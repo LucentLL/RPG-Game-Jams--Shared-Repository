@@ -146,6 +146,7 @@ function load() {
   if (!guild.inventory) guild.inventory = createInventory();
   if (!Array.isArray(guild.inventory.potions)) guild.inventory.potions = []; // Apothecary storage (added with the Alchemist)
   if (!guild.market) guild.market = createMarket();
+  else { const def = createMarket().stock; for (const k in def) if (guild.market.stock[k] == null) guild.market.stock[k] = def[k]; } // seed herbs into pre-Alchemist saves
   if (!['off', 'party', 'all'].includes(guild.quartermaster)) guild.quartermaster = 'off';
   if (typeof guild.reputation !== 'number') guild.reputation = 0;
   if (!Array.isArray(guild.questBoard) || !guild.questBoard.length) guild.questBoard = generateQuestBoard(guild, 3);
@@ -279,7 +280,14 @@ function advanceAll() {
     let questMorale = null;
     let onExpedition = false; // true only if the hero actually marched out this week
 
-    if (a.type === 'forge') {
+    if (h.condition.injury && a.type !== 'train') {
+      // Injured members can't work the craft or march — the week is forced rest until
+      // they heal (the train path already handles injury inside applyTraining). This
+      // keeps the hero card's "will only recover (rest) until healed" promise honest.
+      const res = applyTraining(h, 'rest', 'light', diet.statBias);
+      entry.type = 'train'; // recap renders the rest/recovery line
+      entry.rested = true; entry.injury = res.injury;
+    } else if (a.type === 'forge') {
       const recipe = getRecipe(a.recipeId);
       entry.forge = forge(h, recipe, guild.inventory, week);
       entry.recipeName = recipe.name;
@@ -304,8 +312,8 @@ function advanceAll() {
         h.condition.fatigue = Math.min(100, h.condition.fatigue + (success ? 20 : 35));
         entry.quest = { title: plan.quest.title, success, party: plan.partySize };
         if (success) {
-          const fieldGain = plan.quest.rewards.field; // only a SUCCESSFUL quest teaches Field Insight
-          h.professions.blacksmithing.field = Math.min(100, h.professions.blacksmithing.field + fieldGain);
+          const fieldGain = plan.quest.rewards.field; // only a SUCCESSFUL quest teaches Field Insight —
+          for (const k in h.professions) h.professions[k].field = Math.min(100, (h.professions[k].field || 0) + fieldGain); // ...and it sharpens every craft the hero practices (smithing AND alchemy)
           entry.field = fieldGain;
           if (plan.isLead) entry.reward = { gold: plan.quest.rewards.gold, rep: plan.quest.rewards.reputation, loot: plan.quest.loot };
           questMorale = 8;

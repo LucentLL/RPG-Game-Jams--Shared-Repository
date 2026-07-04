@@ -67,7 +67,7 @@ export function brew(hero, recipe, inv, week) {
 
   spendMaterials(inv, recipe.cost);
   const potency = Math.max(5, Math.min(recipe.ceil, Math.round(recipe.base + prof.practice * 0.5 + prof.field * 0.2 + jitter())));
-  const qty = recipe.yield + Math.floor(prof.practice / 45); // a skilled hand gets a little more from the same herbs
+  const qty = recipe.yield; // fixed per brew — skill drives POTENCY, not quantity (mirrors the smith's one-item-per-forge), so cost-per-heal stays flat
   const batch = {
     id: nextPotionId(), recipeId: recipe.id, type: recipe.kind, name: recipe.name, glyph: recipe.glyph,
     potency, qty, brewedBy: hero.id, brewedByName: hero.name, week,
@@ -102,10 +102,11 @@ export function applyPotion(batch, hero) {
   }
   // heal
   const before = c.stamina || 0;
-  const cures = c.injury && (batch.recipeId === 'greater_heal' || p >= 45);
+  const cures = c.injury && p >= 70; // only a POTENT brew mends a real injury — keeps injuries a meaningful
+                                      // counterweight to heavy training (a mid-skill Greater Draught, ~q70+).
   if (before >= 100 && !cures) return null; // full stamina, nothing to cure — don't waste it
   c.stamina = Math.min(100, before + p);
   let msg = `stamina +${c.stamina - before}`;
-  if (cures) { c.injury = null; c.fatigue = Math.max(0, (c.fatigue || 0) - 20); msg += ', injury cured'; }
+  if (cures) { c.injury = null; msg += ', injury cured'; } // cured, but still worn — no free fatigue relief
   return msg;
 }
