@@ -1538,7 +1538,14 @@ var GUILD_ARCH_PRIME = { Knight: 'salt', Cleric: 'salt', Adventurer: 'salt', Ber
 function renderGuildSprite(canvas, person, facing){
   if (!canvas || !person) return;
   var prime = person.prime || person.bodyType || GUILD_ARCH_PRIME[person.archetype] || 'salt';
-  renderSpriteStatic(canvas, prime, (facing == null ? 0 : facing), 'idle', 0, person);
+  var appearance = ensureAppearance(person, prime); // derives a stable look from the name; caches onto person.appearance
+  var row = facingToRow(facing == null ? 0 : facing);
+  // Draw ONE static frame (no idle-bob RAF loop): a guild screen shows many
+  // portraits at once, and recompositing all of them every frame would burn
+  // battery on mobile. Register a redraw so the portrait still fills in when the
+  // async sprite sheets finish loading, but never join the per-frame bob loop.
+  compositeCharacter(canvas, appearance, 'idle', 0, row, null, { excite: 0, phase: 0 });
+  elementsRegisterRedraw(canvas, function(){ renderGuildSprite(canvas, person, facing); });
 }
 window.renderGuildSprite = renderGuildSprite;
 
