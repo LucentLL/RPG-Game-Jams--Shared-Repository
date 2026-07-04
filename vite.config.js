@@ -9,8 +9,13 @@ import { defineConfig } from 'vite';
 export default defineConfig({
   base: './',
   server: {
+    host: true, // expose on the LAN so a phone on the same Wi-Fi can load the game
     port: 8080, // matches .vscode/launch.json ("Launch Chrome against localhost:8080")
     open: false,
+  },
+  preview: {
+    host: true,
+    port: 8080,
   },
   build: {
     outDir: 'dist',

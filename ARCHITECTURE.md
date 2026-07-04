@@ -143,12 +143,20 @@ Extract in this order; after each module, `npm run build` + smoke‑test before 
 > Build green (26 modules); verified live — title→stat→draft renders gear/materia,
 > and the debug room composites sprites (all layers + skin tone) in South & East facings.
 >
-> **Next: `state.js`** — move the shared mutable globals (`run`, `p1`, `p2`, loop
-> flags, snapshot maps, `_craftFn`) into one `export const S = {…}` object, then
-> rename `run`→`S.run` etc. This is cross-cutting and **not** a blind regex: short
-> tokens (`run`, `tiles`, `p1`, `p2`) also appear in strings/comments, so the rename
-> must be scoped to code. After `state.js`, the engine subsystems (`sprite-loader`,
-> `arena`, `compositor`, `combat`…) become straightforward.
+> **`state.js` — done & verified.** Shared mutable state now lives on a single
+> `export const S = {…}` in [`src/game/state.js`](src/game/state.js). Instead of
+> the risky cross-cutting rename, a transitional bridge mirrors each field onto
+> `window` via get/set accessors — so crucible.js keeps its bare-name references
+> (and local `var` shadows still win) while new modules import `S` directly. The
+> bridge shrinks to nothing as crucible.js is split apart. Verified through a full
+> battle: run → draft → fighter build → battle grid (procedural terrain) → combat
+> over two turns, zero console errors.
+>
+> **Next: engine subsystems** (leaf-first, per the order above) — `engine/facing.js`,
+> `engine/arena.js`, `engine/sprite-loader.js`, `engine/compositor.js`, … Each
+> imports `S` for shared state plus its data module(s); crucible.js imports the
+> functions back. These are now mechanical because state + data already live in
+> modules.
 
 ### Shared state comes first
 Many globals (`run`, `p1`, `p2`, `gamePhase`, `turnNum`, `moveQueue`, loop flags,

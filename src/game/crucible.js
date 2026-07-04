@@ -13,6 +13,7 @@
 // keeps running at every step.
 // ═══════════════════════════════════════════════════════════════════════════
 import { SPRITE_BASES, MATERIA_BASE, FX_BASE } from '../config/assets.js';
+import './state.js'; // shared mutable game state (bridged onto window for legacy bare-name access)
 import {
   BODY_TYPES, ELEMENTS_LAYER_ORDER_SOUTH, ELEMENTS_LAYER_ORDER_SIDE, ELEMENTS_LAYER_ORDER_NORTH,
   ELEMENTS_LAYER_ORDER, ELEMENTS_LAYER_ORDER_REV, WEAPON_MIRROR_OK_ANIMS,
@@ -1548,7 +1549,6 @@ function _bobPhaseForCanvas(cv){
 }
 
 // Animation loop
-var animLoopRunning = false;
 function startAnimLoop() {
   if (animLoopRunning) return;
   animLoopRunning = true;
@@ -1620,16 +1620,6 @@ function isRearTile(entity, tx, ty) { return getZone(entity, tx, ty) === 'rear';
 function isFrontTile(entity, tx, ty) { return getZone(entity, tx, ty) === 'front'; }
 
 // ═══ GAME STATE ═══
-var run=null; // current run state
-var p1=null,p2=null; // current fighters
-var gamePhase='title';
-var turnNum=1;
-var moveQueue=[];
-var lastMoveType=null;
-var selectedAttack=null;
-var tiles=[];
-var executing=false;
-var statsOpen=false;
 
 // ═══ HELPERS ═══
 function getRank(linkCount){
@@ -1848,7 +1838,6 @@ function startRun(overrides){
 function startRunRandom(){ startRun(); }
 
 // ═══ MODE ENTRY ═══ (turn-based vs action — both share builder/draft)
-var _pendingRunMode = 'turn';
 function startTurnFlow(){ _pendingRunMode = 'turn'; showForgeChoice(); }
 function startActionFlow(){ _pendingRunMode = 'action'; showForgeChoice(); }
 
@@ -2741,7 +2730,6 @@ function confirmDraft(){
 //   Reuses builder + draft + attack data; replaces the turn-based
 //   grid combat with WASD movement and click/keyboard attacks.
 // ════════════════════════════════════════════════════════════
-var actionLoopRunning = false;
 var _actionKeys = {};
 var _actionKeyHandler = null;
 var _actionKeyUpHandler = null;
@@ -3263,7 +3251,6 @@ function rollInitiative(){
   }
 }
 
-var arenaGrid=null;
 function initTiles(){
   tiles=[];
   arenaGrid=generateArena();
@@ -4057,9 +4044,6 @@ function buildTimeline(pQueue,eQueue){
 // PROJECTION MODEL (spec §6.4, E6): Idealized — no collision detours,
 // no BFS, no speed-budget walk. Live execution self-corrects.
 // ═══════════════════════════════════════════════════════════════════
-var _snapshotIntervalMap = new Map();  // entity -> [boundary times in seconds]
-var _snapshotPathMap     = new Map();  // entity -> [{dir,dest,endX,endY,startX,startY,moveType,time}]
-var _snapshotStartMap    = new Map();  // entity -> {x,y,facing}
 
 // Project unit-direction for one step. Player 'direct' moves use stored
 // dx/dy (locked choice). Other types derive direction from intent vs target.
