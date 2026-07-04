@@ -4,7 +4,10 @@
 .action-hp-row{display:flex;align-items:center;gap:8px}
 .action-hp-label{font-family:'Cinzel',serif;font-size:0.72em;letter-spacing:0.1em;color:#e8e0d0;min-width:130px}
 .action-arena{position:relative;width:720px;height:720px;max-width:95vw;max-height:95vw;background:#1a2418;border:1px solid var(--border);border-radius:6px;overflow:hidden;image-rendering:pixelated;background-size:100% 100%}
-.action-fighter{position:absolute;left:0;top:0;image-rendering:pixelated;pointer-events:none;transform:translate(0,0);transform-origin:top left}
+/* Sized & positioned as a % of the arena (via left/top set in actionRender) so
+   fighters scale with the arena and stay on-screen on narrow/mobile viewports.
+   96/720 = 13.333%. translate centers the sprite on its tile point (feet-biased). */
+.action-fighter{position:absolute;width:13.333%;height:13.333%;image-rendering:pixelated;pointer-events:none;transform:translate(-50%,-58%)}
 .action-help{font-size:0.75em;color:var(--muted);font-family:'Cinzel',serif;letter-spacing:0.08em;margin-top:6px}
 .action-attacks{display:flex;flex-wrap:wrap;gap:6px;justify-content:center;max-width:min(720px,95vw)}
 .action-attacks button{padding:8px 14px;background:var(--card);border:1px solid var(--gold);color:var(--gold);border-radius:6px;font-family:'Cinzel',serif;font-size:0.8em;letter-spacing:0.08em;cursor:pointer;transition:all 0.15s}

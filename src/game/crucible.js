@@ -2909,9 +2909,11 @@ function actionRender(){
   ['actionP1Cv','actionP2Cv'].forEach(function(id, i){
     var cv = document.getElementById(id); if (!cv) return;
     var f = (i === 0) ? p1 : p2;
-    var x = (f.ax * ACTION_TILE) - cv.width / 2;
-    var y = (f.ay * ACTION_TILE) - cv.height / 2 - 18; // slight upward bias so feet ≈ tile center
-    cv.style.transform = 'translate('+x+'px,'+y+'px)';
+    // Position by PERCENTAGE of the arena so fighters scale with it and stay
+    // on-screen on any viewport (the arena shrinks to fit narrow/mobile widths).
+    // The .action-fighter CSS centers the sprite on this point (feet-biased).
+    cv.style.left = (f.ax / ACTION_GS * 100) + '%';
+    cv.style.top  = (f.ay / ACTION_GS * 100) + '%';
     // Z-stack: whoever is lower on the field draws on top (basic painter sort).
     cv.style.zIndex = String(2 + Math.round(f.ay * 10));
     renderActionFighter(cv, f);
