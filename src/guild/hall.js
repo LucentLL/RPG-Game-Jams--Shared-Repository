@@ -1,18 +1,17 @@
-// Guild Hall — weekly management for the Heroes Guild (v1: one hero).
+// Guild Hall — weekly management for the Heroes Guild.
 //
-// The first Monster-Rancher-style loop: each week you assign a training regimen
-// and a diet, advance the week, and watch the hero's stats grow while stamina
-// and fatigue shift (train too hard without feeding/resting and training stops
-// paying off). Built on the guild domain models in this folder; renders into
-// #guildScreen (index.html) and persists via platform/storage.
+// The Monster-Rancher-style loop, now for a WHOLE ROSTER: each hero carries a
+// per-week assignment (a training regimen + a diet). You tap a hero to set their
+// plan, hire new heroes from the tavern's recruit pool, then Advance Week to
+// resolve everyone at once — stats grow (diet-biased), stamina/fatigue/morale
+// shift, and weekly upkeep is charged. Persists via platform/storage.
 //
-// Deliberately structured to scale: guild.roster is already an array, so
-// multi-hero management, parties, and guild inventory layer on top of this
-// without reshaping the data.
+// Next layers slot in cleanly on top of this: parties/quests, and guild
+// inventory (food supply, smithing materials, armory).
 
 import { createGuild } from './guild.js';
 import { HERO_STATS, heroPower } from './hero.js';
-import { generateRecruit } from './recruiting.js';
+import { generateRecruit, hireCost, rollRecruitPool } from './recruiting.js';
 import { TRAINING_REGIMENS, getRegimen, applyTraining } from './training.js';
 import { DIET_PLANS, getDietPlan, applyDiet } from './diet.js';
 import { advanceWeek, formatDate } from './calendar.js';
@@ -20,129 +19,174 @@ import { weeklyUpkeep, addGold } from './economy.js';
 import { saveGame, loadGame } from '../platform/storage.js';
 
 const SLOT = 'guild';
+const MAX_ROSTER = 6;
 const ARCH_GLYPH = { Knight: '⚔', Mage: '✦', Ranger: '🏹', Cleric: '☩', Rogue: '🗡', Berserker: '🪓', Adventurer: '☉' };
 
 let guild = null;
-let sel = { trainingId: 'drill_str', dietId: 'balanced' };
-let report = null; // last week's outcome, for the recap panel
+let selectedId = null; // hero whose assignment panel is open
+let report = null;     // last week's per-hero results
+let notice = '';       // transient message (hire result / warnings)
 
-function heroOf() { return guild.roster[0]; }
 function save() { saveGame(SLOT, guild); }
+function heroById(id) { return guild.roster.find((h) => h.id === id); }
+function clamp(n) { return Math.max(0, Math.min(100, Math.round(n))); }
+
+function ensureAssignment(h) {
+  if (!h.assignment) h.assignment = { trainingId: 'drill_str', dietId: h.dietPlanId || 'balanced' };
+  if (!h.dietPlanId) h.dietPlanId = h.assignment.dietId;
+}
 
 function load() {
   const saved = loadGame(SLOT);
   if (saved && Array.isArray(saved.roster) && saved.roster.length) {
     guild = saved;
-    if (heroOf().dietPlanId) sel.dietId = heroOf().dietPlanId;
   } else {
     guild = createGuild({ name: 'The Wandering Blade' });
-    const hero = generateRecruit();
-    hero.dietPlanId = sel.dietId;
-    guild.roster.push(hero);
-    save();
+    guild.roster.push(generateRecruit());
   }
+  guild.roster.forEach(ensureAssignment);
+  if (!Array.isArray(guild.recruits) || !guild.recruits.length) guild.recruits = rollRecruitPool(3);
+  if (!selectedId && guild.roster[0]) selectedId = guild.roster[0].id;
+  save();
 }
 
-// --- weekly loop ------------------------------------------------------------
-function advance() {
-  const h = heroOf();
-  const regimen = getRegimen(sel.trainingId);
-  const diet = getDietPlan(sel.dietId);
-  h.dietPlanId = sel.dietId;
+// --- interactions -----------------------------------------------------------
+function selectHero(id) { selectedId = id; notice = ''; render(); }
 
-  const condBefore = { stamina: h.condition.stamina, fatigue: h.condition.fatigue, morale: h.condition.morale };
+function setTraining(id) { const h = heroById(selectedId); if (h) { h.assignment.trainingId = id; save(); render(); } }
+function setDiet(id) { const h = heroById(selectedId); if (h) { h.assignment.dietId = id; h.dietPlanId = id; save(); render(); } }
 
+function hire(id) {
+  if (guild.roster.length >= MAX_ROSTER) { notice = `Roster is full (${MAX_ROSTER}). Cannot hire more.`; render(); return; }
+  const i = guild.recruits.findIndex((r) => r.id === id);
+  if (i < 0) return;
+  const r = guild.recruits[i];
+  const cost = hireCost(r);
+  if (guild.gold < cost) { notice = `Not enough gold to hire ${r.name} (${cost}g).`; render(); return; }
+  addGold(guild, -cost);
+  ensureAssignment(r);
+  guild.roster.push(r);
+  guild.recruits.splice(i, 1);
+  selectedId = r.id;
+  notice = `${r.name} joined the guild.`;
+  save(); render();
+}
+
+function advanceAll() {
   const upkeep = weeklyUpkeep(guild, getDietPlan);
   addGold(guild, -upkeep);
-
-  const { gains } = applyTraining(h, regimen, diet.statBias); // stat growth (diet biases it)
-  applyDiet(h, diet);                                         // stamina/fatigue recovery
-
-  // Light morale dynamics: rest & lavish food lift spirits; grinding wears them down.
-  let dm = regimen.intensity === 0 ? 6 : -regimen.intensity;
-  if (diet.id === 'feast') dm += 4;
-  h.condition.morale = clamp(h.condition.morale + dm);
-
-  h.age += 1;
+  const results = [];
+  for (const h of guild.roster) {
+    const a = h.assignment;
+    const regimen = getRegimen(a.trainingId);
+    const diet = getDietPlan(a.dietId);
+    h.dietPlanId = a.dietId;
+    const cb = { stamina: h.condition.stamina, fatigue: h.condition.fatigue, morale: h.condition.morale };
+    const { gains } = applyTraining(h, regimen, diet.statBias); // stat growth
+    applyDiet(h, diet);                                         // recovery
+    let dm = regimen.intensity === 0 ? 6 : -regimen.intensity;
+    if (diet.id === 'feast') dm += 4;
+    h.condition.morale = clamp(h.condition.morale + dm);
+    h.age += 1;
+    results.push({
+      name: h.name, regimen: regimen.name, diet: diet.name, gains,
+      trained: Object.keys(gains).length > 0,
+      sta: h.condition.stamina - cb.stamina, fat: h.condition.fatigue - cb.fatigue,
+    });
+  }
   advanceWeek(guild.calendar);
-
-  report = {
-    regimen, diet, gains, upkeep,
-    trained: Object.keys(gains).length > 0,
-    staminaDelta: h.condition.stamina - condBefore.stamina,
-    fatigueDelta: h.condition.fatigue - condBefore.fatigue,
-    moraleDelta: h.condition.morale - condBefore.morale,
-  };
-  save();
-  render();
+  guild.recruits = rollRecruitPool(3); // fresh faces at the tavern
+  report = { upkeep, results };
+  notice = '';
+  save(); render();
 }
 
-function selectTraining(id) { sel.trainingId = id; render(); }
-function selectDiet(id) { sel.dietId = id; render(); }
 function back() { showScreen('titleScreen'); }
 
-// --- helpers ----------------------------------------------------------------
-function clamp(n) { return Math.max(0, Math.min(100, Math.round(n))); }
-
+// --- view helpers -----------------------------------------------------------
 function showScreen(id) {
   document.querySelectorAll('.screen').forEach((s) => s.classList.remove('active'));
   const el = document.getElementById(id);
   if (el) el.classList.add('active');
 }
 
-function fmtDelta(n) {
-  n = Math.round(n);
-  if (n > 0) return `<span class="up">+${n}</span>`;
-  if (n < 0) return `<span class="down">${n}</span>`;
-  return `${n}`;
-}
+function fmtDelta(n) { n = Math.round(n); if (n > 0) return `<span class="up">+${n}</span>`; if (n < 0) return `<span class="down">${n}</span>`; return `${n}`; }
+function glyphOf(h) { return ARCH_GLYPH[h.archetype] || '☉'; }
+function statTotal(h) { return HERO_STATS.reduce((s, k) => s + (h.stats[k] || 0), 0); }
 
 function bar(label, value, color) {
   const v = clamp(value);
-  return `<div class="cond-row">
-      <div class="lbl"><span>${label}</span><span>${v}</span></div>
-      <div class="cond-track"><div class="cond-fill" style="width:${v}%;background:${color}"></div></div>
-    </div>`;
+  return `<div class="cond-row"><div class="lbl"><span>${label}</span><span>${v}</span></div>
+    <div class="cond-track"><div class="cond-fill" style="width:${v}%;background:${color}"></div></div></div>`;
+}
+function mini(value, color) { return `<span class="mini"><span class="mini-fill" style="width:${clamp(value)}%;background:${color}"></span></span>`; }
+
+function rosterRow(h) {
+  const reg = getRegimen(h.assignment.trainingId);
+  const diet = getDietPlan(h.assignment.dietId);
+  return `<button class="roster-row ${h.id === selectedId ? 'sel' : ''}" onclick="__guild.selectHero('${h.id}')">
+      <span class="rr-portrait">${glyphOf(h)}</span>
+      <span class="rr-main">
+        <span class="rr-name">${h.name} <span class="rr-sub">${h.archetype} Lv${h.level}</span></span>
+        <span class="rr-assign">⚔ ${reg.name} · 🍖 ${diet.name}</span>
+        <span class="rr-cond">sta ${mini(h.condition.stamina, 'var(--success)')} fat ${mini(h.condition.fatigue, '#e08a3c')}</span>
+      </span>
+      <span class="rr-power">⚡${heroPower(h)}</span>
+    </button>`;
 }
 
-// --- render -----------------------------------------------------------------
-function render() {
-  const h = heroOf();
+function assignPanel() {
+  const h = heroById(selectedId);
+  if (!h) return '<div class="plan-card"><div class="hint">Tap a hero above to plan their week.</div></div>';
 
   const stats = HERO_STATS.map((s) => {
-    const d = report && report.gains && report.gains[s] ? `+${report.gains[s]}` : '';
+    const d = report && report.results && (report.results.find((r) => r.name === h.name)?.gains?.[s]) ? `+${report.results.find((r) => r.name === h.name).gains[s]}` : '';
     return `<div class="stat-cell"><div class="k">${s}</div><div class="v">${h.stats[s]}</div><div class="d">${d}</div></div>`;
   }).join('');
 
   const training = TRAINING_REGIMENS.map((r) => {
     const focus = r.focus.length ? r.focus.join('/') : 'recover';
     const cost = r.staminaCost ? `−${r.staminaCost} sta` : 'restful';
-    return `<button class="opt ${r.id === sel.trainingId ? 'active' : ''}" onclick="__guild.selectTraining('${r.id}')">
-        <span><span class="o-name">${r.name}</span> <span class="o-desc">${focus}</span></span>
-        <span class="o-cost">${cost}</span>
-      </button>`;
+    return `<button class="opt ${r.id === h.assignment.trainingId ? 'active' : ''}" onclick="__guild.setTraining('${r.id}')">
+        <span><span class="o-name">${r.name}</span> <span class="o-desc">${focus}</span></span><span class="o-cost">${cost}</span></button>`;
   }).join('');
 
-  const diet = DIET_PLANS.map((d) => {
-    return `<button class="opt ${d.id === sel.dietId ? 'active' : ''}" onclick="__guild.selectDiet('${d.id}')">
-        <span><span class="o-name">${d.name}</span> <span class="o-desc">${d.description}</span></span>
-        <span class="o-cost">${d.weeklyCost}g/wk</span>
-      </button>`;
-  }).join('');
+  const diet = DIET_PLANS.map((d) => `<button class="opt ${d.id === h.assignment.dietId ? 'active' : ''}" onclick="__guild.setDiet('${d.id}')">
+      <span><span class="o-name">${d.name}</span> <span class="o-desc">${d.description}</span></span><span class="o-cost">${d.weeklyCost}g/wk</span></button>`).join('');
 
-  let recap = '';
-  if (report) {
-    const gainStr = report.trained
-      ? HERO_STATS.filter((s) => report.gains[s]).map((s) => `<span class="up">${s} +${report.gains[s]}</span>`).join(' · ')
-      : '<span class="down">too fatigued to train effectively — rest or feed better</span>';
-    recap = `<div class="week-report">
-        <h4>Last week · ${report.regimen.name} + ${report.diet.name}</h4>
-        <div class="r-line">${gainStr}</div>
-        <div class="r-line">stamina ${fmtDelta(report.staminaDelta)} · fatigue ${fmtDelta(report.fatigueDelta)} · morale ${fmtDelta(report.moraleDelta)} · upkeep <span class="down">−${report.upkeep}g</span></div>
-      </div>`;
-  }
+  return `<div class="plan-card">
+      <div class="assign-head"><span class="rr-portrait sm">${glyphOf(h)}</span> Planning <b>${h.name}</b> · ${h.archetype} Lv${h.level} · ${h.age} wks · ⚡${heroPower(h)}</div>
+      <div class="stat-grid">${stats}</div>
+      ${bar('Stamina', h.condition.stamina, 'var(--success)')}
+      ${bar('Fatigue', h.condition.fatigue, '#e08a3c')}
+      ${bar('Morale', h.condition.morale, '#8ab4d8')}
+      <div class="plan-title">⚔ Training</div><div class="opt-list">${training}</div>
+      <div class="plan-title">🍖 Diet</div><div class="opt-list">${diet}</div>
+    </div>`;
+}
 
-  const glyph = ARCH_GLYPH[h.archetype] || '☉';
+function recruitCard(r) {
+  const cost = hireCost(r);
+  const afford = guild.gold >= cost && guild.roster.length < MAX_ROSTER;
+  return `<div class="recruit-card">
+      <span class="rr-portrait sm">${glyphOf(r)}</span>
+      <span class="rc-info"><b>${r.name}</b><span class="rr-sub">${r.archetype} · Σ${statTotal(r)} · ⚡${heroPower(r)}</span></span>
+      <button class="rc-hire ${afford ? '' : 'disabled'}" onclick="__guild.hire('${r.id}')">Hire · ${cost}g</button>
+    </div>`;
+}
+
+// --- render -----------------------------------------------------------------
+function render() {
+  const upkeep = weeklyUpkeep(guild, getDietPlan);
+
+  const recap = report ? `<div class="week-report">
+      <h4>Last week</h4>
+      ${report.results.map((r) => {
+        const g = r.trained ? HERO_STATS.filter((s) => r.gains[s]).map((s) => `${s}+${r.gains[s]}`).join(' ') : 'no gain — too fatigued';
+        return `<div class="r-line"><b>${r.name}</b> · <span class="${r.trained ? 'up' : 'down'}">${g}</span> <span class="dim">(sta ${fmtDelta(r.sta)}, fat ${fmtDelta(r.fat)})</span></div>`;
+      }).join('')}
+      <div class="r-line">upkeep <span class="down">−${report.upkeep}g</span></div>
+    </div>` : '';
 
   document.getElementById('guildScreen').innerHTML = `
     <div class="guild-wrap">
@@ -152,28 +196,21 @@ function render() {
         <button class="guild-back" onclick="__guild.back()">↩ title</button>
       </div>
 
+      ${notice ? `<div class="notice">${notice}</div>` : ''}
+
       <div class="hero-card">
-        <div class="hero-top">
-          <div class="hero-portrait">${glyph}</div>
-          <div class="hero-id">
-            <div class="hero-name">${h.name}</div>
-            <div class="hero-sub">${h.archetype} · Lv ${h.level} · ${h.age} wks</div>
-            <div class="hero-power">⚡ ${heroPower(h)} power</div>
-          </div>
-        </div>
-        <div class="stat-grid">${stats}</div>
-        ${bar('Stamina', h.condition.stamina, 'var(--success)')}
-        ${bar('Fatigue', h.condition.fatigue, '#e08a3c')}
-        ${bar('Morale', h.condition.morale, '#8ab4d8')}
+        <div class="plan-title">Roster · ${guild.roster.length}/${MAX_ROSTER}</div>
+        <div class="roster-list">${guild.roster.map(rosterRow).join('')}</div>
       </div>
 
+      ${assignPanel()}
+
       <div class="plan-card">
-        <div class="plan-title">⚔ Training this week</div>
-        <div class="opt-list">${training}</div>
-        <div class="plan-title">🍖 Diet this week</div>
-        <div class="opt-list">${diet}</div>
-        <button class="advance-btn" onclick="__guild.advance()">▶ ADVANCE WEEK</button>
+        <div class="plan-title">🍺 Tavern · Recruits</div>
+        <div class="recruit-list">${guild.recruits.map(recruitCard).join('')}</div>
       </div>
+
+      <button class="advance-btn" onclick="__guild.advanceAll()">▶ ADVANCE WEEK · −${upkeep}g upkeep</button>
 
       ${recap}
     </div>`;
@@ -187,4 +224,4 @@ export function openGuild() {
 }
 
 window.openGuild = openGuild;
-window.__guild = { selectTraining, selectDiet, advance, back };
+window.__guild = { selectHero, setTraining, setDiet, hire, advanceAll, back };

@@ -36,7 +36,11 @@ export const HERO_STATS = ['STR', 'DEX', 'CON', 'INT', 'WIS', 'CHA'];
  */
 
 let _heroSeq = 0;
-function nextHeroId() { return 'hero_' + (++_heroSeq).toString(36); }
+// A per-page-load random prefix keeps IDs unique across sessions: heroes created
+// after a reload (e.g. fresh tavern recruits) can never collide with the IDs of
+// heroes already loaded from a save. The counter disambiguates within a session.
+const _heroRun = Math.random().toString(36).slice(2, 7);
+function nextHeroId() { return 'hero_' + _heroRun + (++_heroSeq).toString(36); }
 
 /**
  * Create a hero with sane defaults. Stats default to all-10 (human average);
