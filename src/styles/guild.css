@@ -3,8 +3,9 @@
    right-hand room stage scrolls. Rail on the left, room content on the right. */
 #guildScreen { align-items: stretch; padding: 0; overflow: hidden; height: 100vh; height: 100dvh; }
 .guild-hall { display: flex; flex-direction: row; width: 100%; height: 100vh; height: 100dvh; overflow: hidden; }
-/* Dark backdrop when the app goes fullscreen. */
-#guildScreen:fullscreen, #guildScreen:-webkit-full-screen { height: 100vh; background: var(--bg); }
+/* Dark backdrop when the app goes fullscreen. toggleFullscreen() promotes <html>,
+   so match #guildScreen as a descendant of the fullscreen root (not itself). */
+:fullscreen #guildScreen, :-webkit-full-screen #guildScreen { height: 100vh; background: var(--bg); }
 
 /* --- left rail (persistent room nav) --- */
 .room-rail {

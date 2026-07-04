@@ -650,7 +650,16 @@ function kitchenRoom() {
 }
 
 function armoryRoom() {
-  return `<div class="room-cols">${armoryPanel()}${quartermasterPanel()}${marketPanel()}</div>`;
+  // Equip acts on the selected member, so make that target visible & switchable
+  // here — the shelf's Equip button would otherwise silently arm an off-screen hero.
+  const h = heroById(selectedId);
+  const ctx = h ? `<div class="plan-card">
+      <div class="plan-title">🎯 Equipping · ${h.name} <span class="rr-sub">⚡${combatPower(h)}</span></div>
+      ${heroSwitcher()}
+      ${equippedLine(h)}
+      <div class="room-jobline">Pick a member, then <b>Equip</b> items from the armory below onto them.</div>
+    </div>` : '';
+  return `${ctx}<div class="room-cols">${armoryPanel()}${quartermasterPanel()}${marketPanel()}</div>`;
 }
 function quartersRoom() {
   return `<div class="plan-card">
