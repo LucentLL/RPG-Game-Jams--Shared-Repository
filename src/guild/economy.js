@@ -37,4 +37,6 @@ export function addGold(guild, delta) {
  * @param {import('./guild.js').Guild} guild @returns {number}
  */
 export const BASE_INCOME = 40;
-export function guildIncome(guild) { return BASE_INCOME + Math.round((guild.reputation || 0) * 2); }
+// Reputation contribution is CAPPED so the retainer stays a modest floor (max ~100g/wk)
+// and can never outrun upkeep — quest gold, not passive income, must drive the economy.
+export function guildIncome(guild) { return BASE_INCOME + Math.round(Math.min(guild.reputation || 0, 30) * 2); }

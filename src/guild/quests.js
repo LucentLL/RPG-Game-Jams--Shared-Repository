@@ -51,7 +51,7 @@ export function generateQuest(rank = 1) {
     patron: PATRONS[rand(PATRONS.length)],
     rank: r,
     recommendedPower: 110 + (r - 1) * 100,
-    rewards: { gold: 60 + r * 45, reputation: r * 3, field: 4 + r * 2 },
+    rewards: { gold: 45 + r * 20, reputation: r * 3, field: 4 + r * 2 }, // kept in line with forge profit
     loot: Math.random() < 0.5 ? LOOT[rand(LOOT.length)] : null,
     risk: Math.min(0.55, 0.1 + r * 0.06),
   });

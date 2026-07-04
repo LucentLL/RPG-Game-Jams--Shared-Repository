@@ -22,6 +22,7 @@ import { saveGame, loadGame } from '../platform/storage.js';
 
 const SLOT = 'guild';
 const MAX_ROSTER = 6;
+const QUEST_STAMINA = 40; // dispatching on a quest costs stamina — questing can't be spammed
 const ARCH_GLYPH = { Knight: '⚔', Mage: '✦', Ranger: '🏹', Cleric: '☩', Rogue: '🗡', Berserker: '🪓', Adventurer: '☉' };
 const KIND_GLYPH = { sword: '⚔', armor: '🛡', bow: '🏹' };
 
@@ -85,10 +86,10 @@ function load() {
 
 // --- interactions -----------------------------------------------------------
 function selectHero(id) { selectedId = id; notice = ''; render(); }
-function setActivity(type) { const h = heroById(selectedId); if (h) { h.assignment.type = (type === 'forge' || type === 'study' || type === 'quest') ? type : 'train'; save(); render(); } }
+function setActivity(type) { const h = heroById(selectedId); if (h) { h.assignment.type = (type === 'forge' || type === 'study' || type === 'quest') ? type : 'train'; if (h.assignment.type !== 'quest') h.assignment.questId = null; save(); render(); } }
 function setQuest(questId) { const h = heroById(selectedId); if (h) { h.assignment.type = 'quest'; h.assignment.questId = questId; save(); render(); } }
-function setTraining(id) { const h = heroById(selectedId); if (h) { h.assignment.trainingId = id; h.assignment.type = 'train'; save(); render(); } }
-function setRecipe(id) { const h = heroById(selectedId); if (h) { h.assignment.recipeId = id; h.assignment.type = 'forge'; save(); render(); } }
+function setTraining(id) { const h = heroById(selectedId); if (h) { h.assignment.trainingId = id; h.assignment.type = 'train'; h.assignment.questId = null; save(); render(); } }
+function setRecipe(id) { const h = heroById(selectedId); if (h) { h.assignment.recipeId = id; h.assignment.type = 'forge'; h.assignment.questId = null; save(); render(); } }
 function setDiet(id) { const h = heroById(selectedId); if (h) { h.assignment.dietId = id; h.dietPlanId = id; save(); render(); } }
 
 function equipItem(itemId) {
@@ -159,6 +160,7 @@ function advanceAll() {
     const cb = { stamina: h.condition.stamina, fatigue: h.condition.fatigue };
     let entry = { name: h.name, id: h.id, type: a.type };
     let questMorale = null;
+    let onExpedition = false; // true only if the hero actually marched out this week
 
     if (a.type === 'forge') {
       const recipe = getRecipe(a.recipeId);
@@ -170,21 +172,26 @@ function advanceAll() {
       const quest = guild.questBoard.find((q) => q.id === a.questId);
       if (!quest || resolvedQuests.has(quest.id)) {
         entry.quest = { noQuest: true };
+      } else if (h.condition.stamina < QUEST_STAMINA) {
+        entry.quest = { tooTired: true }; // too exhausted to set out — must rest first
       } else {
         resolvedQuests.add(quest.id);
+        onExpedition = true;
+        h.condition.stamina = Math.max(0, h.condition.stamina - QUEST_STAMINA);
         const outcome = resolveQuest(quest, [h]);
         entry.quest = { title: quest.title, success: outcome.success };
-        const fieldGain = outcome.success ? quest.rewards.field : Math.round(quest.rewards.field / 2);
-        h.professions.blacksmithing.field = Math.min(100, h.professions.blacksmithing.field + fieldGain);
-        entry.field = fieldGain;
         h.condition.fatigue = Math.min(100, h.condition.fatigue + (outcome.success ? 20 : 35));
         if (outcome.success) {
+          const fieldGain = quest.rewards.field; // only a SUCCESSFUL quest teaches Field Insight
+          h.professions.blacksmithing.field = Math.min(100, h.professions.blacksmithing.field + fieldGain);
+          entry.field = fieldGain;
           addGold(guild, quest.rewards.gold);
           guild.reputation += quest.rewards.reputation;
           if (quest.loot) addMaterial(guild.inventory, quest.loot, 1);
           entry.reward = { gold: quest.rewards.gold, rep: quest.rewards.reputation, loot: quest.loot };
           questMorale = 8;
         } else {
+          entry.field = 0;
           questMorale = -12;
         }
       }
@@ -195,7 +202,7 @@ function advanceAll() {
       entry.regimen = regimen.name; entry.gains = gains; entry.trained = Object.keys(gains).length > 0;
     }
 
-    if (a.type !== 'quest') applyDiet(h, diet); // questing heroes are away — no guild rest this week
+    if (!onExpedition) applyDiet(h, diet); // only heroes who actually marched out skip guild rest
     let dm = questMorale != null ? questMorale : (a.type === 'train' && getRegimen(a.trainingId).intensity === 0 ? 6 : -1);
     if (diet.id === 'feast') dm += 4;
     h.condition.morale = clamp(h.condition.morale + dm);
@@ -224,11 +231,15 @@ function fmtDelta(n) { n = Math.round(n); if (n > 0) return `<span class="up">+$
 function glyphOf(h) { return ARCH_GLYPH[h.archetype] || '☉'; }
 function statTotal(h) { return HERO_STATS.reduce((s, k) => s + (h.stats[k] || 0), 0); }
 function questOdds(hp, rec) {
-  const r = hp / Math.max(1, rec);
-  if (r >= 1.3) return { txt: 'Favorable', cls: 'up' };
-  if (r >= 0.9) return { txt: 'Even', cls: '' };
-  if (r >= 0.6) return { txt: 'Risky', cls: 'down' };
-  return { txt: 'Grim', cls: 'down' };
+  // Matches resolveQuest: success needs (hp/rec) * variance >= 1, variance uniform on
+  // [0.75, 1.25]. So P(success) = clamp((1.25 - rec/hp) / 0.5, 0, 1) — the label is
+  // derived from the TRUE probability so it can never drift from the resolver.
+  const need = Math.max(1, rec) / Math.max(1, hp);
+  const pct = Math.round(Math.max(0, Math.min(1, (1.25 - need) / 0.5)) * 100);
+  if (pct >= 85) return { txt: 'Favorable', cls: 'up', pct };
+  if (pct >= 50) return { txt: 'Even', cls: '', pct };
+  if (pct >= 20) return { txt: 'Risky', cls: 'down', pct };
+  return { txt: 'Grim', cls: 'down', pct };
 }
 function bar(label, value, color) {
   const v = clamp(value);
@@ -304,7 +315,7 @@ function assignPanel() {
     const chosen = at === 'quest' && h.assignment.questId === q.id;
     const lootTxt = q.loot ? ` · +1 ${MATERIALS[q.loot].name}` : '';
     return `<button class="opt quest-opt ${chosen ? 'active' : ''}" onclick="__guild.setQuest('${q.id}')">
-      <span><span class="o-name">${q.title} <span class="q-rank">R${q.rank}</span></span> <span class="o-desc">${q.patron} · <span class="${odds.cls}">${odds.txt}</span> (pow ${hp} vs ${q.recommendedPower})</span></span>
+      <span><span class="o-name">${q.title} <span class="q-rank">R${q.rank}</span></span> <span class="o-desc">${q.patron} · <span class="${odds.cls}">${odds.txt} ~${odds.pct}%</span></span></span>
       <span class="o-cost">${q.rewards.gold}g · +${q.rewards.reputation}rep${lootTxt}</span></button>`;
   }).join('');
 
@@ -385,11 +396,12 @@ function recapPanel() {
     if (r.type === 'study') return `<div class="r-line"><b>${r.name}</b> studied smithing — <span class="up">Theory +${r.study.theoryGain}</span></div>`;
     if (r.type === 'quest') {
       if (r.quest && r.quest.noQuest) return `<div class="r-line"><b>${r.name}</b> <span class="down">had no quest assigned</span></div>`;
+      if (r.quest && r.quest.tooTired) return `<div class="r-line"><b>${r.name}</b> <span class="down">too exhausted to set out — rest first</span></div>`;
       if (r.quest && r.quest.success) {
         const loot = r.reward && r.reward.loot ? ` +1 ${MATERIALS[r.reward.loot].name}` : '';
         return `<div class="r-line"><b>${r.name}</b> completed <span class="up">${r.quest.title}</span> — <span class="up">+${r.reward.gold}g · +${r.reward.rep} rep${loot}</span> <span class="dim">· Field +${r.field}</span></div>`;
       }
-      return `<div class="r-line"><b>${r.name}</b> <span class="down">failed ${r.quest ? r.quest.title : 'a quest'}</span> <span class="dim">· Field +${r.field || 0}</span></div>`;
+      return `<div class="r-line"><b>${r.name}</b> <span class="down">failed ${r.quest ? r.quest.title : 'a quest'}</span></div>`;
     }
     const g = r.trained ? HERO_STATS.filter((s) => r.gains[s]).map((s) => `${s}+${r.gains[s]}`).join(' ') : 'no gain — too fatigued';
     return `<div class="r-line"><b>${r.name}</b> · <span class="${r.trained ? 'up' : 'down'}">${g}</span> <span class="dim">(sta ${fmtDelta(r.sta)}, fat ${fmtDelta(r.fat)})</span></div>`;
