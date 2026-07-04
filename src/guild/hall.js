@@ -35,6 +35,21 @@ let guild = null;
 let selectedId = null;
 let report = null;
 let notice = '';
+let currentRoom = 'hub'; // UI-only: which room the stage shows. Never saved — resets to hub each session.
+
+// The guild hall's rooms, in the sketch's row-major order. `tag` = work vs storage vs
+// living; `locked` rooms are stubbed until their system (the Alchemist) is built.
+const ROOMS = [
+  { id: 'roster', glyph: '🛡', name: 'Roster', tag: 'MEMBERS' },
+  { id: 'forge', glyph: '🔨', name: 'Forge', tag: 'WORK' },
+  { id: 'kitchen', glyph: '🍲', name: 'Kitchen', tag: 'WORK' },
+  { id: 'apothecary', glyph: '🏺', name: 'Apothecary', tag: 'STORAGE', locked: true, soon: 'Potion &amp; supply stores. Unlocks with the Alchemist trade.' },
+  { id: 'library', glyph: '📖', name: 'Library', tag: 'WORK' },
+  { id: 'armory', glyph: '🗡', name: 'Armory', tag: 'STORAGE' },
+  { id: 'laboratory', glyph: '⚗', name: 'Laboratory', tag: 'WORK', locked: true, soon: 'Brew potions here. The Alchemist trade is coming next.' },
+  { id: 'quarters', glyph: '🍺', name: 'Quarters', tag: 'LIVING' },
+];
+function getRoom(id) { return ROOMS.find((r) => r.id === id) || null; }
 
 function save() { saveGame(SLOT, guild); }
 function heroById(id) { return guild.roster.find((h) => h.id === id); }
@@ -298,6 +313,7 @@ function advanceAll() {
   guild.recruits = rollRecruitPool(3);
   report = { income, upkeep, shortfall, results, issued };
   notice = '';
+  currentRoom = 'hub'; // land on the hub so the weekly recap is always seen
   save(); render();
 }
 
@@ -357,21 +373,38 @@ function equippedLine(h) {
   return parts.length ? `<div class="equipped">${parts.join('')}</div>` : `<div class="equipped none">— no gear equipped —</div>`;
 }
 
-function assignPanel() {
-  const h = heroById(selectedId);
-  if (!h) return '<div class="plan-card"><div class="hint">Tap a hero above to plan their week.</div></div>';
-  const rep = report && report.results ? report.results.find((r) => r.id === h.id) : null;
+// --- room content builders (decomposed from the old single plan card) --------
 
+/** Compact avatar strip to switch which member you're managing inside a work room. */
+function heroSwitcher() {
+  if (guild.roster.length <= 1) return '';
+  return `<div class="hero-switch">${guild.roster.map((h) => `<button class="hs-chip ${h.id === selectedId ? 'sel' : ''}" title="${h.name}" onclick="__guild.selectHero('${h.id}')">${glyphOf(h)}</button>`).join('')}</div>`;
+}
+
+/** The member's stat / condition / gear card — the shared header used in the Roster room. */
+function heroHeader(h) {
+  const rep = report && report.results ? report.results.find((r) => r.id === h.id) : null;
   const stats = HERO_STATS.map((s) => {
     const val = h.stats[s] || 0;
     const g = rep && rep.gains && rep.gains[s] ? rep.gains[s] : 0;
     return `<div class="stat-cell"><div class="k">${s}</div><div class="v">${val}<span class="cap">/${STAT_CAP}</span></div>
       <div class="statbar"><span style="width:${Math.round(val / STAT_CAP * 100)}%"></span></div><div class="d">${g ? '+' + g : ''}</div></div>`;
   }).join('');
+  return `<div class="assign-head"><span class="rr-portrait sm">${glyphOf(h)}</span> <b>${h.name}</b> · ${h.archetype} Lv${h.level} · ${h.age} wks · ⚡${combatPower(h)}</div>
+      <div class="stat-grid">${stats}</div>
+      ${bar('Stamina', h.condition.stamina, 'var(--success)')}${bar('Fatigue', h.condition.fatigue, '#e08a3c')}${bar('Stress', h.condition.stress || 0, '#c05a8a')}${bar('Morale', h.condition.morale, '#8ab4d8')}
+      ${h.condition.injury ? '<div class="injury-flag">⚠ Injured — will only recover (rest) until healed</div>' : ''}
+      ${equippedLine(h)}`;
+}
 
-  const at = h.assignment.type;
-  const isForge = at === 'forge';
+function skillShapeOf(h) {
   const prof = h.professions.blacksmithing;
+  return `<div class="skill-shape">🔨 Blacksmithing — <b>Theory ${prof.theory}</b> · <b>Practice ${prof.practice}</b> · <span class="dim">Field ${prof.field}</span></div>`;
+}
+
+/** Training drills + Light/Heavy intensity toggle. Picking a drill sets the member to Train. */
+function trainBody(h) {
+  const at = h.assignment.type;
   const heavy = (h.assignment.intensity || 'light') === 'heavy';
   const drillItems = DRILLS.map((d) => {
     const desc = heavy ? `${d.main}+ ${d.sec}+ <span class="down">${d.pen}−</span>` : `${d.main}+`;
@@ -380,11 +413,39 @@ function assignPanel() {
   }).join('');
   const restItem = `<button class="opt ${at === 'train' && h.assignment.trainingId === 'rest' ? 'active' : ''}" onclick="__guild.setTraining('rest')">
       <span><span class="o-name">💤 ${REST.name}</span> <span class="o-desc">shed fatigue &amp; stress</span></span></button>`;
-  const training = `<div class="intensity-toggle">
+  return `<div class="intensity-toggle">
       <button class="${heavy ? '' : 'on'}" onclick="__guild.setIntensity('light')">Light</button>
       <button class="${heavy ? 'on' : ''}" onclick="__guild.setIntensity('heavy')">Heavy · +sec −paired</button>
     </div><div class="opt-list">${drillItems}${restItem}</div>`;
+}
 
+/** Quest board scoped to member h, with party-projected odds. Picking one dispatches h. */
+function questBody(h) {
+  const at = h.assignment.type;
+  const hp = combatPower(h);
+  const hCanMarch = canMarch(h); // this member would be benched at resolution if injured/too tired
+  const list = guild.questBoard.map((q) => {
+    // Preview only the members who'd actually march — matches the resolution filter — so
+    // the odds and "party of N" don't over-promise by counting benched members.
+    const otherMarchers = guild.roster.filter((x) => x.id !== h.id && x.assignment.type === 'quest' && x.assignment.questId === q.id && canMarch(x));
+    const marchPower = otherMarchers.reduce((s, x) => s + combatPower(x), 0) + (hCanMarch ? hp : 0);
+    const odds = questOdds(marchPower, q.recommendedPower); // odds if this member joins (and can march)
+    const chosen = at === 'quest' && h.assignment.questId === q.id;
+    const lootTxt = q.loot ? ` · +1 ${MATERIALS[q.loot].name}` : '';
+    const n = otherMarchers.length + (hCanMarch ? 1 : 0);
+    const partyTag = n > 1 ? ` · <span class="dim">party of ${n}</span>` : '';
+    return `<button class="opt quest-opt ${chosen ? 'active' : ''}" onclick="__guild.setQuest('${q.id}')">
+      <span><span class="o-name">${q.title} <span class="q-rank">R${q.rank}</span></span> <span class="o-desc">${q.patron} · <span class="${odds.cls}">${odds.txt} ~${odds.pct}%</span>${partyTag}</span></span>
+      <span class="o-cost">${q.rewards.gold}g · +${q.rewards.reputation}rep${lootTxt}</span></button>`;
+  }).join('');
+  return `<div class="opt-list">${list}</div>`;
+}
+
+/** Forge recipe list for member h. Picking a recipe sets them to Forge. */
+function forgeBody(h) {
+  const at = h.assignment.type;
+  const isForge = at === 'forge';
+  const prof = h.professions.blacksmithing;
   const forgeList = RECIPES.map((r) => {
     const cost = Object.keys(r.cost).map((k) => `${MATERIALS[k].name} ×${r.cost[k]}`).join(', ');
     const enough = Object.keys(r.cost).every((k) => (guild.inventory.materials[k] || 0) >= r.cost[k]);
@@ -395,51 +456,30 @@ function assignPanel() {
       <span><span class="o-name">${KIND_GLYPH[r.kind] || ''} ${r.name}</span> <span class="o-desc">${cost}</span></span>
       <span class="o-cost">~q${previewQuality(r, prof.practice, prof.field)}</span></button>`;
   }).join('');
+  return `${skillShapeOf(h)}<div class="opt-list">${forgeList}</div>`;
+}
 
-  const skillShape = `<div class="skill-shape">🔨 Blacksmithing — <b>Theory ${prof.theory}</b> · <b>Practice ${prof.practice}</b> · <span class="dim">Field ${prof.field}</span></div>`;
-  const studyBody = `${skillShape}<div class="hint" style="text-align:left;padding:4px 0">The smith studies metallurgy — raises <b>Theory</b>, which unlocks steel &amp; mithril recipes. Practice (from forging) still sets quality.</div>`;
+/** Library/Study body for member h. The button assigns them to Study this week. */
+function studyBody(h) {
+  const assigned = h.assignment.type === 'study';
+  return `${skillShapeOf(h)}
+      <div class="hint" style="text-align:left;padding:4px 0">The scholar studies metallurgy — raises <b>Theory</b>, which unlocks steel &amp; mithril recipes. Practice (from forging) still sets quality.</div>
+      <button class="opt ${assigned ? 'active' : ''}" onclick="__guild.setActivity('study')"><span><span class="o-name">📖 ${assigned ? h.name + ' is studying' : 'Assign ' + h.name + ' to study'}</span> <span class="o-desc">grows Theory this week</span></span></button>`;
+}
 
-  const hp = combatPower(h);
-  const hCanMarch = canMarch(h); // this hero would be benched at resolution if injured/too tired
-  const questList = guild.questBoard.map((q) => {
-    // Preview only the heroes who'd actually march — matches the resolution filter — so
-    // the odds and "party of N" don't over-promise by counting benched members.
-    const otherMarchers = guild.roster.filter((x) => x.id !== h.id && x.assignment.type === 'quest' && x.assignment.questId === q.id && canMarch(x));
-    const marchPower = otherMarchers.reduce((s, x) => s + combatPower(x), 0) + (hCanMarch ? hp : 0);
-    const odds = questOdds(marchPower, q.recommendedPower); // odds if this hero joins (and can march)
-    const chosen = at === 'quest' && h.assignment.questId === q.id;
-    const lootTxt = q.loot ? ` · +1 ${MATERIALS[q.loot].name}` : '';
-    const n = otherMarchers.length + (hCanMarch ? 1 : 0);
-    const partyTag = n > 1 ? ` · <span class="dim">party of ${n}</span>` : '';
-    return `<button class="opt quest-opt ${chosen ? 'active' : ''}" onclick="__guild.setQuest('${q.id}')">
-      <span><span class="o-name">${q.title} <span class="q-rank">R${q.rank}</span></span> <span class="o-desc">${q.patron} · <span class="${odds.cls}">${odds.txt} ~${odds.pct}%</span>${partyTag}</span></span>
-      <span class="o-cost">${q.rewards.gold}g · +${q.rewards.reputation}rep${lootTxt}</span></button>`;
-  }).join('');
+/** Diet list for member h. */
+function dietBody(h) {
+  return `<div class="opt-list">${DIET_PLANS.map((d) => `<button class="opt ${d.id === h.assignment.dietId ? 'active' : ''}" onclick="__guild.setDiet('${d.id}')">
+      <span><span class="o-name">${d.name}</span> <span class="o-desc">${d.description}</span></span><span class="o-cost">${d.weeklyCost}g/wk</span></button>`).join('')}</div>`;
+}
 
-  const diet = DIET_PLANS.map((d) => `<button class="opt ${d.id === h.assignment.dietId ? 'active' : ''}" onclick="__guild.setDiet('${d.id}')">
-      <span><span class="o-name">${d.name}</span> <span class="o-desc">${d.description}</span></span><span class="o-cost">${d.weeklyCost}g/wk</span></button>`).join('');
-
-  return `<div class="plan-card">
-      <div class="assign-head"><span class="rr-portrait sm">${glyphOf(h)}</span> Planning <b>${h.name}</b> · ${h.archetype} Lv${h.level} · ${h.age} wks · ⚡${combatPower(h)}</div>
-      <div class="stat-grid">${stats}</div>
-      ${bar('Stamina', h.condition.stamina, 'var(--success)')}${bar('Fatigue', h.condition.fatigue, '#e08a3c')}${bar('Stress', h.condition.stress || 0, '#c05a8a')}${bar('Morale', h.condition.morale, '#8ab4d8')}
-      ${h.condition.injury ? '<div class="injury-flag">⚠ Injured — will only recover (rest) until healed</div>' : ''}
-      ${equippedLine(h)}
-      <div class="activity-toggle">
-        <button class="${at === 'train' ? 'on' : ''}" onclick="__guild.setActivity('train')">⚔ Train</button>
-        <button class="${at === 'forge' ? 'on' : ''}" onclick="__guild.setActivity('forge')">🔨 Forge</button>
-        <button class="${at === 'study' ? 'on' : ''}" onclick="__guild.setActivity('study')">📖 Study</button>
-        <button class="${at === 'quest' ? 'on' : ''}" onclick="__guild.setActivity('quest')">🗺 Quest</button>
-      </div>
-      ${at === 'forge'
-        ? `${skillShape}<div class="plan-title">🔨 Forge</div><div class="opt-list">${forgeList}</div>`
-        : at === 'study'
-          ? `<div class="plan-title">📖 Study Blacksmithing</div>${studyBody}`
-          : at === 'quest'
-            ? `<div class="plan-title">🗺 Quest Board</div><div class="opt-list">${questList}</div>`
-            : `<div class="plan-title">⚔ Training</div>${training}`}
-      <div class="plan-title">🍖 Diet</div><div class="opt-list">${diet}</div>
-    </div>`;
+/** One-line summary of what a member is doing this week. */
+function jobLabel(h) {
+  const a = h.assignment;
+  return a.type === 'forge' ? `🔨 Forging ${(getRecipe(a.recipeId) || {}).name || ''}`
+    : a.type === 'study' ? '📖 Studying'
+    : a.type === 'quest' ? `🗺 ${a.questId ? (questTitle(a.questId) || 'On a quest') : 'Quest (pick one)'}`
+    : `⚔ ${(getDrill(a.trainingId) || REST).name}${a.intensity === 'heavy' ? ' (Heavy)' : ''}`;
 }
 
 function armoryPanel() {
@@ -549,40 +589,189 @@ function recruitCard(r) {
     </div>`;
 }
 
+// --- rooms ------------------------------------------------------------------
+/** A short status line per room, shown on hub tiles and rail chips. */
+function roomStatus(id) {
+  const r = guild.roster;
+  switch (id) {
+    case 'roster': return `${r.length} member${r.length === 1 ? '' : 's'}`;
+    case 'forge': { const n = r.filter((h) => h.assignment.type === 'forge').length; return n ? `${n} forging` : 'idle'; }
+    case 'library': { const n = r.filter((h) => h.assignment.type === 'study').length; return n ? `${n} studying` : 'idle'; }
+    case 'kitchen': return 'set diets';
+    case 'armory': { const n = guild.inventory.items.length; return `${n} item${n === 1 ? '' : 's'}`; }
+    case 'quarters': return `${guild.recruits.length} for hire`;
+    case 'laboratory': case 'apothecary': return 'soon';
+    default: return '';
+  }
+}
+
+function rosterRoom() {
+  const h = heroById(selectedId);
+  const list = `<div class="plan-card"><div class="plan-title">🛡 Roster · ${guild.roster.length}/${MAX_ROSTER}</div>
+      <div class="roster-list">${guild.roster.map(rosterRow).join('')}</div></div>`;
+  if (!h) return list;
+  return `${list}
+    <div class="plan-card">
+      ${heroHeader(h)}
+      <div class="room-jobline">This week: <b>${jobLabel(h)}</b></div>
+      <div class="plan-title">⚔ Train</div>${trainBody(h)}
+      <div class="plan-title">🗺 Dispatch on a Quest</div>${questBody(h)}
+    </div>`;
+}
+
+/** Shared shell for the single-member work rooms (Forge / Kitchen / Library). */
+function workRoom(title, body, headline) {
+  const h = heroById(selectedId);
+  if (!h) return `<div class="plan-card"><div class="hint">Hire a member in the Quarters, then assign them here.</div></div>`;
+  return `<div class="plan-card">
+      ${heroSwitcher()}
+      ${headline || ''}
+      <div class="plan-title">${title}</div>
+      ${body(h)}
+    </div>`;
+}
+
+function forgeRoom() {
+  const forging = guild.roster.filter((x) => x.assignment.type === 'forge').map((x) => x.name.split(' ')[0]);
+  const head = `<div class="room-jobline">${forging.length ? '🔨 ' + forging.join(', ') + ' at the forge' : 'No one is forging this week.'}</div>`;
+  const h = heroById(selectedId);
+  return workRoom(h ? `🔨 ${h.name} — Forge` : '🔨 Forge', forgeBody, head);
+}
+function libraryRoom() {
+  const studying = guild.roster.filter((x) => x.assignment.type === 'study').map((x) => x.name.split(' ')[0]);
+  const head = `<div class="room-jobline">${studying.length ? '📖 ' + studying.join(', ') + ' studying' : 'No one is studying this week.'}</div>`;
+  const h = heroById(selectedId);
+  return workRoom(h ? `📖 ${h.name} — Library` : '📖 Library', studyBody, head);
+}
+function kitchenRoom() {
+  const h = heroById(selectedId);
+  const head = h ? `<div class="room-jobline">🍖 Now feeding <b>${getDietPlan(h.assignment.dietId).name}</b></div>` : '';
+  return workRoom(h ? `🍲 ${h.name} — Diet` : '🍲 Kitchen', dietBody, head);
+}
+
+function armoryRoom() {
+  return `<div class="room-cols">${armoryPanel()}${quartermasterPanel()}${marketPanel()}</div>`;
+}
+function quartersRoom() {
+  return `<div class="plan-card">
+      <div class="plan-title">🍺 Tavern · Recruits · roster ${guild.roster.length}/${MAX_ROSTER}</div>
+      <div class="recruit-list">${guild.recruits.map(recruitCard).join('')}</div>
+      ${guild.roster.length >= MAX_ROSTER ? '<div class="hint">Roster is full — dismiss a member or expand your quarters later.</div>' : ''}
+    </div>`;
+}
+function roomStub(room) {
+  return `<div class="plan-card room-soon">
+      <div class="room-soon-glyph">${room.glyph}</div>
+      <div class="plan-title">${room.name}</div>
+      <div class="hint">${room.soon || 'Coming soon.'}</div>
+    </div>`;
+}
+
+// --- hub --------------------------------------------------------------------
+function roomTile(room) {
+  return `<button class="room-tile ${room.locked ? 'locked' : ''}" onclick="__guild.openRoom('${room.id}')">
+      <span class="rt-glyph">${room.glyph}</span>
+      <span class="rt-name">${room.name}</span>
+      <span class="rt-tag">${room.tag}</span>
+      <span class="rt-status">${roomStatus(room.id)}</span>
+    </button>`;
+}
+function renderHub() {
+  return `${recapPanel()}
+    <div class="hub-head">☙ <b>${guild.name}</b> — choose a room</div>
+    <div class="room-hub">${ROOMS.map(roomTile).join('')}</div>`;
+}
+
+function renderRoom(id) {
+  const room = getRoom(id);
+  if (id === 'hub' || !room) return renderHub();
+  if (room.locked) return roomStub(room);
+  switch (id) {
+    case 'roster': return rosterRoom();
+    case 'forge': return forgeRoom();
+    case 'kitchen': return kitchenRoom();
+    case 'library': return libraryRoom();
+    case 'armory': return armoryRoom();
+    case 'quarters': return quartersRoom();
+    default: return renderHub();
+  }
+}
+
+// --- rail (persistent left nav) ---------------------------------------------
+function roomChip(room) {
+  const on = currentRoom === room.id;
+  return `<button class="room-chip ${on ? 'on' : ''} ${room.locked ? 'locked' : ''}" onclick="__guild.openRoom('${room.id}')">
+      <span class="rc-glyph">${room.glyph}</span>
+      <span class="rc-body"><span class="rc-name">${room.name}</span><span class="rail-status">${roomStatus(room.id)}</span></span>
+    </button>`;
+}
+function railHTML() {
+  const upkeep = weeklyUpkeep(guild, getDietPlan);
+  const inFs = typeof document !== 'undefined' && (document.fullscreenElement || document.webkitFullscreenElement);
+  return `<div class="rail-top">
+      <div class="rail-title">
+        <span class="guild-name">☙ ${guild.name}</span>
+        <span class="rail-topbtns">
+          <button class="guild-back" onclick="__guild.toggleFullscreen()" title="Fullscreen">${inFs ? '⤢' : '⛶'}</button>
+          <button class="guild-back" onclick="__guild.back()" title="Leave to title">↩</button>
+        </span>
+      </div>
+      <div class="guild-meta"><span>☉ <b>${guild.gold}</b>g</span><span>✦ <b>${guild.reputation}</b></span><span>${formatDate(guild.calendar)}</span></div>
+    </div>
+    <button class="room-chip hub-chip ${currentRoom === 'hub' ? 'on' : ''}" onclick="__guild.openRoom('hub')"><span class="rc-glyph">🏰</span><span class="rc-body"><span class="rc-name">Hub</span></span></button>
+    <div class="rail-rooms">${ROOMS.map(roomChip).join('')}</div>
+    <button class="advance-btn rail-advance" onclick="__guild.advanceAll()">▶ ADVANCE WEEK <span class="ra-cost">−${upkeep}g</span></button>`;
+}
+
 // --- render -----------------------------------------------------------------
 function render() {
-  const upkeep = weeklyUpkeep(guild, getDietPlan);
   document.getElementById('guildScreen').innerHTML = `
-    <div class="guild-wrap">
-      <div class="guild-topbar">
-        <div class="guild-name">☙ ${guild.name}</div>
-        <div class="guild-meta"><span>☉ <b>${guild.gold}</b>g</span><span>✦ <b>${guild.reputation}</b> rep</span><span>${formatDate(guild.calendar)}</span></div>
-        <button class="guild-back" onclick="__guild.back()">↩ title</button>
-      </div>
-      ${notice ? `<div class="notice">${notice}</div>` : ''}
-      <div class="hero-card">
-        <div class="plan-title">Roster · ${guild.roster.length}/${MAX_ROSTER}</div>
-        <div class="roster-list">${guild.roster.map(rosterRow).join('')}</div>
-      </div>
-      ${assignPanel()}
-      ${armoryPanel()}
-      ${quartermasterPanel()}
-      ${marketPanel()}
-      <div class="plan-card">
-        <div class="plan-title">🍺 Tavern · Recruits</div>
-        <div class="recruit-list">${guild.recruits.map(recruitCard).join('')}</div>
-      </div>
-      <button class="advance-btn" onclick="__guild.advanceAll()">▶ ADVANCE WEEK · −${upkeep}g upkeep</button>
-      ${recapPanel()}
+    <div class="guild-hall">
+      <aside class="room-rail">${railHTML()}</aside>
+      <main class="room-stage">
+        ${notice ? `<div class="notice">${notice}</div>` : ''}
+        ${renderRoom(currentRoom)}
+      </main>
     </div>`;
+}
+
+// --- room / fullscreen controls ---------------------------------------------
+function openRoom(id) {
+  currentRoom = id;
+  notice = '';
+  if (!selectedId && guild.roster[0]) selectedId = guild.roster[0].id; // work rooms key off a subject
+  render();
+}
+function toggleFullscreen() {
+  const el = document.documentElement;
+  const inFs = document.fullscreenElement || document.webkitFullscreenElement;
+  if (!inFs) {
+    const req = el.requestFullscreen || el.webkitRequestFullscreen;
+    if (req) {
+      Promise.resolve(req.call(el)).then(() => {
+        try { if (screen.orientation && screen.orientation.lock) screen.orientation.lock('landscape').catch(() => {}); } catch (e) { /* desktop/iOS reject orientation lock */ }
+      }).catch(() => {});
+    } else { notice = 'Fullscreen unavailable here — use your browser or OS fullscreen.'; render(); }
+  } else {
+    const exit = document.exitFullscreen || document.webkitExitFullscreen;
+    if (exit) exit.call(document);
+  }
 }
 
 // --- entry ------------------------------------------------------------------
 export function openGuild() {
   if (!guild) load();
+  currentRoom = 'hub';
+  // Re-render on fullscreen change so the ⛶/⤢ glyph tracks state (hook once).
+  if (!window.__guildFsHooked) {
+    window.__guildFsHooked = true;
+    const onFs = () => { const g = document.getElementById('guildScreen'); if (g && g.classList.contains('active')) render(); };
+    document.addEventListener('fullscreenchange', onFs);
+    document.addEventListener('webkitfullscreenchange', onFs);
+  }
   render();
   showScreen('guildScreen');
 }
 
+window.__guild = { selectHero, setActivity, setTraining, setIntensity, setRecipe, setDiet, setQuest, equipItem, unequipSlot, setPolicy, provision, buyMaterial, sellItem, hire, advanceAll, back, openRoom, toggleFullscreen };
 window.openGuild = openGuild;
-window.__guild = { selectHero, setActivity, setTraining, setIntensity, setRecipe, setDiet, setQuest, equipItem, unequipSlot, setPolicy, provision, buyMaterial, sellItem, hire, advanceAll, back };
