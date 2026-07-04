@@ -14,6 +14,20 @@
 // ═══════════════════════════════════════════════════════════════════════════
 import { SPRITE_BASES, MATERIA_BASE, FX_BASE } from '../config/assets.js';
 
+// --- Extracted leaf modules (decomposition phase A) ---------------------------
+import { PLANETS, COMPOUNDS, ROUND_METALS, RANKS } from './data/progression.js';
+import {
+  GEAR_TYPES, EQUIP_SLOTS, GEAR_MATERIALS, REFINE_TABLE,
+  MAX_REFINEMENT, MAX_SOCKETS, WEAPON_GEAR_TYPES, SHIELD_GEAR_TYPES,
+} from './data/gear.js';
+import { BASIC_ATTACK, ALL_ATTACKS, ATTACKS } from './data/attacks.js';
+import {
+  G, CTL, CT, CTR, CFL, CF, CFR, CWL, CW, CWR, WL, W, WR, WBL, WB, WBR, RK1, RK2, FL1, FL2,
+  BF_TEMPLATES,
+} from './data/arena-templates.js';
+import { gearLevel, getRefineChance, getDrillChance, getLinkChance } from './items/blacksmithing.js';
+import { tileRng, elementsRng, rollDice, statMod, matXpNeeded, randInt, pick } from './engine/rng.js';
+
 // ══════════════════════════════════════════════════════════════
 // THE CRUCIBLE — ATHANOR MODE v1.0
 // ══════════════════════════════════════════════════════════════
@@ -24,171 +38,9 @@ var MATERIA_MAX_LVL=5;
 var MATERIA_DUST_COST=8;   // dust granules of a single planet required to reform a Lv1 orb
 var TOTAL_ROUNDS=7;
 
-// ═══ PLANETARY METALS ═══
-var PLANETS=[
-  {key:'silver',  sym:'☽',name:'Silver',  planet:'Moon',   col:'#b8c4d0',bonus:'defense', bonusDesc:'+AC',     desc:'Lunar reflection.',
-    grants:['Luna Ward','Exaltation']},
-  {key:'quicksilver',sym:'☿',name:'Quicksilver',planet:'Mercury',col:'#a890f0',bonus:'accuracy',bonusDesc:'+hit',   desc:'Volatile flux.',
-    grants:['Mercury Shift','Distillation Bolt']},
-  {key:'copper',  sym:'♀',name:'Copper',  planet:'Venus',  col:'#c87850',bonus:'lifesteal',bonusDesc:'Heal',     desc:'Restorative warmth.',
-    grants:['Conjunction','Coagulation Slam']},
-  {key:'gold',    sym:'☉',name:'Gold',    planet:'Sun',    col:'#d4a843',bonus:'damage',   bonusDesc:'+dmg',     desc:'Solar radiance.',
-    grants:['Calcination Strike','Sol Flare']},
-  {key:'iron',    sym:'♂',name:'Iron',    planet:'Mars',   col:'#c45040',bonus:'crit',     bonusDesc:'Crit++',   desc:'Aggressive edge.',
-    grants:['Dissolution Slash','Dissolution Crush']},
-  {key:'tin',     sym:'♃',name:'Tin',     planet:'Jupiter',col:'#a8b8c8',bonus:'range',    bonusDesc:'+range',   desc:'Expansive force.',
-    grants:['Dissolution Wave']},
-  {key:'lead',    sym:'♄',name:'Lead',    planet:'Saturn', col:'#6b6b75',bonus:'dot',      bonusDesc:'+DOT',     desc:'Heavy oppression.',
-    grants:['Putrefaction Touch','Putrefaction Mist']}
-];
-var COMPOUNDS=[
-  {a:0,b:1,name:'Lunar Flux',     col:'#c0b8e8',desc:'+3 AC and +1 hit'},
-  {a:1,b:2,name:'Healing Arts',   col:'#b880c0',desc:'Lifesteal heals 1d6'},
-  {a:2,b:3,name:'Solar Grace',    col:'#d8a858',desc:'Lifesteal + bonus damage'},
-  {a:3,b:4,name:'Solar Forge',    col:'#d47040',desc:'+3 dmg, crit 19-20'},
-  {a:4,b:5,name:'War Expansion',  col:'#b06868',desc:'Crit 18-20 and +1 range'},
-  {a:5,b:6,name:'Crushing Weight',col:'#8890a0',desc:'+2 range and +2 DOT'}
-];
 
-var ROUND_METALS=[
-  {name:'Lead',    sym:'♄',col:'#6b6b75',budget:1.0},
-  {name:'Tin',     sym:'♃',col:'#a8b8c8',budget:1.2},
-  {name:'Iron',    sym:'♂',col:'#c45040',budget:1.4},
-  {name:'Copper',  sym:'♀',col:'#c87850',budget:1.6},
-  {name:'Silver',  sym:'☽',col:'#b8c4d0',budget:1.8},
-  {name:'Gold',    sym:'☉',col:'#d4a843',budget:2.0},
-  {name:'Platinum',sym:'✦',col:'#e8dff0',budget:2.3}
-];
 
-var RANKS=[
-  {links:0,key:'lead',    name:'Lead',    sym:'♄',col:'#6b6b75'},
-  {links:1,key:'tin',     name:'Tin',     sym:'♃',col:'#a8b8c8'},
-  {links:2,key:'iron',    name:'Iron',    sym:'♂',col:'#c45040'},
-  {links:3,key:'copper',  name:'Copper',  sym:'♀',col:'#c87850'},
-  {links:4,key:'silver',  name:'Silver',  sym:'☽',col:'#b8c4d0'},
-  {links:5,key:'gold',    name:'Gold',    sym:'☉',col:'#d4a843'},
-  {links:6,key:'platinum',name:'Platinum',sym:'✦',col:'#e8dff0'}
-];
 
-// ═══ GEAR DATA ═══
-// Every gear type below maps to a real Time Element pixel-art sprite. Types
-// without a sprite (Gauntlet, Tome, Ring, Amulet) were removed.
-var GEAR_TYPES=[
-  // Hand
-  {type:'Sword',   pos:'Hand', sMin:1,sMax:3, icon:'⚔'},
-  {type:'Dagger',  pos:'Hand', sMin:0,sMax:2, icon:'🗡'},
-  {type:'Wand',    pos:'Hand', sMin:1,sMax:3, icon:'✧'},
-  {type:'Bow',     pos:'Hand', sMin:1,sMax:3, icon:'🏹'},
-  {type:'Axe',     pos:'Hand', sMin:1,sMax:3, icon:'🪓'},
-  {type:'Hammer',  pos:'Hand', sMin:1,sMax:3, icon:'🔨'},
-  {type:'Club',    pos:'Hand', sMin:0,sMax:1, icon:'⌇'},
-  {type:'Buckler', pos:'Hand', sMin:0,sMax:2, icon:'🛡'},
-  // Body
-  {type:'Plate',   pos:'Body', sMin:1,sMax:4, icon:'🛡'},
-  {type:'Mail',    pos:'Body', sMin:1,sMax:3, icon:'⛓'},
-  {type:'Robes',   pos:'Body', sMin:1,sMax:3, icon:'👘'},
-  {type:'Cloak',   pos:'Body', sMin:0,sMax:2, icon:'🧥'},
-  {type:'Vest',    pos:'Body', sMin:0,sMax:1, icon:'△'},
-  // Head
-  {type:'Helm',    pos:'Head', sMin:1,sMax:3, icon:'⛑'},
-  {type:'Crown',   pos:'Head', sMin:1,sMax:2, icon:'👑'},
-  {type:'Cap',     pos:'Head', sMin:0,sMax:1, icon:'🧢'},
-  {type:'Hood',    pos:'Head', sMin:0,sMax:2, icon:'🪖'},
-  // Lower
-  {type:'Trousers',pos:'Lower', sMin:0,sMax:2, icon:'👖'},
-  {type:'Leggings',pos:'Lower', sMin:1,sMax:2, icon:'🦵'},
-  {type:'Skirt',   pos:'Lower', sMin:0,sMax:2, icon:'👗'}
-];
-
-// Canonical ordering of equip slots. Drives every loop that iterates the
-// player's gear (draft, materia, save, etc.).
-var EQUIP_SLOTS = ['Head','LHand','Body','RHand','Lower'];
-
-var GEAR_MATERIALS=[
-  ['Bone','Crude','Tarnished','Scrap'],
-  ['Tin','Pewter','Dull','Worn'],
-  ['Iron','Forged','Tempered','Honed'],
-  ['Copper','Burnished','Warm','Etched'],
-  ['Silver','Polished','Gleaming','Bright'],
-  ['Gold','Radiant','Blessed','Noble'],
-  ['Platinum',"Philosopher's",'Transcendent','Astral']
-];
-
-// ═══ BLACKSMITHING — Refinement / Drill / Link ═══
-// Success rates: REFINE_TABLE[attemptLevel][gearLevel-1]
-// attemptLevel = current refinement (for refine), current sockets (for drill), current links (for link)
-var REFINE_TABLE=[
-  [100,100,100,100], // 0→1
-  [100,100,100,100], // 1→2
-  [100,100,100,100], // 2→3
-  [100,100,100,100], // 3→4
-  [100,100,100, 60], // 4→5
-  [100,100, 60, 40], // 5→6
-  [100, 60, 50, 40], // 6→7
-  [ 60, 40, 20, 20], // 7→8
-  [ 40, 20, 20, 20], // 8→9
-  [ 19, 19, 19,  9]  // 9→10
-];
-var MAX_REFINEMENT=10;
-var MAX_SOCKETS=5;
-
-function gearLevel(gear){
-  // tier 0-1 → Lv1, tier 2-3 → Lv2, tier 4 → Lv3, tier 5-6 → Lv4
-  var t=gear.tier||0;
-  if(t<=1)return 1;
-  if(t<=3)return 2;
-  if(t===4)return 3;
-  return 4;
-}
-
-function getRefineChance(gear){
-  var lvl=gearLevel(gear);var row=gear.refinement||0;
-  if(row>=MAX_REFINEMENT)return 0;
-  if(row>=REFINE_TABLE.length)return 0;
-  var base=REFINE_TABLE[row][lvl-1];
-  // Cross-penalty: each filled socket -10%, each link -5%
-  var penalty=gear.materia.length*10+gear.links*5;
-  return Math.max(1,base-penalty);
-}
-
-function getDrillChance(gear){
-  var lvl=gearLevel(gear);var row=gear.sockets; // current socket count as difficulty index
-  if(row>=MAX_SOCKETS)return 0;
-  if(row>=REFINE_TABLE.length)return 0;
-  var base=REFINE_TABLE[row][lvl-1];
-  // Cross-penalty: each +1 refinement -10%
-  var penalty=(gear.refinement||0)*10;
-  return Math.max(1,base-penalty);
-}
-
-function getLinkChance(gear){
-  var lvl=gearLevel(gear);var row=gear.links; // current link count as difficulty index
-  if(row>=REFINE_TABLE.length)return 0;
-  var base=REFINE_TABLE[row][lvl-1];
-  // Cross-penalty: refinement -10%, sockets -5%
-  var penalty=(gear.refinement||0)*10+gear.sockets*5;
-  return Math.max(1,base-penalty);
-}
-
-// ═══ ATTACKS ═══
-var BASIC_ATTACK={name:'Strike',type:'physical',dice:'1d6',stat:'STR',range:1,desc:'Basic melee attack.',purity:0,dissolve:0};
-var ALL_ATTACKS=[
-  BASIC_ATTACK,
-  {name:'Calcination Strike',type:'sol',dice:'2d6',stat:'STR',range:1,desc:'Burning fist channels Sol energy.',purity:0,dissolve:0},
-  {name:'Sol Flare',type:'sol',dice:'1d10',stat:'CHA',range:3,desc:'Concentrated solar radiance beam.',purity:0,dissolve:0},
-  {name:'Coagulation Slam',type:'luna',dice:'1d8',stat:'STR',range:1,desc:'Luna-infused body slam.',purity:0,dissolve:0},
-  {name:'Luna Ward',type:'luna',dice:'0d0',stat:'WIS',range:0,desc:'Luna barrier: +3 AC until next turn.',purity:0,dissolve:0,special:'ward',acBonus:3},
-  {name:'Distillation Bolt',type:'mercury',dice:'1d8',stat:'INT',range:4,desc:'Mercurial bolt at range.',purity:0,dissolve:0},
-  {name:'Mercury Shift',type:'mercury',dice:'0d0',stat:'DEX',range:0,desc:'Teleport up to 3 tiles.',purity:0,dissolve:0,special:'teleport',teleportRange:3},
-  {name:'Conjunction',type:'mercury',dice:'1d6',stat:'INT',range:1,desc:'Transmutation strike: dmg + purity.',purity:2,dissolve:0},
-  {name:'Dissolution Slash',type:'sol',dice:'1d6',stat:'STR',range:1,desc:'Corrosive Sol: strips 2 purity.',purity:0,dissolve:2},
-  {name:'Dissolution Crush',type:'luna',dice:'1d6',stat:'STR',range:1,desc:'Crushing Luna: strips 2 purity.',purity:0,dissolve:2},
-  {name:'Dissolution Wave',type:'mercury',dice:'1d4',stat:'INT',range:3,desc:'Entropic wave: ranged, strips purity.',purity:0,dissolve:2},
-  {name:'Putrefaction Touch',type:'sol',dice:'1d4',stat:'CHA',range:1,desc:'Inflicts DOT: 1d4 for 2 turns.',purity:0,dissolve:0,special:'dot',dotDice:'1d4',dotTurns:2},
-  {name:'Putrefaction Mist',type:'mercury',dice:'1d4',stat:'INT',range:2,desc:'DOT cloud: 1d4 for 2 turns.',purity:0,dissolve:0,special:'dot',dotDice:'1d4',dotTurns:2},
-  {name:'Exaltation',type:'luna',dice:'0d0',stat:'WIS',range:0,desc:'Luna healing: restore 2d6 HP.',purity:0,dissolve:0,special:'heal',healDice:'2d6'}
-];
-var ATTACKS={};ALL_ATTACKS.forEach(function(a){ATTACKS[a.name]=a});
 
 // Three body archetypes — flavor the procedural appearance / palette bias.
 var BODY_TYPES=['sulfur','salt','mercury'];
@@ -202,11 +54,6 @@ var battlefieldTileset=true; // flag — procedural tiles always "loaded"
 // === PROCEDURAL TILE RENDERER ===
 // Replaces Mana Seed tileset with canvas-drawn tiles
 
-// Seeded random for consistent tile noise
-function tileRng(seed) {
-  var s = seed | 0;
-  return function() { s = (s * 1103515245 + 12345) & 0x7fffffff; return s / 0x7fffffff; };
-}
 
 function drawProceduralTile(ctx, tileType, x, y, size, row, col) {
   var rng = tileRng(row * 137 + col * 311 + tileType[0] * 17 + tileType[1] * 53);
@@ -469,176 +316,6 @@ var arenaTerrainCost=null;
 var arenaName='';
 
 // Tile coordinate shortcuts — [col, row] in the 16x16 tile grid
-var G=[0,0]; // seamless grass (best tiling variant)
-var CTL=[0,3],CT=[1,3],CTR=[3,3]; // cliff top edge: TL corner, edge, TR corner
-var CFL=[0,5],CF=[2,5],CFR=[3,5]; // cliff face: left edge, fill, right edge
-var CWL=[0,6],CW=[2,6],CWR=[3,6]; // cliff-water: left, fill, right
-var WL=[0,7],W=[2,7],WR=[3,7];    // water: left, fill, right
-var WBL=[0,8],WB=[1,8],WBR=[3,8]; // water bottom: BL corner, edge, BR corner
-var RK1=[6,1],RK2=[7,1],FL1=[8,1],FL2=[9,1]; // rocks, flowers
-
-// ═══ BATTLEFIELD TEMPLATES ═══
-var BF_TEMPLATES=[
-  // 0: Verdant Clearing — flat grass with decoratives
-  {
-    name:'Verdant Clearing',
-    tiles:[
-      [G,G,G,G,G,G,G,G,G],
-      [G,G,G,G,G,G,G,G,G],
-      [G,G,G,G,FL1,G,G,G,G],
-      [G,G,G,G,G,G,G,G,G],
-      [G,G,RK1,G,G,G,RK2,G,G],
-      [G,G,G,G,G,G,G,G,G],
-      [G,G,G,G,FL2,G,G,G,G],
-      [G,G,G,G,G,G,G,G,G],
-      [G,G,G,G,G,G,G,G,G]
-    ],
-    elevation:[
-      [1,1,1,1,1,1,1,1,1],[1,1,1,1,1,1,1,1,1],[1,1,1,1,1,1,1,1,1],
-      [1,1,1,1,1,1,1,1,1],[1,1,1,1,1,1,1,1,1],[1,1,1,1,1,1,1,1,1],
-      [1,1,1,1,1,1,1,1,1],[1,1,1,1,1,1,1,1,1],[1,1,1,1,1,1,1,1,1]
-    ],
-    passable:[
-      [1,1,1,1,1,1,1,1,1],[1,1,1,1,1,1,1,1,1],[1,1,1,1,1,1,1,1,1],
-      [1,1,1,1,1,1,1,1,1],[1,1,1,1,1,1,1,1,1],[1,1,1,1,1,1,1,1,1],
-      [1,1,1,1,1,1,1,1,1],[1,1,1,1,1,1,1,1,1],[1,1,1,1,1,1,1,1,1]
-    ],
-    cost:[
-      [1,1,1,1,1,1,1,1,1],[1,1,1,1,1,1,1,1,1],[1,1,1,1,1,1,1,1,1],
-      [1,1,1,1,1,1,1,1,1],[1,1,1,1,1,1,1,1,1],[1,1,1,1,1,1,1,1,1],
-      [1,1,1,1,1,1,1,1,1],[1,1,1,1,1,1,1,1,1],[1,1,1,1,1,1,1,1,1]
-    ]
-  },
-  // 1: Forest Pool — wide cliff-bordered pond
-  {
-    name:'Forest Pool',
-    tiles:[
-      [G,G,G,G,G,G,G,G,G],
-      [G,G,G,G,G,G,G,G,G],
-      [G,CTL,CT,CT,CT,CT,CT,CTR,G],
-      [G,CFL,CF,CF,CF,CF,CF,CFR,G],
-      [G,CWL,CW,CW,CW,CW,CW,CWR,G],
-      [G,WBL,WB,WB,WB,WB,WB,WBR,G],
-      [G,G,G,G,G,G,G,G,G],
-      [G,G,G,FL1,G,G,RK1,G,G],
-      [G,G,G,G,G,G,G,G,G]
-    ],
-    elevation:[
-      [1,1,1,1,1,1,1,1,1],[1,1,1,1,1,1,1,1,1],
-      [1,1,1,1,1,1,1,1,1],[1,0,0,0,0,0,0,0,1],
-      [1,0,0,0,0,0,0,0,1],[1,1,1,1,1,1,1,1,1],
-      [1,1,1,1,1,1,1,1,1],[1,1,1,1,1,1,1,1,1],[1,1,1,1,1,1,1,1,1]
-    ],
-    passable:[
-      [1,1,1,1,1,1,1,1,1],[1,1,1,1,1,1,1,1,1],
-      [1,0,0,0,0,0,0,0,1],[1,0,0,0,0,0,0,0,1],
-      [1,0,0,0,0,0,0,0,1],[1,0,0,0,0,0,0,0,1],
-      [1,1,1,1,1,1,1,1,1],[1,1,1,1,1,1,1,1,1],[1,1,1,1,1,1,1,1,1]
-    ],
-    cost:[
-      [1,1,1,1,1,1,1,1,1],[1,1,1,1,1,1,1,1,1],
-      [1,99,99,99,99,99,99,99,1],[1,99,99,99,99,99,99,99,1],
-      [1,99,99,99,99,99,99,99,1],[1,99,99,99,99,99,99,99,1],
-      [1,1,1,1,1,1,1,1,1],[1,1,1,1,1,1,1,1,1],[1,1,1,1,1,1,1,1,1]
-    ]
-  },
-  // 2: Cliff Ledge — horizontal cliff with stairs passage on right
-  {
-    name:'Cliff Ledge',
-    tiles:[
-      [G,G,G,G,G,G,G,RK2,G],
-      [G,G,G,G,G,G,G,G,G],
-      [G,G,FL1,G,G,G,G,G,G],
-      [CT,CT,CT,CT,CT,CT,CTR,G,G],
-      [CF,CF,CF,CF,CF,CF,CFR,G,G],
-      [WB,WB,WB,WB,WB,WB,WBR,G,G],
-      [G,G,G,G,G,G,G,G,G],
-      [G,G,G,G,G,G,FL2,G,G],
-      [G,G,G,G,G,G,G,G,G]
-    ],
-    elevation:[
-      [1,1,1,1,1,1,1,1,1],[1,1,1,1,1,1,1,1,1],[1,1,1,1,1,1,1,1,1],
-      [1,1,1,1,1,1,1,1,1],[1,1,1,1,1,1,1,1,1],[0,0,0,0,0,0,0,1,1],
-      [0,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,0]
-    ],
-    passable:[
-      [1,1,1,1,1,1,1,1,1],[1,1,1,1,1,1,1,1,1],[1,1,1,1,1,1,1,1,1],
-      [0,0,0,0,0,0,0,1,1],[0,0,0,0,0,0,0,1,1],[0,0,0,0,0,0,0,1,1],
-      [1,1,1,1,1,1,1,1,1],[1,1,1,1,1,1,1,1,1],[1,1,1,1,1,1,1,1,1]
-    ],
-    cost:[
-      [1,1,1,1,1,1,1,1,1],[1,1,1,1,1,1,1,1,1],[1,1,1,1,1,1,1,1,1],
-      [99,99,99,99,99,99,99,1,1],[99,99,99,99,99,99,99,1,1],[99,99,99,99,99,99,99,1,1],
-      [1,1,1,1,1,1,1,1,1],[1,1,1,1,1,1,1,1,1],[1,1,1,1,1,1,1,1,1]
-    ]
-  },
-  // 3: River Crossing — vertical river channel
-  {
-    name:'River Crossing',
-    tiles:[
-      [G,G,G,G,G,G,G,G,G],
-      [G,G,G,G,G,G,G,G,G],
-      [G,RK1,G,CTL,CT,CTR,G,G,G],
-      [G,G,G,CWL,CW,CWR,G,G,G],
-      [G,G,G,CWL,CW,CWR,G,G,G],
-      [G,G,G,CWL,CW,CWR,G,G,G],
-      [G,G,G,WBL,WB,WBR,G,RK2,G],
-      [G,G,G,G,G,G,G,G,G],
-      [G,G,G,G,G,G,G,G,G]
-    ],
-    elevation:[
-      [1,1,1,1,1,1,1,1,1],[1,1,1,1,1,1,1,1,1],
-      [1,1,1,1,1,1,1,1,1],[1,1,1,0,0,0,1,1,1],
-      [1,1,1,0,0,0,1,1,1],[1,1,1,0,0,0,1,1,1],
-      [1,1,1,1,1,1,1,1,1],[1,1,1,1,1,1,1,1,1],[1,1,1,1,1,1,1,1,1]
-    ],
-    passable:[
-      [1,1,1,1,1,1,1,1,1],[1,1,1,1,1,1,1,1,1],
-      [1,1,1,0,0,0,1,1,1],[1,1,1,0,1,0,1,1,1],
-      [1,1,1,0,1,0,1,1,1],[1,1,1,0,1,0,1,1,1],
-      [1,1,1,0,0,0,1,1,1],[1,1,1,1,1,1,1,1,1],[1,1,1,1,1,1,1,1,1]
-    ],
-    cost:[
-      [1,1,1,1,1,1,1,1,1],[1,1,1,1,1,1,1,1,1],
-      [1,1,1,99,99,99,1,1,1],[1,1,1,99,2,99,1,1,1],
-      [1,1,1,99,2,99,1,1,1],[1,1,1,99,2,99,1,1,1],
-      [1,1,1,99,99,99,1,1,1],[1,1,1,1,1,1,1,1,1],[1,1,1,1,1,1,1,1,1]
-    ]
-  },
-  // 4: Waterfall Basin — asymmetric cliff with side path crossing
-  {
-    name:'Waterfall Basin',
-    tiles:[
-      [G,G,G,G,G,G,G,G,G],
-      [G,G,FL1,G,G,G,G,RK1,G],
-      [G,G,G,CTL,CT,CT,CT,CTR,G],
-      [G,G,G,CFL,CF,CF,CF,CFR,G],
-      [G,RK2,G,CWL,CW,CW,CW,CWR,G],
-      [G,G,G,WBL,WB,WB,WB,WBR,G],
-      [G,G,G,G,G,G,G,G,G],
-      [G,G,G,G,G,G,G,RK2,G],
-      [G,G,G,G,G,G,G,G,G]
-    ],
-    elevation:[
-      [1,1,1,1,1,1,1,1,1],[1,1,1,1,1,1,1,1,1],
-      [1,1,1,1,1,1,1,1,1],[1,1,1,0,0,0,0,0,1],
-      [1,1,1,0,0,0,0,0,1],[1,1,1,0,0,0,0,0,1],
-      [1,1,1,1,1,1,1,1,1],[1,1,1,1,1,1,1,1,1],[1,1,1,1,1,1,1,1,1]
-    ],
-    passable:[
-      [1,1,1,1,1,1,1,1,1],[1,1,1,1,1,1,1,1,1],
-      [1,1,1,0,0,0,0,0,1],[1,1,1,0,0,0,0,0,1],
-      [1,1,1,0,0,0,0,0,1],[1,1,1,0,0,0,0,0,1],
-      [1,1,1,1,1,1,1,1,1],[1,1,1,1,1,1,1,1,1],[1,1,1,1,1,1,1,1,1]
-    ],
-    cost:[
-      [1,1,1,1,1,1,1,1,1],[1,1,1,1,1,1,1,1,1],
-      [1,1,1,99,99,99,99,99,1],[1,1,1,99,99,99,99,99,1],
-      [1,1,1,99,99,99,99,99,1],[1,1,1,99,99,99,99,99,1],
-      [1,1,1,1,1,1,1,1,1],[1,1,1,1,1,1,1,1,1],[1,1,1,1,1,1,1,1,1]
-    ]
-  }
-];
 
 function generateArena(){
   var idx=Math.floor(Math.random()*BF_TEMPLATES.length);
@@ -970,8 +647,6 @@ var PRIME_PALETTE_BIAS = {
   mercury: { hair:[1,5,6,7],   top:[3,4,5],   bottom:[3,4,5], hat:[1,4,5,6], backextra:[2,3,5,6] }
 };
 
-// Seeded RNG (mulberry32) — deterministic appearance per fighter.
-function elementsRng(seed){ var s = (seed|0) || 1; return function(){ s = (s+0x6D2B79F5)|0; var t = s; t = Math.imul(t ^ (t>>>15), t|1); t ^= t + Math.imul(t ^ (t>>>7), t|61); return (((t ^ (t>>>14))>>>0) / 4294967296); }; }
 
 // Pick a part (and color variant) for a given layer, optionally biased by prime.
 function elementsPickPart(rng, layer, prime){
@@ -1716,9 +1391,6 @@ var spritesLoaded = true;   // compositor loads parts on demand — never "wait"
 // the character. They share the 23×4 anim grid, so they animate together with
 // the body for free — no per-frame hand-offset math needed.
 
-// Gear roles (kept for gameplay logic in draft/loadout/AI generation).
-var WEAPON_GEAR_TYPES = ['Sword','Dagger','Club','Wand','Bow','Axe','Hammer'];
-var SHIELD_GEAR_TYPES = ['Buckler'];
 
 // Gear type → ordered list of Time Element weapon stems by tier. Higher tier
 // indexes a later (fancier) weapon. Each entry carries its own maxC.
@@ -2169,17 +1841,6 @@ var executing=false;
 var statsOpen=false;
 
 // ═══ HELPERS ═══
-function rollDice(notation){
-  var m=notation.match(/(\d+)d(\d+)/);
-  if(!m)return 0;
-  var n=parseInt(m[1]),d=parseInt(m[2]),total=0;
-  for(var i=0;i<n;i++)total+=Math.floor(Math.random()*d)+1;
-  return total;
-}
-function statMod(fighter,stat){return Math.floor((fighter.stats[stat]-10)/2)}
-function matXpNeeded(level){return level*3}
-function randInt(min,max){return Math.floor(Math.random()*(max-min+1))+min}
-function pick(arr){return arr[Math.floor(Math.random()*arr.length)]}
 function getRank(linkCount){
   for(var i=RANKS.length-1;i>=0;i--){if(linkCount>=RANKS[i].links)return RANKS[i]}
   return RANKS[0];
