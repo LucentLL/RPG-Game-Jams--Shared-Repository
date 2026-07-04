@@ -18,6 +18,7 @@ import { weeklyUpkeep, addGold, guildIncome } from './economy.js';
 import { RECIPES, getRecipe, previewQuality, forge, study, recipeUnlocked } from './smithing.js';
 import { MATERIALS, createInventory, armoryItems, findItem, addMaterial, gearBonus, EQUIP_SLOTS } from './inventory.js';
 import { generateQuestBoard, resolveQuest } from './quests.js';
+import { roleFor } from './roles.js';
 import { qualityTier } from './item.js';
 import { MATERIAL_PRICE, buyPrice, itemSellValue, createMarket, refreshMarket } from './market.js';
 import { saveGame, loadGame } from '../platform/storage.js';
@@ -326,6 +327,23 @@ function showScreen(id) {
 }
 function fmtDelta(n) { n = Math.round(n); if (n > 0) return `<span class="up">+${n}</span>`; if (n < 0) return `<span class="down">${n}</span>`; return `${n}`; }
 function glyphOf(h) { return ARCH_GLYPH[h.archetype] || '☉'; }
+
+// --- character sprites (Elements engine, exposed by crucible.js) -------------
+/** A canvas the post-render pass paints with a member's generated pixel sprite. */
+function personSprite(person, px) {
+  const p = px || 40;
+  return `<canvas class="hero-sprite" width="${p * 2}" height="${p * 2}" data-hid="${person.id}" aria-label="${person.name}"></canvas>`;
+}
+/** A member OR a tavern recruit, by id. */
+function personById(id) { return heroById(id) || (guild.recruits || []).find((r) => r.id === id) || null; }
+/** After each render, draw every sprite canvas via the shared Elements renderer. */
+function paintSprites() {
+  if (typeof window.renderGuildSprite !== 'function') return; // crucible.js not loaded (shouldn't happen)
+  document.querySelectorAll('#guildScreen canvas.hero-sprite[data-hid]').forEach((cv) => {
+    const p = personById(cv.dataset.hid);
+    if (p) try { window.renderGuildSprite(cv, p); } catch (e) { /* asset race — the redraw registry repaints on load */ }
+  });
+}
 function statTotal(h) { return HERO_STATS.reduce((s, k) => s + (h.stats[k] || 0), 0); }
 function questOdds(hp, rec) {
   // Matches resolveQuest: success needs (hp/rec) * variance >= 1, variance uniform on
@@ -354,7 +372,7 @@ function rosterRow(h) {
     : a.type === 'quest' ? `🗺 ${a.questId ? (questTitle(a.questId) || 'On Quest') : '(choose quest)'}`
     : `⚔ ${(getDrill(a.trainingId) || REST).name}${a.intensity === 'heavy' ? ' (H)' : ''}`;
   return `<button class="roster-row ${h.id === selectedId ? 'sel' : ''}" onclick="__guild.selectHero('${h.id}')">
-      <span class="rr-portrait">${glyphOf(h)}</span>
+      <span class="rr-portrait">${personSprite(h, 44)}</span>
       <span class="rr-main">
         <span class="rr-name">${h.name} <span class="rr-sub">${h.archetype} Lv${h.level}</span></span>
         <span class="rr-assign">${plan} · 🍖 ${getDietPlan(a.dietId).name}</span>
@@ -378,7 +396,7 @@ function equippedLine(h) {
 /** Compact avatar strip to switch which member you're managing inside a work room. */
 function heroSwitcher() {
   if (guild.roster.length <= 1) return '';
-  return `<div class="hero-switch">${guild.roster.map((h) => `<button class="hs-chip ${h.id === selectedId ? 'sel' : ''}" title="${h.name}" onclick="__guild.selectHero('${h.id}')">${glyphOf(h)}</button>`).join('')}</div>`;
+  return `<div class="hero-switch">${guild.roster.map((h) => `<button class="hs-chip ${h.id === selectedId ? 'sel' : ''}" title="${h.name}" onclick="__guild.selectHero('${h.id}')">${personSprite(h, 38)}</button>`).join('')}</div>`;
 }
 
 /** The member's stat / condition / gear card — the shared header used in the Roster room. */
@@ -390,7 +408,7 @@ function heroHeader(h) {
     return `<div class="stat-cell"><div class="k">${s}</div><div class="v">${val}<span class="cap">/${STAT_CAP}</span></div>
       <div class="statbar"><span style="width:${Math.round(val / STAT_CAP * 100)}%"></span></div><div class="d">${g ? '+' + g : ''}</div></div>`;
   }).join('');
-  return `<div class="assign-head"><span class="rr-portrait sm">${glyphOf(h)}</span> <b>${h.name}</b> · ${h.archetype} Lv${h.level} · ${h.age} wks · ⚡${combatPower(h)}</div>
+  return `<div class="assign-head"><span class="rr-portrait">${personSprite(h, 46)}</span> <b>${h.name}</b> · ${h.archetype} Lv${h.level} · ${h.age} wks · ⚡${combatPower(h)}</div>
       <div class="stat-grid">${stats}</div>
       ${bar('Stamina', h.condition.stamina, 'var(--success)')}${bar('Fatigue', h.condition.fatigue, '#e08a3c')}${bar('Stress', h.condition.stress || 0, '#c05a8a')}${bar('Morale', h.condition.morale, '#8ab4d8')}
       ${h.condition.injury ? '<div class="injury-flag">⚠ Injured — will only recover (rest) until healed</div>' : ''}
@@ -583,8 +601,8 @@ function recruitCard(r) {
   const cost = hireCost(r);
   const afford = guild.gold >= cost && guild.roster.length < MAX_ROSTER;
   return `<div class="recruit-card">
-      <span class="rr-portrait sm">${glyphOf(r)}</span>
-      <span class="rc-info"><b>${r.name}</b><span class="rr-sub">${r.archetype} · Σ${statTotal(r)} · ⚡${heroPower(r)}</span></span>
+      <span class="rr-portrait rc-portrait">${personSprite(r, 56)}</span>
+      <span class="rc-info"><b>${r.name}</b><span class="rr-sub">${ARCH_GLYPH[r.archetype] || '☉'} ${r.archetype} · Σ${statTotal(r)} · ⚡${heroPower(r)}</span></span>
       <button class="rc-hire ${afford ? '' : 'disabled'}" onclick="__guild.hire('${r.id}')">Hire · ${cost}g</button>
     </div>`;
 }
@@ -678,12 +696,19 @@ function roomStub(room) {
 
 // --- hub --------------------------------------------------------------------
 function roomTile(room) {
+  const role = roleFor(room.id);
   return `<button class="room-tile ${room.locked ? 'locked' : ''}" onclick="__guild.openRoom('${room.id}')">
       <span class="rt-glyph">${room.glyph}</span>
       <span class="rt-name">${room.name}</span>
-      <span class="rt-tag">${room.tag}</span>
+      <span class="rt-tag">${role ? role.name : room.tag}</span>
       <span class="rt-status">${roomStatus(room.id)}</span>
     </button>`;
+}
+
+/** A one-line role banner shown atop every room. */
+function roleTag(roomId) {
+  const r = roleFor(roomId);
+  return r ? `<div class="role-banner"><span class="role-name">${r.glyph} ${r.name}</span> <span class="dim">— ${r.blurb}</span></div>` : '';
 }
 function renderHub() {
   return `${recapPanel()}
@@ -694,14 +719,15 @@ function renderHub() {
 function renderRoom(id) {
   const room = getRoom(id);
   if (id === 'hub' || !room) return renderHub();
-  if (room.locked) return roomStub(room);
+  const hdr = roleTag(id); // every room announces its role
+  if (room.locked) return hdr + roomStub(room);
   switch (id) {
-    case 'roster': return rosterRoom();
-    case 'forge': return forgeRoom();
-    case 'kitchen': return kitchenRoom();
-    case 'library': return libraryRoom();
-    case 'armory': return armoryRoom();
-    case 'quarters': return quartersRoom();
+    case 'roster': return hdr + rosterRoom();
+    case 'forge': return hdr + forgeRoom();
+    case 'kitchen': return hdr + kitchenRoom();
+    case 'library': return hdr + libraryRoom();
+    case 'armory': return hdr + armoryRoom();
+    case 'quarters': return hdr + quartersRoom();
     default: return renderHub();
   }
 }
@@ -742,6 +768,7 @@ function render() {
         ${renderRoom(currentRoom)}
       </main>
     </div>`;
+  paintSprites(); // canvases exist now — draw the Elements sprites into them
 }
 
 // --- room / fullscreen controls ---------------------------------------------

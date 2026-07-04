@@ -1529,6 +1529,19 @@ function renderSpriteStatic(canvas, prime, angle, animName, frame, fighter){
   }
 }
 
+// Guild portrait render: draw a guild member's / recruit's Elements sprite into a
+// canvas. Guild people carry `archetype` (Knight/Mage/...) rather than a `prime`, so
+// map that to a body type; ensureAppearance() then derives a STABLE appearance from
+// the person's name (and caches it onto person.appearance) if none is stored yet.
+// Guild people have `equipped`, not battle `gear`, so the weapon/FX paths no-op.
+var GUILD_ARCH_PRIME = { Knight: 'salt', Cleric: 'salt', Adventurer: 'salt', Berserker: 'sulfur', Ranger: 'sulfur', Mage: 'mercury', Rogue: 'mercury' };
+function renderGuildSprite(canvas, person, facing){
+  if (!canvas || !person) return;
+  var prime = person.prime || person.bodyType || GUILD_ARCH_PRIME[person.archetype] || 'salt';
+  renderSpriteStatic(canvas, prime, (facing == null ? 0 : facing), 'idle', 0, person);
+}
+window.renderGuildSprite = renderGuildSprite;
+
 // Stable per-canvas phase offset (0-1400ms) so previews on screens that show
 // multiple characters (e.g. Pantheon) don't all bob in unison.
 function _bobPhaseForCanvas(cv){

@@ -75,6 +75,18 @@
 .room-soon { text-align: center; padding: 32px 16px; }
 .room-soon-glyph { font-size: 3em; opacity: 0.5; margin-bottom: 6px; }
 
+/* --- character sprites (Elements engine) --- */
+.hero-sprite { width: 100%; height: 100%; display: block; image-rendering: pixelated; image-rendering: crisp-edges; }
+.rr-portrait, .hs-chip, .rc-portrait, .rr-portrait.sm { overflow: hidden; padding: 0; }
+.rc-portrait { width: 60px; height: 60px; flex: 0 0 60px; border: 1px solid var(--gold); border-radius: 10px;
+  background: radial-gradient(circle at 50% 30%, #2a2018, #0c0c10); }
+.recruit-card { align-items: center; }
+
+/* --- role banner (per-room job identity) --- */
+.role-banner { font-size: 0.8em; color: var(--muted); margin: 0 2px 12px; padding: 6px 11px;
+  border-left: 2px solid var(--gold); background: rgba(212, 168, 67, 0.05); border-radius: 0 7px 7px 0; }
+.role-name { font-family: 'Cinzel', serif; color: var(--gold); letter-spacing: 0.03em; }
+
 /* --- landscape tuning --- */
 /* Narrow stage (phone landscape ~500px stage): hub drops to 2 columns. */
 @media (max-width: 680px) { .room-hub { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px; } .room-tile { padding: 13px 6px; } .rt-name { font-size: 0.84em; } }
