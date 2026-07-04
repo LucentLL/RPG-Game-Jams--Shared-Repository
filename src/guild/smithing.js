@@ -16,11 +16,14 @@ import { hasMaterials, spendMaterials, addItem } from './inventory.js';
  * @property {string} id @property {string} name @property {string} kind @property {string} slot
  * @property {string} material @property {Object.<string,number>} cost @property {number} base @property {number} staminaCost
  */
+// `base` = unskilled quality; `ceil` = the best this material can reach even at max
+// Practice. Cheaper materials cap lower, so iron can never match steel/mithril quality
+// (the material tier stays meaningful) — quality = clamp(base + practice*0.5, 5, ceil).
 export const RECIPES = [
-  { id: 'iron_sword', name: 'Iron Sword', kind: 'sword', slot: 'weapon', material: 'iron', cost: { iron_ore: 2 }, base: 20, staminaCost: 30 },
-  { id: 'iron_armor', name: 'Iron Armor', kind: 'armor', slot: 'body', material: 'iron', cost: { iron_ore: 3 }, base: 20, staminaCost: 32 },
-  { id: 'steel_sword', name: 'Steel Sword', kind: 'sword', slot: 'weapon', material: 'steel', cost: { steel_ore: 2 }, base: 40, staminaCost: 30 },
-  { id: 'mithril_sword', name: 'Mithril Sword', kind: 'sword', slot: 'weapon', material: 'mithril', cost: { mithril_ore: 2 }, base: 60, staminaCost: 34 },
+  { id: 'iron_sword', name: 'Iron Sword', kind: 'sword', slot: 'weapon', material: 'iron', cost: { iron_ore: 2 }, base: 20, ceil: 55, staminaCost: 30 },
+  { id: 'iron_armor', name: 'Iron Armor', kind: 'armor', slot: 'body', material: 'iron', cost: { iron_ore: 3 }, base: 20, ceil: 55, staminaCost: 32 },
+  { id: 'steel_sword', name: 'Steel Sword', kind: 'sword', slot: 'weapon', material: 'steel', cost: { steel_ore: 2 }, base: 40, ceil: 80, staminaCost: 30 },
+  { id: 'mithril_sword', name: 'Mithril Sword', kind: 'sword', slot: 'weapon', material: 'mithril', cost: { mithril_ore: 2 }, base: 60, ceil: 100, staminaCost: 34 },
 ];
 
 /** @param {string} id @returns {?Recipe} */
@@ -28,7 +31,7 @@ export function getRecipe(id) { return RECIPES.find((r) => r.id === id) || null;
 
 /** Rough expected quality for a UI preview (no jitter). */
 export function previewQuality(recipe, practice) {
-  return Math.max(5, Math.min(100, Math.round(recipe.base + (practice || 0) * 0.5)));
+  return Math.max(5, Math.min(recipe.ceil, Math.round(recipe.base + (practice || 0) * 0.5)));
 }
 
 function jitter() { return Math.floor(Math.random() * 10) - 3; } // -3..+6
@@ -49,7 +52,7 @@ export function forge(hero, recipe, inv, week) {
   if (c.stamina < recipe.staminaCost) return { ok: false, reason: 'stamina' };
 
   spendMaterials(inv, recipe.cost);
-  const quality = Math.max(5, Math.min(100, Math.round(recipe.base + prof.practice * 0.5 + jitter())));
+  const quality = Math.max(5, Math.min(recipe.ceil, Math.round(recipe.base + prof.practice * 0.5 + jitter())));
   const item = createItem({
     kind: recipe.kind, slot: recipe.slot, material: recipe.material, quality, name: recipe.name,
     history: { forgedBy: hero.id, forgedByName: hero.name, forgedWeek: week, wielders: [], kills: 0, repairs: [] },

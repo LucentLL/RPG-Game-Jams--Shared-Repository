@@ -12,7 +12,7 @@ import { generateRecruit, hireCost, rollRecruitPool } from './recruiting.js';
 import { TRAINING_REGIMENS, getRegimen, applyTraining } from './training.js';
 import { DIET_PLANS, getDietPlan, applyDiet } from './diet.js';
 import { advanceWeek, formatDate } from './calendar.js';
-import { weeklyUpkeep, addGold } from './economy.js';
+import { weeklyUpkeep, addGold, guildIncome } from './economy.js';
 import { RECIPES, getRecipe, previewQuality, forge } from './smithing.js';
 import { MATERIALS, createInventory, armoryItems, findItem } from './inventory.js';
 import { qualityTier } from './item.js';
@@ -39,7 +39,7 @@ function ensureAssignment(h) {
     type: a.type === 'forge' ? 'forge' : 'train',
     trainingId: getRegimen(a.trainingId) ? a.trainingId : 'drill_pow',
     recipeId: getRecipe(a.recipeId) ? a.recipeId : 'iron_sword',
-    dietId: a.dietId || h.dietPlanId || 'balanced',
+    dietId: getDietPlan(a.dietId) ? a.dietId : (getDietPlan(h.dietPlanId) ? h.dietPlanId : 'balanced'),
   };
   if (!h.dietPlanId) h.dietPlanId = h.assignment.dietId;
 }
@@ -54,6 +54,11 @@ function migrateHero(h) {
   if (!h.growth || h.growth.POW === undefined) { h.growth = {}; HERO_STATS.forEach((s) => { h.growth[s] = 2; }); }
   if (!h.professions || !h.professions.blacksmithing) h.professions = { blacksmithing: { theory: 0, practice: 0, field: 0 } };
   if (!h.equipped) h.equipped = {};
+  if (!h.condition) h.condition = { stamina: 100, morale: 70, loyalty: 60, fatigue: 0, injury: null };
+  if (h.level == null) h.level = 1;
+  if (h.xp == null) h.xp = 0;
+  if (h.age == null) h.age = 0;
+  if (h.lifespan == null) h.lifespan = 300;
 }
 
 function load() {
@@ -69,6 +74,7 @@ function load() {
   guild.roster.forEach((h) => { migrateHero(h); ensureAssignment(h); });
   const staleRecruits = guild.recruits && guild.recruits[0] && guild.recruits[0].stats && guild.recruits[0].stats.POW === undefined;
   if (!Array.isArray(guild.recruits) || !guild.recruits.length || staleRecruits) guild.recruits = rollRecruitPool(3);
+  guild.recruits.forEach(migrateHero);
   if (!selectedId && guild.roster[0]) selectedId = guild.roster[0].id;
   save();
 }
@@ -84,7 +90,7 @@ function equipItem(itemId) {
   const h = heroById(selectedId); if (!h) { notice = 'Select a hero first, then equip.'; render(); return; }
   const item = findItem(guild.inventory, itemId); if (!item || item.location !== 'armory') return;
   const slot = item.slot;
-  if (h.equipped[slot]) { const prev = findItem(guild.inventory, h.equipped[slot]); if (prev) prev.location = 'armory'; }
+  if (h.equipped[slot]) { const prev = findItem(guild.inventory, h.equipped[slot]); if (prev) { prev.location = 'armory'; const pw = prev.history.wielders[prev.history.wielders.length - 1]; if (pw && !pw.toWeek) pw.toWeek = guild.calendar.week; } }
   h.equipped[slot] = item.id;
   item.location = h.id;
   item.history.wielders.push({ personId: h.id, fromWeek: guild.calendar.week, toWeek: null });
@@ -127,13 +133,16 @@ function hire(id) {
   const i = guild.recruits.findIndex((r) => r.id === id); if (i < 0) return;
   const r = guild.recruits[i]; const cost = hireCost(r);
   if (guild.gold < cost) { notice = `Not enough gold to hire ${r.name} (${cost}g).`; render(); return; }
-  addGold(guild, -cost); ensureAssignment(r); guild.roster.push(r); guild.recruits.splice(i, 1);
+  addGold(guild, -cost); migrateHero(r); ensureAssignment(r); guild.roster.push(r); guild.recruits.splice(i, 1);
   selectedId = r.id; notice = `${r.name} joined the guild.`;
   save(); render();
 }
 
 function advanceAll() {
+  const income = guildIncome(guild);            // patron retainer (stopgap until quest income)
+  addGold(guild, income);
   const upkeep = weeklyUpkeep(guild, getDietPlan);
+  const shortfall = Math.max(0, upkeep - guild.gold); // can't fully pay wages this week?
   addGold(guild, -upkeep);
   const week = guild.calendar.week;
   const results = [];
@@ -142,7 +151,7 @@ function advanceAll() {
     const diet = getDietPlan(a.dietId);
     h.dietPlanId = a.dietId;
     const cb = { stamina: h.condition.stamina, fatigue: h.condition.fatigue };
-    let entry = { name: h.name, type: a.type };
+    let entry = { name: h.name, id: h.id, type: a.type };
 
     if (a.type === 'forge') {
       const recipe = getRecipe(a.recipeId);
@@ -162,10 +171,11 @@ function advanceAll() {
     entry.sta = h.condition.stamina - cb.stamina; entry.fat = h.condition.fatigue - cb.fatigue;
     results.push(entry);
   }
+  if (shortfall > 0) guild.roster.forEach((h) => { h.condition.morale = clamp(h.condition.morale - 8); }); // unpaid wages hurt morale
   advanceWeek(guild.calendar);
   refreshMarket(guild.market);
   guild.recruits = rollRecruitPool(3);
-  report = { upkeep, results };
+  report = { income, upkeep, shortfall, results };
   notice = '';
   save(); render();
 }
@@ -214,7 +224,7 @@ function equippedLine(h) {
 function assignPanel() {
   const h = heroById(selectedId);
   if (!h) return '<div class="plan-card"><div class="hint">Tap a hero above to plan their week.</div></div>';
-  const rep = report && report.results ? report.results.find((r) => r.name === h.name) : null;
+  const rep = report && report.results ? report.results.find((r) => r.id === h.id) : null;
 
   const stats = HERO_STATS.map((s) => {
     const val = h.stats[s] || 0;
@@ -308,7 +318,7 @@ function recapPanel() {
     const g = r.trained ? HERO_STATS.filter((s) => r.gains[s]).map((s) => `${s}+${r.gains[s]}`).join(' ') : 'no gain — too fatigued';
     return `<div class="r-line"><b>${r.name}</b> · <span class="${r.trained ? 'up' : 'down'}">${g}</span> <span class="dim">(sta ${fmtDelta(r.sta)}, fat ${fmtDelta(r.fat)})</span></div>`;
   }).join('');
-  return `<div class="week-report"><h4>Last week</h4>${lines}<div class="r-line">upkeep <span class="down">−${report.upkeep}g</span></div></div>`;
+  return `<div class="week-report"><h4>Last week</h4>${lines}<div class="r-line">income <span class="up">+${report.income}g</span> · upkeep <span class="down">−${report.upkeep}g</span>${report.shortfall ? ' · <span class="down">insolvent — morale −8 all</span>' : ''}</div></div>`;
 }
 
 function recruitCard(r) {

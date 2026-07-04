@@ -29,3 +29,12 @@ export function addGold(guild, delta) {
   guild.gold = Math.max(0, guild.gold + delta);
   return guild.gold;
 }
+
+/**
+ * Weekly patron retainer — a stopgap income floor so a broke guild can always
+ * recover (no permanent soft-lock) until real quest/service income exists
+ * (DESIGN.md Phase 3). Scales with reputation, so building the guild's name pays.
+ * @param {import('./guild.js').Guild} guild @returns {number}
+ */
+export const BASE_INCOME = 40;
+export function guildIncome(guild) { return BASE_INCOME + Math.round((guild.reputation || 0) * 2); }
