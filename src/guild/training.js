@@ -1,81 +1,106 @@
 /**
- * @file Training regimens (Monster-Rancher style). Each week a hero can be
- * assigned a regimen that grows one or two stats toward STAT_CAP, weighted by
- * the hero's growth talent and their diet's stat bias, at a stamina/fatigue cost.
- * Gains taper as a stat nears the cap, so the last points are earned, not free.
+ * @file Training — Monster-Rancher-style drills.
+ *
+ * Each drill raises a MAIN stat. The HEAVY version also nudges a SECONDARY stat up
+ * and a PAIRED stat DOWN — you can't max everything, and specializing hard costs you
+ * elsewhere — at the price of much more Fatigue and Stress. LIGHT is the safe, small
+ * gain. Gains scale with the hero's talent, their life stage (young/prime train
+ * fastest; the old decline), how worn-down they are (high Fatigue+Stress tanks gains
+ * and risks injury), and morale. Rest is the counterweight that sheds Fatigue/Stress.
  */
 import { HERO_STATS, STAT_CAP } from './hero.js';
 
-/** How much raw stat a single intensity-point yields before talent/diet/taper. */
-const GAIN_SCALE = 2.4;
+const GAIN_SCALE = 5;
 
-/**
- * @typedef {Object} TrainingRegimen
- * @property {string} id
- * @property {string} name
- * @property {string[]} focus     stats trained, e.g. ['POW']
- * @property {number} intensity   0..3 — higher = more gain, more fatigue
- * @property {number} staminaCost
- * @property {number} fatigueGain negative = recovery
- * @property {number} xp
- */
-
-/** @type {TrainingRegimen[]} */
-export const TRAINING_REGIMENS = [
-  { id: 'drill_pow',  name: 'Weight Drills',   focus: ['POW'],        intensity: 2, staminaCost: 30, fatigueGain: 15, xp: 10 },
-  { id: 'guard_def',  name: 'Shield Wall',     focus: ['DEF'],        intensity: 2, staminaCost: 30, fatigueGain: 15, xp: 10 },
-  { id: 'forms_skl',  name: 'Weapon Forms',    focus: ['SKL'],        intensity: 2, staminaCost: 28, fatigueGain: 14, xp: 10 },
-  { id: 'sprint_spd', name: 'Sprint Course',   focus: ['SPD'],        intensity: 2, staminaCost: 30, fatigueGain: 16, xp: 10 },
-  { id: 'study_int',  name: 'Arcane Study',    focus: ['INT'],        intensity: 2, staminaCost: 22, fatigueGain: 12, xp: 10 },
-  { id: 'march_vit',  name: 'Endurance March', focus: ['VIT'],        intensity: 2, staminaCost: 35, fatigueGain: 20, xp: 10 },
-  { id: 'spar',       name: 'Sparring Match',  focus: ['POW', 'SKL'], intensity: 3, staminaCost: 45, fatigueGain: 30, xp: 20 },
-  { id: 'rest',       name: 'Rest & Recover',  focus: [],             intensity: 0, staminaCost: 0,  fatigueGain: -25, xp: 0 },
+/** Drills: MAIN stat, plus (heavy only) a SECONDARY (+) and a PAIRED penalty (−). */
+export const DRILLS = [
+  { id: 'pow', name: 'Weight Drills',   main: 'POW', sec: 'VIT', pen: 'INT' },
+  { id: 'def', name: 'Shield Wall',     main: 'DEF', sec: 'VIT', pen: 'SPD' },
+  { id: 'skl', name: 'Weapon Forms',    main: 'SKL', sec: 'SPD', pen: 'POW' },
+  { id: 'spd', name: 'Sprint Course',   main: 'SPD', sec: 'SKL', pen: 'DEF' },
+  { id: 'int', name: 'Meditation',      main: 'INT', sec: 'SKL', pen: 'POW' },
+  { id: 'vit', name: 'Endurance March', main: 'VIT', sec: 'DEF', pen: 'SPD' },
 ];
+export const REST = { id: 'rest', name: 'Rest & Recover' };
 
-/** @param {string} id @returns {?TrainingRegimen} */
-export function getRegimen(id) { return TRAINING_REGIMENS.find((r) => r.id === id) || null; }
+export function getDrill(id) { return id === 'rest' ? REST : (DRILLS.find((d) => d.id === id) || null); }
 
-/** Taper factor 1.0 (empty stat) → 0.3 (at cap), so training never fully stalls. */
-function capTaper(current) { return 0.3 + 0.7 * Math.max(0, (STAT_CAP - current) / STAT_CAP); }
+const clampStat = (v) => Math.max(0, Math.min(STAT_CAP, v));
+const clamp100 = (v) => Math.max(0, Math.min(100, Math.round(v)));
+
+/** Life-stage curve: ramps up young, peaks in early prime (~20% of life), then declines. */
+function ageMult(hero) {
+  const f = Math.max(0, Math.min(1, (hero.age || 0) / (hero.lifespan || 300)));
+  return f < 0.2 ? (0.85 + f * 2.25) : Math.max(0.3, 1.3 - (f - 0.2) * 1.25);
+}
+/** Wear curve: gains fall as Fatigue + Stress*2 climbs (MR's fatigue+stress model). */
+function wearMult(c) { return Math.max(0.2, 1 - ((c.fatigue || 0) + (c.stress || 0) * 2) / 400); }
 
 /**
- * Resolve one week of training. Mutates hero stats/condition/xp.
- * gain = round(intensity * GAIN_SCALE * talent * dietBias * capTaper), min 1 while
- * there's room and the hero isn't too tired; clamped to STAT_CAP.
+ * Resolve one week of training. Mutates the hero. Returns a report for the recap.
  * @param {import('./hero.js').Hero} hero
- * @param {TrainingRegimen} regimen
- * @param {Object.<string,number>} [dietBias]  from the hero's diet (diet.js statBias)
- * @returns {{gains: Object.<string,number>}}
+ * @param {string} drillId  a DRILLS id, or 'rest'
+ * @param {'light'|'heavy'} intensity
+ * @param {Object.<string,number>} [dietBias]
+ * @returns {{gains:Object,drops:Object,rested?:boolean,injured?:boolean,injury:?string}}
  */
-export function applyTraining(hero, regimen, dietBias = {}) {
-  const gains = {};
+export function applyTraining(hero, drillId, intensity, dietBias = {}) {
   const c = hero.condition;
-  // Morale scales effort a little: a happy hero trains ~15% better, a miserable one worse.
-  const moraleMult = 0.85 + (c.morale / 100) * 0.3;
+  const gains = {}, drops = {};
 
-  if (c.stamina < regimen.staminaCost) {
-    // Too tired to train effectively — only partial fatigue changes.
-    c.fatigue = Math.max(0, Math.min(100, c.fatigue + Math.round(regimen.fatigueGain / 2)));
-    return { gains };
+  // Rest — the recovery counterweight.
+  if (drillId === 'rest' || !getDrill(drillId)) {
+    c.fatigue = clamp100(c.fatigue - 35);
+    c.stress = clamp100((c.stress || 0) - 20);
+    c.stamina = Math.min(100, (c.stamina || 0) + 25);
+    c.morale = clamp100(c.morale + 5);
+    if (c.injury && c.fatigue < 25 && (c.stress || 0) < 25) c.injury = null;
+    return { gains, drops, rested: true, injury: c.injury };
   }
 
-  for (const stat of regimen.focus) {
-    const current = hero.stats[stat] || 0;
-    if (current >= STAT_CAP) continue;
-    const talent = hero.growth[stat] || 1;
-    const bias = dietBias[stat] || 1;
-    const raw = regimen.intensity * GAIN_SCALE * talent * bias * moraleMult * capTaper(current);
-    const gain = Math.max(1, Math.round(raw));
-    const next = Math.min(STAT_CAP, current + gain);
+  // An injured hero can't train — the week becomes forced rest until they recover.
+  if (c.injury) {
+    c.fatigue = clamp100(c.fatigue - 30);
+    c.stress = clamp100((c.stress || 0) - 18);
+    c.stamina = Math.min(100, (c.stamina || 0) + 15);
+    if (c.fatigue < 25 && (c.stress || 0) < 25) c.injury = null;
+    return { gains, drops, injured: true, injury: c.injury };
+  }
+
+  const drill = getDrill(drillId);
+  const heavy = intensity === 'heavy';
+  const base = GAIN_SCALE * (heavy ? 1.8 : 1.0) * wearMult(c) * ageMult(hero) * (0.85 + (c.morale / 100) * 0.3);
+
+  const grow = (stat, factor) => {
+    const cur = hero.stats[stat] || 0;
+    if (cur >= STAT_CAP) return;
+    const room = (STAT_CAP - cur) / STAT_CAP;
+    const amt = Math.max(1, Math.round(base * factor * (hero.growth[stat] || 1) * (dietBias[stat] || 1) * (0.3 + 0.7 * room)));
+    const next = clampStat(cur + amt);
+    if (next > cur) gains[stat] = (gains[stat] || 0) + (next - cur);
     hero.stats[stat] = next;
-    gains[stat] = next - current; // actual gain after the cap
+  };
+
+  grow(drill.main, 1);
+  if (heavy) {
+    grow(drill.sec, 0.4);
+    const cur = hero.stats[drill.pen] || 0;             // heavy training saps a paired stat
+    const next = clampStat(cur - Math.round(base * 0.4));
+    if (next < cur) drops[drill.pen] = (drops[drill.pen] || 0) + (cur - next);
+    hero.stats[drill.pen] = next;
   }
 
-  c.stamina = Math.max(0, c.stamina - regimen.staminaCost);
-  c.fatigue = Math.max(0, Math.min(100, c.fatigue + regimen.fatigueGain));
-  hero.xp += regimen.xp;
-  return { gains };
+  c.fatigue = clamp100(c.fatigue + (heavy ? 25 : 12)); // heavy outpaces most diets' relief → fatigue builds
+  c.stress = clamp100((c.stress || 0) + (heavy ? 14 : 6));
+  c.stamina = Math.max(0, (c.stamina || 0) - (heavy ? 12 : 6));
+  c.morale = clamp100(c.morale - (heavy ? 2 : 1));
+  hero.xp += heavy ? 14 : 8;
+
+  // Overtraining injury: chance rises with combined wear (Fatigue + Stress*2).
+  const wear = c.fatigue + (c.stress || 0) * 2;
+  if (wear > 185 && Math.random() < Math.min(0.6, (wear - 185) / 160)) c.injury = 'strained';
+
+  return { gains, drops, injury: c.injury };
 }
 
-// Keep HERO_STATS reachable to importers that only pull from training.
 export { HERO_STATS };

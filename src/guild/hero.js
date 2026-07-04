@@ -72,7 +72,7 @@ export function createHero(init = {}) {
     growth: init.growth || ones,
     level: init.level ?? 1,
     xp: init.xp ?? 0,
-    condition: init.condition || { stamina: 100, morale: 70, loyalty: 60, fatigue: 0, injury: null },
+    condition: init.condition || { stamina: 100, morale: 70, loyalty: 60, fatigue: 0, stress: 0, injury: null },
     age: init.age ?? 0,
     lifespan: init.lifespan ?? 300,
     dietPlanId: init.dietPlanId || null,

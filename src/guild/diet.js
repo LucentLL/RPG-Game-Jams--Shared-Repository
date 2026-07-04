@@ -45,4 +45,5 @@ export function applyDiet(hero, diet) {
   const c = hero.condition;
   c.stamina = Math.min(100, c.stamina + diet.staminaRecovery);
   c.fatigue = Math.max(0, c.fatigue - diet.fatigueRelief);
+  c.stress = Math.max(0, (c.stress || 0) - Math.round(diet.fatigueRelief * 0.4)); // good food eases stress
 }

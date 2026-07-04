@@ -142,3 +142,10 @@
 .activity-toggle button:disabled { opacity: 0.5; }
 .q-rank { font-size: 0.72em; color: var(--gold); border: 1px solid var(--border); border-radius: 4px; padding: 0 4px; }
 .quest-opt .o-cost { color: var(--success); }
+
+.intensity-toggle { display: flex; gap: 6px; margin-bottom: 8px; }
+.intensity-toggle button { flex: 1; padding: 7px; border: 1px solid var(--border); background: rgba(0, 0, 0, 0.25);
+  color: var(--muted); border-radius: 8px; font-size: 0.76em; font-family: 'Cinzel', serif; letter-spacing: 0.04em; }
+.intensity-toggle button.on { border-color: var(--gold); color: var(--gold); background: linear-gradient(135deg, #2a1a0a, #3a2a10); }
+.injury-flag { border: 1px solid var(--danger); background: rgba(239, 68, 68, 0.1); color: var(--danger);
+  border-radius: 8px; padding: 6px 10px; margin-bottom: 10px; font-size: 0.76em; text-align: center; }

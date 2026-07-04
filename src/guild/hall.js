@@ -9,7 +9,7 @@
 import { createGuild } from './guild.js';
 import { HERO_STATS, heroPower, STAT_CAP } from './hero.js';
 import { generateRecruit, hireCost, rollRecruitPool } from './recruiting.js';
-import { TRAINING_REGIMENS, getRegimen, applyTraining } from './training.js';
+import { DRILLS, REST, getDrill, applyTraining } from './training.js';
 import { DIET_PLANS, getDietPlan, applyDiet } from './diet.js';
 import { advanceWeek, formatDate } from './calendar.js';
 import { weeklyUpkeep, addGold, guildIncome } from './economy.js';
@@ -23,6 +23,7 @@ import { saveGame, loadGame } from '../platform/storage.js';
 const SLOT = 'guild';
 const MAX_ROSTER = 6;
 const QUEST_STAMINA = 40; // dispatching on a quest costs stamina — questing can't be spammed
+const DRILL_MIGRATE = { drill_pow: 'pow', guard_def: 'def', forms_skl: 'skl', sprint_spd: 'spd', study_int: 'int', march_vit: 'vit', spar: 'pow' };
 const ARCH_GLYPH = { Knight: '⚔', Mage: '✦', Ranger: '🏹', Cleric: '☩', Rogue: '🗡', Berserker: '🪓', Adventurer: '☉' };
 const KIND_GLYPH = { sword: '⚔', armor: '🛡', bow: '🏹' };
 
@@ -39,7 +40,8 @@ function ensureAssignment(h) {
   const a = h.assignment || {};
   h.assignment = {
     type: (a.type === 'forge' || a.type === 'study' || a.type === 'quest') ? a.type : 'train',
-    trainingId: getRegimen(a.trainingId) ? a.trainingId : 'drill_pow',
+    trainingId: getDrill(a.trainingId) ? a.trainingId : (DRILL_MIGRATE[a.trainingId] || 'pow'),
+    intensity: a.intensity === 'heavy' ? 'heavy' : 'light',
     recipeId: getRecipe(a.recipeId) ? a.recipeId : 'iron_sword',
     questId: a.questId || null,
     dietId: getDietPlan(a.dietId) ? a.dietId : (getDietPlan(h.dietPlanId) ? h.dietPlanId : 'balanced'),
@@ -57,7 +59,8 @@ function migrateHero(h) {
   if (!h.growth || h.growth.POW === undefined) { h.growth = {}; HERO_STATS.forEach((s) => { h.growth[s] = 2; }); }
   if (!h.professions || !h.professions.blacksmithing) h.professions = { blacksmithing: { theory: 0, practice: 0, field: 0 } };
   if (!h.equipped) h.equipped = {};
-  if (!h.condition) h.condition = { stamina: 100, morale: 70, loyalty: 60, fatigue: 0, injury: null };
+  if (!h.condition) h.condition = { stamina: 100, morale: 70, loyalty: 60, fatigue: 0, stress: 0, injury: null };
+  if (h.condition.stress == null) h.condition.stress = 0;
   if (h.level == null) h.level = 1;
   if (h.xp == null) h.xp = 0;
   if (h.age == null) h.age = 0;
@@ -89,6 +92,7 @@ function selectHero(id) { selectedId = id; notice = ''; render(); }
 function setActivity(type) { const h = heroById(selectedId); if (h) { h.assignment.type = (type === 'forge' || type === 'study' || type === 'quest') ? type : 'train'; if (h.assignment.type !== 'quest') h.assignment.questId = null; save(); render(); } }
 function setQuest(questId) { const h = heroById(selectedId); if (h) { h.assignment.type = 'quest'; h.assignment.questId = questId; save(); render(); } }
 function setTraining(id) { const h = heroById(selectedId); if (h) { h.assignment.trainingId = id; h.assignment.type = 'train'; h.assignment.questId = null; save(); render(); } }
+function setIntensity(level) { const h = heroById(selectedId); if (h) { h.assignment.intensity = level === 'heavy' ? 'heavy' : 'light'; h.assignment.type = 'train'; h.assignment.questId = null; save(); render(); } }
 function setRecipe(id) { const h = heroById(selectedId); if (h) { h.assignment.recipeId = id; h.assignment.type = 'forge'; h.assignment.questId = null; save(); render(); } }
 function setDiet(id) { const h = heroById(selectedId); if (h) { h.assignment.dietId = id; h.dietPlanId = id; save(); render(); } }
 
@@ -197,13 +201,16 @@ function advanceAll() {
       }
       a.questId = null; // the dispatch is spent; pick a new quest next week
     } else {
-      const regimen = getRegimen(a.trainingId);
-      const { gains } = applyTraining(h, regimen, diet.statBias);
-      entry.regimen = regimen.name; entry.gains = gains; entry.trained = Object.keys(gains).length > 0;
+      const res = applyTraining(h, a.trainingId, a.intensity, diet.statBias);
+      entry.drill = (getDrill(a.trainingId) || REST).name;
+      entry.gains = res.gains; entry.drops = res.drops;
+      entry.rested = res.rested; entry.injured = res.injured; entry.injury = res.injury;
+      entry.trained = Object.keys(res.gains).length > 0;
     }
 
     if (!onExpedition) applyDiet(h, diet); // only heroes who actually marched out skip guild rest
-    let dm = questMorale != null ? questMorale : (a.type === 'train' && getRegimen(a.trainingId).intensity === 0 ? 6 : -1);
+    // Training/rest morale is applied inside applyTraining; forge/study take a small dip; quests set questMorale.
+    let dm = questMorale != null ? questMorale : (a.type === 'forge' || a.type === 'study' ? -1 : 0);
     if (diet.id === 'feast') dm += 4;
     h.condition.morale = clamp(h.condition.morale + dm);
     h.age += 1;
@@ -255,7 +262,7 @@ function rosterRow(h) {
   const plan = a.type === 'forge' ? `🔨 ${getRecipe(a.recipeId).name}`
     : a.type === 'study' ? '📖 Study Smithing'
     : a.type === 'quest' ? `🗺 ${a.questId ? (questTitle(a.questId) || 'On Quest') : '(choose quest)'}`
-    : `⚔ ${getRegimen(a.trainingId).name}`;
+    : `⚔ ${(getDrill(a.trainingId) || REST).name}${a.intensity === 'heavy' ? ' (H)' : ''}`;
   return `<button class="roster-row ${h.id === selectedId ? 'sel' : ''}" onclick="__guild.selectHero('${h.id}')">
       <span class="rr-portrait">${glyphOf(h)}</span>
       <span class="rr-main">
@@ -291,9 +298,18 @@ function assignPanel() {
   const at = h.assignment.type;
   const isForge = at === 'forge';
   const prof = h.professions.blacksmithing;
-  const training = TRAINING_REGIMENS.map((r) => `<button class="opt ${at === 'train' && r.id === h.assignment.trainingId ? 'active' : ''}" onclick="__guild.setTraining('${r.id}')">
-      <span><span class="o-name">${r.name}</span> <span class="o-desc">${r.focus.length ? r.focus.join('/') : 'recover'}</span></span>
-      <span class="o-cost">${r.staminaCost ? '−' + r.staminaCost + ' sta' : 'restful'}</span></button>`).join('');
+  const heavy = (h.assignment.intensity || 'light') === 'heavy';
+  const drillItems = DRILLS.map((d) => {
+    const desc = heavy ? `${d.main}+ ${d.sec}+ <span class="down">${d.pen}−</span>` : `${d.main}+`;
+    return `<button class="opt ${at === 'train' && d.id === h.assignment.trainingId ? 'active' : ''}" onclick="__guild.setTraining('${d.id}')">
+      <span><span class="o-name">${d.name}</span> <span class="o-desc">${desc}</span></span></button>`;
+  }).join('');
+  const restItem = `<button class="opt ${at === 'train' && h.assignment.trainingId === 'rest' ? 'active' : ''}" onclick="__guild.setTraining('rest')">
+      <span><span class="o-name">💤 ${REST.name}</span> <span class="o-desc">shed fatigue &amp; stress</span></span></button>`;
+  const training = `<div class="intensity-toggle">
+      <button class="${heavy ? '' : 'on'}" onclick="__guild.setIntensity('light')">Light</button>
+      <button class="${heavy ? 'on' : ''}" onclick="__guild.setIntensity('heavy')">Heavy · +sec −paired</button>
+    </div><div class="opt-list">${drillItems}${restItem}</div>`;
 
   const forgeList = RECIPES.map((r) => {
     const cost = Object.keys(r.cost).map((k) => `${MATERIALS[k].name} ×${r.cost[k]}`).join(', ');
@@ -325,7 +341,8 @@ function assignPanel() {
   return `<div class="plan-card">
       <div class="assign-head"><span class="rr-portrait sm">${glyphOf(h)}</span> Planning <b>${h.name}</b> · ${h.archetype} Lv${h.level} · ${h.age} wks · ⚡${heroPower(h)}</div>
       <div class="stat-grid">${stats}</div>
-      ${bar('Stamina', h.condition.stamina, 'var(--success)')}${bar('Fatigue', h.condition.fatigue, '#e08a3c')}${bar('Morale', h.condition.morale, '#8ab4d8')}
+      ${bar('Stamina', h.condition.stamina, 'var(--success)')}${bar('Fatigue', h.condition.fatigue, '#e08a3c')}${bar('Stress', h.condition.stress || 0, '#c05a8a')}${bar('Morale', h.condition.morale, '#8ab4d8')}
+      ${h.condition.injury ? '<div class="injury-flag">⚠ Injured — will only recover (rest) until healed</div>' : ''}
       ${equippedLine(h)}
       <div class="activity-toggle">
         <button class="${at === 'train' ? 'on' : ''}" onclick="__guild.setActivity('train')">⚔ Train</button>
@@ -339,7 +356,7 @@ function assignPanel() {
           ? `<div class="plan-title">📖 Study Blacksmithing</div>${studyBody}`
           : at === 'quest'
             ? `<div class="plan-title">🗺 Quest Board</div><div class="opt-list">${questList}</div>`
-            : `<div class="plan-title">⚔ Training</div><div class="opt-list">${training}</div>`}
+            : `<div class="plan-title">⚔ Training</div>${training}`}
       <div class="plan-title">🍖 Diet</div><div class="opt-list">${diet}</div>
     </div>`;
 }
@@ -403,8 +420,12 @@ function recapPanel() {
       }
       return `<div class="r-line"><b>${r.name}</b> <span class="down">failed ${r.quest ? r.quest.title : 'a quest'}</span></div>`;
     }
-    const g = r.trained ? HERO_STATS.filter((s) => r.gains[s]).map((s) => `${s}+${r.gains[s]}`).join(' ') : 'no gain — too fatigued';
-    return `<div class="r-line"><b>${r.name}</b> · <span class="${r.trained ? 'up' : 'down'}">${g}</span> <span class="dim">(sta ${fmtDelta(r.sta)}, fat ${fmtDelta(r.fat)})</span></div>`;
+    if (r.rested) return `<div class="r-line"><b>${r.name}</b> rested <span class="dim">— fat ${fmtDelta(r.fat)}${r.injury ? ', still hurt' : ''}</span></div>`;
+    if (r.injured) return `<div class="r-line"><b>${r.name}</b> <span class="down">injured — recovering</span> <span class="dim">(fat ${fmtDelta(r.fat)})</span></div>`;
+    const ups = HERO_STATS.filter((s) => r.gains && r.gains[s]).map((s) => `<span class="up">${s}+${r.gains[s]}</span>`);
+    const downs = HERO_STATS.filter((s) => r.drops && r.drops[s]).map((s) => `<span class="down">${s}−${r.drops[s]}</span>`);
+    const body = ups.concat(downs).join(' ') || '<span class="down">no gain — too worn down</span>';
+    return `<div class="r-line"><b>${r.name}</b> · ${body}${r.injury ? ' <span class="down">⚠ strained!</span>' : ''} <span class="dim">(fat ${fmtDelta(r.fat)})</span></div>`;
   }).join('');
   return `<div class="week-report"><h4>Last week</h4>${lines}<div class="r-line">income <span class="up">+${report.income}g</span> · upkeep <span class="down">−${report.upkeep}g</span>${report.shortfall ? ' · <span class="down">insolvent — morale −8 all</span>' : ''}</div></div>`;
 }
@@ -454,4 +475,4 @@ export function openGuild() {
 }
 
 window.openGuild = openGuild;
-window.__guild = { selectHero, setActivity, setTraining, setRecipe, setDiet, setQuest, equipItem, unequipSlot, buyMaterial, sellItem, hire, advanceAll, back };
+window.__guild = { selectHero, setActivity, setTraining, setIntensity, setRecipe, setDiet, setQuest, equipItem, unequipSlot, buyMaterial, sellItem, hire, advanceAll, back };
