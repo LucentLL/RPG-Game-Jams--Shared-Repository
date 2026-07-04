@@ -15,3 +15,6 @@ export * from './diet.js';
 export * from './quests.js';
 export * from './calendar.js';
 export * from './economy.js';
+export * from './item.js';
+export * from './inventory.js';
+export * from './smithing.js';

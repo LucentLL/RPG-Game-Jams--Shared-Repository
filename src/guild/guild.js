@@ -3,6 +3,7 @@
  * the recruit pool, the quest board, gold/reputation, and the calendar.
  */
 import { createCalendar } from './calendar.js';
+import { createInventory } from './inventory.js';
 
 /**
  * @typedef {Object} Guild
@@ -30,7 +31,8 @@ export function createGuild(init = {}) {
     questBoard: init.questBoard || [],
     activeQuests: init.activeQuests || [],
     calendar: init.calendar || createCalendar(),
-    facilities: init.facilities || ['training-yard', 'kitchen'],
+    inventory: init.inventory || createInventory(),
+    facilities: init.facilities || ['training-yard', 'kitchen', 'forge'],
   };
 }
 

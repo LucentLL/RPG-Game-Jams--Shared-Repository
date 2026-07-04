@@ -78,6 +78,8 @@ export function createHero(init = {}) {
     dietPlanId: init.dietPlanId || null,
     assignment: init.assignment || null,
     loadout: init.loadout || { gear: {}, materia: [] },
+    professions: init.professions || { blacksmithing: { theory: 0, practice: 0, field: 0 } },
+    equipped: init.equipped || {}, // slot -> itemId (real Phase-1 armory items)
     traits: init.traits || [],
   };
 }

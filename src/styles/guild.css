@@ -102,3 +102,26 @@
   padding: 7px 12px; font-size: 0.78em; white-space: nowrap; transition: background 0.15s; }
 .rc-hire:hover { background: rgba(212, 168, 67, 0.12); }
 .rc-hire.disabled { border-color: var(--border); color: var(--dim); pointer-events: none; opacity: 0.55; }
+
+/* --- forge / armory / equip --- */
+.activity-toggle { display: flex; gap: 6px; margin: 4px 0 14px; }
+.activity-toggle button { flex: 1; padding: 9px; border: 1px solid var(--border); background: rgba(0, 0, 0, 0.25);
+  color: var(--muted); border-radius: 8px; font-family: 'Cinzel', serif; font-size: 0.82em; letter-spacing: 0.08em; transition: all 0.15s; }
+.activity-toggle button.on { border-color: var(--gold); color: var(--gold); background: linear-gradient(135deg, #2a1a0a, #3a2a10); }
+
+.opt.lack { opacity: 0.5; }
+.opt.lack .o-cost { color: var(--danger); }
+
+.equipped { display: flex; flex-direction: column; gap: 5px; margin: 4px 0 12px; font-size: 0.82em; color: var(--text); }
+.equipped.none { color: var(--dim); font-style: italic; font-size: 0.78em; }
+.equipped .eq-q { color: var(--muted); font-size: 0.9em; }
+.eq-x { border: none; background: transparent; color: var(--dim); cursor: pointer; font-size: 0.9em; padding: 0 4px; }
+.eq-x:hover { color: var(--danger); }
+
+.materials { display: flex; flex-wrap: wrap; gap: 14px; font-size: 0.82em; color: var(--muted); margin-bottom: 12px; }
+.materials .mat b { font-family: 'Cinzel', serif; }
+.armory-shelf { display: flex; flex-direction: column; gap: 6px; }
+.armory-item { display: flex; align-items: center; gap: 10px; border: 1px solid var(--border); background: rgba(0, 0, 0, 0.22); border-radius: 8px; padding: 7px 11px; }
+.ai-icon { width: 26px; height: 26px; flex: 0 0 26px; border: 1px solid var(--border); border-radius: 6px; display: flex; align-items: center; justify-content: center; }
+.ai-main { display: flex; flex-direction: column; flex: 1 1 auto; min-width: 0; }
+.ai-main b { font-family: 'Cinzel', serif; font-size: 0.88em; color: #e8e0d0; }
