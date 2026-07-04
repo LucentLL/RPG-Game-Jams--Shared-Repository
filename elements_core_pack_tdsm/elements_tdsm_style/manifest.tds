@@ -1,0 +1,631 @@
+(-> style) {
+    ~ string id = "finalbossblues-time-elements";
+    ~ int WIDTH = 48;
+    ~ int HEIGHT = 48;
+    ~ int[] dims = [ WIDTH, HEIGHT ];
+    ~ string[] directions = [ $TDSM.S, $TDSM.W, $TDSM.E, $TDSM.N ];
+    ~ bool orientation = $TDSM.HORZ;
+
+    // AUXILIARY
+
+    // Colors
+    ~ color[] SKIN_BASES = [ #f4d29c, #d49149, #b97e50, #986743 ];
+    ~ color[][] SKIN_RAMPS = [
+        [ #faf4d6, SKIN_BASES[0], #dba463, #bb7547, #73172d ], 
+        [ #f0c175, SKIN_BASES[1], #b4723c, #9d5534, #561f2d ], 
+        [ #dbaa76, SKIN_BASES[2], #955123, #774128, #481c0e ], 
+        [ #c78e52, SKIN_BASES[3], #7b4c2d, #583322, #36150c ] 
+    ];
+
+    ~ color EYES = #1a7a3e;
+    ~ color EYES_SHADOW = #384d38;
+
+    ~ color[] WHITE_RAMP = [ #ffffff, #bbc1f6 ];
+
+    ~ color[] RED_RAMP = [ #fb6028, #d21e3c, #871247, #4e182a ];
+    ~ color[] BROWN_RAMP = [ #c59159, #866037, #49392d ];
+    ~ color YELLOW = #f9d51a;
+
+    ~ color[] BLUE_RAMP = [ #63c7ee, #2c8cd8, #185cbf, #20275b ];
+    ~ color[] ORANGE_RAMP = [ #d69738, #a26320, #4a2c1c ];
+    ~ color GREEN = #9bd65c;
+
+    ~ color[] EB_RAMP_PURPLE = [ #fad1f4, #f396e5, #c668d4, #8446b4, #2f2961 ];
+    ~ color[] EB_RAMP_GREEN = [ #4be28b, #30c055, #31813f, #1c4a22 ];
+
+    ~ color[] HAIR_RAMP_GOLD = [ #fffc40, #f9a31b, #a0480e, #480e11 ];
+    ~ color[] HAIR_RAMP_BLUE = [ #42b5e0, #3288a9, #125387, #143464 ];
+
+    ~ color[] BH_RAMP_PINK = [ #fcb5f2, #e86abe, #b3356c, #5c1435 ];
+    ~ color[] BH_RAMP_GREEN = [ #81c035, #66942e, #4e6827, #313919 ];
+
+    ~ color[] FE_RAMP_BLUE = [ #a6c3e3, #6493ce, #3d61a9, #2a356a ];
+    ~ color[] FE_RAMP_BROWN = [ #c7b08b, #796755, #322b28 ];
+
+    ~ color[] HAT_RAMP_GOLD = [ #fff9bd, #fee457, #d5a038, #7d5338, #431216 ];
+    ~ color[] HAT_RAMP_GREEN = [ #76cb78, #60a562, #2a5b4d ];
+
+    // Swatches
+    ~ color[] SWATCHES_EYES = [ EYES, #873b16, #285cc4 ];
+
+    ~ color[] SWATCHES_HAIR = [ #bbb1a3, #ab7e42, #d7bc36, #51442e ];
+    ~ color[] SWATCHES_CLOTHES = [
+        #d3ccbb, #46433b, #793320, BROWN_RAMP[1], #40418d, #738831, 
+        #d1b15f
+    ];
+
+    // Color selections
+    ~ int TOP_RED = 0; 
+    ~ int TOP_BROWN = 1;
+    ~ int TOP_YELLOW = 2;
+    ~ col_sel[] sels_top = [
+        $Init.col_sel("Primary", true, SWATCHES_CLOTHES), 
+        $Init.col_sel("Secondary", true, SWATCHES_CLOTHES), 
+        $Init.col_sel("Accent", true, SWATCHES_CLOTHES)
+    ];
+
+    ~ int TOP_BLUE = 0;
+    ~ int TOP_ORANGE = 1;
+    ~ int TOP_GREEN = 2;
+    ~ col_sel[] sels_bottom = [
+        $Init.col_sel("Primary", true, SWATCHES_CLOTHES), 
+        $Init.col_sel("Secondary", true, SWATCHES_CLOTHES), 
+        $Init.col_sel("Accent", true, SWATCHES_CLOTHES)
+    ];
+    
+    ~ col_sel[] sels_back_extra = [
+        $Init.col_sel("Primary", true, SWATCHES_CLOTHES), 
+        $Init.col_sel("Secondary", true, SWATCHES_CLOTHES)
+    ];
+    ~ col_sel[] sels_back_hair = [
+        $Init.col_sel("Hair", true, SWATCHES_HAIR), 
+        $Init.col_sel("Accessory", true, SWATCHES_CLOTHES)
+    ];
+    ~ col_sel[] sels_front_extra = [
+        $Init.col_sel("Hair/Main", true, SWATCHES_HAIR), 
+        $Init.col_sel("Accent", true, SWATCHES_CLOTHES)
+    ];
+    ~ col_sel[] sels_hair = [
+        $Init.col_sel("Hair", true, SWATCHES_HAIR), 
+        $Init.col_sel("Accessory", true, SWATCHES_CLOTHES)
+    ];
+    ~ col_sel[] sels_hat = [
+        $Init.col_sel("Main", true, SWATCHES_CLOTHES), 
+        $Init.col_sel("Accent", true, SWATCHES_CLOTHES)
+    ];
+
+    ~ col_sel sel_skin = $Init.col_sel("Skin", false, SKIN_BASES);
+    ~ col_sel sel_eyes = $Init.col_sel("Eyes", true, SWATCHES_EYES);
+
+    // END OF AUXILIARY
+
+    // Animations
+    ~ string A_ID_WALK = "walk";
+    ~ string A_ID_IDLE = "idle";
+    ~ string A_ID_ARMS_UP = "arms_up";
+    ~ string A_ID_HOLD_ITEM = "hold_item";
+    ~ string A_ID_CROUCH = "crouch";
+    ~ string A_ID_JUMP = "jump";
+    ~ string A_ID_ANTICIP = "anticip";
+    ~ string A_ID_ATTACK = "attack";
+    ~ string A_ID_HEAVY_ATTACK = "heavy_attack";
+    ~ string A_ID_NOCK_BOW = "nock_bow";
+    ~ string A_ID_BOW = "bow";
+    ~ string A_ID_CLIMB = "climb";
+    ~ string A_ID_SLEEP_KO = "sleep_/_KO";
+    ~ anim[] anims = define_anims();
+    
+    ~ (color -> replacement) no_replace = c -> $Init.replacement(-1, ::identity);
+    ~ (sheet -> (string -> image)) def_composer = 
+            $Init.default_composer(directions, orientation, anims);
+
+    // Layers
+    ~ {bool : layer<>} layers = define_layers();
+    
+    return $Init.style(id, dims, directions, orientation, anims, layers);
+}
+
+// METADATA
+name(-> string) -> "Time Elements"
+
+info(-> string) -> 
+        "Extend the Character Core Set and increase your\n" + 
+        "customization options by purchasing the expansions!\n\n" + 
+        "Find out more at finalbossblues.itch.io"
+
+settings(-> string[]) -> []
+
+preview_scale(-> int) -> 2
+// END OF METADATA
+
+define_anims(-> anim[]) {
+    return [
+        $Init.anim(A_ID_WALK, [ 10, 10, 10 ],
+                $Init.simple_frame_coord_func(0, 0, orientation), true),
+        $Init.anim(A_ID_IDLE, [ 12 ],
+                $Init.simple_frame_coord_func(1, 0, orientation), false),
+        $Init.anim(A_ID_ARMS_UP, [ 10, 10, 10 ],
+                $Init.simple_frame_coord_func(3, 0, orientation), true),
+        $Init.anim(A_ID_HOLD_ITEM, [ 12 ],
+                $Init.simple_frame_coord_func(4, 0, orientation), false),
+        $Init.anim(A_ID_CROUCH, [ 12 ],
+                $Init.simple_frame_coord_func(6, 0, orientation), false),
+        $Init.anim(A_ID_JUMP, [ 10, 16, 12, 10 ],
+                $Init.simple_frame_coord_func(6, 0, orientation), false),
+        $Init.anim(A_ID_ANTICIP, [ 12 ],
+                $Init.simple_frame_coord_func(10, 0, orientation), false),
+        $Init.anim(A_ID_ATTACK, [ 10, 10, 10, 10 ],
+                $Init.simple_frame_coord_func(11, 0, orientation), false),
+        $Init.anim(A_ID_HEAVY_ATTACK, [ 16, 10, 10, 10, 10 ],
+                $Init.simple_frame_coord_func(10, 0, orientation), false),
+        $Init.anim(A_ID_NOCK_BOW, [ 12 ],
+                $Init.simple_frame_coord_func(15, 0, orientation), false),
+        $Init.anim(A_ID_BOW, [ 10, 10, 10, 10 ],
+                $Init.simple_frame_coord_func(15, 0, orientation), false),
+        $Init.anim(A_ID_CLIMB, [ 10, 10, 10 ],
+                $Init.simple_frame_coord_func(19, 0, orientation), true),
+        $Init.anim(A_ID_SLEEP_KO, [ 12 ],
+                $Init.simple_frame_coord_func(22, 0, orientation), false)
+    ];
+}
+
+define_layers(-> {bool : layer<>}) {
+    // CSLs
+    ~ layer skin = $Init.col_sel_layer("skin-tone", [ sel_skin ]);
+    ~ layer eyes = $Init.col_sel_layer("eye-color", [ sel_eyes ]);
+
+    // ACLs
+    ~ string L_ID_BACK_EXTRA = "back-extra";
+    ~ layer back_extra = $Init.asset_choice_layer(
+        L_ID_BACK_EXTRA, dims, s -> get_asset(L_ID_BACK_EXTRA, s), 
+        get_choices(L_ID_BACK_EXTRA, ::back_extra_split), 
+        $Init.no_choice_prob(0.75), def_composer, [ WIDTH, HEIGHT * 3 ]
+    );
+
+    ~ string L_ID_BACK_HAIR = "back-hair";
+    ~ layer back_hair = $Init.asset_choice_layer(
+        L_ID_BACK_HAIR, dims, s -> get_asset(L_ID_BACK_HAIR, s), 
+        get_choices(L_ID_BACK_HAIR, ::back_hair_split), 
+        $Init.no_choice_prob(0.75), def_composer, [ WIDTH, HEIGHT * 3 ]
+    );
+
+    ~ string L_ID_BOTTOM = "bottom";
+    ~ layer bottom = $Init.asset_choice_layer(
+        L_ID_BOTTOM, dims, s -> get_asset(L_ID_BOTTOM, s), 
+        get_choices(L_ID_BOTTOM, ::bottom_split), 
+        $Init.no_choice_invalid(), def_composer, [ WIDTH, 0 ]
+    );
+    bottom.add_influences([ sel_skin ]);
+
+    ~ string L_ID_FRONT_EXTRA = "front-extra";
+    ~ layer front_extra = $Init.asset_choice_layer(
+        L_ID_FRONT_EXTRA, dims, s -> get_asset(L_ID_FRONT_EXTRA, s), 
+        get_choices(L_ID_FRONT_EXTRA, ::front_extra_split), 
+        $Init.no_choice_prob(0.75), def_composer, [ WIDTH, 0 ]
+    );
+
+    ~ string L_ID_HAIR = "hair";
+    ~ layer hair = $Init.asset_choice_layer(
+        L_ID_HAIR, dims, s -> get_asset(L_ID_HAIR, s), 
+        get_choices(L_ID_HAIR, ::hair_split), 
+        $Init.no_choice_prob(0.75), def_composer, [ WIDTH, 0 ]
+    );
+
+    ~ string L_ID_HAT = "hat";
+    ~ layer hat = $Init.asset_choice_layer(
+        L_ID_HAT, dims, s -> get_asset(L_ID_HAT, s), 
+        get_choices(L_ID_HAT, ::hat_split), 
+        $Init.no_choice_prob(0.75), def_composer, [ WIDTH, 0 ]
+    );
+
+    ~ string L_ID_HEAD = "head";
+    ~ layer head = $Init.asset_choice_layer(
+        L_ID_HEAD, dims, s -> get_asset(L_ID_HEAD, s), 
+        get_choices(L_ID_HEAD, ::head_split), 
+        $Init.no_choice_invalid(), def_composer, [ WIDTH, 0 ]
+    );
+    head.add_influences([ sel_skin, sel_eyes ]);
+
+    ~ string L_ID_TOP = "top";
+    ~ layer top = $Init.asset_choice_layer(
+        L_ID_TOP, dims, s -> get_asset(L_ID_TOP, s), 
+        get_choices(L_ID_TOP, ::top_split), 
+        $Init.no_choice_invalid(), def_composer, [ WIDTH, 0 ]
+    );
+    top.add_influences([ sel_skin ]);
+
+    ~ string L_ID_WEAPON = "weapon";
+    ~ layer weapon = $Init.asset_choice_layer(
+        L_ID_WEAPON, dims, s -> get_asset(L_ID_WEAPON, s), 
+        get_choices(L_ID_WEAPON, ::weapon_split), 
+        $Init.no_choice_prob(0.75), def_composer, [ WIDTH, 0 ]
+    );
+    
+    ~ string L_ID_SHADOW = "shadow";
+    ~ layer shadow = $Init.asset_choice_layer(
+        L_ID_SHADOW, dims, s -> get_asset(L_ID_SHADOW, s), 
+        [ $Init.asset_choice(L_ID_SHADOW, no_replace, new col_sel[0]) ], 
+        $Init.no_choice_prob(1.0), def_composer, [ WIDTH, 0 ]
+    );
+
+    ~ layer combined_layer = $Init.composed_layer(
+        "combined", sprite_id -> {
+            ~ string dir = $Util.extract_direction(sprite_id);
+            ~ string anim_id = $Util.extract_anim_id(sprite_id);
+
+            ~ image combined = new_image_of(WIDTH, HEIGHT);
+            
+            combined.draw(shadow.compose().call(sprite_id), 0, 0);
+
+            if (dir == $TDSM.N || anim_id == A_ID_CLIMB) {
+                // north-facing / climb bottom to top render order
+                combined.draw(weapon.compose().call(sprite_id), 0, 0);
+                combined.draw(bottom.compose().call(sprite_id), 0, 0);
+                combined.draw(top.compose().call(sprite_id), 0, 0);
+                combined.draw(head.compose().call(sprite_id), 0, 0);
+                combined.draw(hair.compose().call(sprite_id), 0, 0);
+                combined.draw(front_extra.compose().call(sprite_id), 0, 0);
+                combined.draw(back_extra.compose().call(sprite_id), 0, 0);
+                combined.draw(back_hair.compose().call(sprite_id), 0, 0);
+                combined.draw(hat.compose().call(sprite_id), 0, 0);
+            } else {
+                // south-, east- and west-facing bottom to top render order
+                combined.draw(back_hair.compose().call(sprite_id), 0, 0);
+                combined.draw(back_extra.compose().call(sprite_id), 0, 0);
+                combined.draw(bottom.compose().call(sprite_id), 0, 0);
+
+                if (anim_id == A_ID_ARMS_UP || anim_id == A_ID_HOLD_ITEM) {
+                    // hold up / arms up
+                    combined.draw(head.compose().call(sprite_id), 0, 0);
+                    combined.draw(hair.compose().call(sprite_id), 0, 0);
+                    combined.draw(front_extra.compose().call(sprite_id), 0, 0);
+                    combined.draw(hat.compose().call(sprite_id), 0, 0);
+                    combined.draw(top.compose().call(sprite_id), 0, 0);
+                } else {
+                    // all other animations
+                    combined.draw(top.compose().call(sprite_id), 0, 0);
+                    combined.draw(head.compose().call(sprite_id), 0, 0);
+                    combined.draw(hair.compose().call(sprite_id), 0, 0);
+                    combined.draw(front_extra.compose().call(sprite_id), 0, 0);
+                    combined.draw(hat.compose().call(sprite_id), 0, 0);
+                }
+
+                combined.draw(weapon.compose().call(sprite_id), 0, 0);
+            }
+
+            return combined;
+        }
+    );
+    
+    ~ layer<> assembly = <
+        shadow, 
+        combined_layer
+    >;
+    ~ layer<> custom = <
+        skin, head, eyes,
+        hair, back_hair, front_extra, 
+        top, bottom, 
+        back_extra, hat, weapon, 
+        shadow
+    >;
+
+    return { $Init.ASSEMBLY : assembly, $Init.CUSTOM : custom };
+}
+
+// READERS
+get_asset(~ string layer_id, ~ string asset_id -> image) -> 
+        read_image("./originals/" + remove_dashes(layer_id) + "/" + asset_id + ".png")
+
+remove_dashes(~ string layer_id -> string) {
+    string result = "";
+
+    for (c in layer_id) {
+        when (c) {
+            is '-', '_', ' ' -> {}
+            otherwise -> result += c;
+        }
+    }
+
+    return result;
+}
+
+get_choices(
+    ~ string layer_id, ~ (string -> asset_choice) post_split_func -> 
+    asset_choice[]
+) {
+    ~ string csv = read_file("./csv/" + remove_dashes(layer_id) + ".csv");
+    ~ string[] split = csv.split(",");
+    ~ int n = #| split;
+
+    ~ asset_choice[] choices = new asset_choice[n];
+
+    for (int i = 0; i < n; i++)
+        choices[i] = post_split_func.call(split[i]);
+    
+    return choices;
+}
+// END READERS
+
+// SPLITTERS
+top_split(~ string csv_entry -> asset_choice) {
+    ~ string[] split = csv_entry.split(":");
+
+    if (#| split == 2) {
+        ~ string id = split[0];
+        ~ string codex = split[1];
+        ~ int n = #| codex;
+
+        ~ col_sel[] selections = new col_sel[n];
+
+        for (int i = 0; i < n; i++) {
+            when (codex.at(i)) {
+                is 'r' -> selections[i] = sels_top[TOP_RED];
+                is 'b' -> selections[i] = sels_top[TOP_BROWN];
+                is 'y' -> selections[i] = sels_top[TOP_YELLOW];
+            }
+        }
+
+        return $Init.asset_choice(id, 
+                c -> skin_replace(c, ::top_replace), selections);
+    }
+
+    return $Init.asset_choice(
+        csv_entry, 
+        c -> skin_replace(c, c2 -> $Init.replacement(-1, ::identity)), 
+        new col_sel[0]
+    );
+}
+
+bottom_split(~ string csv_entry -> asset_choice) {
+    ~ string[] split = csv_entry.split(":");
+
+    if (#| split == 2) {
+        ~ string id = split[0];
+        ~ string codex = split[1];
+        ~ int n = #| codex;
+
+        ~ col_sel[] selections = new col_sel[n];
+
+        for (int i = 0; i < n; i++) {
+            when (codex.at(i)) {
+                is 'b' -> selections[i] = sels_bottom[TOP_BLUE];
+                is 'o' -> selections[i] = sels_bottom[TOP_ORANGE];
+                is 'g' -> selections[i] = sels_bottom[TOP_GREEN];
+            }
+        }
+
+        return $Init.asset_choice(id, 
+                c -> skin_replace(c, ::bottom_replace), selections);
+    }
+
+    return $Init.asset_choice(
+        csv_entry, 
+        c -> skin_replace(c, c2 -> $Init.replacement(-1, ::identity)), 
+        new col_sel[0]
+    );
+}
+
+back_extra_split(~ string csv_entry -> asset_choice) -> gen_split(
+    csv_entry, c -> replace(c, [ EB_RAMP_PURPLE, EB_RAMP_GREEN ]), sels_back_extra
+)
+
+back_hair_split(~ string csv_entry -> asset_choice) -> gen_split(
+    csv_entry, c -> replace(c, [ BH_RAMP_PINK, BH_RAMP_GREEN ]), sels_back_hair
+)
+
+front_extra_split(~ string csv_entry -> asset_choice) -> gen_split(
+    csv_entry, c -> replace(c, [ FE_RAMP_BLUE, FE_RAMP_BROWN ]), sels_front_extra
+)
+
+hair_split(~ string csv_entry -> asset_choice) -> gen_split(
+    csv_entry, c -> replace(c, [ HAIR_RAMP_GOLD, HAIR_RAMP_BLUE ]), sels_hair
+)
+
+hat_split(~ string csv_entry -> asset_choice) -> gen_split(
+    csv_entry, c -> replace(c, [ HAT_RAMP_GOLD, HAT_RAMP_GREEN ]), sels_back_extra
+)
+
+head_split(~ string csv_entry -> asset_choice) -> $Init.asset_choice(
+    csv_entry, c -> skin_replace(c, ::eyes_replace), new col_sel[0]
+)
+
+weapon_split(~ string csv_entry -> asset_choice) -> 
+        gen_split(csv_entry, no_replace, new col_sel[0])
+
+gen_split(
+    ~ string csv_entry, ~ (color -> replacement) replace_func, 
+    ~ col_sel[] selections -> 
+    asset_choice
+) {
+    ~ string[] split = csv_entry.split(":");
+
+    if (#| split == 2) {
+        ~ string id = split[0];
+        ~ int n = (int) split[1];
+
+        ~ col_sel[] sel_subset = new col_sel[n];
+
+        for (int i = 0; i < n && i < #| selections; i++)
+            sel_subset[i] = selections[i];
+        
+        return $Init.asset_choice(id, replace_func, sel_subset);
+    }
+
+    return $Init.asset_choice(csv_entry, no_replace, new col_sel[0]);
+}
+// END SPLITTERS
+
+// COLOR REPLACEMENT
+replace(~ color c, ~ color[][] ramps -> replacement) {
+    if (c.a == 0)
+        return $Init.replacement(-1, ::identity);
+    
+    color b = #000000;
+    int index = -1;
+    bool found = false;
+
+    for (int i = 0; i < #| ramps && !found; i++) {
+        ~ color[] ramp = ramps[i];
+
+        if (ramp.has(c)) {
+            found = true;
+            b = ramp[min(1, #| ramp - 1)];
+            index = i;
+        }
+    }
+
+    if (index == -1)
+        return $Init.replacement(-1, ::identity);
+    
+    ~ color base = b;
+
+    return $Init.replacement(index, c2 -> color_math(c2, c, base));
+}
+
+skin_replace(~ color c, ~ (color -> replacement) if_not_skin -> replacement) {
+    if (c.a == 0) 
+        return $Init.replacement(-1, ::identity);
+    
+    ~ int ramp_index = color_index(c, SKIN_RAMPS[0]);
+
+    if (ramp_index == -1)
+        return if_not_skin.call(c);
+
+    ~ int swatch_index = sel_swatch_index(sel_skin);
+    ~ color[] skin_ramp = SKIN_RAMPS[swatch_index];
+    ~ color to_replace = skin_ramp[ramp_index];
+
+    // 0 index is arbitrary valid index; col_sel color not transformed anyway
+    return $Init.replacement(0, source -> to_replace);
+}
+
+eyes_replace(~ color c -> replacement) {
+    if (c == EYES || c == EYES_SHADOW)
+        return $Init.replacement(1, 
+                source -> color_math(sel_eyes.get_color(), c, EYES));
+    
+    return $Init.replacement(-1, ::identity);
+}
+
+top_replace(~ color c -> replacement) {
+    if (c.a == 0)
+        return $Init.replacement(-1, ::identity);
+    
+    color b = #000000;
+    int index = -1;
+
+    if (RED_RAMP.has(c)) {
+        b = RED_RAMP[1];
+        index = 0;
+    } else if (BROWN_RAMP.has(c)) {
+        b = BROWN_RAMP[1];
+        index = 1;
+    } else if (c == YELLOW) {
+        b = YELLOW;
+        index = 2;
+    }
+
+    if (index == -1)
+        return $Init.replacement(-1, ::identity);
+    
+    ~ color base = b;
+
+    return $Init.replacement(index, c2 -> color_math(c2, c, base));
+}
+
+bottom_replace(~ color c -> replacement) {
+    if (c.a == 0)
+        return $Init.replacement(-1, ::identity);
+    
+    color b = #000000;
+    int index = -1;
+
+    if (BLUE_RAMP.has(c)) {
+        b = BLUE_RAMP[1];
+        index = 0;
+    } else if (ORANGE_RAMP.has(c)) {
+        b = ORANGE_RAMP[1];
+        index = 1;
+    } else if (c == GREEN) {
+        b = GREEN;
+        index = 2;
+    }
+
+    if (index == -1)
+        return $Init.replacement(-1, ::identity);
+    
+    ~ color base = b;
+
+    return $Init.replacement(index, c2 -> color_math(c2, c, base));
+}
+
+color_math(
+    ~ color c, ~ color input, ~ color base -> 
+    color
+) {
+    ~ float s_open = (c.sat * input.sat) / base.sat;
+    ~ float v_open = (c.val * input.val) / base.val;
+    ~ float h = hue_shift(c.hue, base.val - v_open);
+    ~ float s = clamp(0.0, s_open, 1.0);
+    ~ float v = clamp(0.0, v_open, 1.0);
+
+    return $ColorProc.hsv(h, s, v, input.a);
+}
+
+hue_shift(~ float h, ~ float v_diff -> float) {
+    ~ float WARM = 1 / 6.0;
+    ~ float COOL = 2 / 3.0;
+    ~ float MAX_HUE_SHIFT = 1 / 6.0; // 1 / 12.0;
+
+    float shift_amount = abs(v_diff) * MAX_HUE_SHIFT;
+    float dest;
+
+    if (v_diff == 0.0)
+        return h;
+    else if (v_diff > 0)
+        dest = COOL;
+    else
+        dest = WARM;
+    
+    // limit hue shift by destination to prevent overshoot
+    shift_amount = min(shift_amount, abs(h - dest));
+    
+    float hue = h;
+
+    if (dest == WARM) {
+        if (h < WARM || h > COOL)
+            hue += shift_amount;
+        else
+            hue -= shift_amount;
+    } else {
+        if (h < WARM || h > COOL)
+            hue -= shift_amount;
+        else
+            hue += shift_amount;
+    }
+
+    return $ColorProc.normalize_hue(hue);
+}
+
+// Only use with selections S where !S.any
+sel_swatch_index(~ col_sel sel -> int) -> 
+        color_index(sel.get_color(), sel.swatches)
+
+color_index(~ color c, ~ color[] arr -> int) {
+    for (int i = 0; i < #| arr; i++)
+        if (c == arr[i])
+            return i;
+
+    return -1;
+}
+
+index_of(~ string s, ~ char c -> int) {
+    for (int i = 0; i < #| s; i++)
+        if (s.at(i) == c)
+            return i;
+    
+    return -1;
+}
+
+identity(~ color c -> color) -> c
+// END COLOR REPLACEMENT
