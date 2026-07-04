@@ -70,10 +70,13 @@ export function generateQuestBoard(guild, n = 3) {
 /**
  * Auto-resolve a quest: combined party power vs recommendedPower, with luck.
  * @param {Quest} quest @param {import('./hero.js').Hero[]} party
+ * @param {(h:import('./hero.js').Hero)=>number} [powerFn]  how to score each hero
+ *   (defaults to bare stats; the hall passes a gear-inclusive power so equipped
+ *   armory items count toward the outcome)
  * @returns {{success:boolean, score:number, power:number}}
  */
-export function resolveQuest(quest, party) {
-  const power = party.reduce((s, h) => s + heroPower(h), 0);
+export function resolveQuest(quest, party, powerFn = heroPower) {
+  const power = party.reduce((s, h) => s + powerFn(h), 0);
   const variance = 0.75 + Math.random() * 0.5; // 0.75..1.25 luck of the draw
   const score = (power / Math.max(1, quest.recommendedPower)) * variance;
   return { success: score >= 1, score, power };

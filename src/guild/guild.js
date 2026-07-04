@@ -34,6 +34,7 @@ export function createGuild(init = {}) {
     calendar: init.calendar || createCalendar(),
     inventory: init.inventory || createInventory(),
     market: init.market || createMarket(),
+    quartermaster: init.quartermaster || 'off', // equip policy: 'off' | 'party' | 'all'
     facilities: init.facilities || ['training-yard', 'kitchen', 'forge'],
   };
 }

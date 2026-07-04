@@ -34,3 +34,26 @@ export function addItem(inv, item) { inv.items.push(item); return item; }
 export function findItem(inv, itemId) { return inv.items.find((it) => it.id === itemId) || null; }
 /** Items currently sitting in the armory (not carried by anyone). */
 export function armoryItems(inv) { return inv.items.filter((it) => it.location === 'armory'); }
+
+/** The equipment slots a hero can fill (one item each). */
+export const EQUIP_SLOTS = ['weapon', 'body'];
+/** How much each slot's quality is worth as combat power. */
+const GEAR_SLOT_WEIGHT = { weapon: 0.6, body: 0.5 };
+
+/**
+ * Combat power a hero's equipped gear adds on top of their trained stats. Quality
+ * (scaled by slot and current durability) is what makes forging a good armory pay
+ * off in the field — a well-kitted party clears quests a bare-handed one can't.
+ * @param {Inventory} inv @param {import('./hero.js').Hero} hero @returns {number}
+ */
+export function gearBonus(inv, hero) {
+  const eq = hero.equipped || {};
+  let bonus = 0;
+  for (const slot in eq) {
+    const it = findItem(inv, eq[slot]);
+    if (!it) continue;
+    const dur = it.durability ? it.durability.current / (it.durability.max || 100) : 1;
+    bonus += (it.quality || 0) * (GEAR_SLOT_WEIGHT[slot] || 0.5) * dur;
+  }
+  return Math.round(bonus);
+}

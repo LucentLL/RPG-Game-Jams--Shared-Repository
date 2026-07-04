@@ -3,8 +3,10 @@
 // Each hero gets a weekly assignment: TRAIN a stat, or WORK the FORGE (consume
 // materials to make a real weapon that lands in the armory), plus a diet. Advance
 // Week resolves the whole roster. You hire from the tavern and equip heroes from
-// the armory. This is Phase 1 of DESIGN.md (real-item logistics); study/quest
-// assignments, squads, and the quartermaster come next.
+// the armory — by hand, or via the QUARTERMASTER policy that auto-issues the best
+// available gear to the strongest heroes ("by rank") before they march. Equipped
+// quality feeds combatPower, so a well-forged armory measurably wins quests.
+// Consumables/provisioning (an Alchemist's potions a party withdraws) come next.
 
 import { createGuild } from './guild.js';
 import { HERO_STATS, heroPower, STAT_CAP } from './hero.js';
@@ -14,7 +16,7 @@ import { DIET_PLANS, getDietPlan, applyDiet } from './diet.js';
 import { advanceWeek, formatDate } from './calendar.js';
 import { weeklyUpkeep, addGold, guildIncome } from './economy.js';
 import { RECIPES, getRecipe, previewQuality, forge, study, recipeUnlocked } from './smithing.js';
-import { MATERIALS, createInventory, armoryItems, findItem, addMaterial } from './inventory.js';
+import { MATERIALS, createInventory, armoryItems, findItem, addMaterial, gearBonus, EQUIP_SLOTS } from './inventory.js';
 import { generateQuestBoard, resolveQuest } from './quests.js';
 import { qualityTier } from './item.js';
 import { MATERIAL_PRICE, buyPrice, itemSellValue, createMarket, refreshMarket } from './market.js';
@@ -37,6 +39,49 @@ let notice = '';
 function save() { saveGame(SLOT, guild); }
 function heroById(id) { return guild.roster.find((h) => h.id === id); }
 function clamp(n) { return Math.max(0, Math.min(100, Math.round(n))); }
+
+/** Field power = trained stats + whatever gear the hero is carrying. Used for quest
+ *  odds, resolution, and the displayed ⚡ so equipping visibly makes a hero stronger. */
+function combatPower(h) { return heroPower(h) + gearBonus(guild.inventory, h); }
+
+// --- Quartermaster: hand armory gear out by policy ---------------------------
+const itemScore = (it) => (it.quality || 0) * (it.durability ? it.durability.current / (it.durability.max || 100) : 1);
+
+/** Close the open wielder-history entry of an item being set down. */
+function closeWielder(item) {
+  const w = item.history.wielders[item.history.wielders.length - 1];
+  if (w && !w.toWeek) w.toWeek = guild.calendar.week;
+}
+/** Put `item` on hero `h`, returning any displaced item to the armory. Pure state — no UI. */
+function doEquip(h, item) {
+  if (h.equipped[item.slot]) { const prev = findItem(guild.inventory, h.equipped[item.slot]); if (prev) { prev.location = 'armory'; closeWielder(prev); } }
+  h.equipped[item.slot] = item.id;
+  item.location = h.id;
+  item.history.wielders.push({ personId: h.id, fromWeek: guild.calendar.week, toWeek: null });
+}
+
+/**
+ * Issue the best available armory gear to a set of heroes, strongest hero first
+ * ("by rank"). Only upgrades — never strips a hero of better gear. A hero's old
+ * item returns to the armory and can trickle down to a weaker hero. Returns the
+ * number of items issued.
+ * @param {import('./hero.js').Hero[]} candidates
+ */
+function armHeroes(candidates) {
+  const inv = guild.inventory;
+  const order = [...candidates].sort((a, b) => heroPower(b) - heroPower(a)); // rank by trained stats (stable during allocation)
+  let issued = 0;
+  for (const slot of EQUIP_SLOTS) {
+    for (const h of order) {
+      const pool = armoryItems(inv).filter((it) => it.slot === slot).sort((a, b) => itemScore(b) - itemScore(a));
+      if (!pool.length) break; // nothing of this slot left to hand out
+      const best = pool[0];
+      const cur = h.equipped[slot] ? findItem(inv, h.equipped[slot]) : null;
+      if (!cur || itemScore(best) > itemScore(cur)) { doEquip(h, best); issued++; }
+    }
+  }
+  return issued;
+}
 
 function ensureAssignment(h) {
   const a = h.assignment || {};
@@ -79,6 +124,7 @@ function load() {
   }
   if (!guild.inventory) guild.inventory = createInventory();
   if (!guild.market) guild.market = createMarket();
+  if (!['off', 'party', 'all'].includes(guild.quartermaster)) guild.quartermaster = 'off';
   if (typeof guild.reputation !== 'number') guild.reputation = 0;
   if (!Array.isArray(guild.questBoard) || !guild.questBoard.length) guild.questBoard = generateQuestBoard(guild, 3);
   guild.roster.forEach((h) => { migrateHero(h); ensureAssignment(h); });
@@ -101,19 +147,22 @@ function setDiet(id) { const h = heroById(selectedId); if (h) { h.assignment.die
 function equipItem(itemId) {
   const h = heroById(selectedId); if (!h) { notice = 'Select a hero first, then equip.'; render(); return; }
   const item = findItem(guild.inventory, itemId); if (!item || item.location !== 'armory') return;
-  const slot = item.slot;
-  if (h.equipped[slot]) { const prev = findItem(guild.inventory, h.equipped[slot]); if (prev) { prev.location = 'armory'; const pw = prev.history.wielders[prev.history.wielders.length - 1]; if (pw && !pw.toWeek) pw.toWeek = guild.calendar.week; } }
-  h.equipped[slot] = item.id;
-  item.location = h.id;
-  item.history.wielders.push({ personId: h.id, fromWeek: guild.calendar.week, toWeek: null });
+  doEquip(h, item);
   notice = `${h.name} equips the ${item.name}.`;
   save(); render();
 }
 function unequipSlot(slot) {
   const h = heroById(selectedId); if (!h || !h.equipped[slot]) return;
   const item = findItem(guild.inventory, h.equipped[slot]);
-  if (item) { item.location = 'armory'; const w = item.history.wielders[item.history.wielders.length - 1]; if (w && !w.toWeek) w.toWeek = guild.calendar.week; }
+  if (item) { item.location = 'armory'; closeWielder(item); }
   delete h.equipped[slot];
+  save(); render();
+}
+
+function setPolicy(p) { guild.quartermaster = ['off', 'party', 'all'].includes(p) ? p : 'off'; save(); render(); }
+function provision() { // manual "kit everyone out from stores now"
+  const n = armHeroes(guild.roster);
+  notice = n ? `Quartermaster issued ${n} item(s) from the armory.` : 'Everyone already carries the best gear in stock.';
   save(); render();
 }
 
@@ -159,6 +208,11 @@ function advanceAll() {
   const week = guild.calendar.week;
   const results = [];
 
+  // --- Quartermaster: auto-issue gear BEFORE quests resolve so it counts in the field. ---
+  let issued = 0;
+  if (guild.quartermaster === 'all') issued = armHeroes(guild.roster);
+  else if (guild.quartermaster === 'party') issued = armHeroes(guild.roster.filter((h) => h.assignment.type === 'quest' && h.assignment.questId && canMarch(h)));
+
   // --- Quest pre-pass: heroes assigned to the SAME quest form a PARTY; the quest
   // resolves ONCE on the party's combined power, and guild rewards are paid ONCE. ---
   const parties = {};
@@ -170,7 +224,7 @@ function advanceAll() {
     const party = parties[questId];
     const quest = guild.questBoard.find((q) => q.id === questId);
     const marchers = quest ? party.filter(canMarch) : [];
-    const outcome = (quest && marchers.length) ? resolveQuest(quest, marchers) : null;
+    const outcome = (quest && marchers.length) ? resolveQuest(quest, marchers, combatPower) : null;
     if (outcome && outcome.success) { // guild rewards, once for the whole party
       addGold(guild, quest.rewards.gold);
       guild.reputation += quest.rewards.reputation;
@@ -242,7 +296,7 @@ function advanceAll() {
   refreshMarket(guild.market);
   guild.questBoard = generateQuestBoard(guild, 3);
   guild.recruits = rollRecruitPool(3);
-  report = { income, upkeep, shortfall, results };
+  report = { income, upkeep, shortfall, results, issued };
   notice = '';
   save(); render();
 }
@@ -290,7 +344,7 @@ function rosterRow(h) {
         <span class="rr-assign">${plan} · 🍖 ${getDietPlan(a.dietId).name}</span>
         <span class="rr-cond">sta ${mini(h.condition.stamina, 'var(--success)')} fat ${mini(h.condition.fatigue, '#e08a3c')}</span>
       </span>
-      <span class="rr-power">⚡${heroPower(h)}</span>
+      <span class="rr-power">⚡${combatPower(h)}</span>
     </button>`;
 }
 
@@ -345,13 +399,13 @@ function assignPanel() {
   const skillShape = `<div class="skill-shape">🔨 Blacksmithing — <b>Theory ${prof.theory}</b> · <b>Practice ${prof.practice}</b> · <span class="dim">Field ${prof.field}</span></div>`;
   const studyBody = `${skillShape}<div class="hint" style="text-align:left;padding:4px 0">The smith studies metallurgy — raises <b>Theory</b>, which unlocks steel &amp; mithril recipes. Practice (from forging) still sets quality.</div>`;
 
-  const hp = heroPower(h);
+  const hp = combatPower(h);
   const hCanMarch = canMarch(h); // this hero would be benched at resolution if injured/too tired
   const questList = guild.questBoard.map((q) => {
     // Preview only the heroes who'd actually march — matches the resolution filter — so
     // the odds and "party of N" don't over-promise by counting benched members.
     const otherMarchers = guild.roster.filter((x) => x.id !== h.id && x.assignment.type === 'quest' && x.assignment.questId === q.id && canMarch(x));
-    const marchPower = otherMarchers.reduce((s, x) => s + heroPower(x), 0) + (hCanMarch ? hp : 0);
+    const marchPower = otherMarchers.reduce((s, x) => s + combatPower(x), 0) + (hCanMarch ? hp : 0);
     const odds = questOdds(marchPower, q.recommendedPower); // odds if this hero joins (and can march)
     const chosen = at === 'quest' && h.assignment.questId === q.id;
     const lootTxt = q.loot ? ` · +1 ${MATERIALS[q.loot].name}` : '';
@@ -366,7 +420,7 @@ function assignPanel() {
       <span><span class="o-name">${d.name}</span> <span class="o-desc">${d.description}</span></span><span class="o-cost">${d.weeklyCost}g/wk</span></button>`).join('');
 
   return `<div class="plan-card">
-      <div class="assign-head"><span class="rr-portrait sm">${glyphOf(h)}</span> Planning <b>${h.name}</b> · ${h.archetype} Lv${h.level} · ${h.age} wks · ⚡${heroPower(h)}</div>
+      <div class="assign-head"><span class="rr-portrait sm">${glyphOf(h)}</span> Planning <b>${h.name}</b> · ${h.archetype} Lv${h.level} · ${h.age} wks · ⚡${combatPower(h)}</div>
       <div class="stat-grid">${stats}</div>
       ${bar('Stamina', h.condition.stamina, 'var(--success)')}${bar('Fatigue', h.condition.fatigue, '#e08a3c')}${bar('Stress', h.condition.stress || 0, '#c05a8a')}${bar('Morale', h.condition.morale, '#8ab4d8')}
       ${h.condition.injury ? '<div class="injury-flag">⚠ Injured — will only recover (rest) until healed</div>' : ''}
@@ -407,6 +461,29 @@ function armoryPanel() {
       <div class="materials">${mats}</div>
       <div class="armory-shelf">${shelfHTML}</div>
       ${carried.length ? `<div class="rr-sub" style="margin-top:8px">${carried.length} item(s) carried by heroes.</div>` : ''}
+    </div>`;
+}
+
+function quartermasterPanel() {
+  const inv = guild.inventory;
+  const policy = guild.quartermaster || 'off';
+  const shelf = armoryItems(inv);
+  const idleW = shelf.filter((it) => it.slot === 'weapon').length;
+  const idleB = shelf.filter((it) => it.slot === 'body').length;
+  const kitted = guild.roster.filter((h) => EQUIP_SLOTS.every((s) => h.equipped[s])).length;
+  const POLICIES = [
+    { id: 'off', name: 'Manual', desc: 'You equip each hero by hand.' },
+    { id: 'party', name: 'Arm Party', desc: 'Marching heroes auto-draw the best gear each week (strongest first).' },
+    { id: 'all', name: 'Arm All', desc: 'Every hero auto-draws the best available gear each week.' },
+  ];
+  const toggle = POLICIES.map((p) => `<button class="${policy === p.id ? 'on' : ''}" onclick="__guild.setPolicy('${p.id}')">${p.name}</button>`).join('');
+  const desc = (POLICIES.find((p) => p.id === policy) || POLICIES[0]).desc;
+  return `<div class="plan-card">
+      <div class="plan-title">🎽 Quartermaster</div>
+      <div class="activity-toggle">${toggle}</div>
+      <div class="skill-shape"><span class="dim">${desc}</span></div>
+      <div class="rr-sub" style="margin-bottom:10px">${kitted}/${guild.roster.length} fully kitted · armory idle: ${idleW} weapon${idleW === 1 ? '' : 's'}, ${idleB} armor</div>
+      <button class="advance-btn" style="font-size:0.82em;padding:11px" onclick="__guild.provision()">⚙ Provision from stores now</button>
     </div>`;
 }
 
@@ -458,7 +535,8 @@ function recapPanel() {
     const body = ups.concat(downs).join(' ') || '<span class="down">no gain — too worn down</span>';
     return `<div class="r-line"><b>${r.name}</b> · ${body}${r.injury ? ' <span class="down">⚠ strained!</span>' : ''} <span class="dim">(fat ${fmtDelta(r.fat)})</span></div>`;
   }).join('');
-  return `<div class="week-report"><h4>Last week</h4>${lines}<div class="r-line">income <span class="up">+${report.income}g</span> · upkeep <span class="down">−${report.upkeep}g</span>${report.shortfall ? ' · <span class="down">insolvent — morale −8 all</span>' : ''}</div></div>`;
+  const qm = report.issued ? `<div class="r-line dim">🎽 quartermaster issued ${report.issued} item(s) from stores</div>` : '';
+  return `<div class="week-report"><h4>Last week</h4>${lines}${qm}<div class="r-line">income <span class="up">+${report.income}g</span> · upkeep <span class="down">−${report.upkeep}g</span>${report.shortfall ? ' · <span class="down">insolvent — morale −8 all</span>' : ''}</div></div>`;
 }
 
 function recruitCard(r) {
@@ -488,6 +566,7 @@ function render() {
       </div>
       ${assignPanel()}
       ${armoryPanel()}
+      ${quartermasterPanel()}
       ${marketPanel()}
       <div class="plan-card">
         <div class="plan-title">🍺 Tavern · Recruits</div>
@@ -506,4 +585,4 @@ export function openGuild() {
 }
 
 window.openGuild = openGuild;
-window.__guild = { selectHero, setActivity, setTraining, setIntensity, setRecipe, setDiet, setQuest, equipItem, unequipSlot, buyMaterial, sellItem, hire, advanceAll, back };
+window.__guild = { selectHero, setActivity, setTraining, setIntensity, setRecipe, setDiet, setQuest, equipItem, unequipSlot, setPolicy, provision, buyMaterial, sellItem, hire, advanceAll, back };
