@@ -125,3 +125,12 @@
 .ai-icon { width: 26px; height: 26px; flex: 0 0 26px; border: 1px solid var(--border); border-radius: 6px; display: flex; align-items: center; justify-content: center; }
 .ai-main { display: flex; flex-direction: column; flex: 1 1 auto; min-width: 0; }
 .ai-main b { font-family: 'Cinzel', serif; font-size: 0.88em; color: #e8e0d0; }
+.ai-actions { display: flex; gap: 6px; flex: 0 0 auto; }
+.rc-hire.sell { border-color: var(--dim); color: var(--silver); }
+.rc-hire.sell:hover { border-color: var(--silver); background: rgba(184, 196, 208, 0.1); }
+
+.market-list { display: flex; flex-direction: column; gap: 6px; }
+.market-row { display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  border: 1px solid var(--border); background: rgba(0, 0, 0, 0.22); border-radius: 8px; padding: 8px 12px; }
+.mk-name { font-size: 0.88em; }
+.mk-name b { font-family: 'Cinzel', serif; }

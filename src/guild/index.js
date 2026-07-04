@@ -18,3 +18,4 @@ export * from './economy.js';
 export * from './item.js';
 export * from './inventory.js';
 export * from './smithing.js';
+export * from './market.js';

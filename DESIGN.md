@@ -47,6 +47,24 @@ motor control. Time is measured in **weeks**, not individual actions.
 This is why the Phase-1 forge is correct: assign a smith + recipe + ore → Advance Week → skill
 drives quality. Keep every future trade system at this altitude.
 
+### Scope boundary — a guild, not a settlement/kingdom
+
+The guild is **not** a colony, city-builder, or 4X kingdom. **Guild members never mine, farm, or
+gather raw resources.** Raw materials (ore, reagents, food, cloth) enter the economy only via:
+
+- **Trade** — buy from merchants/markets with gold, and sell surplus/finished goods back; and
+- **Service / barter** — heroes earn goods by fulfilling quests (a village pays in grain for
+  protection; a lord rewards mithril for slaying a beast).
+
+Villages, mines, farms, and kingdoms exist in the world as **external partners** — patrons who post
+quests, markets that stock goods, clients who pay for services — never as things the player builds
+or operates internally. The guild is therefore a **transformation + service economy**:
+
+> buy / earn raw materials → **trade jobs** refine them into gear/potions/meals → heroes provide
+> **services** (quests, escorts, monster-slaying) → gold + loot + reputation → repeat.
+
+The player runs the *organization*; the surrounding world supplies the raw inputs.
+
 ## The four pillars
 
 1. **Real-item logistics.** Equipment and consumables are physical, tracked instances in

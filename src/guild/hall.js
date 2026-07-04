@@ -16,6 +16,7 @@ import { weeklyUpkeep, addGold } from './economy.js';
 import { RECIPES, getRecipe, previewQuality, forge } from './smithing.js';
 import { MATERIALS, createInventory, armoryItems, findItem } from './inventory.js';
 import { qualityTier } from './item.js';
+import { MATERIAL_PRICE, buyPrice, itemSellValue, createMarket, refreshMarket } from './market.js';
 import { saveGame, loadGame } from '../platform/storage.js';
 
 const SLOT = 'guild';
@@ -64,6 +65,7 @@ function load() {
     guild.roster.push(generateRecruit());
   }
   if (!guild.inventory) guild.inventory = createInventory();
+  if (!guild.market) guild.market = createMarket();
   guild.roster.forEach((h) => { migrateHero(h); ensureAssignment(h); });
   const staleRecruits = guild.recruits && guild.recruits[0] && guild.recruits[0].stats && guild.recruits[0].stats.POW === undefined;
   if (!Array.isArray(guild.recruits) || !guild.recruits.length || staleRecruits) guild.recruits = rollRecruitPool(3);
@@ -94,6 +96,29 @@ function unequipSlot(slot) {
   const item = findItem(guild.inventory, h.equipped[slot]);
   if (item) { item.location = 'armory'; const w = item.history.wielders[item.history.wielders.length - 1]; if (w && !w.toWeek) w.toWeek = guild.calendar.week; }
   delete h.equipped[slot];
+  save(); render();
+}
+
+function buyMaterial(matId) {
+  const m = guild.market;
+  const price = buyPrice(matId);
+  if ((m.stock[matId] || 0) <= 0) { notice = `The market is out of ${MATERIALS[matId].name} this week.`; render(); return; }
+  if (guild.gold < price) { notice = `Not enough gold — ${MATERIALS[matId].name} costs ${price}g.`; render(); return; }
+  addGold(guild, -price);
+  m.stock[matId] -= 1;
+  guild.inventory.materials[matId] = (guild.inventory.materials[matId] || 0) + 1;
+  notice = `Bought 1 ${MATERIALS[matId].name} for ${price}g.`;
+  save(); render();
+}
+function sellItem(itemId) {
+  const item = findItem(guild.inventory, itemId);
+  if (!item || item.location !== 'armory') { notice = 'That item is carried by a hero — unequip it first.'; render(); return; }
+  const value = itemSellValue(item);
+  const i = guild.inventory.items.findIndex((it) => it.id === itemId);
+  if (i < 0) return;
+  guild.inventory.items.splice(i, 1);
+  addGold(guild, value);
+  notice = `Sold ${item.name} for ${value}g.`;
   save(); render();
 }
 
@@ -138,6 +163,7 @@ function advanceAll() {
     results.push(entry);
   }
   advanceWeek(guild.calendar);
+  refreshMarket(guild.market);
   guild.recruits = rollRecruitPool(3);
   report = { upkeep, results };
   notice = '';
@@ -238,7 +264,10 @@ function armoryPanel() {
   const shelfHTML = shelf.length ? shelf.map((it) => `<div class="armory-item">
       <span class="ai-icon">${KIND_GLYPH[it.kind] || '▪'}</span>
       <span class="ai-main"><b>${it.name}</b><span class="rr-sub">${qualHTML(it)}${it.history.forgedByName ? ' · forged by ' + it.history.forgedByName : ''}</span></span>
-      <button class="rc-hire" onclick="__guild.equipItem('${it.id}')">Equip</button>
+      <span class="ai-actions">
+        <button class="rc-hire" onclick="__guild.equipItem('${it.id}')">Equip</button>
+        <button class="rc-hire sell" onclick="__guild.sellItem('${it.id}')">Sell ${itemSellValue(it)}g</button>
+      </span>
     </div>`).join('') : '<div class="hint">Empty. Assign a hero to the Forge to make weapons.</div>';
 
   return `<div class="plan-card">
@@ -246,6 +275,24 @@ function armoryPanel() {
       <div class="materials">${mats}</div>
       <div class="armory-shelf">${shelfHTML}</div>
       ${carried.length ? `<div class="rr-sub" style="margin-top:8px">${carried.length} item(s) carried by heroes.</div>` : ''}
+    </div>`;
+}
+
+function marketPanel() {
+  const m = guild.market;
+  const rows = Object.keys(MATERIAL_PRICE).map((id) => {
+    const price = buyPrice(id);
+    const stock = m.stock[id] || 0;
+    const afford = guild.gold >= price && stock > 0;
+    return `<div class="market-row">
+        <span class="mk-name"><b style="color:${MATERIALS[id].col}">${MATERIALS[id].name}</b> <span class="rr-sub">stock ${stock}</span></span>
+        <button class="rc-hire ${afford ? '' : 'disabled'}" onclick="__guild.buyMaterial('${id}')">Buy · ${price}g</button>
+      </div>`;
+  }).join('');
+  return `<div class="plan-card">
+      <div class="plan-title">⚖ Market · Buy Materials</div>
+      <div class="market-list">${rows}</div>
+      <div class="hint" style="text-align:left;padding:6px 0 0">Sell forged goods from the Armory above. Stock refreshes each week.</div>
     </div>`;
 }
 
@@ -291,6 +338,7 @@ function render() {
       </div>
       ${assignPanel()}
       ${armoryPanel()}
+      ${marketPanel()}
       <div class="plan-card">
         <div class="plan-title">🍺 Tavern · Recruits</div>
         <div class="recruit-list">${guild.recruits.map(recruitCard).join('')}</div>
@@ -308,4 +356,4 @@ export function openGuild() {
 }
 
 window.openGuild = openGuild;
-window.__guild = { selectHero, setActivity, setTraining, setRecipe, setDiet, equipItem, unequipSlot, hire, advanceAll, back };
+window.__guild = { selectHero, setActivity, setTraining, setRecipe, setDiet, equipItem, unequipSlot, buyMaterial, sellItem, hire, advanceAll, back };

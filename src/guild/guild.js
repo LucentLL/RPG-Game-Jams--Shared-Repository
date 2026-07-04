@@ -4,6 +4,7 @@
  */
 import { createCalendar } from './calendar.js';
 import { createInventory } from './inventory.js';
+import { createMarket } from './market.js';
 
 /**
  * @typedef {Object} Guild
@@ -32,6 +33,7 @@ export function createGuild(init = {}) {
     activeQuests: init.activeQuests || [],
     calendar: init.calendar || createCalendar(),
     inventory: init.inventory || createInventory(),
+    market: init.market || createMarket(),
     facilities: init.facilities || ['training-yard', 'kitchen', 'forge'],
   };
 }
