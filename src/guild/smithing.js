@@ -35,13 +35,14 @@ export function recipeUnlocked(hero, recipe) {
 }
 
 /**
- * Spend the week STUDYING blacksmithing (books/notes) — grows the Theory track,
- * which unlocks recipes. Light on stamina (it's reading, not hammering). Theory
- * grows with the same cap-taper as Practice.
- * @param {import('./hero.js').Hero} hero @returns {{theoryGain:number}}
+ * Spend the week STUDYING a discipline (books/notes) — grows that profession's Theory
+ * track, which unlocks its recipes. Light on stamina (it's reading, not hammering).
+ * Theory grows with the same cap-taper as Practice. The Library Scholar can study
+ * metallurgy ('blacksmithing') or 'alchemy'.
+ * @param {import('./hero.js').Hero} hero @param {string} [discipline] @returns {{theoryGain:number}}
  */
-export function study(hero) {
-  const prof = hero.professions.blacksmithing;
+export function study(hero, discipline = 'blacksmithing') {
+  const prof = hero.professions[discipline] || (hero.professions[discipline] = { theory: 0, practice: 0, field: 0 });
   const c = hero.condition;
   const room = (100 - prof.theory) / 100;
   const gain = Math.max(1, Math.round(6 * (0.3 + 0.7 * room)));

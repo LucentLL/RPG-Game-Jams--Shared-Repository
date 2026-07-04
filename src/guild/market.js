@@ -8,8 +8,8 @@
  * refreshes each week. (Quest barter/service income arrives in Phase 3.)
  */
 
-/** Buy price per material unit (sell-back is half). */
-export const MATERIAL_PRICE = { iron_ore: 8, steel_ore: 20, mithril_ore: 55 };
+/** Buy price per material unit (sell-back is half). Ores feed the Forge, herbs the Lab. */
+export const MATERIAL_PRICE = { iron_ore: 8, steel_ore: 20, mithril_ore: 55, sunleaf: 6, emberroot: 16, nightcap: 42 };
 
 // Item value = recoup the ore (floor) + a skill premium for quality above the
 // material's unskilled base — so an unskilled smith barely breaks even and PROFIT
@@ -30,7 +30,7 @@ export function itemSellValue(item) {
   return Math.max(1, Math.round(floor + Math.max(0, item.quality - base) * gain));
 }
 
-function defaultStock() { return { iron_ore: 24, steel_ore: 10, mithril_ore: 3 }; }
+function defaultStock() { return { iron_ore: 24, steel_ore: 10, mithril_ore: 3, sunleaf: 16, emberroot: 8, nightcap: 3 }; }
 
 /** @param {Object} [init] */
 export function createMarket(init = {}) { return { stock: init.stock || defaultStock() }; }

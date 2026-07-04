@@ -4,24 +4,30 @@
  * expiry come in later phases — see DESIGN.md.)
  */
 
-/** Raw materials. `tier` sets the quality floor of what they forge into. */
+/** Raw materials. `kind` groups them (ore → smithing, herb → alchemy); `tier` sets
+ *  the quality floor of what they craft into. All enter via the market or quest barter. */
 export const MATERIALS = {
-  iron_ore: { id: 'iron_ore', name: 'Iron Ore', tier: 1, col: '#c45040' },
-  steel_ore: { id: 'steel_ore', name: 'Steel Ore', tier: 2, col: '#b8c4d0' },
-  mithril_ore: { id: 'mithril_ore', name: 'Mithril Ore', tier: 3, col: '#e8dff0' },
+  iron_ore: { id: 'iron_ore', name: 'Iron Ore', kind: 'ore', tier: 1, col: '#c45040' },
+  steel_ore: { id: 'steel_ore', name: 'Steel Ore', kind: 'ore', tier: 2, col: '#b8c4d0' },
+  mithril_ore: { id: 'mithril_ore', name: 'Mithril Ore', kind: 'ore', tier: 3, col: '#e8dff0' },
+  sunleaf: { id: 'sunleaf', name: 'Sunleaf', kind: 'herb', tier: 1, col: '#7bbf5a' },
+  emberroot: { id: 'emberroot', name: 'Emberroot', kind: 'herb', tier: 2, col: '#d07a3c' },
+  nightcap: { id: 'nightcap', name: 'Nightcap', kind: 'herb', tier: 3, col: '#9a7bd0' },
 };
 
 /**
  * @typedef {Object} Inventory
  * @property {import('./item.js').Item[]} items  forged weapon/armor instances
- * @property {Object.<string,number>} materials  raw material stacks
+ * @property {Object.<string,number>} materials  raw material stacks (ore + herb)
+ * @property {Object[]} potions  brewed potion batches { id, type, potency, qty, ... }
  */
 
 /** @param {Partial<Inventory>} [init] @returns {Inventory} */
 export function createInventory(init = {}) {
   return {
     items: init.items || [],
-    materials: init.materials || { iron_ore: 20, steel_ore: 8, mithril_ore: 2 }, // starter stock
+    materials: init.materials || { iron_ore: 20, steel_ore: 8, mithril_ore: 2, sunleaf: 6, emberroot: 2, nightcap: 1 }, // starter stock
+    potions: init.potions || [],
   };
 }
 
@@ -32,6 +38,21 @@ export function addMaterial(inv, id, n) { inv.materials[id] = (inv.materials[id]
 
 export function addItem(inv, item) { inv.items.push(item); return item; }
 export function findItem(inv, itemId) { return inv.items.find((it) => it.id === itemId) || null; }
+
+// --- potions (consumable batches) ---
+export function addPotion(inv, batch) { (inv.potions || (inv.potions = [])).push(batch); return batch; }
+export function findPotion(inv, batchId) { return (inv.potions || []).find((b) => b.id === batchId) || null; }
+/** Spend one potion from a batch, removing the batch when empty. @returns {boolean} spent */
+export function consumePotion(inv, batchId) {
+  const list = inv.potions || (inv.potions = []);
+  const i = list.findIndex((b) => b.id === batchId);
+  if (i < 0 || list[i].qty <= 0) return false;
+  list[i].qty -= 1;
+  if (list[i].qty <= 0) list.splice(i, 1);
+  return true;
+}
+/** Total potions on hand (across all batches). */
+export function potionCount(inv) { return (inv.potions || []).reduce((s, b) => s + (b.qty || 0), 0); }
 /** Items currently sitting in the armory (not carried by anyone). */
 export function armoryItems(inv) { return inv.items.filter((it) => it.location === 'armory'); }
 

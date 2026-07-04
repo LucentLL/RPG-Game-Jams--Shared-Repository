@@ -16,7 +16,8 @@ import { DIET_PLANS, getDietPlan, applyDiet } from './diet.js';
 import { advanceWeek, formatDate } from './calendar.js';
 import { weeklyUpkeep, addGold, guildIncome } from './economy.js';
 import { RECIPES, getRecipe, previewQuality, forge, study, recipeUnlocked } from './smithing.js';
-import { MATERIALS, createInventory, armoryItems, findItem, addMaterial, gearBonus, EQUIP_SLOTS } from './inventory.js';
+import { POTION_RECIPES, getPotionRecipe, previewPotency, brew, potionUnlocked, applyPotion } from './alchemy.js';
+import { MATERIALS, createInventory, armoryItems, findItem, addMaterial, gearBonus, EQUIP_SLOTS, findPotion, consumePotion, potionCount } from './inventory.js';
 import { generateQuestBoard, resolveQuest } from './quests.js';
 import { roleFor } from './roles.js';
 import { qualityTier } from './item.js';
@@ -44,10 +45,10 @@ const ROOMS = [
   { id: 'roster', glyph: '🛡', name: 'Roster', tag: 'MEMBERS' },
   { id: 'forge', glyph: '🔨', name: 'Forge', tag: 'WORK' },
   { id: 'kitchen', glyph: '🍲', name: 'Kitchen', tag: 'WORK' },
-  { id: 'apothecary', glyph: '🏺', name: 'Apothecary', tag: 'STORAGE', locked: true, soon: 'Potion &amp; supply stores. Unlocks with the Alchemist trade.' },
+  { id: 'apothecary', glyph: '🏺', name: 'Apothecary', tag: 'STORAGE' },
   { id: 'library', glyph: '📖', name: 'Library', tag: 'WORK' },
   { id: 'armory', glyph: '🗡', name: 'Armory', tag: 'STORAGE' },
-  { id: 'laboratory', glyph: '⚗', name: 'Laboratory', tag: 'WORK', locked: true, soon: 'Brew potions here. The Alchemist trade is coming next.' },
+  { id: 'laboratory', glyph: '⚗', name: 'Laboratory', tag: 'WORK' },
   { id: 'quarters', glyph: '🍺', name: 'Quarters', tag: 'LIVING' },
 ];
 function getRoom(id) { return ROOMS.find((r) => r.id === id) || null; }
@@ -102,10 +103,12 @@ function armHeroes(candidates) {
 function ensureAssignment(h) {
   const a = h.assignment || {};
   h.assignment = {
-    type: (a.type === 'forge' || a.type === 'study' || a.type === 'quest') ? a.type : 'train',
+    type: ['forge', 'study', 'quest', 'brew'].includes(a.type) ? a.type : 'train',
     trainingId: getDrill(a.trainingId) ? a.trainingId : (DRILL_MIGRATE[a.trainingId] || 'pow'),
     intensity: a.intensity === 'heavy' ? 'heavy' : 'light',
     recipeId: getRecipe(a.recipeId) ? a.recipeId : 'iron_sword',
+    potionId: getPotionRecipe(a.potionId) ? a.potionId : 'minor_heal',
+    discipline: a.discipline === 'alchemy' ? 'alchemy' : 'blacksmithing',
     questId: a.questId || null,
     dietId: getDietPlan(a.dietId) ? a.dietId : (getDietPlan(h.dietPlanId) ? h.dietPlanId : 'balanced'),
   };
@@ -120,7 +123,9 @@ function migrateHero(h) {
     h.stats = { POW: up(o.STR), DEF: up(o.CHA ?? o.CON), SKL: up(o.WIS ?? o.DEX), SPD: up(o.DEX), INT: up(o.INT), VIT: up(o.CON) };
   }
   if (!h.growth || h.growth.POW === undefined) { h.growth = {}; HERO_STATS.forEach((s) => { h.growth[s] = 2; }); }
-  if (!h.professions || !h.professions.blacksmithing) h.professions = { blacksmithing: { theory: 0, practice: 0, field: 0 } };
+  if (!h.professions) h.professions = {};
+  if (!h.professions.blacksmithing) h.professions.blacksmithing = { theory: 0, practice: 0, field: 0 };
+  if (!h.professions.alchemy) h.professions.alchemy = { theory: 0, practice: 0, field: 0 };
   if (!h.equipped) h.equipped = {};
   if (!h.condition) h.condition = { stamina: 100, morale: 70, loyalty: 60, fatigue: 0, stress: 0, injury: null };
   if (h.condition.stress == null) h.condition.stress = 0;
@@ -139,6 +144,7 @@ function load() {
     guild.roster.push(generateRecruit());
   }
   if (!guild.inventory) guild.inventory = createInventory();
+  if (!Array.isArray(guild.inventory.potions)) guild.inventory.potions = []; // Apothecary storage (added with the Alchemist)
   if (!guild.market) guild.market = createMarket();
   if (!['off', 'party', 'all'].includes(guild.quartermaster)) guild.quartermaster = 'off';
   if (typeof guild.reputation !== 'number') guild.reputation = 0;
@@ -153,12 +159,24 @@ function load() {
 
 // --- interactions -----------------------------------------------------------
 function selectHero(id) { selectedId = id; notice = ''; render(); }
-function setActivity(type) { const h = heroById(selectedId); if (h) { h.assignment.type = (type === 'forge' || type === 'study' || type === 'quest') ? type : 'train'; if (h.assignment.type !== 'quest') h.assignment.questId = null; save(); render(); } }
+function setActivity(type) { const h = heroById(selectedId); if (h) { h.assignment.type = ['forge', 'study', 'quest', 'brew'].includes(type) ? type : 'train'; if (h.assignment.type !== 'quest') h.assignment.questId = null; save(); render(); } }
 function setQuest(questId) { const h = heroById(selectedId); if (h) { h.assignment.type = 'quest'; h.assignment.questId = questId; save(); render(); } }
 function setTraining(id) { const h = heroById(selectedId); if (h) { h.assignment.trainingId = id; h.assignment.type = 'train'; h.assignment.questId = null; save(); render(); } }
 function setIntensity(level) { const h = heroById(selectedId); if (h) { h.assignment.intensity = level === 'heavy' ? 'heavy' : 'light'; h.assignment.type = 'train'; h.assignment.questId = null; save(); render(); } }
 function setRecipe(id) { const h = heroById(selectedId); if (h) { h.assignment.recipeId = id; h.assignment.type = 'forge'; h.assignment.questId = null; save(); render(); } }
+function setPotion(id) { const h = heroById(selectedId); if (h) { h.assignment.potionId = id; h.assignment.type = 'brew'; h.assignment.questId = null; save(); render(); } }
+function setDiscipline(d) { const h = heroById(selectedId); if (h) { h.assignment.discipline = d === 'alchemy' ? 'alchemy' : 'blacksmithing'; h.assignment.type = 'study'; h.assignment.questId = null; save(); render(); } }
 function setDiet(id) { const h = heroById(selectedId); if (h) { h.assignment.dietId = id; h.dietPlanId = id; save(); render(); } }
+
+function usePotion(batchId) {
+  const h = heroById(selectedId); if (!h) { notice = 'Select a member to treat first.'; render(); return; }
+  const batch = findPotion(guild.inventory, batchId); if (!batch || batch.qty <= 0) return;
+  const result = applyPotion(batch, h);
+  if (!result) { notice = `${h.name} doesn't need the ${batch.name} right now.`; render(); return; }
+  consumePotion(guild.inventory, batchId);
+  notice = `${h.name} drinks a ${batch.name} — ${result}.`;
+  save(); render();
+}
 
 function equipItem(itemId) {
   const h = heroById(selectedId); if (!h) { notice = 'Select a hero first, then equip.'; render(); return; }
@@ -265,8 +283,14 @@ function advanceAll() {
       const recipe = getRecipe(a.recipeId);
       entry.forge = forge(h, recipe, guild.inventory, week);
       entry.recipeName = recipe.name;
+    } else if (a.type === 'brew') {
+      const recipe = getPotionRecipe(a.potionId) || POTION_RECIPES[0];
+      entry.brew = brew(h, recipe, guild.inventory, week);
+      entry.recipeName = recipe.name;
     } else if (a.type === 'study') {
-      entry.study = study(h);
+      const disc = a.discipline === 'alchemy' ? 'alchemy' : 'blacksmithing';
+      entry.study = study(h, disc);
+      entry.discipline = disc;
     } else if (a.type === 'quest') {
       const plan = questPlan[h.id];
       if (!plan || !plan.quest) {
@@ -300,7 +324,7 @@ function advanceAll() {
 
     if (!onExpedition) applyDiet(h, diet); // only heroes who actually marched out skip guild rest
     // Training/rest morale is applied inside applyTraining; forge/study take a small dip; quests set questMorale.
-    let dm = questMorale != null ? questMorale : (a.type === 'forge' || a.type === 'study' ? -1 : 0);
+    let dm = questMorale != null ? questMorale : (a.type === 'forge' || a.type === 'study' || a.type === 'brew' ? -1 : 0);
     if (diet.id === 'feast') dm += 4;
     h.condition.morale = clamp(h.condition.morale + dm);
     h.age += 1;
@@ -369,7 +393,8 @@ function questTitle(id) { const q = guild.questBoard.find((x) => x.id === id); r
 function rosterRow(h) {
   const a = h.assignment;
   const plan = a.type === 'forge' ? `🔨 ${getRecipe(a.recipeId).name}`
-    : a.type === 'study' ? '📖 Study Smithing'
+    : a.type === 'brew' ? `⚗ ${(getPotionRecipe(a.potionId) || {}).name || 'Brew'}`
+    : a.type === 'study' ? `📖 Study ${a.discipline === 'alchemy' ? 'Alchemy' : 'Smithing'}`
     : a.type === 'quest' ? `🗺 ${a.questId ? (questTitle(a.questId) || 'On Quest') : '(choose quest)'}`
     : `⚔ ${(getDrill(a.trainingId) || REST).name}${a.intensity === 'heavy' ? ' (H)' : ''}`;
   return `<button class="roster-row ${h.id === selectedId ? 'sel' : ''}" onclick="__guild.selectHero('${h.id}')">
@@ -478,12 +503,41 @@ function forgeBody(h) {
   return `${skillShapeOf(h)}<div class="opt-list">${forgeList}</div>`;
 }
 
-/** Library/Study body for member h. The button assigns them to Study this week. */
+function alchemyShapeOf(h) {
+  const p = h.professions.alchemy || { theory: 0, practice: 0, field: 0 };
+  return `<div class="skill-shape">⚗ Alchemy — <b>Theory ${p.theory}</b> · <b>Practice ${p.practice}</b> · <span class="dim">Field ${p.field}</span></div>`;
+}
+
+/** Potion recipe list for member h. Picking a recipe sets them to Brew. */
+function brewBody(h) {
+  const isBrew = h.assignment.type === 'brew';
+  const prof = h.professions.alchemy || { theory: 0, practice: 0, field: 0 };
+  const list = POTION_RECIPES.map((r) => {
+    const cost = Object.keys(r.cost).map((k) => `${MATERIALS[k].name} ×${r.cost[k]}`).join(', ');
+    const enough = Object.keys(r.cost).every((k) => (guild.inventory.materials[k] || 0) >= r.cost[k]);
+    if (!potionUnlocked(h, r)) {
+      return `<button class="opt lack" disabled><span><span class="o-name">🔒 ${r.name}</span> <span class="o-desc">study alchemy to unlock</span></span><span class="o-cost">Theory ${r.reqTheory}</span></button>`;
+    }
+    return `<button class="opt ${isBrew && r.id === h.assignment.potionId ? 'active' : ''} ${enough ? '' : 'lack'}" onclick="__guild.setPotion('${r.id}')">
+      <span><span class="o-name">${r.glyph} ${r.name}</span> <span class="o-desc">${cost}</span></span>
+      <span class="o-cost">~p${previewPotency(r, prof.practice, prof.field)} ×${r.yield}</span></button>`;
+  }).join('');
+  return `${alchemyShapeOf(h)}<div class="opt-list">${list}</div>`;
+}
+
+/** Library/Study body: pick a discipline; the Scholar raises its Theory this week. */
 function studyBody(h) {
-  const assigned = h.assignment.type === 'study';
-  return `${skillShapeOf(h)}
-      <div class="hint" style="text-align:left;padding:4px 0">The scholar studies metallurgy — raises <b>Theory</b>, which unlocks steel &amp; mithril recipes. Practice (from forging) still sets quality.</div>
-      <button class="opt ${assigned ? 'active' : ''}" onclick="__guild.setActivity('study')"><span><span class="o-name">📖 ${assigned ? h.name + ' is studying' : 'Assign ' + h.name + ' to study'}</span> <span class="o-desc">grows Theory this week</span></span></button>`;
+  const a = h.assignment;
+  const assigned = a.type === 'study';
+  const disc = a.discipline === 'alchemy' ? 'alchemy' : 'blacksmithing';
+  const toggle = `<div class="intensity-toggle">
+      <button class="${assigned && disc === 'blacksmithing' ? 'on' : ''}" onclick="__guild.setDiscipline('blacksmithing')">⚒ Metallurgy</button>
+      <button class="${assigned && disc === 'alchemy' ? 'on' : ''}" onclick="__guild.setDiscipline('alchemy')">⚗ Alchemy</button>
+    </div>`;
+  const shape = disc === 'alchemy' ? alchemyShapeOf(h) : skillShapeOf(h);
+  return `${shape}${toggle}
+      <div class="hint" style="text-align:left;padding:4px 0">Pick a discipline — the Scholar studies it, raising its <b>Theory</b> (which unlocks recipes). Practice from working the craft still sets quality.</div>
+      ${assigned ? `<div class="room-jobline">📖 ${h.name} is studying <b>${disc === 'alchemy' ? 'Alchemy' : 'Metallurgy'}</b> this week.</div>` : '<div class="hint">Pick a discipline above to assign this member to study.</div>'}`;
 }
 
 /** Diet list for member h. */
@@ -496,7 +550,8 @@ function dietBody(h) {
 function jobLabel(h) {
   const a = h.assignment;
   return a.type === 'forge' ? `🔨 Forging ${(getRecipe(a.recipeId) || {}).name || ''}`
-    : a.type === 'study' ? '📖 Studying'
+    : a.type === 'brew' ? `⚗ Brewing ${(getPotionRecipe(a.potionId) || {}).name || ''}`
+    : a.type === 'study' ? `📖 Studying ${a.discipline === 'alchemy' ? 'alchemy' : 'metallurgy'}`
     : a.type === 'quest' ? `🗺 ${a.questId ? (questTitle(a.questId) || 'On a quest') : 'Quest (pick one)'}`
     : `⚔ ${(getDrill(a.trainingId) || REST).name}${a.intensity === 'heavy' ? ' (Heavy)' : ''}`;
 }
@@ -573,7 +628,13 @@ function recapPanel() {
       const why = f.reason === 'materials' ? 'out of materials' : (f.reason === 'locked' ? 'recipe not yet unlocked' : 'too tired to work');
       return `<div class="r-line"><b>${r.name}</b> <span class="down">couldn't forge — ${why}</span></div>`;
     }
-    if (r.type === 'study') return `<div class="r-line"><b>${r.name}</b> studied smithing — <span class="up">Theory +${r.study.theoryGain}</span></div>`;
+    if (r.type === 'brew') {
+      const b = r.brew;
+      if (b.ok) return `<div class="r-line"><b>${r.name}</b> brewed <span class="up">${b.qty}× ${b.batch.name} (p${b.potency})</span> <span class="dim">· +${b.practiceGain} practice</span></div>`;
+      const why = b.reason === 'materials' ? 'out of herbs' : (b.reason === 'locked' ? 'recipe not yet unlocked' : 'too tired to brew');
+      return `<div class="r-line"><b>${r.name}</b> <span class="down">couldn't brew — ${why}</span></div>`;
+    }
+    if (r.type === 'study') return `<div class="r-line"><b>${r.name}</b> studied ${r.discipline === 'alchemy' ? 'alchemy' : 'metallurgy'} — <span class="up">Theory +${r.study.theoryGain}</span></div>`;
     if (r.type === 'quest') {
       if (r.quest && r.quest.noQuest) return `<div class="r-line"><b>${r.name}</b> <span class="down">had no quest assigned</span></div>`;
       if (r.quest && r.quest.tooTired) return `<div class="r-line"><b>${r.name}</b> <span class="down">too exhausted to set out — rest first</span></div>`;
@@ -619,7 +680,8 @@ function roomStatus(id) {
     case 'kitchen': return 'set diets';
     case 'armory': { const n = guild.inventory.items.length; return `${n} item${n === 1 ? '' : 's'}`; }
     case 'quarters': return `${guild.recruits.length} for hire`;
-    case 'laboratory': case 'apothecary': return 'soon';
+    case 'laboratory': { const n = r.filter((h) => h.assignment.type === 'brew').length; return n ? `${n} brewing` : 'idle'; }
+    case 'apothecary': { const n = potionCount(guild.inventory); return `${n} potion${n === 1 ? '' : 's'}`; }
     default: return '';
   }
 }
@@ -666,6 +728,36 @@ function kitchenRoom() {
   const h = heroById(selectedId);
   const head = h ? `<div class="room-jobline">🍖 Now feeding <b>${getDietPlan(h.assignment.dietId).name}</b></div>` : '';
   return workRoom(h ? `🍲 ${h.name} — Diet` : '🍲 Kitchen', dietBody, head);
+}
+function laboratoryRoom() {
+  const brewing = guild.roster.filter((x) => x.assignment.type === 'brew').map((x) => x.name.split(' ')[0]);
+  const head = `<div class="room-jobline">${brewing.length ? '⚗ ' + brewing.join(', ') + ' brewing' : 'No one is brewing this week.'}</div>`;
+  const h = heroById(selectedId);
+  return workRoom(h ? `⚗ ${h.name} — Laboratory` : '⚗ Laboratory', brewBody, head);
+}
+function apothecaryRoom() {
+  const inv = guild.inventory;
+  const h = heroById(selectedId);
+  const herbs = Object.keys(MATERIALS).filter((k) => MATERIALS[k].kind === 'herb')
+    .map((k) => `<span class="mat"><b style="color:${MATERIALS[k].col}">${inv.materials[k] || 0}</b> ${MATERIALS[k].name}</span>`).join('');
+  const shelf = inv.potions || [];
+  const shelfHTML = shelf.length ? shelf.map((b) => `<div class="armory-item">
+      <span class="ai-icon">${b.glyph || '🧪'}</span>
+      <span class="ai-main"><b>${b.name} ×${b.qty}</b><span class="rr-sub">potency ${b.potency}${b.brewedByName ? ' · brewed by ' + b.brewedByName : ''}</span></span>
+      <span class="ai-actions"><button class="rc-hire" onclick="__guild.usePotion('${b.id}')">Use</button></span>
+    </div>`).join('') : '<div class="hint">Empty. Assign an Alchemist to the Laboratory to brew potions.</div>';
+  const ctx = h ? `<div class="plan-card">
+      <div class="plan-title">🩹 Treating · ${h.name}</div>
+      ${heroSwitcher()}
+      ${bar('Stamina', h.condition.stamina, 'var(--success)')}${bar('Fatigue', h.condition.fatigue, '#e08a3c')}${bar('Stress', h.condition.stress || 0, '#c05a8a')}
+      ${h.condition.injury ? '<div class="injury-flag">⚠ Injured — a Healing or Greater draught can cure it</div>' : ''}
+      <div class="room-jobline">Pick a member, then <b>Use</b> a potion below to treat them.</div>
+    </div>` : '';
+  return `${ctx}<div class="plan-card">
+      <div class="plan-title">🏺 Apothecary · ${potionCount(inv)} potion(s)</div>
+      <div class="materials">${herbs}</div>
+      <div class="armory-shelf">${shelfHTML}</div>
+    </div>`;
 }
 
 function armoryRoom() {
@@ -727,6 +819,8 @@ function renderRoom(id) {
     case 'forge': return hdr + forgeRoom();
     case 'kitchen': return hdr + kitchenRoom();
     case 'library': return hdr + libraryRoom();
+    case 'laboratory': return hdr + laboratoryRoom();
+    case 'apothecary': return hdr + apothecaryRoom();
     case 'armory': return hdr + armoryRoom();
     case 'quarters': return hdr + quartersRoom();
     default: return renderHub();
@@ -810,5 +904,5 @@ export function openGuild() {
   showScreen('guildScreen');
 }
 
-window.__guild = { selectHero, setActivity, setTraining, setIntensity, setRecipe, setDiet, setQuest, equipItem, unequipSlot, setPolicy, provision, buyMaterial, sellItem, hire, advanceAll, back, openRoom, toggleFullscreen };
+window.__guild = { selectHero, setActivity, setTraining, setIntensity, setRecipe, setPotion, setDiscipline, usePotion, setDiet, setQuest, equipItem, unequipSlot, setPolicy, provision, buyMaterial, sellItem, hire, advanceAll, back, openRoom, toggleFullscreen };
 window.openGuild = openGuild;
