@@ -23,6 +23,8 @@ import { saveGame, loadGame } from '../platform/storage.js';
 const SLOT = 'guild';
 const MAX_ROSTER = 6;
 const QUEST_STAMINA = 40; // dispatching on a quest costs stamina — questing can't be spammed
+/** Whether a hero would actually march if dispatched — injured or too-tired heroes stay home. */
+const canMarch = (h) => !h.condition.injury && h.condition.stamina >= QUEST_STAMINA;
 const DRILL_MIGRATE = { drill_pow: 'pow', guard_def: 'def', forms_skl: 'skl', sprint_spd: 'spd', study_int: 'int', march_vit: 'vit', spar: 'pow' };
 const ARCH_GLYPH = { Knight: '⚔', Mage: '✦', Ranger: '🏹', Cleric: '☩', Rogue: '🗡', Berserker: '🪓', Adventurer: '☉' };
 const KIND_GLYPH = { sword: '⚔', armor: '🛡', bow: '🏹' };
@@ -167,7 +169,7 @@ function advanceAll() {
   for (const questId in parties) {
     const party = parties[questId];
     const quest = guild.questBoard.find((q) => q.id === questId);
-    const marchers = quest ? party.filter((h) => !h.condition.injury && h.condition.stamina >= QUEST_STAMINA) : [];
+    const marchers = quest ? party.filter(canMarch) : [];
     const outcome = (quest && marchers.length) ? resolveQuest(quest, marchers) : null;
     if (outcome && outcome.success) { // guild rewards, once for the whole party
       addGold(guild, quest.rewards.gold);
@@ -344,14 +346,16 @@ function assignPanel() {
   const studyBody = `${skillShape}<div class="hint" style="text-align:left;padding:4px 0">The smith studies metallurgy — raises <b>Theory</b>, which unlocks steel &amp; mithril recipes. Practice (from forging) still sets quality.</div>`;
 
   const hp = heroPower(h);
+  const hCanMarch = canMarch(h); // this hero would be benched at resolution if injured/too tired
   const questList = guild.questBoard.map((q) => {
-    const partyHeroes = guild.roster.filter((x) => x.assignment.type === 'quest' && x.assignment.questId === q.id);
-    const already = partyHeroes.some((x) => x.id === h.id);
-    const partyPower = partyHeroes.reduce((s, x) => s + heroPower(x), 0);
-    const odds = questOdds(already ? partyPower : partyPower + hp, q.recommendedPower); // odds if this hero joins
+    // Preview only the heroes who'd actually march — matches the resolution filter — so
+    // the odds and "party of N" don't over-promise by counting benched members.
+    const otherMarchers = guild.roster.filter((x) => x.id !== h.id && x.assignment.type === 'quest' && x.assignment.questId === q.id && canMarch(x));
+    const marchPower = otherMarchers.reduce((s, x) => s + heroPower(x), 0) + (hCanMarch ? hp : 0);
+    const odds = questOdds(marchPower, q.recommendedPower); // odds if this hero joins (and can march)
     const chosen = at === 'quest' && h.assignment.questId === q.id;
     const lootTxt = q.loot ? ` · +1 ${MATERIALS[q.loot].name}` : '';
-    const n = partyHeroes.length + (already ? 0 : 1);
+    const n = otherMarchers.length + (hCanMarch ? 1 : 0);
     const partyTag = n > 1 ? ` · <span class="dim">party of ${n}</span>` : '';
     return `<button class="opt quest-opt ${chosen ? 'active' : ''}" onclick="__guild.setQuest('${q.id}')">
       <span><span class="o-name">${q.title} <span class="q-rank">R${q.rank}</span></span> <span class="o-desc">${q.patron} · <span class="${odds.cls}">${odds.txt} ~${odds.pct}%</span>${partyTag}</span></span>
