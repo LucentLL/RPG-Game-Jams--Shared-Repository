@@ -287,6 +287,9 @@ function advanceAll() {
     });
   }
 
+  // Snapshot injuries at the START of the week: a member who bruises themselves mid-loop
+  // during their own bout must not retroactively demote their (healthy) spar partner.
+  const wasInjured = new Map(guild.roster.map((x) => [x.id, !!x.condition.injury]));
   for (const h of guild.roster) {
     const a = h.assignment;
     const diet = getDietPlan(a.dietId);
@@ -340,11 +343,14 @@ function advanceAll() {
       }
     } else if (a.trainingId === 'spar') {
       const partner = heroById(a.sparWith);
-      const mutual = partner && partner.assignment.trainingId === 'spar' && partner.assignment.sparWith === h.id;
+      // Partner must ACTUALLY be sparring back this week (not forging/questing on a stale link)
+      // and must have started the week uninjured — snapshot, not their live (maybe self-injured) state.
+      const mutual = partner && partner.assignment.type === 'train' && partner.assignment.trainingId === 'spar'
+        && partner.assignment.sparWith === h.id && !wasInjured.get(partner.id);
       if (h.condition.injury) {
         const res = applyTraining(h, 'rest', 'light', diet.statBias); // injured — rest, don't spar
         entry.rested = true; entry.injury = res.injury;
-      } else if (mutual && !partner.condition.injury) {
+      } else if (mutual) {
         const res = applySpar(h, partner, diet.statBias); // both partners resolve their own side
         entry.drill = 'Spar vs ' + partner.name.split(' ')[0];
         entry.gains = res.gains; entry.drops = res.drops; entry.injury = res.injury;
@@ -756,11 +762,9 @@ function rosterRoom() {
  *  they work here, else the first worker. */
 function deptRoom(jobType, roleGlyph, roleName, bodyFn) {
   const workers = guild.roster.filter((h) => h.assignment.type === jobType);
-  let subject = heroById(selectedId);
-  if (!subject || subject.assignment.type !== jobType) subject = workers[0] || null;
-  // The body's controls (setRecipe/setPotion/setDiscipline) act on selectedId, so keep
-  // it aligned to the displayed worker — otherwise they'd configure an off-screen member.
-  if (subject && subject.id !== selectedId) selectedId = subject.id;
+  // selectedId is realigned to a worker in openRoom() (navigation time, not render time),
+  // so the selected member is a worker here whenever one exists.
+  const subject = (heroById(selectedId) && heroById(selectedId).assignment.type === jobType) ? heroById(selectedId) : (workers[0] || null);
   const chips = workers.map((h) => `<button class="hs-chip ${subject && h.id === subject.id ? 'sel' : ''}" title="${h.name}" onclick="__guild.selectHero('${h.id}')">${personSprite(h, 38)}</button>`).join('');
   const available = guild.roster.filter((h) => h.assignment.type !== jobType);
   const addChips = available.map((h) => `<button class="hs-chip add" title="Assign ${h.name}" onclick="__guild.assignTo('${h.id}','${jobType}')">${personSprite(h, 34)}</button>`).join('');
@@ -924,10 +928,18 @@ function render() {
 }
 
 // --- room / fullscreen controls ---------------------------------------------
+const ROOM_JOB = { forge: 'forge', library: 'study', laboratory: 'brew' };
 function openRoom(id) {
   currentRoom = id;
   notice = '';
   if (!selectedId && guild.roster[0]) selectedId = guild.roster[0].id; // work rooms key off a subject
+  // Entering a work room, point at one of ITS workers (if the current pick works elsewhere),
+  // so the room's controls target a member shown here. Done on navigation, not during render.
+  const job = ROOM_JOB[id];
+  if (job) {
+    const sel = heroById(selectedId);
+    if (!sel || sel.assignment.type !== job) { const w = guild.roster.find((h) => h.assignment.type === job); if (w) selectedId = w.id; }
+  }
   render();
 }
 function toggleFullscreen() {
