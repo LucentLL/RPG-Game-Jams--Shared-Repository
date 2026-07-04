@@ -16,6 +16,37 @@ a mix of **books, practice, and battlefield experience**. The guild accumulates
 It sits in the underexplored middle: **RTS × management sim × RPG**, where *logistics
 drive the battles* rather than being abstracted into numbers.
 
+## Level of abstraction (the granularity dial) — read this first
+
+Two anchors fix how granular the game is. **Every system must sit between them.**
+
+- **One level _deeper_ than an RTS.** An RTS abstracts everything: "the barracks makes a
+  swordsman," resources convert to units instantly, gear is an implicit stat. We go one level
+  below — *individual* heroes, *individual* forged swords in a real armory, *explicit* supply
+  lines. Logistics are visible and consequential.
+- **One level _higher_ than Potion Craft (for trade jobs).** Potion Craft is a hands-on crafting
+  *simulator* — you physically grind reagents and steer a pendulum to brew each potion. We stay
+  **above** that: the player **manages the craftsperson and the supply chain; they do not operate
+  the tools.** No per-item mini-game.
+
+So for any trade job the player decides **who** works, **what** they make, and **with what
+materials** — then **time + skill** produce the result. Depth comes from *many interacting
+systems* (skill tracks, material quality, item history, spoilage, logistics), **not** from fine
+motor control. Time is measured in **weeks**, not individual actions.
+
+| Trade | The player DOES | The player does NOT |
+|---|---|---|
+| Blacksmith | assign the smith, pick the recipe, supply ore, grow their skill | swing the hammer / play a forging mini-game |
+| Alchemist | assign, choose the potion, supply reagents | grind ingredients / steer a brewing pendulum |
+| Chef | assign, choose the meal, supply ingredients | cook in real time |
+
+> Combat is the one place the dial can go lower on demand: the player *may* directly play a
+> battle (the action arena) or auto-resolve a squad expedition. Production/trade stays at the
+> management altitude above; combat offers an optional hands-on layer.
+
+This is why the Phase-1 forge is correct: assign a smith + recipe + ore → Advance Week → skill
+drives quality. Keep every future trade system at this altitude.
+
 ## The four pillars
 
 1. **Real-item logistics.** Equipment and consumables are physical, tracked instances in
