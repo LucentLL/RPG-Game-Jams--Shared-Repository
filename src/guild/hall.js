@@ -339,6 +339,7 @@ function personById(id) { return heroById(id) || (guild.recruits || []).find((r)
 /** After each render, draw every sprite canvas via the shared Elements renderer. */
 function paintSprites() {
   if (typeof window.renderGuildSprite !== 'function') return; // crucible.js not loaded (shouldn't happen)
+  if (typeof window.pruneDetachedSpriteRedraws === 'function') window.pruneDetachedSpriteRedraws(); // drop last render's detached canvases
   document.querySelectorAll('#guildScreen canvas.hero-sprite[data-hid]').forEach((cv) => {
     const p = personById(cv.dataset.hid);
     if (p) try { window.renderGuildSprite(cv, p); } catch (e) { /* asset race — the redraw registry repaints on load */ }

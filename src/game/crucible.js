@@ -1538,7 +1538,15 @@ var GUILD_ARCH_PRIME = { Knight: 'salt', Cleric: 'salt', Adventurer: 'salt', Ber
 function renderGuildSprite(canvas, person, facing){
   if (!canvas || !person) return;
   var prime = person.prime || person.bodyType || GUILD_ARCH_PRIME[person.archetype] || 'salt';
-  var appearance = ensureAppearance(person, prime); // derives a stable look from the name; caches onto person.appearance
+  // Seed the appearance from the UNIQUE id (+name), not name alone — recruits draw
+  // from only ~60 name combos, so name-only seeds give look-alike twins. Set it
+  // before ensureAppearance so it takes this seed; it persists with the save.
+  if (person.appearanceSeed == null && person.appearance == null){
+    var s = 0, key = (person.id || '') + '|' + (person.name || '');
+    for (var i = 0; i < key.length; i++) s = (s * 131 + key.charCodeAt(i)) | 0;
+    person.appearanceSeed = s;
+  }
+  var appearance = ensureAppearance(person, prime); // derives a stable look from the seed; caches onto person.appearance
   var row = facingToRow(facing == null ? 0 : facing);
   // Draw ONE static frame (no idle-bob RAF loop): a guild screen shows many
   // portraits at once, and recompositing all of them every frame would burn
@@ -1548,6 +1556,13 @@ function renderGuildSprite(canvas, person, facing){
   elementsRegisterRedraw(canvas, function(){ renderGuildSprite(canvas, person, facing); });
 }
 window.renderGuildSprite = renderGuildSprite;
+// The guild replaces innerHTML wholesale each render, detaching sprite canvases.
+// The redraw registry only self-cleans when an asset load fires; once every sheet
+// is cached that stops, so the guild calls this each render to drop detached
+// canvases and keep _elementsRedrawByCanvas from growing without bound.
+window.pruneDetachedSpriteRedraws = function(){
+  _elementsRedrawByCanvas.forEach(function(fn, cv){ if (!cv || cv.isConnected === false) _elementsRedrawByCanvas.delete(cv); });
+};
 
 // Stable per-canvas phase offset (0-1400ms) so previews on screens that show
 // multiple characters (e.g. Pantheon) don't all bob in unison.
