@@ -135,12 +135,20 @@ A full analysis of the original file (413 top‑level symbols) produced the targ
 below — **44 modules**, leaf‑first, so the game keeps running at every step.
 Extract in this order; after each module, `npm run build` + smoke‑test before the next.
 
-> **Progress — Phase A (partial), done & verified:**
-> `data/progression.js`, `data/gear.js`, `data/attacks.js`, `data/arena-templates.js`,
-> `items/blacksmithing.js`, `engine/rng.js` are extracted out of `crucible.js`
-> (now ~5.9k lines, down from 6.3k). Build passes; title→stat→draft drive is clean.
-> **Next:** `data/config.js` (scattered scalars), `data/sprite-tables.js`,
-> `data/orb-tables.js`, then `state.js` and the engine subsystems.
+> **Progress — Phase A data layer complete & verified:**
+> Extracted out of `crucible.js` (now ~5.7k lines, down from 6.3k):
+> `data/progression.js`, `data/gear.js`, `data/attacks.js`, `data/config.js`,
+> `data/orb-tables.js`, `data/sprite-tables.js`, `data/arena-templates.js`,
+> `items/blacksmithing.js`, `engine/rng.js`.
+> Build green (26 modules); verified live — title→stat→draft renders gear/materia,
+> and the debug room composites sprites (all layers + skin tone) in South & East facings.
+>
+> **Next: `state.js`** — move the shared mutable globals (`run`, `p1`, `p2`, loop
+> flags, snapshot maps, `_craftFn`) into one `export const S = {…}` object, then
+> rename `run`→`S.run` etc. This is cross-cutting and **not** a blind regex: short
+> tokens (`run`, `tiles`, `p1`, `p2`) also appear in strings/comments, so the rename
+> must be scoped to code. After `state.js`, the engine subsystems (`sprite-loader`,
+> `arena`, `compositor`, `combat`…) become straightforward.
 
 ### Shared state comes first
 Many globals (`run`, `p1`, `p2`, `gamePhase`, `turnNum`, `moveQueue`, loop flags,
