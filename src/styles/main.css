@@ -1,0 +1,14 @@
+/* The Crucible — stylesheet entry.
+   Split from the original monolith's <style> block along its section comments.
+   Imported by src/main.js; Vite bundles these @imports into one stylesheet. */
+@import './base.css';
+@import './title.css';
+@import './stat-roll.css';
+@import './draft.css';
+@import './battle.css';
+@import './loot.css';
+@import './lab.css';
+@import './endscreens.css';
+@import './crafting.css';
+@import './action-arena.css';
+@import './builder.css';

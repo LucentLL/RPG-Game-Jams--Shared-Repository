@@ -1,0 +1,21 @@
+/* ═══ GAME OVER / VICTORY ═══ */
+#gameOverScreen,#victoryScreen{align-items:center;justify-content:center;padding:20px;text-align:center}
+.go-title{font-family:'Cinzel',serif;font-size:1.6em;letter-spacing:0.25em;margin-bottom:8px}
+.go-stats{font-size:0.85em;color:var(--dim);line-height:1.8}
+.go-stats span{color:var(--text)}
+.champ-input{background:var(--card);border:2px solid var(--gold);color:var(--gold);font-family:'Cinzel',serif;font-size:1.1em;text-align:center;padding:10px 20px;border-radius:8px;outline:none;width:min(280px,80vw);letter-spacing:0.1em;margin:12px 0}
+.champ-input::placeholder{color:#555}
+
+/* ═══ PANTHEON ═══ */
+#pantheonScreen{align-items:center;padding:20px}
+.pantheon-title{font-family:'Cinzel',serif;font-size:1.2em;letter-spacing:0.2em;color:#e8e0d0;margin-bottom:16px;text-align:center}
+.pantheon-list{max-width:500px;width:100%}
+.pantheon-card{background:var(--card);border:1px solid var(--border);border-radius:10px;padding:12px;margin-bottom:8px;display:flex;gap:12px;align-items:center}
+.pantheon-card canvas{image-rendering:pixelated;border-radius:6px;background:#08080d}
+.pantheon-card .pc-info{flex:1}
+.pantheon-card .pc-name{font-family:'Cinzel',serif;font-size:0.9em;color:var(--gold);letter-spacing:0.08em}
+.pantheon-card .pc-stats{font-size:0.7em;color:var(--dim);margin-top:2px}
+.pantheon-card .pc-gear{font-size:0.68em;color:var(--muted);margin-top:3px}
+.pantheon-card .pc-meta{font-size:0.65em;color:#444;margin-top:2px}
+.pantheon-empty{text-align:center;color:var(--dim);font-style:italic;font-size:0.85em;padding:30px 0}
+

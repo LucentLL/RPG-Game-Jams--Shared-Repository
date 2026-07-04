@@ -1,0 +1,11 @@
+/* ═══ LOOT SCREEN ═══ */
+#lootScreen{align-items:center;padding:20px;text-align:center}
+.loot-header{font-family:'Cinzel',serif;font-size:1.1em;letter-spacing:0.15em;color:var(--gold);margin-bottom:4px}
+.loot-sub{font-size:0.8em;color:var(--dim);margin-bottom:16px}
+.loot-items{display:grid;grid-template-columns:1fr 1fr;gap:8px;max-width:500px;width:100%}
+.loot-card{background:var(--card);border:1px solid var(--border);border-radius:10px;padding:10px;text-align:left}
+.loot-card .gc-name{font-size:0.8em;font-weight:600;color:#e8e0d0}
+.loot-card .gc-pos{font-size:0.65em;color:var(--muted)}
+.loot-card .gc-sockets{display:flex;align-items:center;gap:2px;margin-top:4px;flex-wrap:wrap}
+.loot-qs{font-size:0.9em;color:var(--qs-col);margin:12px 0}
+

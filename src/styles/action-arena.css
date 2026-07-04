@@ -1,0 +1,20 @@
+/* ═══ ACTION ARENA ═══ */
+#actionScreen{align-items:center;padding:12px;gap:8px}
+.action-hud{display:flex;flex-direction:column;gap:4px;width:min(720px,95vw)}
+.action-hp-row{display:flex;align-items:center;gap:8px}
+.action-hp-label{font-family:'Cinzel',serif;font-size:0.72em;letter-spacing:0.1em;color:#e8e0d0;min-width:130px}
+.action-arena{position:relative;width:720px;height:720px;max-width:95vw;max-height:95vw;background:#1a2418;border:1px solid var(--border);border-radius:6px;overflow:hidden;image-rendering:pixelated;background-size:100% 100%}
+.action-fighter{position:absolute;left:0;top:0;image-rendering:pixelated;pointer-events:none;transform:translate(0,0);transform-origin:top left}
+.action-help{font-size:0.75em;color:var(--muted);font-family:'Cinzel',serif;letter-spacing:0.08em;margin-top:6px}
+.action-attacks{display:flex;flex-wrap:wrap;gap:6px;justify-content:center;max-width:min(720px,95vw)}
+.action-attacks button{padding:8px 14px;background:var(--card);border:1px solid var(--gold);color:var(--gold);border-radius:6px;font-family:'Cinzel',serif;font-size:0.8em;letter-spacing:0.08em;cursor:pointer;transition:all 0.15s}
+.action-attacks button:hover{background:rgba(212,168,67,0.18)}
+.action-attacks button:disabled{opacity:0.4;cursor:default}
+.action-attacks button .atk-key{font-size:0.7em;opacity:0.7;margin-right:4px}
+.action-attacks button.cooling{opacity:0.45}
+.action-log{font-size:0.72em;color:var(--dim);max-width:min(720px,95vw);width:100%;height:78px;overflow-y:auto;background:var(--card);border:1px solid var(--border);border-radius:6px;padding:6px 10px;font-family:'Cormorant Garamond',serif}
+.action-log .log-entry{margin:2px 0}
+.action-log .log-entry.hit{color:var(--text)}
+.action-log .log-entry.crit{color:var(--gold);font-weight:600}
+.action-log .log-entry.miss{color:var(--muted);font-style:italic}
+
