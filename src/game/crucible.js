@@ -13,6 +13,7 @@
 // keeps running at every step.
 // ═══════════════════════════════════════════════════════════════════════════
 import { SPRITE_BASES, MATERIA_BASE, FX_BASE } from '../config/assets.js';
+import { facingToRow, facingAngle, faceBothFighters, angleDiff, getZone, getAdjacentTilesByZone, isRearTile, isFrontTile } from './engine/facing.js';
 import './state.js'; // shared mutable game state (bridged onto window for legacy bare-name access)
 import {
   BODY_TYPES, ELEMENTS_LAYER_ORDER_SOUTH, ELEMENTS_LAYER_ORDER_SIDE, ELEMENTS_LAYER_ORDER_NORTH,
@@ -1386,16 +1387,6 @@ function loadSpriteSheets() {
   // Compositor loads modular parts on demand; nothing to preload here.
 }
 
-function facingToRow(angle) {
-  // Convert game's radian facing to Mana Seed spritesheet row
-  // Game: atan2(dx,-dy) → 0=target above, PI=target below, PI/2=right, -PI/2=left
-  // Spritesheet rows: 0=South(front), 1=East(right), 2=West(left), 3=North(back)
-  var deg = ((angle * 180 / Math.PI) % 360 + 360) % 360;
-  if (deg > 315 || deg <= 45) return 3;     // target above → face up (show back)
-  if (deg > 45 && deg <= 135) return 2;     // target right → face right (East, row 2)
-  if (deg > 135 && deg <= 225) return 0;    // target below → face down (South, row 0)
-  return 1;                                  // target left → face left (West, row 1)
-}
 
 function initFighterAnim(fighter) {
   fighter.anim = { name: 'idle', frame: 0, timer: 0, onDone: null };
@@ -1571,53 +1562,6 @@ function startAnimLoop() {
 function stopAnimLoop() { animLoopRunning = false; }
 
 // ═══ FACING ═══
-function facingAngle(dx,dy){
-  if(dx===0&&dy===0)return 0;
-  return Math.atan2(dx,-dy);
-}
-function faceBothFighters(){
-  if(!p1||!p2)return;
-  if(p1.hp>0&&p2.hp>0){
-    p1.facing=facingAngle(p2.x-p1.x,p2.y-p1.y);
-    p2.facing=facingAngle(p1.x-p2.x,p1.y-p2.y);
-  }
-}
-
-// ═══ FACING ZONES (Front/Side/Rear) ═══
-// Uses the radian-based facing system to classify adjacent tiles
-function angleDiff(a, b) {
-  var d = a - b;
-  while (d > Math.PI) d -= 2 * Math.PI;
-  while (d < -Math.PI) d += 2 * Math.PI;
-  return d;
-}
-
-function getZone(defender, tileX, tileY) {
-  // Returns 'front', 'side', or 'rear' for a tile relative to defender's facing
-  var dx = tileX - defender.x, dy = tileY - defender.y;
-  if (dx === 0 && dy === 0) return 'self';
-  var tileAngle = Math.atan2(dx, -dy); // same convention as facingAngle
-  var diff = Math.abs(angleDiff(tileAngle, defender.facing));
-  if (diff <= Math.PI * 0.375) return 'front';  // ~67.5° cone
-  if (diff >= Math.PI * 0.625) return 'rear';    // ~67.5° cone behind
-  return 'side';
-}
-
-function getAdjacentTilesByZone(entity, zone) {
-  var tiles = [];
-  for (var dx = -1; dx <= 1; dx++) {
-    for (var dy = -1; dy <= 1; dy++) {
-      if (dx === 0 && dy === 0) continue;
-      var tx = entity.x + dx, ty = entity.y + dy;
-      if (tx < 0 || tx >= GS || ty < 0 || ty >= GS) continue;
-      if (getZone(entity, tx, ty) === zone) tiles.push({x: tx, y: ty});
-    }
-  }
-  return tiles;
-}
-
-function isRearTile(entity, tx, ty) { return getZone(entity, tx, ty) === 'rear'; }
-function isFrontTile(entity, tx, ty) { return getZone(entity, tx, ty) === 'front'; }
 
 // ═══ GAME STATE ═══
 
