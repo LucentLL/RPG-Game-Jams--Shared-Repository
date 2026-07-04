@@ -156,7 +156,30 @@ function advanceAll() {
   addGold(guild, -upkeep);
   const week = guild.calendar.week;
   const results = [];
-  const resolvedQuests = new Set(); // each quest resolves at most once per week
+
+  // --- Quest pre-pass: heroes assigned to the SAME quest form a PARTY; the quest
+  // resolves ONCE on the party's combined power, and guild rewards are paid ONCE. ---
+  const parties = {};
+  for (const h of guild.roster) {
+    if (h.assignment.type === 'quest' && h.assignment.questId) (parties[h.assignment.questId] = parties[h.assignment.questId] || []).push(h);
+  }
+  const questPlan = {}; // heroId -> { quest, outcome, marched, isLead, partySize }
+  for (const questId in parties) {
+    const party = parties[questId];
+    const quest = guild.questBoard.find((q) => q.id === questId);
+    const marchers = quest ? party.filter((h) => !h.condition.injury && h.condition.stamina >= QUEST_STAMINA) : [];
+    const outcome = (quest && marchers.length) ? resolveQuest(quest, marchers) : null;
+    if (outcome && outcome.success) { // guild rewards, once for the whole party
+      addGold(guild, quest.rewards.gold);
+      guild.reputation += quest.rewards.reputation;
+      if (quest.loot) addMaterial(guild.inventory, quest.loot, 1);
+    }
+    party.forEach((h) => {
+      questPlan[h.id] = { quest, outcome, marched: marchers.includes(h), isLead: marchers[0] === h, partySize: marchers.length };
+      h.assignment.questId = null; // dispatch spent — pick a new quest next week
+    });
+  }
+
   for (const h of guild.roster) {
     const a = h.assignment;
     const diet = getDietPlan(a.dietId);
@@ -173,33 +196,28 @@ function advanceAll() {
     } else if (a.type === 'study') {
       entry.study = study(h);
     } else if (a.type === 'quest') {
-      const quest = guild.questBoard.find((q) => q.id === a.questId);
-      if (!quest || resolvedQuests.has(quest.id)) {
+      const plan = questPlan[h.id];
+      if (!plan || !plan.quest) {
         entry.quest = { noQuest: true };
-      } else if (h.condition.stamina < QUEST_STAMINA) {
-        entry.quest = { tooTired: true }; // too exhausted to set out — must rest first
+      } else if (!plan.marched) {
+        entry.quest = { tooTired: true }; // too tired/injured to march this week
       } else {
-        resolvedQuests.add(quest.id);
         onExpedition = true;
+        const success = plan.outcome.success;
         h.condition.stamina = Math.max(0, h.condition.stamina - QUEST_STAMINA);
-        const outcome = resolveQuest(quest, [h]);
-        entry.quest = { title: quest.title, success: outcome.success };
-        h.condition.fatigue = Math.min(100, h.condition.fatigue + (outcome.success ? 20 : 35));
-        if (outcome.success) {
-          const fieldGain = quest.rewards.field; // only a SUCCESSFUL quest teaches Field Insight
+        h.condition.fatigue = Math.min(100, h.condition.fatigue + (success ? 20 : 35));
+        entry.quest = { title: plan.quest.title, success, party: plan.partySize };
+        if (success) {
+          const fieldGain = plan.quest.rewards.field; // only a SUCCESSFUL quest teaches Field Insight
           h.professions.blacksmithing.field = Math.min(100, h.professions.blacksmithing.field + fieldGain);
           entry.field = fieldGain;
-          addGold(guild, quest.rewards.gold);
-          guild.reputation += quest.rewards.reputation;
-          if (quest.loot) addMaterial(guild.inventory, quest.loot, 1);
-          entry.reward = { gold: quest.rewards.gold, rep: quest.rewards.reputation, loot: quest.loot };
+          if (plan.isLead) entry.reward = { gold: plan.quest.rewards.gold, rep: plan.quest.rewards.reputation, loot: plan.quest.loot };
           questMorale = 8;
         } else {
           entry.field = 0;
           questMorale = -12;
         }
       }
-      a.questId = null; // the dispatch is spent; pick a new quest next week
     } else {
       const res = applyTraining(h, a.trainingId, a.intensity, diet.statBias);
       entry.drill = (getDrill(a.trainingId) || REST).name;
@@ -327,11 +345,16 @@ function assignPanel() {
 
   const hp = heroPower(h);
   const questList = guild.questBoard.map((q) => {
-    const odds = questOdds(hp, q.recommendedPower);
+    const partyHeroes = guild.roster.filter((x) => x.assignment.type === 'quest' && x.assignment.questId === q.id);
+    const already = partyHeroes.some((x) => x.id === h.id);
+    const partyPower = partyHeroes.reduce((s, x) => s + heroPower(x), 0);
+    const odds = questOdds(already ? partyPower : partyPower + hp, q.recommendedPower); // odds if this hero joins
     const chosen = at === 'quest' && h.assignment.questId === q.id;
     const lootTxt = q.loot ? ` · +1 ${MATERIALS[q.loot].name}` : '';
+    const n = partyHeroes.length + (already ? 0 : 1);
+    const partyTag = n > 1 ? ` · <span class="dim">party of ${n}</span>` : '';
     return `<button class="opt quest-opt ${chosen ? 'active' : ''}" onclick="__guild.setQuest('${q.id}')">
-      <span><span class="o-name">${q.title} <span class="q-rank">R${q.rank}</span></span> <span class="o-desc">${q.patron} · <span class="${odds.cls}">${odds.txt} ~${odds.pct}%</span></span></span>
+      <span><span class="o-name">${q.title} <span class="q-rank">R${q.rank}</span></span> <span class="o-desc">${q.patron} · <span class="${odds.cls}">${odds.txt} ~${odds.pct}%</span>${partyTag}</span></span>
       <span class="o-cost">${q.rewards.gold}g · +${q.rewards.reputation}rep${lootTxt}</span></button>`;
   }).join('');
 
@@ -415,8 +438,12 @@ function recapPanel() {
       if (r.quest && r.quest.noQuest) return `<div class="r-line"><b>${r.name}</b> <span class="down">had no quest assigned</span></div>`;
       if (r.quest && r.quest.tooTired) return `<div class="r-line"><b>${r.name}</b> <span class="down">too exhausted to set out — rest first</span></div>`;
       if (r.quest && r.quest.success) {
-        const loot = r.reward && r.reward.loot ? ` +1 ${MATERIALS[r.reward.loot].name}` : '';
-        return `<div class="r-line"><b>${r.name}</b> completed <span class="up">${r.quest.title}</span> — <span class="up">+${r.reward.gold}g · +${r.reward.rep} rep${loot}</span> <span class="dim">· Field +${r.field}</span></div>`;
+        const party = r.quest.party > 1 ? ` <span class="dim">(party of ${r.quest.party})</span>` : '';
+        if (r.reward) {
+          const loot = r.reward.loot ? ` +1 ${MATERIALS[r.reward.loot].name}` : '';
+          return `<div class="r-line"><b>${r.name}</b> completed <span class="up">${r.quest.title}</span> — <span class="up">+${r.reward.gold}g · +${r.reward.rep} rep${loot}</span> <span class="dim">· Field +${r.field}</span>${party}</div>`;
+        }
+        return `<div class="r-line"><b>${r.name}</b> joined <span class="up">${r.quest.title}</span> <span class="dim">· Field +${r.field}</span>${party}</div>`;
       }
       return `<div class="r-line"><b>${r.name}</b> <span class="down">failed ${r.quest ? r.quest.title : 'a quest'}</span></div>`;
     }
