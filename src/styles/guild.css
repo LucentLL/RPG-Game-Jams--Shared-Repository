@@ -1,0 +1,63 @@
+/* ═══ HEROES GUILD (management) ═══ */
+#guildScreen { align-items: center; padding: 16px 12px 48px; overflow-y: auto; }
+.guild-wrap { width: min(560px, 94vw); margin: 0 auto; }
+
+.guild-topbar {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap;
+  border: 1px solid var(--border); background: var(--card); border-radius: 10px; padding: 10px 14px; margin-bottom: 14px;
+}
+.guild-name { font-family: 'Cinzel', serif; color: var(--gold); letter-spacing: 0.08em; font-size: 1.02em; }
+.guild-meta { display: flex; gap: 14px; font-size: 0.82em; color: var(--muted); }
+.guild-meta b { color: var(--text); }
+.guild-back { border: 1px solid var(--dim); color: var(--dim); background: transparent; border-radius: 8px; padding: 6px 12px; font-size: 0.78em; }
+.guild-back:hover { border-color: var(--silver); color: var(--silver); }
+
+.hero-card, .plan-card { border: 1px solid var(--border); background: var(--card); border-radius: 12px; padding: 16px; margin-bottom: 14px; }
+
+.hero-top { display: flex; align-items: center; gap: 14px; margin-bottom: 14px; }
+.hero-portrait {
+  width: 72px; height: 72px; flex: 0 0 72px; border: 2px solid var(--gold); border-radius: 12px;
+  display: flex; align-items: center; justify-content: center; font-size: 2em;
+  background: radial-gradient(circle at 50% 35%, #2a2018, #0c0c10);
+  box-shadow: inset 0 0 18px rgba(212, 168, 67, 0.15);
+}
+.hero-name { font-family: 'Cinzel', serif; font-size: 1.15em; color: #e8e0d0; }
+.hero-sub { font-size: 0.78em; color: var(--muted); font-style: italic; margin: 2px 0 4px; }
+.hero-power { font-size: 0.82em; color: var(--gold); font-family: 'Cinzel', serif; }
+
+.stat-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 14px; }
+.stat-cell { border: 1px solid var(--border); border-radius: 8px; padding: 8px 4px; text-align: center; background: rgba(0, 0, 0, 0.22); }
+.stat-cell .k { font-size: 0.66em; color: var(--muted); letter-spacing: 0.12em; }
+.stat-cell .v { font-family: 'Cinzel', serif; font-size: 1.3em; color: var(--text); line-height: 1.3; }
+.stat-cell .d { font-size: 0.72em; color: var(--success); height: 1em; }
+
+.cond-row { margin-bottom: 8px; }
+.cond-row .lbl { display: flex; justify-content: space-between; font-size: 0.72em; color: var(--muted); margin-bottom: 3px; letter-spacing: 0.05em; }
+.cond-track { height: 8px; border-radius: 5px; background: rgba(0, 0, 0, 0.45); overflow: hidden; }
+.cond-fill { height: 100%; border-radius: 5px; transition: width 0.4s ease; }
+
+.plan-title { font-family: 'Cinzel', serif; color: var(--gold); font-size: 0.78em; letter-spacing: 0.14em; margin-bottom: 8px; text-transform: uppercase; }
+.opt-list { display: flex; flex-direction: column; gap: 6px; margin-bottom: 18px; }
+.opt {
+  display: flex; justify-content: space-between; align-items: center; gap: 10px; text-align: left;
+  border: 1px solid var(--border); background: rgba(0, 0, 0, 0.22); border-radius: 8px; padding: 9px 12px;
+  color: var(--text); font-size: 0.86em; transition: border-color 0.15s, background 0.15s;
+}
+.opt:hover { border-color: var(--dim); }
+.opt.active { border-color: var(--gold); background: linear-gradient(135deg, #2a1a0a, #3a2a10); box-shadow: 0 0 12px rgba(212, 168, 67, 0.15); }
+.opt .o-name { font-weight: 600; }
+.opt .o-desc { font-size: 0.86em; color: var(--muted); font-style: italic; }
+.opt .o-cost { font-size: 0.74em; color: var(--gold); white-space: nowrap; }
+
+.advance-btn {
+  width: 100%; padding: 14px; margin-top: 2px; background: linear-gradient(135deg, #2a1a0a, #3a2a10);
+  border: 2px solid var(--gold); color: var(--gold); font-family: 'Cinzel', serif; font-size: 1em;
+  letter-spacing: 0.15em; border-radius: 10px; transition: transform 0.2s, box-shadow 0.2s;
+}
+.advance-btn:hover { transform: scale(1.02); box-shadow: 0 0 20px rgba(212, 168, 67, 0.25); }
+
+.week-report { border: 1px solid var(--border); background: rgba(0, 0, 0, 0.28); border-radius: 10px; padding: 12px 14px; font-size: 0.82em; }
+.week-report h4 { font-family: 'Cinzel', serif; color: var(--gold); font-size: 0.82em; letter-spacing: 0.1em; margin-bottom: 6px; }
+.week-report .r-line { margin: 3px 0; color: var(--muted); }
+.week-report .up { color: var(--success); }
+.week-report .down { color: var(--danger); }

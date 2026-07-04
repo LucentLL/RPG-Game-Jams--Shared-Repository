@@ -8,13 +8,11 @@
 import './styles/main.css';
 import './game/crucible.js';
 
-// --- Guild layer (scaffold) -------------------------------------------------
-// The Monster-Rancher-style guild systems are being built alongside the engine.
-// Imported so the build validates them; not yet wired into gameplay.
-// See src/guild/ and ARCHITECTURE.md for the pivot plan.
+// --- Guild layer ------------------------------------------------------------
+// The Monster-Rancher-style heroes-guild game, built alongside the battle engine.
 import * as guild from './guild/index.js';
 import * as platform from './platform/index.js';
+import './guild/hall.js'; // Guild Hall screen — registers window.openGuild
 
-// Expose the new layers on a namespaced global so they're reachable from the
-// devtools console while the guild UI is being built. Harmless, easy to remove.
+// Expose the layers on a namespaced global for the devtools console.
 window.CRUCIBLE = { guild, platform };

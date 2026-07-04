@@ -20,8 +20,9 @@
 <div class="screen active" id="titleScreen">
   <div class="title-logo">⚗ THE CRUCIBLE ⚗</div>
   <div class="title-sub">Athanor Mode — The Alchemical Furnace</div>
-  <button class="title-btn" onclick="startTurnFlow()">⚗ ENTER THE ATHANOR ⚗</button>
-  <button class="title-btn" onclick="startActionFlow()">⚡ ACTION ARENA ⚡</button>
+  <button class="title-btn" onclick="openGuild()">🏰 HEROES GUILD 🏰</button>
+  <button class="title-btn secondary" onclick="startTurnFlow()">⚗ Enter the Athanor</button>
+  <button class="title-btn secondary" onclick="startActionFlow()">⚡ Action Arena</button>
   <button class="title-btn secondary" onclick="showPantheon()">☿ PANTHEON</button>
   <button class="title-btn secondary" onclick="openDebug()">🔧 DEBUG ROOM</button>
   <div class="pantheon-preview" id="titlePantheonPreview"></div>
@@ -270,6 +271,9 @@
 <div class="mat-detail-overlay" id="matDetailOverlay" onclick="closeMatDetail()">
   <div class="mat-detail" id="matDetailPanel" onclick="event.stopPropagation()"></div>
 </div>
+
+<!-- ═══ HEROES GUILD (management) ═══ -->
+<div class="screen" id="guildScreen"></div>
 
 </body>
 </html>
