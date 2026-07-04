@@ -1,7 +1,7 @@
 /**
  * @file Diet plans — Monster-Rancher-style feeding. A hero's assigned diet
- * modifies weekly stat growth (via statBias, consumed by training.js), stamina
- * recovery, and fatigue. Balancing diet against training intensity is core loop.
+ * biases weekly stat growth (via statBias, consumed by training.js) and drives
+ * stamina/fatigue recovery. Balancing diet against training is the core loop.
  */
 
 /**
@@ -20,23 +20,24 @@
 export const DIET_PLANS = [
   { id: 'balanced', name: 'Balanced Rations', description: 'Steady, cheap, no downside.',
     weeklyCost: 5, statBias: {}, staminaRecovery: 30, fatigueRelief: 20, injuryRiskMod: 0 },
-  { id: 'protein', name: 'Protein Feast', description: 'Bulks STR/CON; dulls the mind.',
-    weeklyCost: 12, statBias: { STR: 1.3, CON: 1.2, INT: 0.8 }, staminaRecovery: 25, fatigueRelief: 15, injuryRiskMod: -0.02 },
-  { id: 'scholar', name: "Scholar's Table", description: 'Feeds INT/WIS; softens the body.',
-    weeklyCost: 12, statBias: { INT: 1.3, WIS: 1.2, STR: 0.85 }, staminaRecovery: 25, fatigueRelief: 20, injuryRiskMod: 0 },
-  { id: 'lean', name: 'Lean & Light', description: 'Boosts DEX & recovery; less raw power.',
-    weeklyCost: 10, statBias: { DEX: 1.3, STR: 0.9 }, staminaRecovery: 40, fatigueRelief: 30, injuryRiskMod: -0.03 },
+  { id: 'protein', name: 'Protein Feast', description: 'Bulks POW & VIT; dulls the mind.',
+    weeklyCost: 12, statBias: { POW: 1.35, VIT: 1.2, INT: 0.8 }, staminaRecovery: 25, fatigueRelief: 15, injuryRiskMod: -0.02 },
+  { id: 'scholar', name: "Scholar's Table", description: 'Feeds INT & SKL; softens the body.',
+    weeklyCost: 12, statBias: { INT: 1.35, SKL: 1.2, POW: 0.85 }, staminaRecovery: 25, fatigueRelief: 20, injuryRiskMod: 0 },
+  { id: 'lean', name: 'Lean & Light', description: 'Boosts SPD & recovery; less raw power.',
+    weeklyCost: 10, statBias: { SPD: 1.35, SKL: 1.1, POW: 0.9 }, staminaRecovery: 40, fatigueRelief: 30, injuryRiskMod: -0.03 },
+  { id: 'hearty', name: 'Hearty Stew', description: 'Toughens DEF & VIT; a slow burn.',
+    weeklyCost: 12, statBias: { DEF: 1.35, VIT: 1.2, SPD: 0.9 }, staminaRecovery: 30, fatigueRelief: 25, injuryRiskMod: -0.04 },
   { id: 'feast', name: 'Lavish Feast', description: 'Morale soars, waistlines too.',
-    weeklyCost: 20, statBias: { CHA: 1.2 }, staminaRecovery: 45, fatigueRelief: 35, injuryRiskMod: 0.01 },
+    weeklyCost: 20, statBias: { POW: 1.05, DEF: 1.05 }, staminaRecovery: 45, fatigueRelief: 35, injuryRiskMod: 0.01 },
 ];
 
 /** @param {string} id @returns {?DietPlan} */
-export function getDietPlan(id) { return DIET_PLANS.find(d => d.id === id) || null; }
+export function getDietPlan(id) { return DIET_PLANS.find((d) => d.id === id) || null; }
 
 /**
  * Apply one week of the hero's diet to their condition. Training applies stat
  * gains separately (training.js) using this diet's statBias.
- * TODO: model long-term over/under-feeding (weight, peak decline).
  * @param {import('./hero.js').Hero} hero
  * @param {DietPlan} diet
  */

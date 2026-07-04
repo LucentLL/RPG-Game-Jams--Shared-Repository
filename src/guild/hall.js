@@ -10,7 +10,7 @@
 // inventory (food supply, smithing materials, armory).
 
 import { createGuild } from './guild.js';
-import { HERO_STATS, heroPower } from './hero.js';
+import { HERO_STATS, heroPower, STAT_CAP } from './hero.js';
 import { generateRecruit, hireCost, rollRecruitPool } from './recruiting.js';
 import { TRAINING_REGIMENS, getRegimen, applyTraining } from './training.js';
 import { DIET_PLANS, getDietPlan, applyDiet } from './diet.js';
@@ -32,8 +32,25 @@ function heroById(id) { return guild.roster.find((h) => h.id === id); }
 function clamp(n) { return Math.max(0, Math.min(100, Math.round(n))); }
 
 function ensureAssignment(h) {
-  if (!h.assignment) h.assignment = { trainingId: 'drill_str', dietId: h.dietPlanId || 'balanced' };
+  const validTraining = getRegimen(h.assignment && h.assignment.trainingId);
+  if (!h.assignment || !validTraining) h.assignment = { trainingId: 'drill_pow', dietId: (h.dietPlanId) || 'balanced' };
   if (!h.dietPlanId) h.dietPlanId = h.assignment.dietId;
+}
+
+// Migrate heroes saved under the old D&D stat block (STR/DEX/…) to the new
+// Monster-Rancher stats (POW/DEF/…), scaling values up so trained progress carries over.
+function migrateHero(h) {
+  if (h && h.stats && h.stats.POW === undefined) {
+    const o = h.stats;
+    const up = (v) => Math.min(STAT_CAP, Math.round((v || 10) * 2.5));
+    h.stats = {
+      POW: up(o.STR), DEF: up(o.CHA ?? o.CON), SKL: up(o.WIS ?? o.DEX),
+      SPD: up(o.DEX), INT: up(o.INT), VIT: up(o.CON),
+    };
+  }
+  if (!h || !h.growth || h.growth.POW === undefined) {
+    if (h) { h.growth = {}; HERO_STATS.forEach((s) => { h.growth[s] = 2; }); }
+  }
 }
 
 function load() {
@@ -44,8 +61,9 @@ function load() {
     guild = createGuild({ name: 'The Wandering Blade' });
     guild.roster.push(generateRecruit());
   }
-  guild.roster.forEach(ensureAssignment);
-  if (!Array.isArray(guild.recruits) || !guild.recruits.length) guild.recruits = rollRecruitPool(3);
+  guild.roster.forEach((h) => { migrateHero(h); ensureAssignment(h); });
+  const staleRecruits = guild.recruits && guild.recruits[0] && guild.recruits[0].stats && guild.recruits[0].stats.POW === undefined;
+  if (!Array.isArray(guild.recruits) || !guild.recruits.length || staleRecruits) guild.recruits = rollRecruitPool(3);
   if (!selectedId && guild.roster[0]) selectedId = guild.roster[0].id;
   save();
 }
@@ -139,9 +157,17 @@ function assignPanel() {
   const h = heroById(selectedId);
   if (!h) return '<div class="plan-card"><div class="hint">Tap a hero above to plan their week.</div></div>';
 
+  const rep = report && report.results ? report.results.find((r) => r.name === h.name) : null;
   const stats = HERO_STATS.map((s) => {
-    const d = report && report.results && (report.results.find((r) => r.name === h.name)?.gains?.[s]) ? `+${report.results.find((r) => r.name === h.name).gains[s]}` : '';
-    return `<div class="stat-cell"><div class="k">${s}</div><div class="v">${h.stats[s]}</div><div class="d">${d}</div></div>`;
+    const val = h.stats[s] || 0;
+    const g = rep && rep.gains && rep.gains[s] ? rep.gains[s] : 0;
+    const pct = Math.round((val / STAT_CAP) * 100);
+    return `<div class="stat-cell">
+        <div class="k">${s}</div>
+        <div class="v">${val}<span class="cap">/${STAT_CAP}</span></div>
+        <div class="statbar"><span style="width:${pct}%"></span></div>
+        <div class="d">${g ? '+' + g : ''}</div>
+      </div>`;
   }).join('');
 
   const training = TRAINING_REGIMENS.map((r) => {

@@ -1,11 +1,21 @@
 /**
  * @file Hero model — a recruitable, trainable guild member.
- * Heroes reuse the battle engine's six-stat block (STR/DEX/CON/INT/WIS/CHA) so
- * a hero can be handed straight to the engine for quest/tournament resolution.
+ *
+ * Stats use a Monster-Rancher / Pokémon-style scale (0..STAT_CAP) rather than
+ * D&D's 3–20, so there is room for many weeks of satisfying training growth.
+ * Six stats: POW (power), DEF (defense), SKL (skill/accuracy), SPD (speed),
+ * INT (intellect/magic), VIT (vitality/life). Raise STAT_CAP to 255/999 later
+ * if you want an even longer grind — training and display are cap-relative.
  */
 
-/** Primary stats, shared with the battle engine (src/game/crucible.js). */
-export const HERO_STATS = ['STR', 'DEX', 'CON', 'INT', 'WIS', 'CHA'];
+/** Primary stats (Monster-Rancher style). */
+export const HERO_STATS = ['POW', 'DEF', 'SKL', 'SPD', 'INT', 'VIT'];
+
+/** Display names for the UI. */
+export const STAT_LABEL = { POW: 'Power', DEF: 'Defense', SKL: 'Skill', SPD: 'Speed', INT: 'Intellect', VIT: 'Vitality' };
+
+/** The soft ceiling every stat trains toward. Bump to 255 or 999 for a longer game. */
+export const STAT_CAP = 100;
 
 /**
  * @typedef {Object} HeroCondition
@@ -20,10 +30,10 @@ export const HERO_STATS = ['STR', 'DEX', 'CON', 'INT', 'WIS', 'CHA'];
  * @typedef {Object} Hero
  * @property {string} id
  * @property {string} name
- * @property {string} archetype   e.g. 'Knight', 'Mage' — biases growth
+ * @property {string} archetype   e.g. 'Knight', 'Mage' — biases growth talents
  * @property {?Object} appearance  Elements appearance descriptor (engine renders it)
- * @property {Object.<string,number>} stats   STR/DEX/CON/INT/WIS/CHA
- * @property {Object.<string,number>} growth  per-stat growth weighting (Monster-Rancher-style)
+ * @property {Object.<string,number>} stats   POW/DEF/SKL/SPD/INT/VIT, 0..STAT_CAP
+ * @property {Object.<string,number>} growth  per-stat growth talent (multiplier on training)
  * @property {number} level
  * @property {number} xp
  * @property {HeroCondition} condition
@@ -43,20 +53,23 @@ const _heroRun = Math.random().toString(36).slice(2, 7);
 function nextHeroId() { return 'hero_' + _heroRun + (++_heroSeq).toString(36); }
 
 /**
- * Create a hero with sane defaults. Stats default to all-10 (human average);
- * recruiting.js rolls real ones.
- * TODO: derive hp/ac/speed via the engine's deriveStats() at battle time.
+ * Create a hero with sane defaults. Stats default low (room to grow); recruiting.js
+ * rolls real starting stats + growth talents.
  * @param {Partial<Hero>} [init]
  * @returns {Hero}
  */
 export function createHero(init = {}) {
+  const flat = {};
+  HERO_STATS.forEach((s) => { flat[s] = 20; });
+  const ones = {};
+  HERO_STATS.forEach((s) => { ones[s] = 1; });
   return {
     id: init.id || nextHeroId(),
     name: init.name || 'Unnamed Hero',
     archetype: init.archetype || 'Adventurer',
     appearance: init.appearance || null,
-    stats: init.stats || { STR: 10, DEX: 10, CON: 10, INT: 10, WIS: 10, CHA: 10 },
-    growth: init.growth || { STR: 1, DEX: 1, CON: 1, INT: 1, WIS: 1, CHA: 1 },
+    stats: init.stats || flat,
+    growth: init.growth || ones,
     level: init.level ?? 1,
     xp: init.xp ?? 0,
     condition: init.condition || { stamina: 100, morale: 70, loyalty: 60, fatigue: 0, injury: null },
@@ -70,9 +83,8 @@ export function createHero(init = {}) {
 }
 
 /**
- * Rough "power" rating used to gate quests and sort the roster.
- * TODO: replace with the engine's real combat evaluation once quests dispatch
- * into the battle system.
+ * Overall "power" rating — the sum of stats, nudged by level. With a 100 cap the
+ * ceiling is ~600, so a fully-trained hero reads clearly above a fresh recruit.
  * @param {Hero} hero
  * @returns {number}
  */
