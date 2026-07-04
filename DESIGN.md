@@ -175,9 +175,13 @@ Built on today's working weekly loop (roster, training, diet, recruiting, MR sta
 - **Phase 2 — Multi-track skills (Theory + Field).**
   Study (books → Theory → unlock recipes) and Field Insight (from quests). Recipe availability +
   quality gate on all three tracks. Show each person's expertise *shape* in the UI. *The signature system.*
-- **Phase 3 — Quartermaster + Squads + Consumables.**
-  Group heroes into squads, auto-equip by policy, deploy on quests that withdraw gear + supplies
-  and return loot/damage/injuries. Alchemist brews potions (consumables). *Logistics drive expeditions.*
+- **Phase 3 — Quartermaster + Squads + Consumables.** *(Squads ✅ · Quartermaster ✅ · Consumables ⏳)*
+  ✅ **Squads:** heroes sharing a quest form a party; it resolves once on combined power, pays reward
+  once, splits Field to all marchers. ✅ **Quartermaster:** `guild.quartermaster` policy (off/party/all)
+  auto-issues the best armory gear to the strongest heroes first ("by rank"), upgrade-only with
+  trickle-down; equipped **quality now feeds combatPower** so the armory measurably wins quests.
+  ⏳ **Consumables:** an Alchemist brews potions the party *withdraws* before a march (provisioning),
+  spent to swing a bad roll. *(Deploy-withdraws-supplies + damage/casualty returns land here + Phase 4.)*
 - **Phase 4 — Persistence, repair, inheritance, decay, mentorship.**
   Item history/durability/edge-quality; repair-vs-craft; inheritance on death; potion expiry; food
   spoilage; master→apprentice mentorship; the guild's library/workshops/veterans as institutional memory.
