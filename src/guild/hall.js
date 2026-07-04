@@ -14,7 +14,8 @@ import { DIET_PLANS, getDietPlan, applyDiet } from './diet.js';
 import { advanceWeek, formatDate } from './calendar.js';
 import { weeklyUpkeep, addGold, guildIncome } from './economy.js';
 import { RECIPES, getRecipe, previewQuality, forge, study, recipeUnlocked } from './smithing.js';
-import { MATERIALS, createInventory, armoryItems, findItem } from './inventory.js';
+import { MATERIALS, createInventory, armoryItems, findItem, addMaterial } from './inventory.js';
+import { generateQuestBoard, resolveQuest } from './quests.js';
 import { qualityTier } from './item.js';
 import { MATERIAL_PRICE, buyPrice, itemSellValue, createMarket, refreshMarket } from './market.js';
 import { saveGame, loadGame } from '../platform/storage.js';
@@ -36,9 +37,10 @@ function clamp(n) { return Math.max(0, Math.min(100, Math.round(n))); }
 function ensureAssignment(h) {
   const a = h.assignment || {};
   h.assignment = {
-    type: (a.type === 'forge' || a.type === 'study') ? a.type : 'train',
+    type: (a.type === 'forge' || a.type === 'study' || a.type === 'quest') ? a.type : 'train',
     trainingId: getRegimen(a.trainingId) ? a.trainingId : 'drill_pow',
     recipeId: getRecipe(a.recipeId) ? a.recipeId : 'iron_sword',
+    questId: a.questId || null,
     dietId: getDietPlan(a.dietId) ? a.dietId : (getDietPlan(h.dietPlanId) ? h.dietPlanId : 'balanced'),
   };
   if (!h.dietPlanId) h.dietPlanId = h.assignment.dietId;
@@ -71,6 +73,8 @@ function load() {
   }
   if (!guild.inventory) guild.inventory = createInventory();
   if (!guild.market) guild.market = createMarket();
+  if (typeof guild.reputation !== 'number') guild.reputation = 0;
+  if (!Array.isArray(guild.questBoard) || !guild.questBoard.length) guild.questBoard = generateQuestBoard(guild, 3);
   guild.roster.forEach((h) => { migrateHero(h); ensureAssignment(h); });
   const staleRecruits = guild.recruits && guild.recruits[0] && guild.recruits[0].stats && guild.recruits[0].stats.POW === undefined;
   if (!Array.isArray(guild.recruits) || !guild.recruits.length || staleRecruits) guild.recruits = rollRecruitPool(3);
@@ -81,7 +85,8 @@ function load() {
 
 // --- interactions -----------------------------------------------------------
 function selectHero(id) { selectedId = id; notice = ''; render(); }
-function setActivity(type) { const h = heroById(selectedId); if (h) { h.assignment.type = (type === 'forge' || type === 'study') ? type : 'train'; save(); render(); } }
+function setActivity(type) { const h = heroById(selectedId); if (h) { h.assignment.type = (type === 'forge' || type === 'study' || type === 'quest') ? type : 'train'; save(); render(); } }
+function setQuest(questId) { const h = heroById(selectedId); if (h) { h.assignment.type = 'quest'; h.assignment.questId = questId; save(); render(); } }
 function setTraining(id) { const h = heroById(selectedId); if (h) { h.assignment.trainingId = id; h.assignment.type = 'train'; save(); render(); } }
 function setRecipe(id) { const h = heroById(selectedId); if (h) { h.assignment.recipeId = id; h.assignment.type = 'forge'; save(); render(); } }
 function setDiet(id) { const h = heroById(selectedId); if (h) { h.assignment.dietId = id; h.dietPlanId = id; save(); render(); } }
@@ -146,12 +151,14 @@ function advanceAll() {
   addGold(guild, -upkeep);
   const week = guild.calendar.week;
   const results = [];
+  const resolvedQuests = new Set(); // each quest resolves at most once per week
   for (const h of guild.roster) {
     const a = h.assignment;
     const diet = getDietPlan(a.dietId);
     h.dietPlanId = a.dietId;
     const cb = { stamina: h.condition.stamina, fatigue: h.condition.fatigue };
     let entry = { name: h.name, id: h.id, type: a.type };
+    let questMorale = null;
 
     if (a.type === 'forge') {
       const recipe = getRecipe(a.recipeId);
@@ -159,14 +166,37 @@ function advanceAll() {
       entry.recipeName = recipe.name;
     } else if (a.type === 'study') {
       entry.study = study(h);
+    } else if (a.type === 'quest') {
+      const quest = guild.questBoard.find((q) => q.id === a.questId);
+      if (!quest || resolvedQuests.has(quest.id)) {
+        entry.quest = { noQuest: true };
+      } else {
+        resolvedQuests.add(quest.id);
+        const outcome = resolveQuest(quest, [h]);
+        entry.quest = { title: quest.title, success: outcome.success };
+        const fieldGain = outcome.success ? quest.rewards.field : Math.round(quest.rewards.field / 2);
+        h.professions.blacksmithing.field = Math.min(100, h.professions.blacksmithing.field + fieldGain);
+        entry.field = fieldGain;
+        h.condition.fatigue = Math.min(100, h.condition.fatigue + (outcome.success ? 20 : 35));
+        if (outcome.success) {
+          addGold(guild, quest.rewards.gold);
+          guild.reputation += quest.rewards.reputation;
+          if (quest.loot) addMaterial(guild.inventory, quest.loot, 1);
+          entry.reward = { gold: quest.rewards.gold, rep: quest.rewards.reputation, loot: quest.loot };
+          questMorale = 8;
+        } else {
+          questMorale = -12;
+        }
+      }
+      a.questId = null; // the dispatch is spent; pick a new quest next week
     } else {
       const regimen = getRegimen(a.trainingId);
       const { gains } = applyTraining(h, regimen, diet.statBias);
       entry.regimen = regimen.name; entry.gains = gains; entry.trained = Object.keys(gains).length > 0;
     }
 
-    applyDiet(h, diet);
-    let dm = a.type === 'train' && getRegimen(a.trainingId).intensity === 0 ? 6 : -1;
+    if (a.type !== 'quest') applyDiet(h, diet); // questing heroes are away — no guild rest this week
+    let dm = questMorale != null ? questMorale : (a.type === 'train' && getRegimen(a.trainingId).intensity === 0 ? 6 : -1);
     if (diet.id === 'feast') dm += 4;
     h.condition.morale = clamp(h.condition.morale + dm);
     h.age += 1;
@@ -176,6 +206,7 @@ function advanceAll() {
   if (shortfall > 0) guild.roster.forEach((h) => { h.condition.morale = clamp(h.condition.morale - 8); }); // unpaid wages hurt morale
   advanceWeek(guild.calendar);
   refreshMarket(guild.market);
+  guild.questBoard = generateQuestBoard(guild, 3);
   guild.recruits = rollRecruitPool(3);
   report = { income, upkeep, shortfall, results };
   notice = '';
@@ -192,6 +223,13 @@ function showScreen(id) {
 function fmtDelta(n) { n = Math.round(n); if (n > 0) return `<span class="up">+${n}</span>`; if (n < 0) return `<span class="down">${n}</span>`; return `${n}`; }
 function glyphOf(h) { return ARCH_GLYPH[h.archetype] || '☉'; }
 function statTotal(h) { return HERO_STATS.reduce((s, k) => s + (h.stats[k] || 0), 0); }
+function questOdds(hp, rec) {
+  const r = hp / Math.max(1, rec);
+  if (r >= 1.3) return { txt: 'Favorable', cls: 'up' };
+  if (r >= 0.9) return { txt: 'Even', cls: '' };
+  if (r >= 0.6) return { txt: 'Risky', cls: 'down' };
+  return { txt: 'Grim', cls: 'down' };
+}
 function bar(label, value, color) {
   const v = clamp(value);
   return `<div class="cond-row"><div class="lbl"><span>${label}</span><span>${v}</span></div>
@@ -200,9 +238,13 @@ function bar(label, value, color) {
 function mini(value, color) { return `<span class="mini"><span class="mini-fill" style="width:${clamp(value)}%;background:${color}"></span></span>`; }
 function qualHTML(item) { const t = qualityTier(item.quality); return `<span style="color:${t.col}">${t.name}</span> q${item.quality}`; }
 
+function questTitle(id) { const q = guild.questBoard.find((x) => x.id === id); return q ? q.title : null; }
 function rosterRow(h) {
   const a = h.assignment;
-  const plan = a.type === 'forge' ? `🔨 ${getRecipe(a.recipeId).name}` : (a.type === 'study' ? '📖 Study Smithing' : `⚔ ${getRegimen(a.trainingId).name}`);
+  const plan = a.type === 'forge' ? `🔨 ${getRecipe(a.recipeId).name}`
+    : a.type === 'study' ? '📖 Study Smithing'
+    : a.type === 'quest' ? `🗺 ${a.questId ? (questTitle(a.questId) || 'On Quest') : '(choose quest)'}`
+    : `⚔ ${getRegimen(a.trainingId).name}`;
   return `<button class="roster-row ${h.id === selectedId ? 'sel' : ''}" onclick="__guild.selectHero('${h.id}')">
       <span class="rr-portrait">${glyphOf(h)}</span>
       <span class="rr-main">
@@ -250,11 +292,21 @@ function assignPanel() {
     }
     return `<button class="opt ${isForge && r.id === h.assignment.recipeId ? 'active' : ''} ${enough ? '' : 'lack'}" onclick="__guild.setRecipe('${r.id}')">
       <span><span class="o-name">${KIND_GLYPH[r.kind] || ''} ${r.name}</span> <span class="o-desc">${cost}</span></span>
-      <span class="o-cost">~q${previewQuality(r, prof.practice)}</span></button>`;
+      <span class="o-cost">~q${previewQuality(r, prof.practice, prof.field)}</span></button>`;
   }).join('');
 
   const skillShape = `<div class="skill-shape">🔨 Blacksmithing — <b>Theory ${prof.theory}</b> · <b>Practice ${prof.practice}</b> · <span class="dim">Field ${prof.field}</span></div>`;
   const studyBody = `${skillShape}<div class="hint" style="text-align:left;padding:4px 0">The smith studies metallurgy — raises <b>Theory</b>, which unlocks steel &amp; mithril recipes. Practice (from forging) still sets quality.</div>`;
+
+  const hp = heroPower(h);
+  const questList = guild.questBoard.map((q) => {
+    const odds = questOdds(hp, q.recommendedPower);
+    const chosen = at === 'quest' && h.assignment.questId === q.id;
+    const lootTxt = q.loot ? ` · +1 ${MATERIALS[q.loot].name}` : '';
+    return `<button class="opt quest-opt ${chosen ? 'active' : ''}" onclick="__guild.setQuest('${q.id}')">
+      <span><span class="o-name">${q.title} <span class="q-rank">R${q.rank}</span></span> <span class="o-desc">${q.patron} · <span class="${odds.cls}">${odds.txt}</span> (pow ${hp} vs ${q.recommendedPower})</span></span>
+      <span class="o-cost">${q.rewards.gold}g · +${q.rewards.reputation}rep${lootTxt}</span></button>`;
+  }).join('');
 
   const diet = DIET_PLANS.map((d) => `<button class="opt ${d.id === h.assignment.dietId ? 'active' : ''}" onclick="__guild.setDiet('${d.id}')">
       <span><span class="o-name">${d.name}</span> <span class="o-desc">${d.description}</span></span><span class="o-cost">${d.weeklyCost}g/wk</span></button>`).join('');
@@ -268,12 +320,15 @@ function assignPanel() {
         <button class="${at === 'train' ? 'on' : ''}" onclick="__guild.setActivity('train')">⚔ Train</button>
         <button class="${at === 'forge' ? 'on' : ''}" onclick="__guild.setActivity('forge')">🔨 Forge</button>
         <button class="${at === 'study' ? 'on' : ''}" onclick="__guild.setActivity('study')">📖 Study</button>
+        <button class="${at === 'quest' ? 'on' : ''}" onclick="__guild.setActivity('quest')">🗺 Quest</button>
       </div>
       ${at === 'forge'
         ? `${skillShape}<div class="plan-title">🔨 Forge</div><div class="opt-list">${forgeList}</div>`
         : at === 'study'
           ? `<div class="plan-title">📖 Study Blacksmithing</div>${studyBody}`
-          : `<div class="plan-title">⚔ Training</div><div class="opt-list">${training}</div>`}
+          : at === 'quest'
+            ? `<div class="plan-title">🗺 Quest Board</div><div class="opt-list">${questList}</div>`
+            : `<div class="plan-title">⚔ Training</div><div class="opt-list">${training}</div>`}
       <div class="plan-title">🍖 Diet</div><div class="opt-list">${diet}</div>
     </div>`;
 }
@@ -328,6 +383,14 @@ function recapPanel() {
       return `<div class="r-line"><b>${r.name}</b> <span class="down">couldn't forge — ${why}</span></div>`;
     }
     if (r.type === 'study') return `<div class="r-line"><b>${r.name}</b> studied smithing — <span class="up">Theory +${r.study.theoryGain}</span></div>`;
+    if (r.type === 'quest') {
+      if (r.quest && r.quest.noQuest) return `<div class="r-line"><b>${r.name}</b> <span class="down">had no quest assigned</span></div>`;
+      if (r.quest && r.quest.success) {
+        const loot = r.reward && r.reward.loot ? ` +1 ${MATERIALS[r.reward.loot].name}` : '';
+        return `<div class="r-line"><b>${r.name}</b> completed <span class="up">${r.quest.title}</span> — <span class="up">+${r.reward.gold}g · +${r.reward.rep} rep${loot}</span> <span class="dim">· Field +${r.field}</span></div>`;
+      }
+      return `<div class="r-line"><b>${r.name}</b> <span class="down">failed ${r.quest ? r.quest.title : 'a quest'}</span> <span class="dim">· Field +${r.field || 0}</span></div>`;
+    }
     const g = r.trained ? HERO_STATS.filter((s) => r.gains[s]).map((s) => `${s}+${r.gains[s]}`).join(' ') : 'no gain — too fatigued';
     return `<div class="r-line"><b>${r.name}</b> · <span class="${r.trained ? 'up' : 'down'}">${g}</span> <span class="dim">(sta ${fmtDelta(r.sta)}, fat ${fmtDelta(r.fat)})</span></div>`;
   }).join('');
@@ -351,7 +414,7 @@ function render() {
     <div class="guild-wrap">
       <div class="guild-topbar">
         <div class="guild-name">☙ ${guild.name}</div>
-        <div class="guild-meta"><span>☉ <b>${guild.gold}</b>g</span><span>${formatDate(guild.calendar)}</span></div>
+        <div class="guild-meta"><span>☉ <b>${guild.gold}</b>g</span><span>✦ <b>${guild.reputation}</b> rep</span><span>${formatDate(guild.calendar)}</span></div>
         <button class="guild-back" onclick="__guild.back()">↩ title</button>
       </div>
       ${notice ? `<div class="notice">${notice}</div>` : ''}
@@ -379,4 +442,4 @@ export function openGuild() {
 }
 
 window.openGuild = openGuild;
-window.__guild = { selectHero, setActivity, setTraining, setRecipe, setDiet, equipItem, unequipSlot, buyMaterial, sellItem, hire, advanceAll, back };
+window.__guild = { selectHero, setActivity, setTraining, setRecipe, setDiet, setQuest, equipItem, unequipSlot, buyMaterial, sellItem, hire, advanceAll, back };

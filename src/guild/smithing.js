@@ -56,8 +56,8 @@ export function study(hero) {
 export function getRecipe(id) { return RECIPES.find((r) => r.id === id) || null; }
 
 /** Rough expected quality for a UI preview (no jitter). */
-export function previewQuality(recipe, practice) {
-  return Math.max(5, Math.min(recipe.ceil, Math.round(recipe.base + (practice || 0) * 0.5)));
+export function previewQuality(recipe, practice, field) {
+  return Math.max(5, Math.min(recipe.ceil, Math.round(recipe.base + (practice || 0) * 0.5 + (field || 0) * 0.2)));
 }
 
 function jitter() { return Math.floor(Math.random() * 10) - 3; } // -3..+6
@@ -79,7 +79,9 @@ export function forge(hero, recipe, inv, week) {
   if (c.stamina < recipe.staminaCost) return { ok: false, reason: 'stamina' };
 
   spendMaterials(inv, recipe.cost);
-  const quality = Math.max(5, Math.min(recipe.ceil, Math.round(recipe.base + prof.practice * 0.5 + jitter())));
+  // Practice drives quality; Field Insight (from questing/combat) adds a smaller bonus
+  // — a smith who has SEEN blades fail forges a little better.
+  const quality = Math.max(5, Math.min(recipe.ceil, Math.round(recipe.base + prof.practice * 0.5 + prof.field * 0.2 + jitter())));
   const item = createItem({
     kind: recipe.kind, slot: recipe.slot, material: recipe.material, quality, name: recipe.name,
     history: { forgedBy: hero.id, forgedByName: hero.name, forgedWeek: week, wielders: [], kills: 0, repairs: [] },

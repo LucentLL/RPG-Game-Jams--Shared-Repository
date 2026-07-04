@@ -137,4 +137,8 @@
 
 .skill-shape { font-size: 0.82em; color: var(--muted); margin-bottom: 10px; letter-spacing: 0.02em; }
 .skill-shape b { color: var(--gold); font-family: 'Cinzel', serif; }
+.activity-toggle { flex-wrap: wrap; }
+.activity-toggle button { min-width: 66px; }
 .activity-toggle button:disabled { opacity: 0.5; }
+.q-rank { font-size: 0.72em; color: var(--gold); border: 1px solid var(--border); border-radius: 4px; padding: 0 4px; }
+.quest-opt .o-cost { color: var(--success); }
