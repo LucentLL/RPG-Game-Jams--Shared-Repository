@@ -188,6 +188,20 @@ Built on today's working weekly loop (roster, training, diet, recruiting, MR sta
 - **Phase 4 — Persistence, repair, inheritance, decay, mentorship.**
   Item history/durability/edge-quality; repair-vs-craft; inheritance on death; potion expiry; food
   spoilage; master→apprentice mentorship; the guild's library/workshops/veterans as institutional memory.
+- **Phase 5 — A minor league (the owner's 2026-07 direction).** Two tiers of people:
+  **named heroes = professionals** (individually managed, as today), and a larger pool of **generic
+  members = trainees/prospects** (a few → 100+) the guild *houses and supplies*. Trainees perform
+  activities + training, have stats that shift with training/experience and weapon/armor proficiencies,
+  and **graduate to become named heroes** once good enough — a farm system, not commanders-with-troops.
+  UI must scale to many (roll-ups, not per-unit micro). Depends on: cheap generic-person storage,
+  a graduation threshold, and batch training. *Deferred; "named for now".*
+- **Supply-gated diet (paired with Phase 5 / the Cook).** A member has a *preferred/assigned* diet but
+  only actually eats it if the **Kitchen stocks that food** (food becomes real supply, like gear/potions);
+  otherwise they eat what's available — grudgingly if it's not their preference, or willingly under orders.
+  Turns diet into logistics. *Kitchen is currently a plain per-member menu until this lands.*
+- ✅ **Done alongside:** work departments show **only their active workers** (+ an "assign a member"
+  picker); **sparring** — pair two members to train each other (mutual assignment; you learn more from a
+  stronger partner; contact-injury risk).
 
 ## Open design decisions
 
