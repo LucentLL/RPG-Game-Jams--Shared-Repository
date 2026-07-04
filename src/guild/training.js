@@ -103,4 +103,39 @@ export function applyTraining(hero, drillId, intensity, dietBias = {}) {
   return { gains, drops, injury: c.injury };
 }
 
+/**
+ * Resolve one member's side of a sparring bout. BOTH members call this (once each),
+ * so both improve. Sparring sharpens SKL & SPD (technique/reflexes) with some POW —
+ * and you learn MORE from a stronger partner. Contact training piles on Fatigue/Stress
+ * and carries a real injury risk. Mutates `hero`; reads `partner`.
+ * @param {import('./hero.js').Hero} hero @param {import('./hero.js').Hero} partner
+ * @param {Object.<string,number>} [dietBias]
+ * @returns {{gains:Object,drops:Object,spar:boolean,partnerName:string,injury:?string}}
+ */
+export function applySpar(hero, partner, dietBias = {}) {
+  const c = hero.condition;
+  const gains = {}, drops = {};
+  const combat = (h) => (h.stats.SKL || 0) + (h.stats.SPD || 0) + (h.stats.POW || 0);
+  const edge = Math.max(0.7, Math.min(1.8, combat(partner) / Math.max(1, combat(hero)))); // a stronger partner teaches more
+  const base = GAIN_SCALE * 1.35 * edge * wearMult(c) * ageMult(hero) * (0.85 + (c.morale / 100) * 0.3);
+  const grow = (stat, factor) => {
+    const cur = hero.stats[stat] || 0;
+    if (cur >= STAT_CAP) return;
+    const room = (STAT_CAP - cur) / STAT_CAP;
+    const amt = Math.max(1, Math.round(base * factor * (hero.growth[stat] || 1) * (dietBias[stat] || 1) * (0.3 + 0.7 * room)));
+    const next = clampStat(cur + amt);
+    if (next > cur) gains[stat] = (gains[stat] || 0) + (next - cur);
+    hero.stats[stat] = next;
+  };
+  grow('SKL', 1); grow('SPD', 0.7); grow('POW', 0.4);
+  c.fatigue = clamp100(c.fatigue + 18);
+  c.stress = clamp100((c.stress || 0) + 10);
+  c.stamina = Math.max(0, (c.stamina || 0) - 10);
+  c.morale = clamp100(c.morale + 1); // a good bout lifts spirits
+  hero.xp += 12;
+  const wear = c.fatigue + (c.stress || 0) * 2;
+  if (wear > 185 && Math.random() < Math.min(0.6, (wear - 185) / 150)) c.injury = 'bruised';
+  return { gains, drops, spar: true, partnerName: partner.name, injury: c.injury };
+}
+
 export { HERO_STATS };

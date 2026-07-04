@@ -11,7 +11,7 @@
 import { createGuild } from './guild.js';
 import { HERO_STATS, heroPower, STAT_CAP } from './hero.js';
 import { generateRecruit, hireCost, rollRecruitPool } from './recruiting.js';
-import { DRILLS, REST, getDrill, applyTraining } from './training.js';
+import { DRILLS, REST, getDrill, applyTraining, applySpar } from './training.js';
 import { DIET_PLANS, getDietPlan, applyDiet } from './diet.js';
 import { advanceWeek, formatDate } from './calendar.js';
 import { weeklyUpkeep, addGold, guildIncome } from './economy.js';
@@ -104,8 +104,9 @@ function ensureAssignment(h) {
   const a = h.assignment || {};
   h.assignment = {
     type: ['forge', 'study', 'quest', 'brew'].includes(a.type) ? a.type : 'train',
-    trainingId: getDrill(a.trainingId) ? a.trainingId : (DRILL_MIGRATE[a.trainingId] || 'pow'),
+    trainingId: (a.trainingId === 'spar' || getDrill(a.trainingId)) ? a.trainingId : (DRILL_MIGRATE[a.trainingId] || 'pow'),
     intensity: a.intensity === 'heavy' ? 'heavy' : 'light',
+    sparWith: a.sparWith || null,
     recipeId: getRecipe(a.recipeId) ? a.recipeId : 'iron_sword',
     potionId: getPotionRecipe(a.potionId) ? a.potionId : 'minor_heal',
     discipline: a.discipline === 'alchemy' ? 'alchemy' : 'blacksmithing',
@@ -162,7 +163,22 @@ function load() {
 function selectHero(id) { selectedId = id; notice = ''; render(); }
 function setActivity(type) { const h = heroById(selectedId); if (h) { h.assignment.type = ['forge', 'study', 'quest', 'brew'].includes(type) ? type : 'train'; if (h.assignment.type !== 'quest') h.assignment.questId = null; save(); render(); } }
 function setQuest(questId) { const h = heroById(selectedId); if (h) { h.assignment.type = 'quest'; h.assignment.questId = questId; save(); render(); } }
-function setTraining(id) { const h = heroById(selectedId); if (h) { h.assignment.trainingId = id; h.assignment.type = 'train'; h.assignment.questId = null; save(); render(); } }
+function setTraining(id) { const h = heroById(selectedId); if (h) { h.assignment.trainingId = id; h.assignment.type = 'train'; h.assignment.sparWith = null; h.assignment.questId = null; save(); render(); } }
+function assignTo(heroId, jobType) {
+  const h = heroById(heroId); if (!h) return;
+  h.assignment.type = ['forge', 'study', 'brew'].includes(jobType) ? jobType : 'train';
+  h.assignment.questId = null;
+  selectedId = heroId; notice = `${h.name} assigned.`;
+  save(); render();
+}
+/** Pair two members to spar — a MUTUAL assignment, so both spend the week sparring. */
+function setSpar(partnerId) {
+  const h = heroById(selectedId); const p = heroById(partnerId);
+  if (!h || !p || h.id === p.id) return;
+  for (const [x, y] of [[h, p], [p, h]]) { x.assignment.type = 'train'; x.assignment.trainingId = 'spar'; x.assignment.sparWith = y.id; x.assignment.questId = null; }
+  notice = `${h.name} and ${p.name} will spar.`;
+  save(); render();
+}
 function setIntensity(level) { const h = heroById(selectedId); if (h) { h.assignment.intensity = level === 'heavy' ? 'heavy' : 'light'; h.assignment.type = 'train'; h.assignment.questId = null; save(); render(); } }
 function setRecipe(id) { const h = heroById(selectedId); if (h) { h.assignment.recipeId = id; h.assignment.type = 'forge'; h.assignment.questId = null; save(); render(); } }
 function setPotion(id) { const h = heroById(selectedId); if (h) { h.assignment.potionId = id; h.assignment.type = 'brew'; h.assignment.questId = null; save(); render(); } }
@@ -322,6 +338,23 @@ function advanceAll() {
           questMorale = -12;
         }
       }
+    } else if (a.trainingId === 'spar') {
+      const partner = heroById(a.sparWith);
+      const mutual = partner && partner.assignment.trainingId === 'spar' && partner.assignment.sparWith === h.id;
+      if (h.condition.injury) {
+        const res = applyTraining(h, 'rest', 'light', diet.statBias); // injured — rest, don't spar
+        entry.rested = true; entry.injury = res.injury;
+      } else if (mutual && !partner.condition.injury) {
+        const res = applySpar(h, partner, diet.statBias); // both partners resolve their own side
+        entry.drill = 'Spar vs ' + partner.name.split(' ')[0];
+        entry.gains = res.gains; entry.drops = res.drops; entry.injury = res.injury;
+        entry.trained = Object.keys(res.gains).length > 0; entry.spar = true;
+      } else {
+        const res = applyTraining(h, 'skl', 'light', diet.statBias); // partner unavailable — solo footwork
+        entry.drill = 'Spar — no partner';
+        entry.gains = res.gains; entry.drops = res.drops; entry.injury = res.injury;
+        entry.trained = Object.keys(res.gains).length > 0;
+      }
     } else {
       const res = applyTraining(h, a.trainingId, a.intensity, diet.statBias);
       entry.drill = (getDrill(a.trainingId) || REST).name;
@@ -404,6 +437,7 @@ function rosterRow(h) {
     : a.type === 'brew' ? `⚗ ${(getPotionRecipe(a.potionId) || {}).name || 'Brew'}`
     : a.type === 'study' ? `📖 Study ${a.discipline === 'alchemy' ? 'Alchemy' : 'Smithing'}`
     : a.type === 'quest' ? `🗺 ${a.questId ? (questTitle(a.questId) || 'On Quest') : '(choose quest)'}`
+    : a.trainingId === 'spar' ? `🤺 Spar ${((heroById(a.sparWith) || {}).name || '?').split(' ')[0]}`
     : `⚔ ${(getDrill(a.trainingId) || REST).name}${a.intensity === 'heavy' ? ' (H)' : ''}`;
   return `<button class="roster-row ${h.id === selectedId ? 'sel' : ''}" onclick="__guild.selectHero('${h.id}')">
       <span class="rr-portrait">${personSprite(h, 44)}</span>
@@ -465,10 +499,18 @@ function trainBody(h) {
   }).join('');
   const restItem = `<button class="opt ${at === 'train' && h.assignment.trainingId === 'rest' ? 'active' : ''}" onclick="__guild.setTraining('rest')">
       <span><span class="o-name">💤 ${REST.name}</span> <span class="o-desc">shed fatigue &amp; stress</span></span></button>`;
+  const sparring = at === 'train' && h.assignment.trainingId === 'spar';
+  const others = guild.roster.filter((x) => x.id !== h.id);
+  const sparList = others.length
+    ? others.map((p) => `<button class="opt ${sparring && h.assignment.sparWith === p.id ? 'active' : ''}" onclick="__guild.setSpar('${p.id}')">
+        <span><span class="o-name">🤺 vs ${p.name}</span> <span class="o-desc">both sharpen SKL &amp; SPD · Lv${p.level}</span></span></button>`).join('')
+    : '<div class="hint">Recruit another member to spar with.</div>';
   return `<div class="intensity-toggle">
       <button class="${heavy ? '' : 'on'}" onclick="__guild.setIntensity('light')">Light</button>
       <button class="${heavy ? 'on' : ''}" onclick="__guild.setIntensity('heavy')">Heavy · +sec −paired</button>
-    </div><div class="opt-list">${drillItems}${restItem}</div>`;
+    </div><div class="opt-list">${drillItems}${restItem}</div>
+    <div class="plan-title" style="font-size:0.72em;margin-top:10px">🤺 Spar a partner <span class="dim" style="font-weight:400">— both train, pairs up automatically</span></div>
+    <div class="opt-list">${sparList}</div>`;
 }
 
 /** Quest board scoped to member h, with party-projected odds. Picking one dispatches h. */
@@ -561,6 +603,7 @@ function jobLabel(h) {
     : a.type === 'brew' ? `⚗ Brewing ${(getPotionRecipe(a.potionId) || {}).name || ''}`
     : a.type === 'study' ? `📖 Studying ${a.discipline === 'alchemy' ? 'alchemy' : 'metallurgy'}`
     : a.type === 'quest' ? `🗺 ${a.questId ? (questTitle(a.questId) || 'On a quest') : 'Quest (pick one)'}`
+    : a.trainingId === 'spar' ? `🤺 Sparring ${((heroById(a.sparWith) || {}).name || '?').split(' ')[0]}`
     : `⚔ ${(getDrill(a.trainingId) || REST).name}${a.intensity === 'heavy' ? ' (Heavy)' : ''}`;
 }
 
@@ -708,40 +751,46 @@ function rosterRoom() {
     </div>`;
 }
 
-/** Shared shell for the single-member work rooms (Forge / Kitchen / Library). */
-function workRoom(title, body, headline) {
-  const h = heroById(selectedId);
-  if (!h) return `<div class="plan-card"><div class="hint">Hire a member in the Quarters, then assign them here.</div></div>`;
+/** A work department: shows ONLY the members assigned to this job, plus an "Assign a
+ *  member" picker to bring others in. The configured subject is the selected member if
+ *  they work here, else the first worker. */
+function deptRoom(jobType, roleGlyph, roleName, bodyFn) {
+  const workers = guild.roster.filter((h) => h.assignment.type === jobType);
+  let subject = heroById(selectedId);
+  if (!subject || subject.assignment.type !== jobType) subject = workers[0] || null;
+  // The body's controls (setRecipe/setPotion/setDiscipline) act on selectedId, so keep
+  // it aligned to the displayed worker — otherwise they'd configure an off-screen member.
+  if (subject && subject.id !== selectedId) selectedId = subject.id;
+  const chips = workers.map((h) => `<button class="hs-chip ${subject && h.id === subject.id ? 'sel' : ''}" title="${h.name}" onclick="__guild.selectHero('${h.id}')">${personSprite(h, 38)}</button>`).join('');
+  const available = guild.roster.filter((h) => h.assignment.type !== jobType);
+  const addChips = available.map((h) => `<button class="hs-chip add" title="Assign ${h.name}" onclick="__guild.assignTo('${h.id}','${jobType}')">${personSprite(h, 34)}</button>`).join('');
+  const workerRow = workers.length
+    ? `<div class="dept-lbl">${roleGlyph} Working here · ${workers.length}</div><div class="hero-switch">${chips}</div>`
+    : `<div class="room-jobline">No one works the ${roleName.toLowerCase()} this week.</div>`;
+  const addRow = available.length ? `<div class="dept-lbl add">➕ Assign a member</div><div class="hero-switch">${addChips}</div>` : '';
   return `<div class="plan-card">
-      ${heroSwitcher()}
-      ${headline || ''}
-      <div class="plan-title">${title}</div>
-      ${body(h)}
+      ${workerRow}
+      ${addRow}
+      ${subject ? `<div class="plan-title">${roleGlyph} ${subject.name}</div>${bodyFn(subject)}` : ''}
     </div>`;
 }
 
-function forgeRoom() {
-  const forging = guild.roster.filter((x) => x.assignment.type === 'forge').map((x) => x.name.split(' ')[0]);
-  const head = `<div class="room-jobline">${forging.length ? '🔨 ' + forging.join(', ') + ' at the forge' : 'No one is forging this week.'}</div>`;
-  const h = heroById(selectedId);
-  return workRoom(h ? `🔨 ${h.name} — Forge` : '🔨 Forge', forgeBody, head);
-}
-function libraryRoom() {
-  const studying = guild.roster.filter((x) => x.assignment.type === 'study').map((x) => x.name.split(' ')[0]);
-  const head = `<div class="room-jobline">${studying.length ? '📖 ' + studying.join(', ') + ' studying' : 'No one is studying this week.'}</div>`;
-  const h = heroById(selectedId);
-  return workRoom(h ? `📖 ${h.name} — Library` : '📖 Library', studyBody, head);
-}
+function forgeRoom() { return deptRoom('forge', '🔨', 'Forge', forgeBody); }
+function libraryRoom() { return deptRoom('study', '📖', 'Library', studyBody); }
+function laboratoryRoom() { return deptRoom('brew', '⚗', 'Laboratory', brewBody); }
+
+/** The Kitchen is the guild MENU — everyone eats, so it lists every member's diet
+ *  (not a worker roster). Pick a member to change their diet. */
 function kitchenRoom() {
   const h = heroById(selectedId);
-  const head = h ? `<div class="room-jobline">🍖 Now feeding <b>${getDietPlan(h.assignment.dietId).name}</b></div>` : '';
-  return workRoom(h ? `🍲 ${h.name} — Diet` : '🍲 Kitchen', dietBody, head);
-}
-function laboratoryRoom() {
-  const brewing = guild.roster.filter((x) => x.assignment.type === 'brew').map((x) => x.name.split(' ')[0]);
-  const head = `<div class="room-jobline">${brewing.length ? '⚗ ' + brewing.join(', ') + ' brewing' : 'No one is brewing this week.'}</div>`;
-  const h = heroById(selectedId);
-  return workRoom(h ? `⚗ ${h.name} — Laboratory` : '⚗ Laboratory', brewBody, head);
+  const menu = `<div class="plan-card"><div class="plan-title">🍲 The Menu · who eats what</div>
+      <div class="roster-list">${guild.roster.map((m) => `<button class="roster-row ${m.id === selectedId ? 'sel' : ''}" onclick="__guild.selectHero('${m.id}')">
+          <span class="rr-portrait sm">${personSprite(m, 34)}</span>
+          <span class="rr-main"><span class="rr-name">${m.name}</span><span class="rr-assign">🍖 ${getDietPlan(m.assignment.dietId).name}</span></span>
+        </button>`).join('')}</div>
+      <div class="hint" style="text-align:left;padding:6px 2px 0">Everyone eats. Supply-gated meals — where a member only gets their diet if the Kitchen stocks it — arrive with the Cook mechanic.</div></div>`;
+  if (!h) return menu;
+  return `${menu}<div class="plan-card"><div class="plan-title">🍖 ${h.name}'s Diet</div>${dietBody(h)}</div>`;
 }
 function apothecaryRoom() {
   const inv = guild.inventory;
@@ -912,5 +961,5 @@ export function openGuild() {
   showScreen('guildScreen');
 }
 
-window.__guild = { selectHero, setActivity, setTraining, setIntensity, setRecipe, setPotion, setDiscipline, usePotion, setDiet, setQuest, equipItem, unequipSlot, setPolicy, provision, buyMaterial, sellItem, hire, advanceAll, back, openRoom, toggleFullscreen };
+window.__guild = { selectHero, setActivity, setTraining, setIntensity, setRecipe, setPotion, setDiscipline, usePotion, setDiet, setQuest, assignTo, setSpar, equipItem, unequipSlot, setPolicy, provision, buyMaterial, sellItem, hire, advanceAll, back, openRoom, toggleFullscreen };
 window.openGuild = openGuild;
