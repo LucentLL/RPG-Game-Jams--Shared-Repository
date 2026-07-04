@@ -14,6 +14,15 @@
 // ═══════════════════════════════════════════════════════════════════════════
 import { SPRITE_BASES, MATERIA_BASE, FX_BASE } from '../config/assets.js';
 
+// --- Extracted data modules (decomposition phase A, cont.) --------------------
+import {
+  GS, MATERIA_MAX_LVL, MATERIA_DUST_COST, TOTAL_ROUNDS, TILE_SIZE, TILE_COLS, battlefieldTileset,
+  ELEMENTS_CELL, ELEMENTS_COLS, ELEMENTS_ROWS, CAST_FX_COUNT, CAST_FX_FRAME_MS,
+  ORB_BASE_PATH, ORB_CELL, ORB_COLS, ORB_ROWS, SPRITE_CELL, SPRITE_COLS, SPRITE_ROWS,
+  ACTION_TILE, ACTION_GS, MOVE_PHASE,
+} from './data/config.js';
+import { ORB_FRAMES, PLANET_TO_ORB_COLOR, ORB_COLORS, GEAR_WEAPON_LADDER, GEAR_BODY_LADDER, GEAR_HEAD_LADDER, GEAR_LOWER_LADDER } from './data/orb-tables.js';
+
 // --- Extracted leaf modules (decomposition phase A) ---------------------------
 import { PLANETS, COMPOUNDS, ROUND_METALS, RANKS } from './data/progression.js';
 import {
@@ -33,10 +42,6 @@ import { tileRng, elementsRng, rollDice, statMod, matXpNeeded, randInt, pick } f
 // ══════════════════════════════════════════════════════════════
 
 // ═══ CONSTANTS ═══
-var GS=9;
-var MATERIA_MAX_LVL=5;
-var MATERIA_DUST_COST=8;   // dust granules of a single planet required to reform a Lv1 orb
-var TOTAL_ROUNDS=7;
 
 
 
@@ -46,10 +51,6 @@ var TOTAL_ROUNDS=7;
 var BODY_TYPES=['sulfur','salt','mercury'];
 
 // ═══ GENTLE FOREST BATTLEFIELD TILESET ═══
-var TILE_SIZE=48;
-var TILE_COLS=16;
-// Tileset replaced with procedural generation
-var battlefieldTileset=true; // flag — procedural tiles always "loaded"
 
 // === PROCEDURAL TILE RENDERER ===
 // Replaces Mana Seed tileset with canvas-drawn tiles
@@ -437,9 +438,6 @@ function renderBattlefield(arenaGrid){
 // (Spaces in folder names are handled by encodeURI later.)
 var ELEMENTS_BASES  = SPRITE_BASES; // see ../config/assets.js
 var ELEMENTS_BASE   = ELEMENTS_BASES[0]; // legacy alias (still used by self-test)
-var ELEMENTS_CELL   = 48;
-var ELEMENTS_COLS   = 23;
-var ELEMENTS_ROWS   = 4;
 
 // Per-facing back-to-front orders. The weapon slot is split: `weapon_back` is
 // drawn before the body so the far hand (in side views) is hidden by the
@@ -821,8 +819,6 @@ function _testSkinSwap(done){
 // 60-frame spell flourish from "Visual FX/Effects Pack 14(1)/1/N.png".
 // Plays above the character's head during the 'cast' anim. Frames are
 // 32×32 and scaled to ~70% of the character's draw size.
-var CAST_FX_COUNT = 60;
-var CAST_FX_FRAME_MS = 14;             // ≈ 71fps; total ≈ 840ms (matches 5-frame cast at 140ms)
 var _castFxFrames = new Array(CAST_FX_COUNT); // index → Image | 'loading' | null
 function getCastFxFrame(idx){
   if (idx < 0 || idx >= CAST_FX_COUNT) return null;
@@ -876,23 +872,6 @@ function drawCastFxOnCanvas(canvas, fighter, manualFrameIdx){
 //
 // Frame indices below are best guesses based on the user's annotated mockup;
 // adjust ORB_FRAMES if individual cells look off.
-var ORB_BASE_PATH = MATERIA_BASE;
-var ORB_CELL = 48;
-var ORB_COLS = 12;
-var ORB_ROWS = 8;
-// Static frame used everywhere an orb is shown inline (gear sockets, draft,
-// stat sheet, lab). Animations interpolate through their own frame lists.
-var ORB_FRAMES = {
-  idle:    [[1,0],[0,1],[1,1],[2,1]],          // 4-frame pulse (top, l, c, r)
-  levelup: [[3,0],[3,1],[3,2],[3,3]],          // halo column (red-arrow path)
-  crumble: [[5,0],[5,1],[5,2],[5,3]],          // cracks progress (blue-arrow start)
-  dust:    [10,3]                              // single dust pile cell
-};
-// Planet → orb color. Sol/Mars/Mercury/Venus map directly; Luna/Jupiter/
-// Saturn reuse the closest match (Luna→blue, Jupiter→yellow, Saturn→green).
-// Order matches PLANETS: [Moon, Mercury, Venus, Sun, Mars, Jupiter, Saturn].
-var PLANET_TO_ORB_COLOR = ['blue','blue','green','yellow','red','yellow','green'];
-var ORB_COLORS = ['blue','red','green','yellow'];
 
 var _orbImgCache = {};   // color → Image | 'loading' | 'failed'
 function getOrbImage(color){
@@ -1379,9 +1358,6 @@ function compositeCharacter(canvas, appearance, animName, frame, facingRow, weap
 }
 
 // Backwards-compat shim: old SPRITE_SHEET_MAP used by loadSpriteSheets()
-var SPRITE_CELL = ELEMENTS_CELL;
-var SPRITE_COLS = ELEMENTS_COLS;
-var SPRITE_ROWS = ELEMENTS_ROWS;
 var SPRITE_SHEET_MAP = {};
 var spriteImages = {};
 var spritesLoaded = true;   // compositor loads parts on demand — never "wait"
@@ -1395,74 +1371,6 @@ var spritesLoaded = true;   // compositor loads parts on demand — never "wait"
 // Gear type → ordered list of Time Element weapon stems by tier. Higher tier
 // indexes a later (fancier) weapon. Each entry carries its own maxC.
 // Daggers / shields use slot-specific files (L vs R hand).
-var GEAR_WEAPON_LADDER = {
-  Sword: [
-    {stem:'sword1', maxC:3}, {stem:'sword2', maxC:3}, {stem:'sword3', maxC:3},
-    {stem:'sword4', maxC:3}, {stem:'sword5', maxC:4}
-  ],
-  Dagger: [ {stem:'dagger', maxC:3, slotSuffix:true} ],
-  Wand:   [ {stem:'wand1', maxC:8} ],
-  Bow:    [ {stem:'bow1', maxC:0}, {stem:'bow1', maxC:0}, {stem:'bow1arrow1', maxC:0} ],
-  Axe:    [ {stem:'axe1', maxC:3}, {stem:'axe1', maxC:3}, {stem:'axe2', maxC:3}, {stem:'axe2', maxC:3} ],
-  Hammer: [ {stem:'hammer', maxC:3} ],
-  Club:   [ {stem:'pickaxe1', maxC:2} ],
-  Buckler:[ {stem:'shield1', maxC:0, slotSuffix:true}, {stem:'shield1', maxC:0, slotSuffix:true}, {stem:'shield2', maxC:6, slotSuffix:true}, {stem:'shield2', maxC:6, slotSuffix:true} ]
-};
-
-// Body / Head / Lower → layer override mapping. Lets gear cards AND the
-// on-field sprite show real pixel art for armor / hats / pants. Higher tier
-// indexes a later (fancier) stem.
-var GEAR_BODY_LADDER = {
-  Plate: [
-    {layer:'top', stem:'top9',  maxC:4}, {layer:'top', stem:'top10', maxC:4},
-    {layer:'top', stem:'top12', maxC:5}, {layer:'top', stem:'top14', maxC:11},
-    {layer:'top', stem:'top17', maxC:13}
-  ],
-  Mail: [
-    {layer:'top', stem:'top5',  maxC:4}, {layer:'top', stem:'top13', maxC:9},
-    {layer:'top', stem:'top15', maxC:10}, {layer:'top', stem:'top21', maxC:10}
-  ],
-  Robes: [
-    {layer:'top', stem:'top11', maxC:5}, {layer:'top', stem:'top18', maxC:10},
-    {layer:'top', stem:'top25', maxC:6}, {layer:'top', stem:'top26', maxC:7}
-  ],
-  Cloak: [
-    {layer:'backextra', stem:'backextra1', maxC:6},
-    {layer:'backextra', stem:'backextra2', maxC:3},
-    {layer:'backextra', stem:'backextra3', maxC:2}
-  ],
-  Vest: [
-    {layer:'top', stem:'top1', maxC:4}, {layer:'top', stem:'top2', maxC:5},
-    {layer:'top', stem:'top3', maxC:4}, {layer:'top', stem:'top19', maxC:5}
-  ]
-};
-var GEAR_HEAD_LADDER = {
-  Helm: [
-    {layer:'hat', stem:'hat1', maxC:4}, {layer:'hat', stem:'hat2', maxC:4},
-    {layer:'hat', stem:'hat3', maxC:2}, {layer:'hat', stem:'hat5', maxC:6}
-  ],
-  Crown: [
-    {layer:'hat', stem:'crown1', maxC:5}, {layer:'hat', stem:'crown2', maxC:5}
-  ],
-  Cap: [
-    {layer:'hat', stem:'hat4', maxC:3}, {layer:'hat', stem:'hat7', maxC:5}, {layer:'hat', stem:'hat8', maxC:5}
-  ],
-  Hood: [
-    {layer:'hat', stem:'hat6', maxC:6}, {layer:'hat', stem:'hat9', maxC:6},
-    {layer:'hat', stem:'hat11', maxC:8}, {layer:'hat', stem:'hat13', maxC:4}
-  ]
-};
-var GEAR_LOWER_LADDER = {
-  Trousers: [
-    {layer:'bottom', stem:'bottom1', maxC:4}, {layer:'bottom', stem:'bottom4', maxC:4}, {layer:'bottom', stem:'bottom7', maxC:4}
-  ],
-  Leggings: [
-    {layer:'bottom', stem:'bottom2', maxC:4}, {layer:'bottom', stem:'bottom6', maxC:4}, {layer:'bottom', stem:'bottom9', maxC:6}
-  ],
-  Skirt: [
-    {layer:'bottom', stem:'bottom3', maxC:4}, {layer:'bottom', stem:'bottom8', maxC:5}, {layer:'bottom', stem:'bottom13', maxC:15}
-  ]
-};
 
 // Tier (0-6) → weapon color-variant index. Higher tier = fancier finish.
 function weaponTierToColor(tier, maxC) {
@@ -2954,8 +2862,6 @@ var actionLoopRunning = false;
 var _actionKeys = {};
 var _actionKeyHandler = null;
 var _actionKeyUpHandler = null;
-var ACTION_TILE = 80;
-var ACTION_GS = 9;
 
 function startActionArena(){
   // Build fighters the same way the VS / battle does, then layer on
@@ -4271,7 +4177,6 @@ function buildTimeline(pQueue,eQueue){
 var _snapshotIntervalMap = new Map();  // entity -> [boundary times in seconds]
 var _snapshotPathMap     = new Map();  // entity -> [{dir,dest,endX,endY,startX,startY,moveType,time}]
 var _snapshotStartMap    = new Map();  // entity -> {x,y,facing}
-var MOVE_PHASE = 5;                    // total move phase span (matches buildTimeline's PHASE)
 
 // Project unit-direction for one step. Player 'direct' moves use stored
 // dx/dy (locked choice). Other types derive direction from intent vs target.
