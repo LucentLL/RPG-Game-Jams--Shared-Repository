@@ -13,7 +13,7 @@ import { TRAINING_REGIMENS, getRegimen, applyTraining } from './training.js';
 import { DIET_PLANS, getDietPlan, applyDiet } from './diet.js';
 import { advanceWeek, formatDate } from './calendar.js';
 import { weeklyUpkeep, addGold, guildIncome } from './economy.js';
-import { RECIPES, getRecipe, previewQuality, forge } from './smithing.js';
+import { RECIPES, getRecipe, previewQuality, forge, study, recipeUnlocked } from './smithing.js';
 import { MATERIALS, createInventory, armoryItems, findItem } from './inventory.js';
 import { qualityTier } from './item.js';
 import { MATERIAL_PRICE, buyPrice, itemSellValue, createMarket, refreshMarket } from './market.js';
@@ -36,7 +36,7 @@ function clamp(n) { return Math.max(0, Math.min(100, Math.round(n))); }
 function ensureAssignment(h) {
   const a = h.assignment || {};
   h.assignment = {
-    type: a.type === 'forge' ? 'forge' : 'train',
+    type: (a.type === 'forge' || a.type === 'study') ? a.type : 'train',
     trainingId: getRegimen(a.trainingId) ? a.trainingId : 'drill_pow',
     recipeId: getRecipe(a.recipeId) ? a.recipeId : 'iron_sword',
     dietId: getDietPlan(a.dietId) ? a.dietId : (getDietPlan(h.dietPlanId) ? h.dietPlanId : 'balanced'),
@@ -81,7 +81,7 @@ function load() {
 
 // --- interactions -----------------------------------------------------------
 function selectHero(id) { selectedId = id; notice = ''; render(); }
-function setActivity(type) { const h = heroById(selectedId); if (h) { h.assignment.type = type === 'forge' ? 'forge' : 'train'; save(); render(); } }
+function setActivity(type) { const h = heroById(selectedId); if (h) { h.assignment.type = (type === 'forge' || type === 'study') ? type : 'train'; save(); render(); } }
 function setTraining(id) { const h = heroById(selectedId); if (h) { h.assignment.trainingId = id; h.assignment.type = 'train'; save(); render(); } }
 function setRecipe(id) { const h = heroById(selectedId); if (h) { h.assignment.recipeId = id; h.assignment.type = 'forge'; save(); render(); } }
 function setDiet(id) { const h = heroById(selectedId); if (h) { h.assignment.dietId = id; h.dietPlanId = id; save(); render(); } }
@@ -157,6 +157,8 @@ function advanceAll() {
       const recipe = getRecipe(a.recipeId);
       entry.forge = forge(h, recipe, guild.inventory, week);
       entry.recipeName = recipe.name;
+    } else if (a.type === 'study') {
+      entry.study = study(h);
     } else {
       const regimen = getRegimen(a.trainingId);
       const { gains } = applyTraining(h, regimen, diet.statBias);
@@ -200,7 +202,7 @@ function qualHTML(item) { const t = qualityTier(item.quality); return `<span sty
 
 function rosterRow(h) {
   const a = h.assignment;
-  const plan = a.type === 'forge' ? `🔨 ${getRecipe(a.recipeId).name}` : `⚔ ${getRegimen(a.trainingId).name}`;
+  const plan = a.type === 'forge' ? `🔨 ${getRecipe(a.recipeId).name}` : (a.type === 'study' ? '📖 Study Smithing' : `⚔ ${getRegimen(a.trainingId).name}`);
   return `<button class="roster-row ${h.id === selectedId ? 'sel' : ''}" onclick="__guild.selectHero('${h.id}')">
       <span class="rr-portrait">${glyphOf(h)}</span>
       <span class="rr-main">
@@ -233,19 +235,26 @@ function assignPanel() {
       <div class="statbar"><span style="width:${Math.round(val / STAT_CAP * 100)}%"></span></div><div class="d">${g ? '+' + g : ''}</div></div>`;
   }).join('');
 
-  const isForge = h.assignment.type === 'forge';
-  const training = TRAINING_REGIMENS.map((r) => `<button class="opt ${!isForge && r.id === h.assignment.trainingId ? 'active' : ''}" onclick="__guild.setTraining('${r.id}')">
+  const at = h.assignment.type;
+  const isForge = at === 'forge';
+  const prof = h.professions.blacksmithing;
+  const training = TRAINING_REGIMENS.map((r) => `<button class="opt ${at === 'train' && r.id === h.assignment.trainingId ? 'active' : ''}" onclick="__guild.setTraining('${r.id}')">
       <span><span class="o-name">${r.name}</span> <span class="o-desc">${r.focus.length ? r.focus.join('/') : 'recover'}</span></span>
       <span class="o-cost">${r.staminaCost ? '−' + r.staminaCost + ' sta' : 'restful'}</span></button>`).join('');
 
-  const practice = h.professions.blacksmithing.practice;
   const forgeList = RECIPES.map((r) => {
     const cost = Object.keys(r.cost).map((k) => `${MATERIALS[k].name} ×${r.cost[k]}`).join(', ');
     const enough = Object.keys(r.cost).every((k) => (guild.inventory.materials[k] || 0) >= r.cost[k]);
+    if (!recipeUnlocked(h, r)) {
+      return `<button class="opt lack" disabled><span><span class="o-name">🔒 ${r.name}</span> <span class="o-desc">study to unlock</span></span><span class="o-cost">Theory ${r.reqTheory}</span></button>`;
+    }
     return `<button class="opt ${isForge && r.id === h.assignment.recipeId ? 'active' : ''} ${enough ? '' : 'lack'}" onclick="__guild.setRecipe('${r.id}')">
       <span><span class="o-name">${KIND_GLYPH[r.kind] || ''} ${r.name}</span> <span class="o-desc">${cost}</span></span>
-      <span class="o-cost">~q${previewQuality(r, practice)}</span></button>`;
+      <span class="o-cost">~q${previewQuality(r, prof.practice)}</span></button>`;
   }).join('');
+
+  const skillShape = `<div class="skill-shape">🔨 Blacksmithing — <b>Theory ${prof.theory}</b> · <b>Practice ${prof.practice}</b> · <span class="dim">Field ${prof.field}</span></div>`;
+  const studyBody = `${skillShape}<div class="hint" style="text-align:left;padding:4px 0">The smith studies metallurgy — raises <b>Theory</b>, which unlocks steel &amp; mithril recipes. Practice (from forging) still sets quality.</div>`;
 
   const diet = DIET_PLANS.map((d) => `<button class="opt ${d.id === h.assignment.dietId ? 'active' : ''}" onclick="__guild.setDiet('${d.id}')">
       <span><span class="o-name">${d.name}</span> <span class="o-desc">${d.description}</span></span><span class="o-cost">${d.weeklyCost}g/wk</span></button>`).join('');
@@ -256,12 +265,15 @@ function assignPanel() {
       ${bar('Stamina', h.condition.stamina, 'var(--success)')}${bar('Fatigue', h.condition.fatigue, '#e08a3c')}${bar('Morale', h.condition.morale, '#8ab4d8')}
       ${equippedLine(h)}
       <div class="activity-toggle">
-        <button class="${isForge ? '' : 'on'}" onclick="__guild.setActivity('train')">⚔ Train</button>
-        <button class="${isForge ? 'on' : ''}" onclick="__guild.setActivity('forge')">🔨 Forge</button>
+        <button class="${at === 'train' ? 'on' : ''}" onclick="__guild.setActivity('train')">⚔ Train</button>
+        <button class="${at === 'forge' ? 'on' : ''}" onclick="__guild.setActivity('forge')">🔨 Forge</button>
+        <button class="${at === 'study' ? 'on' : ''}" onclick="__guild.setActivity('study')">📖 Study</button>
       </div>
-      ${isForge
-        ? `<div class="plan-title">🔨 Forge · Smithing Practice ${practice}/100</div><div class="opt-list">${forgeList}</div>`
-        : `<div class="plan-title">⚔ Training</div><div class="opt-list">${training}</div>`}
+      ${at === 'forge'
+        ? `${skillShape}<div class="plan-title">🔨 Forge</div><div class="opt-list">${forgeList}</div>`
+        : at === 'study'
+          ? `<div class="plan-title">📖 Study Blacksmithing</div>${studyBody}`
+          : `<div class="plan-title">⚔ Training</div><div class="opt-list">${training}</div>`}
       <div class="plan-title">🍖 Diet</div><div class="opt-list">${diet}</div>
     </div>`;
 }
@@ -312,9 +324,10 @@ function recapPanel() {
     if (r.type === 'forge') {
       const f = r.forge;
       if (f.ok) return `<div class="r-line"><b>${r.name}</b> forged <span class="up">${f.item.name} (q${f.quality})</span> <span class="dim">· +${f.practiceGain} practice</span></div>`;
-      const why = f.reason === 'materials' ? 'out of materials' : 'too tired to work';
+      const why = f.reason === 'materials' ? 'out of materials' : (f.reason === 'locked' ? 'recipe not yet unlocked' : 'too tired to work');
       return `<div class="r-line"><b>${r.name}</b> <span class="down">couldn't forge — ${why}</span></div>`;
     }
+    if (r.type === 'study') return `<div class="r-line"><b>${r.name}</b> studied smithing — <span class="up">Theory +${r.study.theoryGain}</span></div>`;
     const g = r.trained ? HERO_STATS.filter((s) => r.gains[s]).map((s) => `${s}+${r.gains[s]}`).join(' ') : 'no gain — too fatigued';
     return `<div class="r-line"><b>${r.name}</b> · <span class="${r.trained ? 'up' : 'down'}">${g}</span> <span class="dim">(sta ${fmtDelta(r.sta)}, fat ${fmtDelta(r.fat)})</span></div>`;
   }).join('');
