@@ -24,6 +24,7 @@ import { roleFor } from './roles.js';
 import { qualityTier } from './item.js';
 import { MATERIAL_PRICE, buyPrice, itemSellValue, createMarket, refreshMarket } from './market.js';
 import { saveGame, loadGame } from '../platform/storage.js';
+import { playTournamentMatch, battleEngineReady } from './battle-bridge.js';
 
 const SLOT = 'guild';
 // The roster cap is no longer a constant — it's derived from the Living Quarters
@@ -40,6 +41,8 @@ let selectedId = null;
 let report = null;
 let notice = '';
 let currentRoom = 'hub'; // UI-only: which room the stage shows. Never saved — resets to hub each session.
+let playTournamentId = null; // UI-only: tournament the player opted to PLAY (not simulate) next Advance Week.
+let advancing = false; // re-entrancy guard — a played battle makes advanceAll async & minutes-long.
 
 // The guild hall's rooms, in the sketch's row-major order. `tag` = work vs storage vs
 // living; `locked` rooms are stubbed until their system (the Alchemist) is built.
@@ -278,7 +281,10 @@ function hire(id) {
   save(); render();
 }
 
-function advanceAll() {
+async function advanceAll() {
+  if (advancing) return; // a played battle is mid-flight — ignore repeat Advance clicks
+  advancing = true;
+  try {
   const income = guildIncome(guild);            // patron retainer (stopgap until quest income)
   addGold(guild, income);
   const upkeep = weeklyUpkeep(guild, getDietPlan);
@@ -324,10 +330,21 @@ function advanceAll() {
     const lineup = (t.entrants || []).map((id) => heroById(id)).filter((h) => h && !h.condition.injury);
     if (!lineup.length) {
       t.resolved = true; t.result = { forfeit: true };
+      if (t.id === playTournamentId) playTournamentId = null; // the play opt-in dies with the forfeited event
       tournamentResults.push({ name: t.name, rank: t.rank, forfeit: true, hadEntrants: (t.entrants || []).length > 0 });
       continue;
     }
-    const res = resolveTournament(t, lineup, combatPower);
+    // Seam: PLAY this match through the battle engine when the player opted in
+    // (single-entrant → lineup[0] is the champion), else auto-resolve as before.
+    // playBattle returns the SAME {power,rounds,wins,champion} shape as the resolver.
+    let res;
+    if (t.id === playTournamentId && lineup.length && battleEngineReady()) {
+      playTournamentId = null; // consume the opt-in
+      const played = await playTournamentMatch(lineup[0], t);
+      res = played || resolveTournament(t, lineup, combatPower); // null → engine missing, fall back
+    } else {
+      res = resolveTournament(t, lineup, combatPower);
+    }
     const pl = placement(res);
     const gold = Math.round(t.rewards.gold * pl.frac);
     const rep = Math.round(t.rewards.reputation * pl.frac);
@@ -445,7 +462,8 @@ function advanceAll() {
   report = { income, upkeep, shortfall, results, issued, tournaments: tournamentResults };
   notice = '';
   currentRoom = 'hub'; // land on the hub so the weekly recap is always seen
-  save(); render({ top: true }); // recap sits at the top of the hub
+  save(); showScreen('guildScreen'); render({ top: true }); // return from any played-battle screen; recap at top
+  } finally { advancing = false; }
 }
 
 function back() { showScreen('titleScreen'); }
@@ -1045,6 +1063,14 @@ function leaveTournament(tId, heroId) {
   t.entrants = (t.entrants || []).filter((id) => id !== heroId);
   save(); render();
 }
+/** Toggle whether the player will PLAY this tournament's match (vs auto-resolve) next Advance Week. */
+function setPlayNext(tId) {
+  playTournamentId = (playTournamentId === tId) ? null : tId;
+  notice = playTournamentId
+    ? 'You’ll fight this match yourself — nominate a champion, then Advance Week.'
+    : 'This match will auto-resolve.';
+  render();
+}
 
 /** One upcoming tournament: countdown, field, rewards, your champion + picker, win odds. */
 function tournamentCard(t) {
@@ -1068,6 +1094,9 @@ function tournamentCard(t) {
       <div class="tourney-head"><span class="tourney-name">🏆 ${t.name}</span><span class="q-rank">R${t.rank}</span><span class="tourney-when">${when}</span></div>
       <div class="rr-sub">Field ~${t.field}⚡ · best of ${t.rounds} · Champion <span class="up">${t.rewards.gold}g · +${t.rewards.reputation} rep${loot}</span></div>
       <div class="tourney-odds">${odds}</div>
+      ${fit && weeksOut <= 1
+        ? `<button class="tourney-play ${playTournamentId === t.id ? 'on' : ''}" onclick="__guild.setPlayNext('${t.id}')">${playTournamentId === t.id ? '▶ You’ll fight this one — winner take all' : '🎮 Play this match yourself'}</button>`
+        : (fit ? '<div class="hint" style="text-align:left;padding:0 2px 8px">🎮 Playable once it’s a week out.</div>' : '')}
       <div class="dept-lbl">Your champion</div>
       <div class="hero-switch">${chip}</div>
       ${avail.length ? `<div class="dept-lbl add">➕ ${entrant ? 'Send someone else' : 'Choose a champion'}</div><div class="hero-switch">${addChips}</div>` : ''}
@@ -1225,5 +1254,5 @@ export function openGuild() {
   showScreen('guildScreen');
 }
 
-window.__guild = { selectHero, setActivity, setTraining, setIntensity, setRecipe, setPotion, setDiscipline, usePotion, setDiet, setQuest, assignTo, setSpar, equipItem, unequipSlot, setPolicy, provision, buyMaterial, sellItem, hire, advanceAll, back, openRoom, toggleFullscreen, upgradeFacility, enterTournament, leaveTournament };
+window.__guild = { selectHero, setActivity, setTraining, setIntensity, setRecipe, setPotion, setDiscipline, usePotion, setDiet, setQuest, assignTo, setSpar, equipItem, unequipSlot, setPolicy, provision, buyMaterial, sellItem, hire, advanceAll, back, openRoom, toggleFullscreen, upgradeFacility, enterTournament, leaveTournament, setPlayNext };
 window.openGuild = openGuild;

@@ -2714,6 +2714,9 @@ function confirmDraft(){
 var _actionKeys = {};
 var _actionKeyHandler = null;
 var _actionKeyUpHandler = null;
+var _touchMove = { x: 0, y: 0 };   // virtual-joystick vector (-1..1), added to keyboard movement
+var _guildBattle = null;           // { resolve, done } while a guild (non-run) battle is live
+var _koTimer = null;               // pending "battle decided" timeout, so it can be cancelled/tracked
 
 function startActionArena(){
   // Build fighters the same way the VS / battle does, then layer on
@@ -2740,6 +2743,7 @@ function startActionArena(){
   showScreen('actionScreen');
   renderActionTiles();
   buildActionAttackBar();
+  var fb0 = document.getElementById('actForfeitBtn'); if (fb0) fb0.textContent = '↩ Forfeit Run';
   document.getElementById('actionLog').innerHTML = '';
   actionLog('⚔ Round '+run.round+' — '+ROUND_METALS[run.round-1].name+' — Fight!', 'crit');
   startActionLoop();
@@ -2806,6 +2810,8 @@ function startActionLoop(){
   _actionKeyUpHandler = function(e){ _actionKeys[e.key.toLowerCase()] = false; };
   document.addEventListener('keydown', _actionKeyHandler);
   document.addEventListener('keyup', _actionKeyUpHandler);
+  _touchMove.x = 0; _touchMove.y = 0;
+  ensureActionJoystick();
 
   function loop(now){
     if (!actionLoopRunning) return;
@@ -2824,12 +2830,59 @@ function stopActionLoop(){
   if (_actionKeyHandler) document.removeEventListener('keydown', _actionKeyHandler);
   if (_actionKeyUpHandler) document.removeEventListener('keyup', _actionKeyUpHandler);
   _actionKeyHandler = _actionKeyUpHandler = null;
+  _touchMove.x = 0; _touchMove.y = 0;
+  var joy = document.getElementById('actionJoystick'); if (joy) joy.classList.remove('active');
+}
+
+// Virtual movement stick for touch devices (the arena is otherwise WASD-only).
+// Lives inside #actionScreen; a pointer drag sets _touchMove, which actionTick adds
+// to the keyboard vector. Attacks are already tappable (buildActionAttackBar buttons).
+function ensureActionJoystick(){
+  var host = document.getElementById('actionArena') || document.getElementById('actionScreen');
+  if (!host) return;
+  var joy = document.getElementById('actionJoystick');
+  if (!joy){
+    joy = document.createElement('div');
+    joy.id = 'actionJoystick';
+    joy.className = 'action-joystick';
+    joy.innerHTML = '<div class="aj-thumb"></div>';
+    host.appendChild(joy);
+    var thumb = joy.querySelector('.aj-thumb');
+    var R = 42, cx = 0, cy = 0, activeId = null;
+    function setVec(px, py){
+      var dx = px - cx, dy = py - cy;
+      var len = Math.sqrt(dx * dx + dy * dy) || 1;
+      var cl = Math.min(len, R);
+      thumb.style.transform = 'translate(' + (dx / len * cl) + 'px,' + (dy / len * cl) + 'px)';
+      _touchMove.x = dx / len * (cl / R);
+      _touchMove.y = dy / len * (cl / R);
+    }
+    joy.addEventListener('pointerdown', function(e){
+      var r = joy.getBoundingClientRect();
+      cx = r.left + r.width / 2; cy = r.top + r.height / 2;
+      activeId = e.pointerId;
+      try { joy.setPointerCapture(e.pointerId); } catch (_){}
+      setVec(e.clientX, e.clientY); e.preventDefault();
+    });
+    joy.addEventListener('pointermove', function(e){
+      if (activeId !== e.pointerId) return;
+      setVec(e.clientX, e.clientY); e.preventDefault();
+    });
+    function release(e){
+      if (activeId !== e.pointerId) return;
+      activeId = null; _touchMove.x = 0; _touchMove.y = 0;
+      thumb.style.transform = 'translate(0,0)';
+    }
+    joy.addEventListener('pointerup', release);
+    joy.addEventListener('pointercancel', release);
+  }
+  joy.classList.add('active');
 }
 
 function actionTick(dt){
   if (p1.hp <= 0 || p2.hp <= 0){
     stopActionLoop();
-    setTimeout(endActionBattle, 500);
+    _koTimer = setTimeout(endActionBattle, 500);
     return;
   }
   // ─── Player movement (held keys) ─────────────────────────────
@@ -2839,6 +2892,7 @@ function actionTick(dt){
   if (_actionKeys.s || _actionKeys.arrowdown) dy += 1;
   if (_actionKeys.a || _actionKeys.arrowleft) dx -= 1;
   if (_actionKeys.d || _actionKeys.arrowright) dx += 1;
+  dx += _touchMove.x; dy += _touchMove.y;   // virtual joystick (touch) adds to keyboard input
   if (dx || dy){
     var L = Math.sqrt(dx*dx + dy*dy);
     dx /= L; dy /= L;
@@ -2870,7 +2924,7 @@ function actionTick(dt){
   if (p2._aiAtkCD <= 0 && p2.attacks && p2.attacks.length && od < 5){
     var pick2 = p2.attacks[Math.floor(Math.random() * p2.attacks.length)];
     tryActionAttack(p2, p1, pick2);
-    p2._aiAtkCD = 1.6;
+    p2._aiAtkCD = _guildBattle ? 0.9 : 1.6; // guild battles tighten the AI cadence so playing isn't structurally easy vs the sim odds
   }
   // ─── Cooldowns ───────────────────────────────────────────────
   p1._atkCD   = Math.max(0, (p1._atkCD||0)   - dt);
@@ -2932,7 +2986,7 @@ function tryActionAttack(attacker, defender, atkName){
     if (dmg < 1) dmg = 1;
     defender.hp -= dmg;
     if (defender.hp < 0) defender.hp = 0;
-    if (attacker === p1) run.totalDamage += dmg;
+    if (attacker === p1 && run) run.totalDamage += dmg; // guard: guild battles have no `run`
     setFighterAnim(defender, defender.hp <= 0 ? 'death' : 'hurt');
     actionLog((crit?'✦ CRIT ':'⚔ ')+aName+' '+atk.name+' — '+dmg+(crit?' (critical)':''), crit?'crit':'hit');
   } else {
@@ -2986,7 +3040,22 @@ function renderActionFighter(cv, fighter){
 }
 
 function endActionBattle(){
-  // Reuse the same victory / game-over flow as turn-based.
+  _koTimer = null; // this IS the decided-battle callback (or a manual end); no pending timer now
+  // Guild battle: resolve the promise; no `run` mutation, no loot/game-over screens.
+  if (_guildBattle && !_guildBattle.done){
+    _guildBattle.done = true;
+    var g = _guildBattle; _guildBattle = null; // consume now → a stray forfeit tap can't double-resolve
+    var playerWon = p1.hp > 0;
+    actionLog(playerWon ? '✦ Victory!' : '☠ Defeated…', playerWon ? 'crit' : 'miss');
+    var res = { winner: playerWon ? 'player' : 'opponent',
+      playerHp: Math.max(0, p1.hp), playerMaxHp: p1.maxHp,
+      oppHp: Math.max(0, p2.hp), oppMaxHp: p2.maxHp };
+    setTimeout(function(){ g.resolve(res); }, 750); // a beat on the result before returning
+    return;
+  }
+  // Roguelike path — NEVER enter it without a live run (a guild/stale context has none,
+  // and handleVictory/showGameOver dereference run.*). This is the null-run crash guard.
+  if (!run) return;
   if (p2.hp <= 0){
     handleVictory();
   } else if (p1.hp <= 0){
@@ -2995,10 +3064,91 @@ function endActionBattle(){
 }
 
 function forfeitAction(){
+  // Guild battle: forfeiting counts as a loss — but a battle already decided by a KO is
+  // resolved authoritatively by endActionBattle, so ignore a late forfeit tap (and its
+  // wrong forced-loss result). This closes the KO-window double-resolve/mis-result race.
+  if (_guildBattle && !_guildBattle.done){
+    if (p1.hp <= 0 || p2.hp <= 0) return; // already decided — let endActionBattle resolve it
+    if (!confirm('Forfeit this match? It counts as a loss.')) return;
+    _guildBattle.done = true;
+    var g = _guildBattle; _guildBattle = null;
+    if (_koTimer) { clearTimeout(_koTimer); _koTimer = null; }
+    stopActionLoop();
+    g.resolve({ winner: 'opponent', forfeit: true,
+      playerHp: Math.max(0, p1.hp), playerMaxHp: p1.maxHp,
+      oppHp: Math.max(0, p2.hp), oppMaxHp: p2.maxHp });
+    return;
+  }
+  if (!run) return; // guild/stale context with no live battle — do nothing (no run to abandon)
   if (!confirm('Abandon this run? All progress will be lost.')) return;
   stopActionLoop();
   showGameOver();
 }
+
+// ─── Guild-mode battle bridge ────────────────────────────────────────────────
+// Lets the Heroes Guild PLAY a battle (instead of auto-resolving it) using the
+// existing action arena, with no `run` / roguelike state. A guild member is a
+// Person with Monster-Rancher stats {POW,DEF,SKL,SPD,INT,VIT}; convert to the
+// engine's D&D-ish fighter, fight in the arena, and hand back a plain result.
+var GUILD_ATTACKS_BY_ARCH = {
+  Knight:     ['Strike', 'Calcination Strike', 'Coagulation Slam'],
+  Berserker:  ['Strike', 'Calcination Strike', 'Coagulation Slam'],
+  Adventurer: ['Strike', 'Calcination Strike'],
+  Ranger:     ['Strike', 'Calcination Strike', 'Coagulation Slam'],
+  Mage:       ['Strike', 'Distillation Bolt', 'Conjunction'],
+  Cleric:     ['Strike', 'Exaltation', 'Calcination Strike'],
+  Rogue:      ['Strike', 'Mercury Shift', 'Calcination Strike'],
+};
+// MR stat 0..100 → engine 8..20 so deriveStats' hp/ac/speed stay in the engine's band.
+function _mrToEng(v){ return Math.max(8, Math.min(20, Math.round(8 + (Math.max(0, Math.min(100, v || 0)) / 100) * 12))); }
+function guildFighterFromSpec(spec, num){
+  var s = spec.stats || {};
+  // Inverse of the save-migration map (POW←STR, DEF←CHA, SKL←WIS, SPD←DEX, VIT←CON).
+  var stats = {
+    STR: _mrToEng(s.POW), DEX: _mrToEng(s.SPD), CON: _mrToEng(s.VIT),
+    INT: _mrToEng(s.INT), WIS: _mrToEng(s.SKL), CHA: _mrToEng(s.DEF),
+  };
+  var d = deriveStats(stats);
+  var defMod = Math.floor((stats.CHA - 10) / 2); // DEF (→CHA) now hardens AC, so trained defense matters in the arena
+  var prime = spec.prime || (GUILD_ARCH_PRIME[spec.archetype] || 'salt');
+  var attacks = (GUILD_ATTACKS_BY_ARCH[spec.archetype] || ['Strike', 'Calcination Strike']).filter(function(n){ return !!ATTACKS[n]; });
+  return {
+    prime: prime, num: num || 1, name: spec.name || 'Fighter', col: num === 2 ? '#ef4444' : '#d4a843',
+    stats: stats, maxHp: d.hp, hp: d.hp, ac: d.ac + defMod, speed: d.speed, prof: d.proficiency,
+    x: 4, y: num === 2 ? 1 : 7,
+    attacks: attacks.length ? attacks : ['Strike'],
+    dot: null, ward: 0, facing: num === 2 ? 0 : Math.PI, teleported: false,
+    anim: { name: 'idle', frame: 0, timer: 0, onDone: null },
+    _bobPhase: Math.floor(Math.random() * 1400), _bobExcite: 0,
+    appearanceSeed: spec.appearanceSeed || null,
+    appearance: spec.appearance || null,
+    materia: [], gear: null,   // Phase 1: gear→engine conversion is stubbed
+  };
+}
+function startGuildBattle(p1Spec, p2Spec){
+  return new Promise(function(resolve){
+    _guildBattle = { resolve: resolve, done: false };
+    p1 = p1Spec; p2 = p2Spec;
+    p1.ax = 1.5; p1.ay = 7.5; p1.facing = 0;         // player bottom-left, facing up
+    p2.ax = 7.5; p2.ay = 1.5; p2.facing = Math.PI;   // opponent top-right, facing down
+    p1._atkCD = 0; p2._atkCD = 0; p1._aiAtkCD = 0; p2._aiAtkCD = 0;
+    gamePhase = 'action';
+    showScreen('actionScreen');
+    renderActionTiles();
+    buildActionAttackBar();
+    var fb = document.getElementById('actForfeitBtn'); if (fb) fb.textContent = '↩ Forfeit Match';
+    var logEl = document.getElementById('actionLog'); if (logEl) logEl.innerHTML = '';
+    actionLog('⚔ ' + p1.name + ' vs ' + p2.name + ' — Fight!', 'crit');
+    startActionLoop();
+  });
+}
+// Public facade for the guild: play a battle between two Person-like specs.
+// config = { player:{name,stats:{POW..},archetype,appearance?,appearanceSeed?,prime?}, opponent:{…} }
+// Returns Promise<{ winner:'player'|'opponent', playerHp, oppHp, … }>.
+window.playGuildBattle = function(config){
+  config = config || {};
+  return startGuildBattle(guildFighterFromSpec(config.player || {}, 1), guildFighterFromSpec(config.opponent || {}, 2));
+};
 
 // ═══ OPPONENT GENERATION (§7) ═══
 function generateOpponent(round){

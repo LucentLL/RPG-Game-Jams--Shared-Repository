@@ -21,3 +21,10 @@
 .action-log .log-entry.crit{color:var(--gold);font-weight:600}
 .action-log .log-entry.miss{color:var(--muted);font-style:italic}
 
+/* Virtual movement stick (touch). Overlays the arena's lower-left; created on demand by
+   ensureActionJoystick() and shown only while a battle loop runs (.active). Attacks are
+   already tappable, so this only supplies movement the keyboard otherwise would. */
+.action-joystick{position:absolute;left:12px;bottom:12px;width:104px;height:104px;border-radius:50%;background:radial-gradient(circle,rgba(15,15,22,0.5),rgba(15,15,22,0.28));border:2px solid rgba(212,168,67,0.45);touch-action:none;z-index:20;display:none;align-items:center;justify-content:center}
+.action-joystick.active{display:flex}
+.action-joystick .aj-thumb{width:46px;height:46px;border-radius:50%;background:radial-gradient(circle at 40% 35%,#e0b455,#6b4a1a);border:1px solid rgba(0,0,0,0.45);box-shadow:0 2px 6px rgba(0,0,0,0.45);pointer-events:none}
+

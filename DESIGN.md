@@ -239,6 +239,54 @@ we sidestep by keeping *direct* control to a hero/squad. The 100-unit spectacle 
 problem, not a control one: it needs a single scene canvas + baked per-character sprite atlases (the
 current per-character-canvas renderer tops out ~15–25 animated on desktop / ~6–12 on mid-range Android).
 
+## Modes & playable combat — one simulation, three lenses (owner 2026-07)
+
+The game offers **EA-Sports-style control scopes** (like Superstar / Team / Manager): **My Hero**
+(be one custom hero), **Team** (play the guild's battles), **Manager/Guildmaster** (today's
+management sim). The unifying rule is the owner's: **whatever the player isn't actively controlling
+is simulated.** There is one always-running guild simulation; a *mode* only changes which decisions
+and battles the player takes over vs. lets the AI/sim handle.
+
+**The keystone this rests on:** the battle engine must be *playable inside guild mode*. Guild combat
+was auto-resolved by power math; the tactical engine (the original Crucible battler) existed but was
+wired to its own `p1`/`p2` + `run` state. The enabling abstraction is a **resolution layer** where a
+battle is *either* simulated (the math) *or* played (hand guild heroes to the engine → a result), with
+the played result returning the **exact same shape** the resolver does — so everything downstream
+(payout, reputation, fatigue, placement, recap) never learns which it was.
+
+**Architecture (four layers over the sim):**
+- **Simulation core** — `hall.js advanceAll()` weekly tick + `resolveQuest`/`resolveTournament`. The
+  only two points where combat is decided. Unchanged; runs identically in all modes.
+- **Control-scope layer** *(future `src/guild/control.js`)* — `guild.control = { mode, focusId }` +
+  `playerOwns(battle)` ("player's call or the AI's?") + `autoManage(guild)` (sim-the-rest).
+- **Resolution seam** — inside `advanceAll`, `outcome = playerOwns ? await playBattle(…) : resolve(…)`.
+- **Battle adapter** — `src/guild/battle-bridge.js` (`heroSpec`, `playTournamentMatch`) → the engine's
+  `window.playGuildBattle({player,opponent})` facade in `crucible.js` (`guildFighterFromSpec`,
+  `startGuildBattle`), which reuses the real action arena with no `run`/roguelike state.
+
+### Build status & roadmap
+- **Phase 1 — Keystone ✅ DONE (2026-07).** Play ONE 1v1 tournament match through the action arena and
+  feed the win/loss back into `advanceAll` unchanged. A guild Person's MR stats convert to an engine
+  fighter (`guildFighterFromSpec`, hp/attacks by archetype; gear→engine is stubbed), fights a synthetic
+  field champion, and the result flows through `placement()` → rewards → recap exactly like a simulated
+  one. A **virtual touch joystick** (`ensureActionJoystick`, added to the arena) makes it mobile-real
+  (attacks were already tappable). `advanceAll` is now `async` with an `advancing` re-entrancy guard; a
+  "🎮 Play this match yourself" opt-in on the tournament card sets `playTournamentId`. Single duel: win →
+  Champion, lose → Eliminated (no bracket gradient yet).
+- **Phase 2 — Manager+, formalized (SMALL).** Extract `control.js`; generalize "Play this match" to any
+  tournament. Absent `control` defaults to `manager` → every existing save already *is* Manager mode.
+- **Phase 3 — My Hero (MEDIUM).** Own one hero; play only their fights; `autoManage` runs the rest via
+  reuse-only assignment passes (gear/diet/training/dispatch/tournament-entry). **Forces mobile touch
+  controls** (the joystick shipped in Phase 1 is the head start).
+- **Phase 4 — Team, small (MED→LARGE).** ≤4-a-side; de-singleton `p1`/`p2` so >2 fighters coexist.
+- **Phase 5 — Team, full melee (EPIC).** The 100-member war exercise — the **only** thing that forces
+  the single-scene-canvas + baked-sprite-atlas renderer rewrite. Sequenced last; blocks nothing before it.
+
+Presentation: the **real-time action arena** is the guild-battle vehicle (self-contained, already
+playable); the turn-based tactical grid can return later as a second presentation (shares the fighter
+model). Deferred from Phase 1: gear→engine conversion, multi-round played brackets, and a win/lose
+result overlay.
+
 ## Open design decisions
 
 - **One pool or two?** Recommend heroes and craftspeople are the *same* Person entity (professions
