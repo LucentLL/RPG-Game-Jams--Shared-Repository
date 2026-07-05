@@ -203,6 +203,42 @@ Built on today's working weekly loop (roster, training, diet, recruiting, MR sta
   picker); **sparring** — pair two members to train each other (mutual assignment; you learn more from a
   stronger partner; contact-injury risk).
 
+## The season & tournaments (added 2026-07)
+
+The weekly loop needed a **long horizon**. Quests are reactive (a fresh board each week);
+**tournaments are the opposite — scheduled tentpole events at fixed future weeks, visible in
+advance** (Monster Rancher's calendar), so training gains a *purpose and a deadline*: peak a hero's
+stats **and** keep them healthy for the Rank-3 tournament you can see six weeks out.
+
+- **Data:** `guild.schedule` — a rolling window of `Tournament`s (`{week, rank, field, rounds,
+  rewards, entrants[]}`) kept topped-up by `ensureSchedule()` (one roughly every 8 weeks, ranks
+  rising the further out they sit, floored by reputation). `src/guild/tournaments.js` mirrors `quests.js`.
+- **Nominate one champion, resolve on the week:** you send **one** hero per tournament (Monster-Rancher
+  style — you peak and taper a single ace, not the whole roster); on its week `advanceAll`'s tournament
+  pre-pass runs a small **bracket** — that champion's `combatPower` vs an escalating field
+  (`resolveTournament`, final round ≈ field×1.35), placement → scaled payout (Champion pays full gold +
+  rep + loot; finalists a fraction). **An injured champion can't compete** (forfeit), so the
+  "peak-and-taper" tension is real: a fresh recruit can't win — you must *train* them up and keep them
+  healthy. Single-entrant is deliberate — combined-lineup power made stacking heroes a guaranteed
+  zero-risk win (caught by the review). Pairs with the Grounds (train harder/safer via facilities) and
+  diet/fatigue/injury (don't crest into an injury on tournament week).
+- **UI:** a `📅 Calendar` room (upcoming cards with countdown, field, rewards, entered lineup +
+  win-odds), a hub "Next tournament" teaser, and recap lines. Reuses the quest power×variance model
+  so displayed odds can't drift from the resolver.
+
+## Combat controls — direction (owner 2026-07)
+
+Target feel: **Warcraft-3-*light*** — hero-led command, not mass micro. The player directly drives
+**one member or a small squad** while the rest (up to the ~100-unit "war exercise" vision) run on AI,
+with **auto-resolve** always available as the management-altitude fallback. This is deliberately the
+*mobile-friendly* end of RTS. Strongest precedent: **Iron Marines** (Ironhide) — a few squads + a
+leveling hero, tap-to-select / tap-to-command, "universal acclaim" on touch; MOBAs (LoL: Wild Rift)
+prove precise hero + skillshot control at scale; Bad North proves tap-drag squad tactics. The friction
+case — selecting individual soldiers in a dense RTS (the Company of Heroes iPad port) — is exactly what
+we sidestep by keeping *direct* control to a hero/squad. The 100-unit spectacle is an AI-driven render
+problem, not a control one: it needs a single scene canvas + baked per-character sprite atlases (the
+current per-character-canvas renderer tops out ~15–25 animated on desktop / ~6–12 on mid-range Android).
+
 ## Open design decisions
 
 - **One pool or two?** Recommend heroes and craftspeople are the *same* Person entity (professions

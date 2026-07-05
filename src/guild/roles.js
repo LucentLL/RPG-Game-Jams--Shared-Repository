@@ -17,6 +17,8 @@
 
 /** @type {Object.<string, Role>} keyed by room id. */
 export const ROLES = {
+  grounds:    { name: 'The Grounds',   glyph: '🏕', kind: 'living',  skill: null,           blurb: 'The whole compound — expand quarters, training & stores.' },
+  calendar:   { name: 'The Season',    glyph: '📅', kind: 'field',   skill: null,           blurb: 'Tournaments ahead — enter heroes early and train toward them.' },
   roster:     { name: 'Adventurer',    glyph: '🛡', kind: 'field',   skill: null,           blurb: 'Trains, then quests in the field.' },
   forge:      { name: 'Blacksmith',    glyph: '🔨', kind: 'work',    skill: 'blacksmithing', blurb: 'Forges weapons & armor into the armory.' },
   kitchen:    { name: 'Cook',          glyph: '🍲', kind: 'work',    skill: 'cooking',       blurb: 'Prepares meals that speed recovery.' },

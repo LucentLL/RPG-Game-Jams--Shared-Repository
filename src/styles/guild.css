@@ -250,3 +250,112 @@
 .intensity-toggle button.on { border-color: var(--gold); color: var(--gold); background: linear-gradient(135deg, #2a1a0a, #3a2a10); }
 .injury-flag { border: 1px solid var(--danger); background: rgba(239, 68, 68, 0.1); color: var(--danger);
   border-radius: 8px; padding: 6px 10px; margin-bottom: 10px; font-size: 0.76em; text-align: center; }
+
+/* ═══ THE GROUNDS (outdoors / compound view) ═══ */
+/* The illustrated compound: a sky+ground banner with stylized buildings sitting on
+   the ground line. 100% CSS/DOM — no canvas, no RAF, so it costs nothing on battery.
+   Each building is a button that enters its room; the Bunkhouse grows with tier. */
+.compound {
+  position: relative; width: 100%; height: clamp(150px, 30vh, 230px);
+  margin-bottom: 14px; border: 1px solid var(--border); border-radius: 12px; overflow: hidden;
+  background: linear-gradient(180deg, #0e1524 0%, #172033 42%, #3a3320 43%, #241d12 100%);
+}
+.compound::before { /* a faint moon/sun */
+  content: ''; position: absolute; top: 14px; right: 18px; width: 26px; height: 26px; border-radius: 50%;
+  background: radial-gradient(circle, rgba(230, 216, 170, 0.9), rgba(230, 216, 170, 0)); pointer-events: none;
+}
+.compound::after { /* the ground band */
+  content: ''; position: absolute; left: 0; right: 0; bottom: 0; height: 20%;
+  background: linear-gradient(180deg, #2b2416, #171009); border-top: 1px solid rgba(0, 0, 0, 0.5);
+}
+.compound-row {
+  position: absolute; left: 0; right: 0; bottom: 18%; height: 78%; z-index: 1; /* above the ::after ground band so labels show */
+  display: flex; align-items: flex-end; justify-content: center; gap: 3%; padding: 0 4%;
+}
+.building {
+  position: relative; flex: 1 1 0; min-width: 0; max-width: 15%;
+  display: flex; flex-direction: column; align-items: center; justify-content: flex-end;
+  background: transparent; border: none; padding: 0; cursor: pointer;
+  transition: transform 0.15s, filter 0.15s;
+}
+.building.wide { flex-grow: 1.7; max-width: 24%; }
+.building:hover, .building:focus-visible { transform: translateY(-3px); filter: brightness(1.18); outline: none; }
+.bld-roof {
+  width: 82%; height: 12px; flex: 0 0 auto; background: var(--roof, #6b4a2a);
+  clip-path: polygon(12% 100%, 0 100%, 50% 0, 100% 100%, 88% 100%); margin-bottom: -1px;
+}
+.bld-wall {
+  width: 100%; flex: 1 1 auto; min-height: 8px;
+  background: linear-gradient(180deg, var(--wall, #3a2e1f), var(--wall2, #241b12));
+  border: 1px solid rgba(0, 0, 0, 0.55); border-bottom: none; border-radius: 2px 2px 0 0;
+  display: flex; flex-direction: column; align-items: center; gap: 3px; padding: 5px 2px 0;
+  overflow: hidden; image-rendering: pixelated;
+}
+.bld-glyph { font-size: clamp(0.85em, 2.3vw, 1.35em); line-height: 1; filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.6)); }
+.bld-wins { display: flex; flex-wrap: wrap; gap: 3px; justify-content: center; }
+.bld-win { width: 5px; height: 6px; border-radius: 1px; background: rgba(240, 200, 90, 0.75); box-shadow: 0 0 4px rgba(240, 200, 90, 0.45); }
+.bld-label {
+  position: absolute; bottom: -15px; left: 50%; transform: translateX(-50%); white-space: nowrap;
+  font-size: 0.58em; color: var(--muted); font-family: 'Cinzel', serif; letter-spacing: 0.02em;
+}
+.bld-quarters { --roof: #7a5230; --wall: #4a3826; --wall2: #2c2013; }
+.bld-library  { --roof: #3f5170; --wall: #2c3346; --wall2: #1a1f2c; }
+.bld-hall     { --roof: #9a7326; --wall: #4a3a1c; --wall2: #2a2010; }
+.bld-forge    { --roof: #8a3a24; --wall: #4a2a1e; --wall2: #2a1712; }
+.bld-armory   { --roof: #4a4a5c; --wall: #2e2e3a; --wall2: #1c1c24; }
+.bld-kitchen  { --roof: #5a6a34; --wall: #333a22; --wall2: #1e2214; }
+
+/* capacity dashboard */
+.fac-note { font-size: 0.74em; color: var(--dim); margin: -4px 0 12px; font-style: italic; }
+.headcount { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.hc-cell { display: flex; flex-direction: column; align-items: center; gap: 2px; border: 1px solid var(--border);
+  border-radius: 8px; padding: 10px 4px; background: rgba(0, 0, 0, 0.22); text-align: center; }
+.hc-cell b { font-family: 'Cinzel', serif; font-size: 1.25em; color: var(--gold); line-height: 1.1; }
+.hc-cell span { font-size: 0.62em; color: var(--muted); letter-spacing: 0.05em; text-transform: uppercase; }
+.hs-more { display: inline-flex; align-items: center; padding: 0 6px; font-size: 0.8em; color: var(--dim); font-family: 'Cinzel', serif; }
+
+/* facility upgrade grid — 2-up on phones, more on desktop */
+.fac-hub { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 200px), 1fr)); gap: 12px; align-items: start; }
+.fac-hub .plan-card { margin-bottom: 0; }
+.fac-card { display: flex; flex-direction: column; }
+.fac-head { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+.fac-glyph { font-size: 1.3em; flex: 0 0 auto; }
+.fac-name { font-family: 'Cinzel', serif; color: #e8e0d0; font-size: 0.9em; flex: 1 1 auto; min-width: 0; }
+.fac-tier { font-size: 0.66em; color: var(--gold); border: 1px solid var(--border); border-radius: 5px; padding: 1px 6px; white-space: nowrap; }
+.fac-desc { font-size: 0.78em; color: var(--muted); font-style: italic; margin-bottom: 8px; line-height: 1.35; }
+.fac-now { font-size: 0.8em; color: var(--text); margin-bottom: 10px; }
+.fac-now b { color: var(--gold); font-family: 'Cinzel', serif; font-size: 0.92em; }
+.fac-action { margin-top: auto; }
+.fac-action .rc-hire { width: 100%; text-align: center; }
+.fac-max { display: block; text-align: center; font-size: 0.76em; color: var(--gold);
+  padding: 7px; border: 1px dashed var(--border); border-radius: 8px; }
+
+/* short viewport (phone landscape): shrink the scene so the dashboard stays reachable */
+@media (max-height: 430px) { .compound { height: clamp(120px, 26vh, 170px); } .bld-label { font-size: 0.52em; } }
+
+/* ═══ CALENDAR / TOURNAMENTS (the season) ═══ */
+.hub-tourney {
+  display: flex; align-items: center; gap: 8px; width: 100%; text-align: left; flex-wrap: wrap;
+  border: 1px solid var(--gold); border-radius: 9px; padding: 8px 12px; margin: 0 0 12px;
+  background: linear-gradient(135deg, rgba(42, 26, 10, 0.7), rgba(58, 42, 16, 0.5)); color: var(--text);
+  font-size: 0.86em; transition: box-shadow 0.15s;
+}
+.hub-tourney:hover { box-shadow: 0 0 12px rgba(212, 168, 67, 0.2); }
+.hub-tourney b { font-family: 'Cinzel', serif; color: #e8e0d0; flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hub-tourney .q-rank { flex: 0 0 auto; }
+.hub-tourney-when { margin-left: auto; color: var(--gold); font-size: 0.9em; white-space: nowrap; flex: 0 0 auto; }
+
+.tourney-card { border-color: rgba(212, 168, 67, 0.35); }
+.tourney-card.imminent { border-color: var(--gold); box-shadow: 0 0 14px rgba(212, 168, 67, 0.14); }
+.tourney-head { display: flex; align-items: center; gap: 8px; margin-bottom: 7px; }
+.tourney-name { font-family: 'Cinzel', serif; color: var(--gold); font-size: 0.98em; flex: 1 1 auto; min-width: 0; }
+.tourney-when {
+  font-size: 0.72em; color: var(--gold); border: 1px solid var(--gold); border-radius: 6px;
+  padding: 2px 8px; white-space: nowrap; background: rgba(212, 168, 67, 0.08);
+}
+.tourney-card.imminent .tourney-when { background: var(--gold); color: #1a1206; font-weight: 600; }
+.tourney-odds { font-size: 0.84em; color: var(--muted); margin: 8px 0 10px; }
+.tourney-odds b { color: var(--text); font-family: 'Cinzel', serif; }
+.hs-chip.unfit { position: relative; border-color: var(--danger); opacity: 0.8; filter: grayscale(0.35); }
+/* .hs-chip clips overflow, so the badge sits INSIDE the box (top-right), legible via a shadow. */
+.hs-chip.unfit::after { content: '⚠'; position: absolute; top: 0; right: 1px; font-size: 0.62em; line-height: 1; text-shadow: 0 0 3px #000, 0 0 2px #000; }

@@ -1547,7 +1547,9 @@ function renderGuildSprite(canvas, person, facing){
     person.appearanceSeed = s;
   }
   var appearance = ensureAppearance(person, prime); // derives a stable look from the seed; caches onto person.appearance
-  var row = facingToRow(facing == null ? 0 : facing);
+  // Default to Math.PI (South row = facing the viewer), matching renderActionFighter.
+  // A facing of 0 maps to row 3 (North/back), which made every guild member show their back.
+  var row = facingToRow(facing == null ? Math.PI : facing);
   // Draw ONE static frame (no idle-bob RAF loop): a guild screen shows many
   // portraits at once, and recompositing all of them every frame would burn
   // battery on mobile. Register a redraw so the portrait still fills in when the

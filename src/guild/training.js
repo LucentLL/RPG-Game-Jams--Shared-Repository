@@ -42,9 +42,10 @@ function wearMult(c) { return Math.max(0.2, 1 - ((c.fatigue || 0) + (c.stress ||
  * @param {string} drillId  a DRILLS id, or 'rest'
  * @param {'light'|'heavy'} intensity
  * @param {Object.<string,number>} [dietBias]
+ * @param {{injuryBonus?:number}} [opts]  injuryBonus raises the overtraining-injury threshold (Sparring Ring)
  * @returns {{gains:Object,drops:Object,rested?:boolean,injured?:boolean,injury:?string}}
  */
-export function applyTraining(hero, drillId, intensity, dietBias = {}) {
+export function applyTraining(hero, drillId, intensity, dietBias = {}, opts = {}) {
   const c = hero.condition;
   const gains = {}, drops = {};
 
@@ -96,9 +97,11 @@ export function applyTraining(hero, drillId, intensity, dietBias = {}) {
   c.morale = clamp100(c.morale - (heavy ? 2 : 1));
   hero.xp += heavy ? 14 : 8;
 
-  // Overtraining injury: chance rises with combined wear (Fatigue + Stress*2).
+  // Overtraining injury: chance rises with combined wear (Fatigue + Stress*2). A
+  // Sparring Ring (opts.injuryBonus) raises the threshold, so injuries start later.
   const wear = c.fatigue + (c.stress || 0) * 2;
-  if (wear > 185 && Math.random() < Math.min(0.6, (wear - 185) / 160)) c.injury = 'strained';
+  const injThresh = 185 + (opts.injuryBonus || 0);
+  if (wear > injThresh && Math.random() < Math.min(0.6, (wear - injThresh) / 160)) c.injury = 'strained';
 
   return { gains, drops, injury: c.injury };
 }
@@ -110,9 +113,10 @@ export function applyTraining(hero, drillId, intensity, dietBias = {}) {
  * and carries a real injury risk. Mutates `hero`; reads `partner`.
  * @param {import('./hero.js').Hero} hero @param {import('./hero.js').Hero} partner
  * @param {Object.<string,number>} [dietBias]
+ * @param {{injuryBonus?:number}} [opts]  injuryBonus raises the contact-injury threshold (Sparring Ring)
  * @returns {{gains:Object,drops:Object,spar:boolean,partnerName:string,injury:?string}}
  */
-export function applySpar(hero, partner, dietBias = {}) {
+export function applySpar(hero, partner, dietBias = {}, opts = {}) {
   const c = hero.condition;
   const gains = {}, drops = {};
   const combat = (h) => (h.stats.SKL || 0) + (h.stats.SPD || 0) + (h.stats.POW || 0);
@@ -134,7 +138,8 @@ export function applySpar(hero, partner, dietBias = {}) {
   c.morale = clamp100(c.morale + 1); // a good bout lifts spirits
   hero.xp += 12;
   const wear = c.fatigue + (c.stress || 0) * 2;
-  if (wear > 185 && Math.random() < Math.min(0.6, (wear - 185) / 150)) c.injury = 'bruised';
+  const injThresh = 185 + (opts.injuryBonus || 0); // Sparring Ring softens contact-injury risk
+  if (wear > injThresh && Math.random() < Math.min(0.6, (wear - injThresh) / 150)) c.injury = 'bruised';
   return { gains, drops, spar: true, partnerName: partner.name, injury: c.injury };
 }
 

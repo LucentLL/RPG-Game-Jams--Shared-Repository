@@ -8,7 +8,7 @@
 // quality feeds combatPower, so a well-forged armory measurably wins quests.
 // Consumables/provisioning (an Alchemist's potions a party withdraws) come next.
 
-import { createGuild } from './guild.js';
+import { createGuild, FACILITIES, maxRoster, facilityTier, fedCapacity } from './guild.js';
 import { HERO_STATS, heroPower, STAT_CAP } from './hero.js';
 import { generateRecruit, hireCost, rollRecruitPool } from './recruiting.js';
 import { DRILLS, REST, getDrill, applyTraining, applySpar } from './training.js';
@@ -19,13 +19,15 @@ import { RECIPES, getRecipe, previewQuality, forge, study, recipeUnlocked } from
 import { POTION_RECIPES, getPotionRecipe, previewPotency, brew, potionUnlocked, applyPotion } from './alchemy.js';
 import { MATERIALS, createInventory, armoryItems, findItem, addMaterial, gearBonus, EQUIP_SLOTS, findPotion, consumePotion, potionCount } from './inventory.js';
 import { generateQuestBoard, resolveQuest } from './quests.js';
+import { ensureSchedule, nextTournament, resolveTournament, placement, championOdds } from './tournaments.js';
 import { roleFor } from './roles.js';
 import { qualityTier } from './item.js';
 import { MATERIAL_PRICE, buyPrice, itemSellValue, createMarket, refreshMarket } from './market.js';
 import { saveGame, loadGame } from '../platform/storage.js';
 
 const SLOT = 'guild';
-const MAX_ROSTER = 6;
+// The roster cap is no longer a constant — it's derived from the Living Quarters
+// facility tier via maxRoster(guild) (see the Grounds view). Tier 0 == 6, as before.
 const QUEST_STAMINA = 40; // dispatching on a quest costs stamina — questing can't be spammed
 /** Whether a hero would actually march if dispatched — injured or too-tired heroes stay home. */
 const canMarch = (h) => !h.condition.injury && h.condition.stamina >= QUEST_STAMINA;
@@ -42,6 +44,8 @@ let currentRoom = 'hub'; // UI-only: which room the stage shows. Never saved —
 // The guild hall's rooms, in the sketch's row-major order. `tag` = work vs storage vs
 // living; `locked` rooms are stubbed until their system (the Alchemist) is built.
 const ROOMS = [
+  { id: 'grounds', glyph: '🏕', name: 'Grounds', tag: 'COMPOUND' },
+  { id: 'calendar', glyph: '📅', name: 'Calendar', tag: 'SEASON' },
   { id: 'roster', glyph: '🛡', name: 'Roster', tag: 'MEMBERS' },
   { id: 'forge', glyph: '🔨', name: 'Forge', tag: 'WORK' },
   { id: 'kitchen', glyph: '🍲', name: 'Kitchen', tag: 'WORK' },
@@ -60,6 +64,19 @@ function clamp(n) { return Math.max(0, Math.min(100, Math.round(n))); }
 /** Field power = trained stats + whatever gear the hero is carrying. Used for quest
  *  odds, resolution, and the displayed ⚡ so equipping visibly makes a hero stronger. */
 function combatPower(h) { return heroPower(h) + gearBonus(guild.inventory, h); }
+
+/** Weekly training multiplier bag = each diet's per-stat bias × the Training Yard's
+ *  flat gain multiplier. It merges into training.js's existing (dietBias[stat]||1)
+ *  factor, so no gain-formula change is needed — a better yard trains everyone faster. */
+function trainingBias(diet) {
+  const m = FACILITIES.yard.mainMult[facilityTier(guild, 'yard')] || 1;
+  const db = (diet && diet.statBias) || {};
+  const bias = {};
+  for (const s of HERO_STATS) bias[s] = (db[s] || 1) * m;
+  return bias;
+}
+/** Injury headroom from the Sparring Ring, passed as training opts (raises the injury threshold). */
+function ringOpts() { return { injuryBonus: FACILITIES.ring.injuryBonus[facilityTier(guild, 'ring')] || 0 }; }
 
 // --- Quartermaster: hand armory gear out by policy ---------------------------
 const itemScore = (it) => (it.quality || 0) * (it.durability ? it.durability.current / (it.durability.max || 100) : 1);
@@ -150,6 +167,17 @@ function load() {
   else { const def = createMarket().stock; for (const k in def) if (guild.market.stock[k] == null) guild.market.stock[k] = def[k]; } // seed herbs into pre-Alchemist saves
   if (!['off', 'party', 'all'].includes(guild.quartermaster)) guild.quartermaster = 'off';
   if (typeof guild.reputation !== 'number') guild.reputation = 0;
+  // Facilities: the Grounds reshaped this from a legacy string[] into a tier map.
+  // Old saves (and pre-Grounds new games) start every facility at tier 0 — cap 6,
+  // no training/injury bonus — so nothing changes until the player expands.
+  if (!guild.facilities || typeof guild.facilities !== 'object' || Array.isArray(guild.facilities)) {
+    guild.facilities = { quarters: 0, yard: 0, ring: 0, mess: 0 };
+  }
+  for (const k of ['quarters', 'yard', 'ring', 'mess']) {
+    if (typeof guild.facilities[k] !== 'number' || guild.facilities[k] < 0) guild.facilities[k] = 0;
+  }
+  if (!Array.isArray(guild.schedule)) guild.schedule = []; // tournament calendar (added with the season loop)
+  ensureSchedule(guild); // seed/top-up upcoming tournaments so there's always something on the horizon
   if (!Array.isArray(guild.questBoard) || !guild.questBoard.length) guild.questBoard = generateQuestBoard(guild, 3);
   guild.roster.forEach((h) => { migrateHero(h); ensureAssignment(h); });
   const staleRecruits = guild.recruits && guild.recruits[0] && guild.recruits[0].stats && guild.recruits[0].stats.POW === undefined;
@@ -241,7 +269,7 @@ function sellItem(itemId) {
 }
 
 function hire(id) {
-  if (guild.roster.length >= MAX_ROSTER) { notice = `Roster is full (${MAX_ROSTER}).`; render(); return; }
+  if (guild.roster.length >= maxRoster(guild)) { notice = `Quarters are full (${maxRoster(guild)}). Expand Living Quarters in the Grounds.`; render(); return; }
   const i = guild.recruits.findIndex((r) => r.id === id); if (i < 0) return;
   const r = guild.recruits[i]; const cost = hireCost(r);
   if (guild.gold < cost) { notice = `Not enough gold to hire ${r.name} (${cost}g).`; render(); return; }
@@ -285,6 +313,36 @@ function advanceAll() {
       questPlan[h.id] = { quest, outcome, marched: marchers.includes(h), isLead: marchers[0] === h, partySize: marchers.length };
       h.assignment.questId = null; // dispatch spent — pick a new quest next week
     });
+  }
+
+  // --- Tournament pre-pass: any scheduled tournament DUE this week resolves now on the
+  // entered lineup (uninjured entrants only), as a small bracket vs an escalating field.
+  // The guild is paid once, scaled by placement; competing tires the lineup. ---
+  const tournamentResults = [];
+  for (const t of guild.schedule) {
+    if (t.resolved || t.week > week) continue; // future events wait; <= week is due (incl. any straggler)
+    const lineup = (t.entrants || []).map((id) => heroById(id)).filter((h) => h && !h.condition.injury);
+    if (!lineup.length) {
+      t.resolved = true; t.result = { forfeit: true };
+      tournamentResults.push({ name: t.name, rank: t.rank, forfeit: true, hadEntrants: (t.entrants || []).length > 0 });
+      continue;
+    }
+    const res = resolveTournament(t, lineup, combatPower);
+    const pl = placement(res);
+    const gold = Math.round(t.rewards.gold * pl.frac);
+    const rep = Math.round(t.rewards.reputation * pl.frac);
+    if (gold) addGold(guild, gold);
+    if (rep) guild.reputation += rep;
+    if (pl.place === 1 && t.rewards.loot) addMaterial(guild.inventory, t.rewards.loot, 1);
+    lineup.forEach((h) => { // competing tires the lineup; a good run lifts morale and teaches Field
+      h.condition.stamina = Math.max(0, h.condition.stamina - 20);
+      h.condition.fatigue = Math.min(100, h.condition.fatigue + 15);
+      h.condition.morale = clamp(h.condition.morale + (pl.place === 1 ? 12 : pl.place <= 4 ? 4 : -6));
+      for (const k in h.professions) h.professions[k].field = Math.min(100, (h.professions[k].field || 0) + (2 + t.rank));
+    });
+    t.resolved = true;
+    t.result = { placement: pl.label, place: pl.place, wins: res.wins, rounds: res.rounds, gold, rep };
+    tournamentResults.push({ name: t.name, rank: t.rank, placement: pl.label, champion: pl.place === 1, gold, rep, party: lineup.length, loot: pl.place === 1 ? t.rewards.loot : null });
   }
 
   // Snapshot injuries at the START of the week: a member who bruises themselves mid-loop
@@ -351,18 +409,18 @@ function advanceAll() {
         const res = applyTraining(h, 'rest', 'light', diet.statBias); // injured — rest, don't spar
         entry.rested = true; entry.injury = res.injury;
       } else if (mutual) {
-        const res = applySpar(h, partner, diet.statBias); // both partners resolve their own side
+        const res = applySpar(h, partner, trainingBias(diet), ringOpts()); // both partners resolve their own side
         entry.drill = 'Spar vs ' + partner.name.split(' ')[0];
         entry.gains = res.gains; entry.drops = res.drops; entry.injury = res.injury;
         entry.trained = Object.keys(res.gains).length > 0; entry.spar = true;
       } else {
-        const res = applyTraining(h, 'skl', 'light', diet.statBias); // partner unavailable — solo footwork
+        const res = applyTraining(h, 'skl', 'light', trainingBias(diet), ringOpts()); // partner unavailable — solo footwork
         entry.drill = 'Spar — no partner';
         entry.gains = res.gains; entry.drops = res.drops; entry.injury = res.injury;
         entry.trained = Object.keys(res.gains).length > 0;
       }
     } else {
-      const res = applyTraining(h, a.trainingId, a.intensity, diet.statBias);
+      const res = applyTraining(h, a.trainingId, a.intensity, trainingBias(diet), ringOpts());
       entry.drill = (getDrill(a.trainingId) || REST).name;
       entry.gains = res.gains; entry.drops = res.drops;
       entry.rested = res.rested; entry.injured = res.injured; entry.injury = res.injury;
@@ -383,10 +441,11 @@ function advanceAll() {
   refreshMarket(guild.market);
   guild.questBoard = generateQuestBoard(guild, 3);
   guild.recruits = rollRecruitPool(3);
-  report = { income, upkeep, shortfall, results, issued };
+  ensureSchedule(guild); // drop the just-resolved tournament(s) and top up the horizon
+  report = { income, upkeep, shortfall, results, issued, tournaments: tournamentResults };
   notice = '';
   currentRoom = 'hub'; // land on the hub so the weekly recap is always seen
-  save(); render();
+  save(); render({ top: true }); // recap sits at the top of the hub
 }
 
 function back() { showScreen('titleScreen'); }
@@ -428,9 +487,13 @@ function questOdds(hp, rec) {
   if (pct >= 20) return { txt: 'Risky', cls: 'down', pct };
   return { txt: 'Grim', cls: 'down', pct };
 }
-function bar(label, value, color) {
+// `readout` overrides the right-hand number — condition bars show the 0-100 stat
+// (default), but capacity bars pass a real "N / M" count so the badge isn't a bare
+// clamped percentage (which would also hide over-capacity, e.g. 12/6 pinning at 100).
+function bar(label, value, color, readout) {
   const v = clamp(value);
-  return `<div class="cond-row"><div class="lbl"><span>${label}</span><span>${v}</span></div>
+  const right = readout != null ? readout : v;
+  return `<div class="cond-row"><div class="lbl"><span>${label}</span><span>${right}</span></div>
     <div class="cond-track"><div class="cond-fill" style="width:${v}%;background:${color}"></div></div></div>`;
 }
 function mini(value, color) { return `<span class="mini"><span class="mini-fill" style="width:${clamp(value)}%;background:${color}"></span></span>`; }
@@ -713,12 +776,19 @@ function recapPanel() {
     return `<div class="r-line"><b>${r.name}</b> · ${body}${r.injury ? ' <span class="down">⚠ strained!</span>' : ''} <span class="dim">(fat ${fmtDelta(r.fat)})</span></div>`;
   }).join('');
   const qm = report.issued ? `<div class="r-line dim">🎽 quartermaster issued ${report.issued} item(s) from stores</div>` : '';
-  return `<div class="week-report"><h4>Last week</h4>${lines}${qm}<div class="r-line">income <span class="up">+${report.income}g</span> · upkeep <span class="down">−${report.upkeep}g</span>${report.shortfall ? ' · <span class="down">insolvent — morale −8 all</span>' : ''}</div></div>`;
+  const tLines = (report.tournaments || []).map((t) => {
+    if (t.forfeit) return `<div class="r-line">🏆 <b>${t.name}</b> <span class="down">${t.hadEntrants ? 'forfeited — entrants unfit to compete' : 'passed — no one entered'}</span></div>`;
+    const loot = t.loot ? ` +1 ${MATERIALS[t.loot].name}` : '';
+    const team = t.party > 1 ? ` <span class="dim">(team of ${t.party})</span>` : '';
+    const pay = t.gold || t.rep ? ` — <span class="up">+${t.gold}g · +${t.rep} rep${loot}</span>` : '';
+    return `<div class="r-line">🏆 <b>${t.name}</b> · <span class="${t.champion ? 'up' : ''}">${t.placement}</span>${pay}${team}</div>`;
+  }).join('');
+  return `<div class="week-report"><h4>Last week</h4>${tLines}${lines}${qm}<div class="r-line">income <span class="up">+${report.income}g</span> · upkeep <span class="down">−${report.upkeep}g</span>${report.shortfall ? ' · <span class="down">insolvent — morale −8 all</span>' : ''}</div></div>`;
 }
 
 function recruitCard(r) {
   const cost = hireCost(r);
-  const afford = guild.gold >= cost && guild.roster.length < MAX_ROSTER;
+  const afford = guild.gold >= cost && guild.roster.length < maxRoster(guild);
   return `<div class="recruit-card">
       <span class="rr-portrait rc-portrait">${personSprite(r, 56)}</span>
       <span class="rc-info"><b>${r.name}</b><span class="rr-sub">${ARCH_GLYPH[r.archetype] || '☉'} ${r.archetype} · Σ${statTotal(r)} · ⚡${heroPower(r)}</span></span>
@@ -731,6 +801,8 @@ function recruitCard(r) {
 function roomStatus(id) {
   const r = guild.roster;
   switch (id) {
+    case 'grounds': return `${r.length}/${maxRoster(guild)} housed`;
+    case 'calendar': { const t = nextTournament(guild); if (!t) return 'no events'; const w = Math.max(0, t.week - guild.calendar.week); return `${w === 0 ? 'this week' : w + 'w'} · R${t.rank}`; }
     case 'roster': return `${r.length} member${r.length === 1 ? '' : 's'}`;
     case 'forge': { const n = r.filter((h) => h.assignment.type === 'forge').length; return n ? `${n} forging` : 'idle'; }
     case 'library': { const n = r.filter((h) => h.assignment.type === 'study').length; return n ? `${n} studying` : 'idle'; }
@@ -745,7 +817,7 @@ function roomStatus(id) {
 
 function rosterRoom() {
   const h = heroById(selectedId);
-  const list = `<div class="plan-card"><div class="plan-title">🛡 Roster · ${guild.roster.length}/${MAX_ROSTER}</div>
+  const list = `<div class="plan-card"><div class="plan-title">🛡 Roster · ${guild.roster.length}/${maxRoster(guild)}</div>
       <div class="roster-list">${guild.roster.map(rosterRow).join('')}</div></div>`;
   if (!h) return list;
   return `${list}
@@ -835,9 +907,9 @@ function armoryRoom() {
 }
 function quartersRoom() {
   return `<div class="plan-card">
-      <div class="plan-title">🍺 Tavern · Recruits · roster ${guild.roster.length}/${MAX_ROSTER}</div>
+      <div class="plan-title">🍺 Tavern · Recruits · roster ${guild.roster.length}/${maxRoster(guild)}</div>
       <div class="recruit-list">${guild.recruits.map(recruitCard).join('')}</div>
-      ${guild.roster.length >= MAX_ROSTER ? '<div class="hint">Roster is full — dismiss a member or expand your quarters later.</div>' : ''}
+      ${guild.roster.length >= maxRoster(guild) ? '<div class="hint">Quarters are full — expand Living Quarters in the 🏕 Grounds to house more.</div>' : ''}
     </div>`;
 }
 function roomStub(room) {
@@ -846,6 +918,170 @@ function roomStub(room) {
       <div class="plan-title">${room.name}</div>
       <div class="hint">${room.soon || 'Coming soon.'}</div>
     </div>`;
+}
+
+// --- Grounds (the outdoors / compound view) ---------------------------------
+// A capacity dashboard fronted by an illustrated compound. The scene is pure
+// CSS/DOM (no canvas, no RAF) so it costs no battery; buildings are tappable and
+// the Bunkhouse visibly grows as Living Quarters are expanded. Below the scene:
+// capacity roll-ups (bars/counts that read the same at 6 members or 120 trainees)
+// and the facility upgrade grid. See DESIGN.md Phase 5 (the minor league).
+
+/** Human-readable effect of a facility AT a given tier (for the "now → next" line). */
+function facilityEffect(key, t) {
+  const def = FACILITIES[key];
+  if (key === 'quarters') return `${def.caps[t]} beds`;
+  if (key === 'mess') return `feeds ${def.fed[t]}`;
+  if (key === 'yard') { const p = Math.round((def.mainMult[t] - 1) * 100); return p ? `+${p}% training` : 'standard training'; }
+  if (key === 'ring') return def.injuryBonus[t] ? `+${def.injuryBonus[t]} injury guard` : 'no injury guard';
+  return '';
+}
+
+/** Buy the next tier of a facility (gold-gated only — rank isn't advanced anywhere yet). */
+function upgradeFacility(key) {
+  const def = FACILITIES[key]; if (!def) return;
+  const t = facilityTier(guild, key);
+  if (t >= def.costs.length - 1) { notice = `${def.name} is already at its highest tier.`; render(); return; }
+  const cost = def.costs[t + 1];
+  if (guild.gold < cost) { notice = `Not enough gold — upgrading ${def.name} costs ${cost}g.`; render(); return; }
+  addGold(guild, -cost);
+  guild.facilities[key] = t + 1;
+  notice = `${def.name} expanded to Tier ${t + 1} — ${facilityEffect(key, t + 1)}.`;
+  save(); render(); // default render() preserves scroll so the player keeps their place in the grid
+}
+
+/** One facility's card: current tier, its effect now → next, and an Upgrade button. */
+function facilityCard(key) {
+  const def = FACILITIES[key];
+  const t = facilityTier(guild, key);
+  const maxed = t >= def.costs.length - 1;
+  const cost = maxed ? 0 : def.costs[t + 1];
+  const afford = guild.gold >= cost;
+  const action = maxed
+    ? '<span class="fac-max">✦ Fully expanded</span>'
+    : `<button class="rc-hire ${afford ? '' : 'disabled'}" onclick="__guild.upgradeFacility('${key}')">Expand · ${cost}g</button>`;
+  return `<div class="plan-card fac-card">
+      <div class="fac-head"><span class="fac-glyph">${def.glyph}</span><span class="fac-name">${def.name}</span><span class="fac-tier">Tier ${t}</span></div>
+      <div class="fac-desc">${def.desc}</div>
+      <div class="fac-now">Now <b>${facilityEffect(key, t)}</b>${maxed ? '' : ` <span class="dim">→ ${facilityEffect(key, t + 1)}</span>`}</div>
+      <div class="fac-action">${action}</div>
+    </div>`;
+}
+
+/** The buildings in the compound scene, left→right. Each opens its room; the
+ *  Bunkhouse (grow:'quarters') gains storeys as Living Quarters expand. */
+const COMPOUND_BUILDINGS = [
+  { room: 'quarters', glyph: '🏠', name: 'Bunkhouse', cls: 'bld-quarters', h: 50, grow: 'quarters' },
+  { room: 'library', glyph: '📖', name: 'Library', cls: 'bld-library', h: 60 },
+  { room: 'roster', glyph: '🏰', name: 'Great Hall', cls: 'bld-hall', h: 86, wide: true },
+  { room: 'forge', glyph: '🔨', name: 'Forge', cls: 'bld-forge', h: 52 },
+  { room: 'armory', glyph: '🗡', name: 'Armory', cls: 'bld-armory', h: 56 },
+  { room: 'kitchen', glyph: '🍲', name: 'Kitchen', cls: 'bld-kitchen', h: 46 },
+];
+function compoundScene() {
+  const buildings = COMPOUND_BUILDINGS.map((b) => {
+    const floors = b.grow ? facilityTier(guild, b.grow) : 0; // extra storeys as the facility tiers up
+    const height = Math.min(100, b.h + floors * 8);
+    const wins = Array.from({ length: 1 + floors }, () => '<span class="bld-win"></span>').join('');
+    return `<button class="building ${b.cls} ${b.wide ? 'wide' : ''}" style="height:${height}%" onclick="__guild.openRoom('${b.room}')" aria-label="Enter ${b.name}" title="Enter ${b.name}">
+        <span class="bld-roof"></span>
+        <span class="bld-wall"><span class="bld-glyph">${b.glyph}</span><span class="bld-wins">${wins}</span></span>
+        <span class="bld-label">${b.name}</span>
+      </button>`;
+  }).join('');
+  return `<div class="compound" role="group" aria-label="The guild grounds — tap a building to enter">
+      <div class="compound-row">${buildings}</div>
+    </div>`;
+}
+
+function groundsRoom() {
+  const roster = guild.roster;
+  const housed = roster.length, cap = maxRoster(guild), fed = fedCapacity(guild);
+  const training = roster.filter((h) => h.assignment.type === 'train').length;
+  const upkeep = weeklyUpkeep(guild, getDietPlan);
+  const named = roster.length; // every roster member is a named hero today
+  const trainees = 0;          // generic trainees (the Phase-5 minor league) — counted here, none yet
+  const facGrid = ['quarters', 'yard', 'ring', 'mess'].map(facilityCard).join('');
+  const strip = roster.slice(0, 8).map((h) => `<button class="hs-chip" title="${h.name}" onclick="__guild.selectHero('${h.id}')">${personSprite(h, 38)}</button>`).join('')
+    + (roster.length > 8 ? `<span class="hs-more">+${roster.length - 8}</span>` : '');
+  return `${compoundScene()}
+    <div class="plan-card">
+      <div class="plan-title">🏕 The Grounds · capacity</div>
+      ${bar('Housing', cap ? housed / cap * 100 : 0, housed >= cap ? 'var(--danger)' : 'var(--success)', `${housed} / ${cap}`)}
+      <div class="fac-note">Beds in the Living Quarters${housed >= cap ? ' — full; expand to recruit more' : ''}</div>
+      ${bar('Fed', fed ? housed / fed * 100 : 0, housed > fed ? '#e08a3c' : '#8ab4d8', `${housed} / ${fed}`)}
+      <div class="fac-note">Mess Hall capacity${housed > fed ? ' — overstretched; expand it to keep everyone fed' : ''}</div>
+      ${bar('In training', roster.length ? training / roster.length * 100 : 0, 'var(--gold)', `${training} / ${roster.length}`)}
+      <div class="fac-note">Members drilling this week · upkeep −${upkeep}g/wk</div>
+    </div>
+    <div class="plan-card">
+      <div class="plan-title">👥 Headcount</div>
+      <div class="headcount">
+        <span class="hc-cell"><b>${named}</b><span>Named heroes</span></span>
+        <span class="hc-cell"><b>${trainees}</b><span>Trainees</span></span>
+        <span class="hc-cell"><b>${housed}/${cap}</b><span>Housed</span></span>
+      </div>
+      <div class="hint" style="text-align:left;padding:6px 2px 0">Trainees — a pool of generic recruits who train up and graduate into named heroes — arrive with the minor-league system. This view already scales to them.</div>
+      <div class="dept-lbl" style="margin-top:10px">Members</div>
+      <div class="hero-switch">${strip}</div>
+    </div>
+    <div class="plan-title" style="margin:2px 2px 8px">🏗 Expand the compound</div>
+    <div class="fac-hub">${facGrid}</div>`;
+}
+
+// --- Calendar (the season of tournaments) -----------------------------------
+/** Nominate the ONE champion who represents the guild in an upcoming tournament
+ *  (Monster-Rancher style — you peak and taper a single ace, not dump the roster in).
+ *  Entering replaces any current pick, so a lineup is always at most one hero. */
+function enterTournament(tId, heroId) {
+  const t = (guild.schedule || []).find((x) => x.id === tId); const h = heroById(heroId);
+  if (!t || !h || t.resolved) return;
+  t.entrants = [heroId]; // single-entrant: one champion per event (replace, never stack)
+  notice = `${h.name} will represent the guild in ${t.name}.`;
+  save(); render();
+}
+function leaveTournament(tId, heroId) {
+  const t = (guild.schedule || []).find((x) => x.id === tId); if (!t) return;
+  t.entrants = (t.entrants || []).filter((id) => id !== heroId);
+  save(); render();
+}
+
+/** One upcoming tournament: countdown, field, rewards, your champion + picker, win odds. */
+function tournamentCard(t) {
+  const weeksOut = t.week - guild.calendar.week;
+  const when = weeksOut <= 0 ? 'this week' : weeksOut === 1 ? 'next week' : `in ${weeksOut} weeks`;
+  const entrant = (t.entrants || []).map(heroById).filter(Boolean)[0] || null; // one champion per event
+  const fit = entrant && !entrant.condition.injury ? entrant : null; // matches the resolver's injured filter
+  const power = fit ? combatPower(fit) : 0;
+  const champ = Math.round(championOdds(power, t) * 100);
+  const oddsCls = champ >= 50 ? 'up' : champ >= 20 ? '' : 'down';
+  const loot = t.rewards.loot ? ` · +1 ${MATERIALS[t.rewards.loot].name}` : '';
+  const odds = !entrant ? '<span class="dim">Choose a champion to see your odds.</span>'
+    : !fit ? '<span class="down">Injured — would forfeit. Heal them, or send someone else.</span>'
+    : `${entrant.name} <b>⚡${power}</b> · <span class="${oddsCls}">~${champ}% to win it all</span>`;
+  const chip = entrant
+    ? `<button class="hs-chip sel ${entrant.condition.injury ? 'unfit' : ''}" title="${entrant.condition.injury ? entrant.name + ' — injured, cannot compete; withdraw?' : 'Withdraw ' + entrant.name}" onclick="__guild.leaveTournament('${t.id}','${entrant.id}')">${personSprite(entrant, 34)}</button>`
+    : '<span class="dim" style="font-size:0.82em">No champion chosen.</span>';
+  const avail = guild.roster.filter((h) => !entrant || h.id !== entrant.id);
+  const addChips = avail.map((h) => `<button class="hs-chip add" title="Send ${h.name}" onclick="__guild.enterTournament('${t.id}','${h.id}')">${personSprite(h, 34)}</button>`).join('');
+  return `<div class="plan-card tourney-card ${weeksOut <= 1 ? 'imminent' : ''}">
+      <div class="tourney-head"><span class="tourney-name">🏆 ${t.name}</span><span class="q-rank">R${t.rank}</span><span class="tourney-when">${when}</span></div>
+      <div class="rr-sub">Field ~${t.field}⚡ · best of ${t.rounds} · Champion <span class="up">${t.rewards.gold}g · +${t.rewards.reputation} rep${loot}</span></div>
+      <div class="tourney-odds">${odds}</div>
+      <div class="dept-lbl">Your champion</div>
+      <div class="hero-switch">${chip}</div>
+      ${avail.length ? `<div class="dept-lbl add">➕ ${entrant ? 'Send someone else' : 'Choose a champion'}</div><div class="hero-switch">${addChips}</div>` : ''}
+    </div>`;
+}
+function calendarRoom() {
+  const cur = guild.calendar.week;
+  const upcoming = (guild.schedule || []).filter((t) => !t.resolved && t.week >= cur).sort((a, b) => a.week - b.week);
+  const cards = upcoming.length ? upcoming.map(tournamentCard).join('') : '<div class="plan-card"><div class="hint">No tournaments scheduled — advance a week to refresh the season.</div></div>';
+  return `<div class="plan-card">
+      <div class="plan-title">📅 The Season · ${formatDate(guild.calendar)}</div>
+      <div class="hint" style="text-align:left;padding:2px 2px 4px">Tournaments are set weeks in advance — <b>nominate one champion and train them toward the date</b>. Each resolves automatically on its week as a bracket fought on your champion's ⚡; an injured champion can't compete, so peak them <em>and</em> keep them healthy.</div>
+    </div>
+    ${cards}`;
 }
 
 // --- hub --------------------------------------------------------------------
@@ -865,8 +1101,12 @@ function roleTag(roomId) {
   return r ? `<div class="role-banner"><span class="role-name">${r.glyph} ${r.name}</span> <span class="dim">— ${r.blurb}</span></div>` : '';
 }
 function renderHub() {
+  const nt = nextTournament(guild);
+  const w = nt ? Math.max(0, nt.week - guild.calendar.week) : 0;
+  const teaser = nt ? `<button class="hub-tourney" onclick="__guild.openRoom('calendar')">🏆 Next: <b>${nt.name}</b> <span class="q-rank">R${nt.rank}</span> <span class="hub-tourney-when">${w === 0 ? 'this week' : w === 1 ? 'next week' : 'in ' + w + ' weeks'}</span></button>` : '';
   return `${recapPanel()}
     <div class="hub-head">☙ <b>${guild.name}</b> — choose a room</div>
+    ${teaser}
     <div class="room-hub">${ROOMS.map(roomTile).join('')}</div>`;
 }
 
@@ -876,6 +1116,8 @@ function renderRoom(id) {
   const hdr = roleTag(id); // every room announces its role
   if (room.locked) return hdr + roomStub(room);
   switch (id) {
+    case 'grounds': return hdr + groundsRoom();
+    case 'calendar': return hdr + calendarRoom();
     case 'roster': return hdr + rosterRoom();
     case 'forge': return hdr + forgeRoom();
     case 'kitchen': return hdr + kitchenRoom();
@@ -915,8 +1157,16 @@ function railHTML() {
 }
 
 // --- render -----------------------------------------------------------------
-function render() {
-  document.getElementById('guildScreen').innerHTML = `
+// Re-renders the whole hall (rail + stage) by replacing #guildScreen's innerHTML.
+// Because that destroys and recreates the scrolling .room-stage, we snapshot its
+// scrollTop and restore it afterward — otherwise every in-room menu tap (pick a
+// diet, a drill, a recipe) would jump the view back to the top. Navigation that
+// SHOULD start fresh (switching rooms, Advance Week) passes { top: true }.
+function render({ top = false } = {}) {
+  const screen = document.getElementById('guildScreen');
+  const prevStage = screen.querySelector('.room-stage');
+  const keepScroll = top ? 0 : (prevStage ? prevStage.scrollTop : 0);
+  screen.innerHTML = `
     <div class="guild-hall">
       <aside class="room-rail">${railHTML()}</aside>
       <main class="room-stage">
@@ -924,6 +1174,8 @@ function render() {
         ${renderRoom(currentRoom)}
       </main>
     </div>`;
+  const stage = screen.querySelector('.room-stage');
+  if (stage) stage.scrollTop = keepScroll;
   paintSprites(); // canvases exist now — draw the Elements sprites into them
 }
 
@@ -940,7 +1192,7 @@ function openRoom(id) {
     const sel = heroById(selectedId);
     if (!sel || sel.assignment.type !== job) { const w = guild.roster.find((h) => h.assignment.type === job); if (w) selectedId = w.id; }
   }
-  render();
+  render({ top: true }); // a fresh room starts scrolled to the top
 }
 function toggleFullscreen() {
   const el = document.documentElement;
@@ -969,9 +1221,9 @@ export function openGuild() {
     document.addEventListener('fullscreenchange', onFs);
     document.addEventListener('webkitfullscreenchange', onFs);
   }
-  render();
+  render({ top: true });
   showScreen('guildScreen');
 }
 
-window.__guild = { selectHero, setActivity, setTraining, setIntensity, setRecipe, setPotion, setDiscipline, usePotion, setDiet, setQuest, assignTo, setSpar, equipItem, unequipSlot, setPolicy, provision, buyMaterial, sellItem, hire, advanceAll, back, openRoom, toggleFullscreen };
+window.__guild = { selectHero, setActivity, setTraining, setIntensity, setRecipe, setPotion, setDiscipline, usePotion, setDiet, setQuest, assignTo, setSpar, equipItem, unequipSlot, setPolicy, provision, buyMaterial, sellItem, hire, advanceAll, back, openRoom, toggleFullscreen, upgradeFacility, enterTournament, leaveTournament };
 window.openGuild = openGuild;
