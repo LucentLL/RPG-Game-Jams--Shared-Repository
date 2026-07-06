@@ -1,0 +1,42 @@
+/* ═══ THE RANCH — living-canvas home view ═══ */
+/* A sibling of .guild-hall-host inside #guildScreen. Only one is visible at a time
+   (toggled via [hidden]); the ranch owns its own animated canvas subtree + RAF loop. */
+#guildScreen { position: relative; }
+.ranch-view { position: absolute; inset: 0; display: flex; flex-direction: column; background: #0e1118; }
+.ranch-view[hidden] { display: none; }
+
+/* HUD strip (never inside the field, so it isn't z-index shuffled). */
+.ranch-hud { display: flex; align-items: center; gap: 10px 14px; flex-wrap: wrap;
+  padding: 8px 14px; border-bottom: 1px solid var(--border); background: rgba(0, 0, 0, 0.4); flex: 0 0 auto; }
+.ranch-title { font-family: 'Cinzel', serif; color: var(--gold); letter-spacing: 0.05em; font-size: 0.95em; }
+.ranch-meta { font-size: 0.8em; color: var(--muted); }
+.ranch-meta b { color: var(--text); }
+.ranch-hud-btns { margin-left: auto; display: flex; gap: 8px; }
+.ranch-btn { border: 1px solid var(--dim); color: var(--silver); background: transparent; border-radius: 8px;
+  padding: 7px 13px; font-size: 0.8em; font-family: 'Cinzel', serif; letter-spacing: 0.04em; transition: all 0.15s; }
+.ranch-btn:hover { border-color: var(--silver); }
+.ranch-btn.adv { border-color: var(--gold); color: var(--gold); background: linear-gradient(135deg, #2a1a0a, #3a2a10); }
+.ranch-btn.adv:hover { box-shadow: 0 0 12px rgba(212, 168, 67, 0.25); }
+
+/* The field — a centered square sized to fit the area under the HUD. */
+.ranch-stage { flex: 1 1 auto; display: flex; align-items: center; justify-content: center; overflow: hidden; padding: 6px; }
+.ranch-field { position: relative; width: min(96vw, calc(100dvh - 78px)); height: min(96vw, calc(100dvh - 78px));
+  background-size: cover; image-rendering: pixelated; border: 1px solid var(--border); border-radius: 6px;
+  box-shadow: inset 0 0 60px rgba(0, 0, 0, 0.45); overflow: hidden; }
+
+/* Roaming member sprite. Mirrors .action-fighter positioning BUT is tappable
+   (.action-fighter is pointer-events:none) — the one gotcha the design flagged. */
+.ranch-member { position: absolute; width: 13.333%; height: 13.333%; image-rendering: pixelated;
+  transform: translate(-50%, -58%); pointer-events: auto; cursor: pointer; }
+.ranch-member:hover { filter: drop-shadow(0 0 4px rgba(212, 168, 67, 0.7)); }
+
+/* Facility / building props — glyph slabs placed on the field, tap to enter the room. */
+.ranch-prop { position: absolute; transform: translate(-50%, -72%); display: flex; flex-direction: column;
+  align-items: center; gap: 0; background: transparent; border: none; color: #e8e0d0; cursor: pointer; }
+.rp-glyph { font-size: 2.1em; line-height: 1; filter: drop-shadow(0 3px 3px rgba(0, 0, 0, 0.6)); transition: transform 0.15s; }
+.ranch-prop.big .rp-glyph { font-size: 3em; }
+.ranch-prop:hover .rp-glyph { transform: translateY(-2px) scale(1.06); }
+.rp-name { font-family: 'Cinzel', serif; font-size: 0.62em; color: #e8e0d0; margin-top: 1px;
+  text-shadow: 0 1px 3px #000, 0 0 4px #000; white-space: nowrap; }
+
+.ranch-fallback { margin: auto; color: var(--muted); font-style: italic; }

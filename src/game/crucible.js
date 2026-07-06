@@ -1422,42 +1422,42 @@ function _fighterIdleAnim(f){
   return 'idle';
 }
 
+// Step ONE entity's animation frame. Generic — the battle loop runs it over p1/p2
+// (tickAnimations below), and the ranch loop runs it over wandering members via
+// window.__ranchGfx.tickActor. Reads only fighter.anim + SPRITE_ANIMS.
+function _stepFighterAnim(f, now) {
+  if (!f || !f.anim) return;
+  var ad = SPRITE_ANIMS[f.anim.name];
+  if (!ad) return;
+  // Single-frame non-looping anims (hurt, anticip, …) time out after `speed`;
+  // `hold:true` anims (death, prone) stay until something else overwrites them.
+  if (ad.frames <= 1) {
+    if (!ad.loop && !ad.hold) {
+      var el = now - f.anim.timer;
+      if (el >= ad.speed) {
+        if (f.anim.onDone) { var cb0 = f.anim.onDone; f.anim.onDone = null; cb0(); }
+        f.anim = { name: _fighterIdleAnim(f), frame: 0, timer: now, onDone: null };
+      }
+    }
+    return;
+  }
+  var elapsed = now - f.anim.timer;
+  if (elapsed >= ad.speed) {
+    f.anim.frame++;
+    f.anim.timer = now;
+    if (f.anim.frame >= ad.frames) {
+      if (ad.loop) {
+        f.anim.frame = 0;
+      } else {
+        f.anim.frame = ad.frames - 1;
+        if (f.anim.onDone) { var cb = f.anim.onDone; f.anim.onDone = null; cb(); }
+        if (!ad.hold) { f.anim = { name: _fighterIdleAnim(f), frame: 0, timer: now, onDone: null }; }
+      }
+    }
+  }
+}
 function tickAnimations(now) {
-  [p1, p2].forEach(function(f) {
-    if (!f) return;
-    // Bob excitement is computed on demand from f._bobExciteEnd (see
-    // getBobExcite). Nothing to decay here.
-    if (!f.anim) return;
-    var ad = SPRITE_ANIMS[f.anim.name];
-    if (!ad) return;
-    // Single-frame non-looping anims (hurt, anticip, etc.): time out after speed
-    // duration. `hold: true` anims (death, prone) stay until something else
-    // overwrites them.
-    if (ad.frames <= 1) {
-      if (!ad.loop && !ad.hold) {
-        var elapsed = now - f.anim.timer;
-        if (elapsed >= ad.speed) {
-          if (f.anim.onDone) { var cb = f.anim.onDone; f.anim.onDone = null; cb(); }
-          f.anim = { name: _fighterIdleAnim(f), frame: 0, timer: now, onDone: null };
-        }
-      }
-      return;
-    }
-    var elapsed = now - f.anim.timer;
-    if (elapsed >= ad.speed) {
-      f.anim.frame++;
-      f.anim.timer = now;
-      if (f.anim.frame >= ad.frames) {
-        if (ad.loop) {
-          f.anim.frame = 0;
-        } else {
-          f.anim.frame = ad.frames - 1;
-          if (f.anim.onDone) { var cb = f.anim.onDone; f.anim.onDone = null; cb(); }
-          if (!ad.hold) { f.anim = { name: _fighterIdleAnim(f), frame: 0, timer: now, onDone: null }; }
-        }
-      }
-    }
-  });
+  [p1, p2].forEach(function(f) { _stepFighterAnim(f, now); });
 }
 
 // Find the fighter being rendered onto a given canvas (battle grid only).
@@ -3148,6 +3148,49 @@ function startGuildBattle(p1Spec, p2Spec){
 window.playGuildBattle = function(config){
   config = config || {};
   return startGuildBattle(guildFighterFromSpec(config.player || {}, 1), guildFighterFromSpec(config.opponent || {}, 2));
+};
+
+// ─── Ranch reuse surface ─────────────────────────────────────────────────────
+// The living-ranch view (src/guild/ranch.js) animates roaming guild members using
+// the arena's animated-sprite leaves. It owns its own actor array + RAF loop; this
+// facade just hands it the per-actor draw/step/anim helpers so crucible.js's p1/p2
+// globals stay untouched (tickAnimations/fighterForCanvas are p1/p2-bound — not reused).
+
+/** Build a lightweight, render-ready ranch actor from a guild Person (no Person
+ *  mutation beyond the STABLE appearance cache renderGuildSprite already sets). */
+function makeRanchActor(person){
+  var prime = person.prime || person.bodyType || GUILD_ARCH_PRIME[person.archetype] || 'salt';
+  if (person.appearance == null && person.appearanceSeed == null){
+    var s = 0, key = (person.id || '') + '|' + (person.name || '');
+    for (var i = 0; i < key.length; i++) s = (s * 131 + key.charCodeAt(i)) | 0;
+    person.appearanceSeed = s;
+  }
+  return {
+    id: person.id, name: person.name,
+    appearance: ensureAppearance(person, prime), prime: prime, gear: null,
+    anim: { name: 'idle', frame: 0, timer: performance.now(), onDone: null },
+    facing: Math.PI, _bobExcite: 0, _bobPhase: Math.floor(Math.random() * 1400),
+  };
+}
+/** Bake the arena's procedural grass into a data-URI (for a CSS background). Cache the result. */
+function renderRanchTilesToDataURI(){
+  var px = ACTION_TILE * ACTION_GS;
+  var cv = document.createElement('canvas'); cv.width = px; cv.height = px;
+  var ctx = cv.getContext('2d'); ctx.imageSmoothingEnabled = false;
+  for (var r = 0; r < ACTION_GS; r++){
+    for (var c = 0; c < ACTION_GS; c++){
+      drawGrass(ctx, c * ACTION_TILE, r * ACTION_TILE, ACTION_TILE, tileRng(r * 137 + c * 311 + 9));
+    }
+  }
+  return cv.toDataURL();
+}
+window.__ranchGfx = {
+  makeActor:   makeRanchActor,          // (person) → ranch actor
+  renderActor: renderActionFighter,     // (canvas, actor) → composite anim+frame+facing
+  tickActor:   _stepFighterAnim,        // (actor, now) → step its anim frame
+  setAnim:     setFighterAnim,          // (actor, 'move'|'idle') → set actor.anim
+  bakeGrass:   renderRanchTilesToDataURI,
+  GS:          ACTION_GS,               // field grid size (tiles)
 };
 
 // ═══ OPPONENT GENERATION (§7) ═══

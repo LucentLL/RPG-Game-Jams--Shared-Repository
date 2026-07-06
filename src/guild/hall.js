@@ -25,6 +25,7 @@ import { qualityTier } from './item.js';
 import { MATERIAL_PRICE, buyPrice, itemSellValue, createMarket, refreshMarket } from './market.js';
 import { saveGame, loadGame } from '../platform/storage.js';
 import { playTournamentMatch, battleEngineReady } from './battle-bridge.js';
+import { renderRanch, stopRanchLoop } from './ranch.js';
 
 const SLOT = 'guild';
 // The roster cap is no longer a constant — it's derived from the Living Quarters
@@ -43,6 +44,7 @@ let notice = '';
 let currentRoom = 'hub'; // UI-only: which room the stage shows. Never saved — resets to hub each session.
 let playTournamentId = null; // UI-only: tournament the player opted to PLAY (not simulate) next Advance Week.
 let advancing = false; // re-entrancy guard — a played battle makes advanceAll async & minutes-long.
+let ranchView = true; // UI-only: the guild opens on the RANCH (home view); rooms are drill-in detail.
 
 // The guild hall's rooms, in the sketch's row-major order. `tag` = work vs storage vs
 // living; `locked` rooms are stubbed until their system (the Alchemist) is built.
@@ -463,7 +465,8 @@ async function advanceAll() {
   report = { income, upkeep, shortfall, results, issued, tournaments: tournamentResults };
   notice = '';
   currentRoom = 'hub'; // land on the hub so the weekly recap is always seen
-  save(); showScreen('guildScreen'); render({ top: true }); // return from any played-battle screen; recap at top
+  ranchView = false; stopRanchLoop(); // land on the hub recap after a week resolves
+  save(); showScreen('guildScreen'); applyViewToggle(); render({ top: true });
   } finally { advancing = false; }
 }
 
@@ -1138,6 +1141,7 @@ async function practiceBout(myId, oppId) {
       : `${me.name} lost the bout vs ${opp.name} — no harm done, just practice.`;
   } finally { advancing = false; }
   showScreen('guildScreen'); render();
+  if (ranchView) { renderRanch(guild); applyViewToggle(); } // restart the ranch loop after a bout
 }
 
 /** The Arena — jump straight into a live, playable bout (no Advance Week needed).
@@ -1228,22 +1232,25 @@ function railHTML() {
       </div>
       <div class="guild-meta"><span>☉ <b>${guild.gold}</b>g</span><span>✦ <b>${guild.reputation}</b></span><span>${formatDate(guild.calendar)}</span></div>
     </div>
+    <button class="room-chip hub-chip" onclick="__guild.openRanch()"><span class="rc-glyph">⌂</span><span class="rc-body"><span class="rc-name">Ranch</span></span></button>
     <button class="room-chip hub-chip ${currentRoom === 'hub' ? 'on' : ''}" onclick="__guild.openRoom('hub')"><span class="rc-glyph">🏰</span><span class="rc-body"><span class="rc-name">Hub</span></span></button>
     <div class="rail-rooms">${ROOMS.map(roomChip).join('')}</div>
     <button class="advance-btn rail-advance" onclick="__guild.advanceAll()">▶ ADVANCE WEEK <span class="ra-cost">−${upkeep}g</span></button>`;
 }
 
 // --- render -----------------------------------------------------------------
-// Re-renders the whole hall (rail + stage) by replacing #guildScreen's innerHTML.
-// Because that destroys and recreates the scrolling .room-stage, we snapshot its
-// scrollTop and restore it afterward — otherwise every in-room menu tap (pick a
-// diet, a drill, a recipe) would jump the view back to the top. Navigation that
-// SHOULD start fresh (switching rooms, Advance Week) passes { top: true }.
+// Re-renders the room-hub (rail + stage) into a CHILD `.guild-hall-host` div, NOT
+// #guildScreen itself — so the ranch view (a sibling `.ranch-view` with its own
+// animated canvas subtree + RAF loop) is never wiped by a room re-render. Snapshots
+// .room-stage scrollTop so an in-room menu tap doesn't jump to the top; navigation
+// that should start fresh (switching rooms, Advance Week) passes { top: true }.
 function render({ top = false } = {}) {
   const screen = document.getElementById('guildScreen');
-  const prevStage = screen.querySelector('.room-stage');
+  let host = screen.querySelector('.guild-hall-host');
+  if (!host) { host = document.createElement('div'); host.className = 'guild-hall-host'; screen.appendChild(host); }
+  const prevStage = host.querySelector('.room-stage');
   const keepScroll = top ? 0 : (prevStage ? prevStage.scrollTop : 0);
-  screen.innerHTML = `
+  host.innerHTML = `
     <div class="guild-hall">
       <aside class="room-rail">${railHTML()}</aside>
       <main class="room-stage">
@@ -1251,10 +1258,26 @@ function render({ top = false } = {}) {
         ${renderRoom(currentRoom)}
       </main>
     </div>`;
-  const stage = screen.querySelector('.room-stage');
+  const stage = host.querySelector('.room-stage');
   if (stage) stage.scrollTop = keepScroll;
   paintSprites(); // canvases exist now — draw the Elements sprites into them
 }
+
+// --- ranch (home view) ------------------------------------------------------
+/** Show exactly one of the ranch view or the room-hub host (they're siblings in #guildScreen). */
+function applyViewToggle() {
+  const screen = document.getElementById('guildScreen');
+  const host = screen.querySelector('.guild-hall-host');
+  const view = screen.querySelector('.ranch-view');
+  if (host) host.hidden = ranchView;
+  if (view) view.hidden = !ranchView;
+}
+/** Go home to the ranch. */
+function openRanch() { ranchView = true; renderRanch(guild); applyViewToggle(); }
+/** Drill from the ranch into a room's menus. */
+function enterRoomFromRanch(roomId) { stopRanchLoop(); ranchView = false; applyViewToggle(); openRoom(roomId); }
+/** Tap a member on the ranch → open their Roster card. */
+function manageMemberFromRanch(id) { stopRanchLoop(); ranchView = false; selectedId = id; applyViewToggle(); openRoom('roster'); }
 
 // --- room / fullscreen controls ---------------------------------------------
 const ROOM_JOB = { forge: 'forge', library: 'study', laboratory: 'brew' };
@@ -1298,9 +1321,10 @@ export function openGuild() {
     document.addEventListener('fullscreenchange', onFs);
     document.addEventListener('webkitfullscreenchange', onFs);
   }
-  render({ top: true });
+  render({ top: true });        // build the room-hub host (hidden while on the ranch)
+  ranchView = true; renderRanch(guild); applyViewToggle(); // open ON the ranch (home)
   showScreen('guildScreen');
 }
 
-window.__guild = { selectHero, setActivity, setTraining, setIntensity, setRecipe, setPotion, setDiscipline, usePotion, setDiet, setQuest, assignTo, setSpar, equipItem, unequipSlot, setPolicy, provision, buyMaterial, sellItem, hire, advanceAll, back, openRoom, toggleFullscreen, upgradeFacility, enterTournament, leaveTournament, setPlayNext, practiceBout };
+window.__guild = { selectHero, setActivity, setTraining, setIntensity, setRecipe, setPotion, setDiscipline, usePotion, setDiet, setQuest, assignTo, setSpar, equipItem, unequipSlot, setPolicy, provision, buyMaterial, sellItem, hire, advanceAll, back, openRoom, toggleFullscreen, upgradeFacility, enterTournament, leaveTournament, setPlayNext, practiceBout, openRanch, enterRoomFromRanch, manageMemberFromRanch };
 window.openGuild = openGuild;
