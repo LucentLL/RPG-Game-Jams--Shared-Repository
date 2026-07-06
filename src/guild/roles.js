@@ -20,6 +20,7 @@ export const ROLES = {
   grounds:    { name: 'The Grounds',   glyph: '🏕', kind: 'living',  skill: null,           blurb: 'The whole compound — expand quarters, training & stores.' },
   calendar:   { name: 'The Season',    glyph: '📅', kind: 'field',   skill: null,           blurb: 'Tournaments ahead — enter heroes early and train toward them.' },
   roster:     { name: 'Adventurer',    glyph: '🛡', kind: 'field',   skill: null,           blurb: 'Trains, then quests in the field.' },
+  arena:      { name: 'Combatant',     glyph: '⚔', kind: 'field',   skill: null,           blurb: 'Step in for a live practice bout — anytime.' },
   forge:      { name: 'Blacksmith',    glyph: '🔨', kind: 'work',    skill: 'blacksmithing', blurb: 'Forges weapons & armor into the armory.' },
   kitchen:    { name: 'Cook',          glyph: '🍲', kind: 'work',    skill: 'cooking',       blurb: 'Prepares meals that speed recovery.' },
   library:    { name: 'Scholar',       glyph: '📖', kind: 'work',    skill: 'blacksmithing', blurb: 'Studies theory to unlock recipes.' },

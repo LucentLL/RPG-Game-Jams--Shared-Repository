@@ -50,6 +50,7 @@ const ROOMS = [
   { id: 'grounds', glyph: '🏕', name: 'Grounds', tag: 'COMPOUND' },
   { id: 'calendar', glyph: '📅', name: 'Calendar', tag: 'SEASON' },
   { id: 'roster', glyph: '🛡', name: 'Roster', tag: 'MEMBERS' },
+  { id: 'arena', glyph: '⚔', name: 'Arena', tag: 'COMBAT' },
   { id: 'forge', glyph: '🔨', name: 'Forge', tag: 'WORK' },
   { id: 'kitchen', glyph: '🍲', name: 'Kitchen', tag: 'WORK' },
   { id: 'apothecary', glyph: '🏺', name: 'Apothecary', tag: 'STORAGE' },
@@ -820,6 +821,7 @@ function roomStatus(id) {
   const r = guild.roster;
   switch (id) {
     case 'grounds': return `${r.length}/${maxRoster(guild)} housed`;
+    case 'arena': return r.length ? 'fight now' : 'no fighters';
     case 'calendar': { const t = nextTournament(guild); if (!t) return 'no events'; const w = Math.max(0, t.week - guild.calendar.week); return `${w === 0 ? 'this week' : w + 'w'} · R${t.rank}`; }
     case 'roster': return `${r.length} member${r.length === 1 ? '' : 's'}`;
     case 'forge': { const n = r.filter((h) => h.assignment.type === 'forge').length; return n ? `${n} forging` : 'idle'; }
@@ -1113,6 +1115,51 @@ function calendarRoom() {
     ${cards}`;
 }
 
+// --- Arena (always-open live combat) ----------------------------------------
+/** Start a LIVE practice bout right now (independent of Advance Week): your fighter
+ *  vs a member or a mirror-strength training dummy. Pure practice — no gold, no
+ *  injuries, no stat/morale change — so it can't be farmed; it's just "combat mode". */
+async function practiceBout(myId, oppId) {
+  if (advancing) return; // a battle (bout or tournament) is already live
+  const me = heroById(myId);
+  if (!me) { notice = 'Pick your fighter first.'; render(); return; }
+  if (typeof window.playGuildBattle !== 'function') { notice = 'The combat engine is still loading — try again in a moment.'; render(); return; }
+  const opp = oppId === '__dummy'
+    ? { name: 'Training Dummy', archetype: 'Adventurer', stats: { ...me.stats }, appearanceSeed: 424242 }
+    : heroById(oppId);
+  if (!opp) return;
+  const toSpec = (p) => ({ name: p.name, stats: p.stats, archetype: p.archetype, appearance: p.appearance, appearanceSeed: p.appearanceSeed, prime: p.prime });
+  advancing = true;
+  try {
+    const result = await window.playGuildBattle({ player: toSpec(me), opponent: toSpec(opp) });
+    const won = result && result.winner === 'player';
+    notice = (result && result.forfeit) ? `${me.name} bowed out of the bout.`
+      : won ? `${me.name} won the practice bout vs ${opp.name}!`
+      : `${me.name} lost the bout vs ${opp.name} — no harm done, just practice.`;
+  } finally { advancing = false; }
+  showScreen('guildScreen'); render();
+}
+
+/** The Arena — jump straight into a live, playable bout (no Advance Week needed).
+ *  Pick your fighter (the switcher), pick an opponent, fight. The always-open combat mode. */
+function arenaRoom() {
+  const h = heroById(selectedId);
+  if (!h) return `<div class="plan-card"><div class="plan-title">⚔ The Arena</div><div class="hint">Recruit a member, then step into the ring.</div></div>`;
+  const dummy = `<button class="opt" onclick="__guild.practiceBout('${h.id}','__dummy')">
+      <span><span class="o-name">🥊 Training Dummy</span> <span class="o-desc">a mirror of your own strength</span></span>
+      <span class="o-cost">Fight ▶</span></button>`;
+  const oppList = guild.roster.filter((m) => m.id !== h.id).map((o) => `<button class="opt" onclick="__guild.practiceBout('${h.id}','${o.id}')">
+      <span><span class="o-name">⚔ vs ${o.name}</span> <span class="o-desc">${o.archetype} Lv${o.level} · ⚡${combatPower(o)}</span></span>
+      <span class="o-cost">Fight ▶</span></button>`).join('');
+  return `<div class="plan-card">
+      <div class="plan-title">⚔ The Arena · <span class="rr-sub">as ${h.name}</span></div>
+      ${heroSwitcher()}
+      <div class="room-jobline">Step into the ring <b>right now</b> — move with the on-screen stick (or WASD), tap to attack. Pure practice: no gold, no injuries, just a live fight.</div>
+      <div class="dept-lbl">Choose an opponent</div>
+      <div class="opt-list">${dummy}${oppList}</div>
+    </div>`;
+}
+
 // --- hub --------------------------------------------------------------------
 function roomTile(room) {
   const role = roleFor(room.id);
@@ -1148,6 +1195,7 @@ function renderRoom(id) {
     case 'grounds': return hdr + groundsRoom();
     case 'calendar': return hdr + calendarRoom();
     case 'roster': return hdr + rosterRoom();
+    case 'arena': return hdr + arenaRoom();
     case 'forge': return hdr + forgeRoom();
     case 'kitchen': return hdr + kitchenRoom();
     case 'library': return hdr + libraryRoom();
@@ -1254,5 +1302,5 @@ export function openGuild() {
   showScreen('guildScreen');
 }
 
-window.__guild = { selectHero, setActivity, setTraining, setIntensity, setRecipe, setPotion, setDiscipline, usePotion, setDiet, setQuest, assignTo, setSpar, equipItem, unequipSlot, setPolicy, provision, buyMaterial, sellItem, hire, advanceAll, back, openRoom, toggleFullscreen, upgradeFacility, enterTournament, leaveTournament, setPlayNext };
+window.__guild = { selectHero, setActivity, setTraining, setIntensity, setRecipe, setPotion, setDiscipline, usePotion, setDiet, setQuest, assignTo, setSpar, equipItem, unequipSlot, setPolicy, provision, buyMaterial, sellItem, hire, advanceAll, back, openRoom, toggleFullscreen, upgradeFacility, enterTournament, leaveTournament, setPlayNext, practiceBout };
 window.openGuild = openGuild;
