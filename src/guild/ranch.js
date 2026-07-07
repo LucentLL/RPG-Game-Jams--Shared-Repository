@@ -22,14 +22,48 @@ let grassURI = null;          // baked once
 
 // Buildings/zones placed on the GS×GS field (tile coords). Rooms → openRoom on tap.
 const RANCH_PROPS = [
-  { glyph: '🏰', name: 'Great Hall', room: 'roster', tx: 4.5, ty: 2.0, big: true },
+  { glyph: '🏰', name: 'Great Hall', room: 'roster', tx: 4.5, ty: 1.6, big: true },
   { glyph: '🏠', name: 'Quarters', room: 'quarters', tx: 1.4, ty: 2.2, grow: 'quarters' },
   { glyph: '🔨', name: 'Forge', room: 'forge', tx: 7.4, ty: 2.4 },
-  { glyph: '📖', name: 'Library', room: 'library', tx: 1.7, ty: 5.4 },
+  { glyph: '📖', name: 'Library', room: 'library', tx: 1.5, ty: 5.4 },
   { glyph: '🗡', name: 'Armory', room: 'armory', tx: 7.5, ty: 5.6 },
-  { glyph: '🍲', name: 'Kitchen', room: 'kitchen', tx: 3.3, ty: 7.4 },
-  { glyph: '⚔', name: 'Arena', room: 'arena', tx: 6.2, ty: 7.2 },
+  { glyph: '🍲', name: 'Kitchen', room: 'kitchen', tx: 3.0, ty: 7.5 },
+  { glyph: '⚔', name: 'Arena', room: 'arena', tx: 6.4, ty: 7.4 },
 ];
+
+// Environmental dressing (Pixy-Garden set dressing, MR-ranch density): CSS trees,
+// bushes, and small accents scattered art-directed around the walk area, plus a
+// flat dirt path and a pond that LIE on the plane. Purely decorative — never saved.
+const RANCH_DECOR = [
+  { kind: 'tree',  tx: 0.55, ty: 0.8, s: 1.25 }, { kind: 'tree',  tx: 2.6, ty: 0.7, s: 1.0 },
+  { kind: 'tree',  tx: 6.2, ty: 0.6, s: 1.15 }, { kind: 'tree',  tx: 8.35, ty: 0.9, s: 1.3 },
+  { kind: 'tree',  tx: 0.5, ty: 3.8, s: 1.1 },  { kind: 'tree',  tx: 8.5, ty: 4.1, s: 1.05 },
+  { kind: 'tree',  tx: 0.6, ty: 7.6, s: 1.2 },  { kind: 'tree',  tx: 8.4, ty: 7.8, s: 1.1 },
+  { kind: 'tree',  tx: 1.0, ty: 8.6, s: 0.9 },  { kind: 'tree',  tx: 7.9, ty: 8.7, s: 1.0 },
+  { kind: 'bush',  tx: 2.9, ty: 2.9, s: 1 },    { kind: 'bush',  tx: 6.1, ty: 3.1, s: 1.1 },
+  { kind: 'bush',  tx: 2.2, ty: 6.4, s: 0.9 },  { kind: 'bush',  tx: 6.9, ty: 6.6, s: 1 },
+  { kind: 'bush',  tx: 4.2, ty: 8.6, s: 1.05 }, { kind: 'bush',  tx: 8.2, ty: 2.9, s: 0.85 },
+  { kind: 'glyph', g: '🌼', tx: 3.6, ty: 3.4 }, { kind: 'glyph', g: '🌼', tx: 5.5, ty: 5.2 },
+  { kind: 'glyph', g: '🌷', tx: 2.4, ty: 4.6 }, { kind: 'glyph', g: '🌾', tx: 6.6, ty: 4.5 },
+  { kind: 'glyph', g: '🌾', tx: 3.1, ty: 5.8 }, { kind: 'glyph', g: '🍄', tx: 1.3, ty: 6.9 },
+  { kind: 'glyph', g: '🪨', tx: 7.2, ty: 1.6 }, { kind: 'glyph', g: '🌼', tx: 5.0, ty: 6.9 },
+  { kind: 'glyph', g: '🪵', tx: 2.0, ty: 1.3 }, { kind: 'glyph', g: '🌷', tx: 7.6, ty: 6.9 },
+];
+function decorHTML(GS) {
+  const items = RANCH_DECOR.map((d) => {
+    const pos = `left:${d.tx / GS * 100}%;top:${d.ty / GS * 100}%;z-index:${2 + Math.round(d.ty * 10)}`;
+    if (d.kind === 'tree') return `<span class="ranch-decor" style="${pos}"><span class="rm-shadow"></span><span class="rd-standee" style="--s:${d.s}"><span class="rd-canopy"></span><span class="rd-canopy two"></span><span class="rd-trunk"></span></span></span>`;
+    if (d.kind === 'bush') return `<span class="ranch-decor" style="${pos}"><span class="rd-standee" style="--s:${d.s || 1}"><span class="rd-bush"></span></span></span>`;
+    return `<span class="ranch-decor" style="${pos}"><span class="rd-standee"><span class="rd-glyph">${d.g}</span></span></span>`;
+  }).join('');
+  // Flat features lie IN the plane: a worn dirt path from the Great Hall down the
+  // middle, and a pond by the kitchen. Drawn as ground patches, not standees.
+  const flats = `
+    <span class="ranch-path" style="left:${4.5 / GS * 100}%;top:${1.9 / GS * 100}%;width:${1.15 / GS * 100}%;height:${6.1 / GS * 100}%"></span>
+    <span class="ranch-path spur" style="left:${5.55 / GS * 100}%;top:${7.0 / GS * 100}%;width:${1.1 / GS * 100}%;height:${0.5 / GS * 100}%"></span>
+    <span class="ranch-pond" style="left:${1.6 / GS * 100}%;top:${8.0 / GS * 100}%;width:${1.9 / GS * 100}%;height:${1.1 / GS * 100}%"></span>`;
+  return flats + items;
+}
 
 /** Deterministic spawn tile from the stable person id (no persistence needed). */
 function seedTile(id, GS) {
@@ -45,11 +79,24 @@ function seedActors(roster, GS) {
   const prev = new Map(actors.map((a) => [a.id, a]));
   actors = roster.map((h) => {
     const keep = prev.get(h.id);
-    if (keep) return keep; // same member — keep its position, wander state, actor + anim
+    if (keep) { keep.el = null; keep.cv = null; return keep; } // same member — keep position/wander/anim; DOM rebinds below
     const t = seedTile(h.id, GS);
-    return { id: h.id, actor: gfx.makeActor(h), cv: null, ax: t.ax, ay: t.ay, facing: Math.PI,
+    return { id: h.id, actor: gfx.makeActor(h), el: null, cv: null, ax: t.ax, ay: t.ay, facing: Math.PI,
       _wander: { state: 'idle', until: performance.now() + Math.random() * 1500, tx: t.ax, ty: t.ay } };
   });
+}
+
+/** This week's task, as a glanceable bubble over the member's head (MR-style). */
+function taskGlyph(h) {
+  const a = h.assignment || {};
+  if (h.condition && h.condition.injury) return '🩹';
+  if (a.type === 'forge') return '🔨';
+  if (a.type === 'brew') return '⚗';
+  if (a.type === 'study') return '📖';
+  if (a.type === 'quest') return '🗺';
+  if (a.trainingId === 'spar') return '🤺';
+  if (a.trainingId === 'rest' || !a.trainingId) return '💤';
+  return '⚔';
 }
 
 /** Build (or refresh) the ranch DOM and (re)start the wander loop. Call on entry / on roster change. */
@@ -64,31 +111,53 @@ export function renderRanch(guild) {
   const GS = gfx.GS;
   const roster = guild.roster || [];
 
+  // Buildings + members are PAPER STANDEES on the tilted plane: a flat wrapper sits
+  // ON the ground (owns the shadow), an inner .standee counter-rotates upright.
   const propsHTML = RANCH_PROPS.map((p) => {
     const tier = p.grow ? facilityTier(guild, p.grow) : 0;
-    return `<button class="ranch-prop ${p.big ? 'big' : ''}" style="left:${p.tx / GS * 100}%;top:${p.ty / GS * 100}%;z-index:${2 + Math.round(p.ty * 10)}" title="${p.name}" onclick="__guild.enterRoomFromRanch('${p.room}')">
-        <span class="rp-glyph">${p.glyph}</span><span class="rp-name">${p.name}${tier ? ' ·' + (tier + 1) : ''}</span></button>`;
+    return `<button class="ranch-prop ${p.big ? 'big' : ''}" style="left:${p.tx / GS * 100}%;top:${p.ty / GS * 100}%;z-index:${2 + Math.round(p.ty * 10)}" title="Enter the ${p.name}" onclick="__guild.enterRoomFromRanch('${p.room}')">
+        <span class="rm-shadow"></span>
+        <span class="rp-standee" style="${tier ? `--grow:${1 + tier * 0.14}` : ''}">
+          <span class="rp-roof"></span>
+          <span class="rp-wall"><span class="rp-glyph">${p.glyph}</span></span>
+          <span class="rp-name">${p.name}${tier ? ' ·' + (tier + 1) : ''}</span>
+        </span></button>`;
   }).join('');
   const membersHTML = roster.map((h) =>
-    `<canvas class="ranch-member" width="96" height="96" data-rid="${h.id}" title="${h.name} — manage" onclick="__guild.manageMemberFromRanch('${h.id}')"></canvas>`).join('');
+    `<button class="ranch-actor" data-rid="${h.id}" title="${h.name} — ${taskGlyph(h)} this week · manage" onclick="__guild.manageMemberFromRanch('${h.id}')">
+        <span class="rm-shadow"></span>
+        <span class="ra-standee">
+          <span class="rm-task">${taskGlyph(h)}</span>
+          <canvas class="ranch-member" width="96" height="96"></canvas>
+          <span class="rm-name">${(h.name || '').split(' ')[0]}</span>
+        </span></button>`).join('');
 
   view.innerHTML = `
     <div class="ranch-hud">
       <span class="ranch-title">☙ ${guild.name}</span>
       <span class="ranch-meta">☉ <b>${guild.gold}</b>g · ✦ <b>${guild.reputation}</b> · ${formatDate(guild.calendar)}</span>
       <span class="ranch-hud-btns">
-        <button class="ranch-btn" onclick="__guild.enterRoomFromRanch('hub')">☰ Manage</button>
         <button class="ranch-btn adv" onclick="__guild.advanceAll()">▶ Advance Week</button>
       </span>
     </div>
     <div class="ranch-stage">
-      <div class="ranch-field" style="background-image:url(${grassURI})">${propsHTML}${membersHTML}</div>
+      <div class="ranch-field" style="background-image:url(${grassURI})">${decorHTML(GS)}${propsHTML}${membersHTML}</div>
+    </div>
+    <div class="ranch-menu">
+      <button class="rmn-btn" onclick="__guild.enterRoomFromRanch('roster')"><span class="rmn-g">🛡</span>Roster</button>
+      <button class="rmn-btn" onclick="__guild.enterRoomFromRanch('calendar')"><span class="rmn-g">📅</span>Calendar</button>
+      <button class="rmn-btn" onclick="__guild.enterRoomFromRanch('arena')"><span class="rmn-g">⚔</span>Arena</button>
+      <button class="rmn-btn" onclick="__guild.enterRoomFromRanch('grounds')"><span class="rmn-g">🏗</span>Grounds</button>
+      <button class="rmn-btn" onclick="__guild.enterRoomFromRanch('hub')"><span class="rmn-g">☰</span>All rooms</button>
     </div>`;
 
   seedActors(roster, GS);
-  // Cache each member's freshly-built canvas so the render loop needn't re-query per frame.
+  // Cache each member's freshly-built wrapper + canvas so the render loop needn't re-query per frame.
   const field = view.querySelector('.ranch-field');
-  actors.forEach((a) => { a.cv = field.querySelector(`canvas.ranch-member[data-rid="${a.id}"]`); });
+  actors.forEach((a) => {
+    a.el = field.querySelector(`.ranch-actor[data-rid="${a.id}"]`);
+    a.cv = a.el ? a.el.querySelector('canvas.ranch-member') : null;
+  });
   ranchRender();      // draw the first frame now (so sprites show before the RAF loop ticks)
   startRanchLoop();
 }
@@ -123,10 +192,10 @@ function ranchTick(dt, now) {
 function ranchRender() {
   const gfx = window.__ranchGfx; const GS = gfx.GS;
   for (const a of actors) {
-    if (!a.cv || !a.cv.isConnected) continue;
-    a.cv.style.left = (a.ax / GS * 100) + '%';
-    a.cv.style.top = (a.ay / GS * 100) + '%';
-    a.cv.style.zIndex = String(2 + Math.round(a.ay * 10)); // painter sort: lower on the field draws on top
+    if (!a.el || !a.el.isConnected || !a.cv) continue;
+    a.el.style.left = (a.ax / GS * 100) + '%';
+    a.el.style.top = (a.ay / GS * 100) + '%';
+    a.el.style.zIndex = String(2 + Math.round(a.ay * 10)); // painter sort backstop (3D depth handles overlaps)
     gfx.renderActor(a.cv, a.actor);
   }
 }

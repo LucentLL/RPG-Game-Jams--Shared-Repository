@@ -377,12 +377,16 @@ function bfsNextStep(startX,startY,goalX,goalY,blockedX,blockedY){
       if(nx<0||nx>=GS||ny<0||ny>=GS)continue;
       if(visited[key(nx,ny)])continue;
       if(!canTraverseTerrain(cur.x,cur.y,nx,ny))continue;
-      if(nx===blockedX&&ny===blockedY)continue; // can't move through the other fighter
       var firstDx=cur.steps===0?dirs[i].x:cur.firstDx;
       var firstDy=cur.steps===0?dirs[i].y:cur.firstDy;
+      // GOAL before the occupancy skip: pursuing targets the tile the other fighter
+      // STANDS ON (goal === blocked), so testing blocked first made a stationary
+      // target unreachable — BFS exhausted the map, returned null, and pursue
+      // silently no-oped (both sides pursuing = a permanent standoff).
       if(nx===goalX&&ny===goalY){
         return{dx:firstDx,dy:firstDy};
       }
+      if(nx===blockedX&&ny===blockedY)continue; // can't move THROUGH the other fighter
       visited[key(nx,ny)]=true;
       queue.push({x:nx,y:ny,firstDx:firstDx,firstDy:firstDy,steps:cur.steps+1});
     }
@@ -2717,6 +2721,9 @@ var _actionKeyUpHandler = null;
 var _touchMove = { x: 0, y: 0 };   // virtual-joystick vector (-1..1), added to keyboard movement
 var _guildBattle = null;           // { resolve, done } while a guild (non-run) battle is live
 var _koTimer = null;               // pending "battle decided" timeout, so it can be cancelled/tracked
+var _charge = null;                // { name, start } while the player HOLDS an attack (Shining-Soul hold-to-charge)
+var _guildItems = null;            // [{batchId,name,glyph,potency,qty}] withdrawn consumables (guild battles only)
+var _guildItemsUsed = null;        // { batchId: count } drunk this battle — reported in the resolve payload
 
 function startActionArena(){
   // Build fighters the same way the VS / battle does, then layer on
@@ -2738,6 +2745,7 @@ function startActionArena(){
   p2.facing = Math.PI;      // face south toward player
   p1._atkCD = 0; p2._atkCD = 0;
   p1._aiAtkCD = 0; p2._aiAtkCD = 0;
+  _charge = null; _guildItems = null; _guildItemsUsed = null; // roguelike arena: no withdrawn consumables
   gamePhase = 'action';
 
   showScreen('actionScreen');
@@ -2785,9 +2793,76 @@ function buildActionAttackBar(){
     var btn = document.createElement('button');
     btn.id = 'actAtk_' + i;
     btn.innerHTML = '<span class="atk-key">'+(i+1)+'</span>'+name;
-    btn.onclick = function(){ tryActionAttack(p1, p2, name); };
+    // Hold-to-charge (Shining-Soul style): press starts the charge, release fires.
+    // A quick tap = tier 0 = exactly the old attack. Works for touch AND mouse.
+    btn.onpointerdown  = function(e){
+      e.preventDefault();
+      try { btn.setPointerCapture(e.pointerId); } catch (_e) {} // hold survives finger/mouse drift (review fix)
+      startCharge(name);
+    };
+    btn.onpointerup     = function(e){ e.preventDefault(); releaseCharge(name); };
+    btn.onpointerleave  = function(){ cancelChargeFor(name); }; // with capture held this only fires on true exits
+    btn.onpointercancel = function(){ cancelChargeFor(name); }; // browser claimed the gesture — drop the charge
     bar.appendChild(btn);
   });
+  // Guild consumables — tap slots that drink REAL Apothecary potions (withdrawn by
+  // the guild layer via config.items; consumption reports back in the result).
+  (_guildItems||[]).slice(0, 2).forEach(function(item, i){
+    var btn = document.createElement('button');
+    btn.id = 'actItem_' + i;
+    btn.className = 'act-item';
+    btn.innerHTML = item.glyph + ' ' + item.name + ' <span class="item-qty" id="actItemQty_' + i + '">×' + item.qty + '</span>';
+    btn.onclick = function(){ tryUseItem(i); };
+    bar.appendChild(btn);
+  });
+}
+
+// ─── Hold-to-charge (Shining Soul) ──────────────────────────────────────────
+// Press-and-hold a damaging attack to charge it: tier 1 (+1 damage die, +2 to-hit)
+// from 0.45s; tier 2 (+2 dice, +2 to-hit) from 1.1s — but tier 2 is TRAINED, not
+// free: it gates on the guild hero's MR stat for the attack's kind, so raising POW/
+// SKL/INT visibly grows the action kit. Specials (teleport/heal) fire on press.
+var MR_CHARGE_GATE = { STR: 'POW', DEX: 'SKL', WIS: 'SKL', INT: 'INT', CON: 'VIT', CHA: 'DEF' };
+function chargeTier2Allowed(f, atk){
+  var key = MR_CHARGE_GATE[atk.stat] || 'POW';
+  if (f._mr) return (f._mr[key] || 0) >= 40;
+  return ((f.stats && f.stats[atk.stat]) || 10) >= 13; // roguelike fighters: engine-stat equivalent of MR 40
+}
+function startCharge(name){
+  if (!actionLoopRunning || !p1 || p1.hp <= 0 || p2.hp <= 0) return;
+  var atk = ATTACKS[name]; if (!atk) return;
+  if (atk.special){ tryActionAttack(p1, p2, name); return; }  // specials don't charge (CD re-checked inside)
+  // Record the press even while cooling (review fix): charge time only accrues after
+  // the cooldown expires, and releaseCharge defers to tryActionAttack's own CD check —
+  // so press-early/release-late fires exactly like the old click/key-repeat behavior.
+  _charge = { name: name, start: performance.now() + Math.max(0, p1._atkCD || 0) * 1000 };
+}
+function releaseCharge(name){
+  if (!_charge || _charge.name !== name) return;
+  var held = Math.max(0, (performance.now() - _charge.start) / 1000); // pre-expiry release → 0 (tier 0)
+  _charge = null;
+  tryActionAttack(p1, p2, name, { held: held });
+}
+function cancelChargeFor(name){ if (_charge && _charge.name === name) _charge = null; }
+
+// Drink a withdrawn potion mid-fight (guild battles only). Follows the heal-special
+// pattern: instant effect, shared attack cooldown, one log line. Real Apothecary
+// stock is decremented by the guild layer from the result's itemsUsed tally.
+function tryUseItem(slot){
+  var item = (_guildItems||[])[slot]; if (!item) return;
+  if (!p1 || p1.hp <= 0 || p2.hp <= 0) return;
+  if ((p1._atkCD||0) > 0) return;
+  if (item.qty <= 0){ actionLog('🧪 ' + item.name + ' — none left', 'miss'); return; }
+  if (p1.hp >= p1.maxHp){ actionLog('🧪 Already at full health', 'miss'); return; }
+  item.qty--;
+  var heal = Math.max(4, Math.round((item.potency || 30) * 0.35));
+  p1.hp = Math.min(p1.maxHp, p1.hp + heal);
+  p1._atkCD = 0.8;
+  setFighterAnim(p1, 'parry');
+  _guildItemsUsed = _guildItemsUsed || {};
+  _guildItemsUsed[item.batchId] = (_guildItemsUsed[item.batchId] || 0) + 1;
+  actionLog('🧪 You drink a ' + item.name + ' — +' + heal + ' HP', 'hit');
+  var qEl = document.getElementById('actItemQty_' + slot); if (qEl) qEl.textContent = '×' + item.qty;
 }
 
 function startActionLoop(){
@@ -2803,11 +2878,18 @@ function startActionLoop(){
       _actionKeys[k] = true; e.preventDefault();
     } else if (/^[1-9]$/.test(e.key)){
       var idx = parseInt(e.key,10) - 1;
-      if (p1.attacks && p1.attacks[idx]) tryActionAttack(p1, p2, p1.attacks[idx]);
+      // Hold-to-charge on keys too: keydown starts the charge, keyup releases it.
+      if (!e.repeat && p1.attacks && p1.attacks[idx]) startCharge(p1.attacks[idx]);
       e.preventDefault();
     }
   };
-  _actionKeyUpHandler = function(e){ _actionKeys[e.key.toLowerCase()] = false; };
+  _actionKeyUpHandler = function(e){
+    _actionKeys[e.key.toLowerCase()] = false;
+    if (/^[1-9]$/.test(e.key)){
+      var uIdx = parseInt(e.key,10) - 1;
+      if (p1.attacks && p1.attacks[uIdx]) releaseCharge(p1.attacks[uIdx]);
+    }
+  };
   document.addEventListener('keydown', _actionKeyHandler);
   document.addEventListener('keyup', _actionKeyUpHandler);
   _touchMove.x = 0; _touchMove.y = 0;
@@ -2827,6 +2909,7 @@ function startActionLoop(){
 }
 function stopActionLoop(){
   actionLoopRunning = false;
+  _charge = null; // never leave a half-held charge across battles
   if (_actionKeyHandler) document.removeEventListener('keydown', _actionKeyHandler);
   if (_actionKeyUpHandler) document.removeEventListener('keyup', _actionKeyUpHandler);
   _actionKeyHandler = _actionKeyUpHandler = null;
@@ -2838,7 +2921,9 @@ function stopActionLoop(){
 // Lives inside #actionScreen; a pointer drag sets _touchMove, which actionTick adds
 // to the keyboard vector. Attacks are already tappable (buildActionAttackBar buttons).
 function ensureActionJoystick(){
-  var host = document.getElementById('actionArena') || document.getElementById('actionScreen');
+  // Screen-space host — the arena itself is a tilted 3D plane now, and a joystick
+  // must never live on a rotated surface (its pointer math is 2D).
+  var host = document.querySelector('#actionScreen .action-stage') || document.getElementById('actionScreen');
   if (!host) return;
   var joy = document.getElementById('actionJoystick');
   if (!joy){
@@ -2926,6 +3011,15 @@ function actionTick(dt){
     tryActionAttack(p2, p1, pick2);
     p2._aiAtkCD = _guildBattle ? 0.9 : 1.6; // guild battles tighten the AI cadence so playing isn't structurally easy vs the sim odds
   }
+  // A wilful hero swings on their own sometimes (K5): low discipline+bond leaks
+  // unrequested attacks in guild action battles — obedience felt in real time.
+  if (_guildBattle && p1._obey && (p1._atkCD||0) <= 0 && od < 1.3 && p1.attacks && p1.attacks.length){
+    var _wil = 1 - Math.min(1, ((p1._obey.discipline||40) + (p1._obey.bond||60)) / 200 + (p1._obey.obeyMod||0));
+    if (_wil > 0 && Math.random() < dt * 0.35 * _wil){
+      actionLog('🎭 '+(p1.name||'Your fighter')+' lashes out on instinct!', 'miss');
+      tryActionAttack(p1, p2, p1.attacks[0]);
+    }
+  }
   // ─── Cooldowns ───────────────────────────────────────────────
   p1._atkCD   = Math.max(0, (p1._atkCD||0)   - dt);
   p2._atkCD   = Math.max(0, (p2._atkCD||0)   - dt);
@@ -2934,12 +3028,18 @@ function actionTick(dt){
   tickAnimations(performance.now());
 }
 
-function tryActionAttack(attacker, defender, atkName){
+function tryActionAttack(attacker, defender, atkName, opts){
   if (!atkName) return;
   if ((attacker._atkCD||0) > 0) return;
   if (attacker.hp <= 0 || defender.hp <= 0) return;
   var atk = ATTACKS[atkName]; if (!atk) return;
   var matB = getMateriaBonus(attacker, atk);
+  // Charge tier from how long the attack was held (player only, damaging attacks only).
+  var chargeTier = 0;
+  if (opts && opts.held != null && attacker === p1 && !atk.special){
+    if (opts.held >= 1.1 && chargeTier2Allowed(attacker, atk)) chargeTier = 2;
+    else if (opts.held >= 0.45) chargeTier = 1;
+  }
   // Teleport / heal / buff specials — fire without range check.
   if (atk.special === 'teleport'){
     setFighterAnim(attacker, 'parry');
@@ -2971,10 +3071,11 @@ function tryActionAttack(attacker, defender, atkName){
   // Face the target as we swing.
   attacker.facing = Math.atan2(ddx, -ddy);
   setFighterAnim(attacker, 'slash');
-  attacker._atkCD = (atk.range > 1 ? 0.95 : 0.7);
+  attacker._atkCD = (atk.range > 1 ? 0.95 : 0.7) + (chargeTier ? 0.25 : 0); // a charged swing recovers a touch slower
   // Roll-to-hit reuses the same stat → modifier → +prof + materia chain.
+  // A charged release lands more reliably (+2 to-hit — SS2's "charges connect").
   var sMod = Math.floor((attacker.stats[atk.stat] - 10) / 2);
-  var toHit = sMod + attacker.prof + (matB.toHit||0);
+  var toHit = sMod + attacker.prof + (matB.toHit||0) + (chargeTier ? 2 : 0);
   var roll = Math.floor(Math.random() * 20) + 1;
   var total = roll + toHit;
   var aName = attacker === p1 ? 'You' : 'Opp';
@@ -2982,33 +3083,62 @@ function tryActionAttack(attacker, defender, atkName){
     var crit = roll >= (matB.critRange || 20);
     var diceRoll = rollDice(atk.dice||'1d6');
     if (crit) diceRoll += rollDice(atk.dice||'1d6');
+    for (var ci = 0; ci < chargeTier; ci++) diceRoll += rollDice(atk.dice||'1d6'); // +1 die per charge tier
     var dmg = diceRoll + sMod + (matB.bonusDmg||0);
     if (dmg < 1) dmg = 1;
     defender.hp -= dmg;
     if (defender.hp < 0) defender.hp = 0;
     if (attacker === p1 && run) run.totalDamage += dmg; // guard: guild battles have no `run`
     setFighterAnim(defender, defender.hp <= 0 ? 'death' : 'hurt');
-    actionLog((crit?'✦ CRIT ':'⚔ ')+aName+' '+atk.name+' — '+dmg+(crit?' (critical)':''), crit?'crit':'hit');
+    var tag = chargeTier === 2 ? '⚡⚡ CHARGED ' : chargeTier === 1 ? '⚡ CHARGED ' : (crit ? '✦ CRIT ' : '⚔ ');
+    actionLog(tag+aName+' '+atk.name+' — '+dmg+(crit?' (critical)':''), (crit||chargeTier===2)?'crit':'hit');
   } else {
     actionLog('⚔ '+aName+' '+atk.name+' misses', 'miss');
   }
 }
 
 function actionRender(){
-  // Position fighter canvases. (ax, ay) are tile-centered coordinates;
-  // each canvas is 96×96 so we offset half its size to center.
-  ['actionP1Cv','actionP2Cv'].forEach(function(id, i){
-    var cv = document.getElementById(id); if (!cv) return;
+  // Position fighter STANDEES. (ax, ay) are tile-centered coordinates; the wrapper
+  // sits flat on the tilted plane (owning the ground shadow) and the inner standee
+  // counter-rotates upright — same diorama recipe as the Ranch.
+  [['actionP1Wrap','actionP1Cv'],['actionP2Wrap','actionP2Cv']].forEach(function(pair, i){
+    var wrap = document.getElementById(pair[0]);
+    var cv = document.getElementById(pair[1]);
+    if (!wrap || !cv) return;
     var f = (i === 0) ? p1 : p2;
-    // Position by PERCENTAGE of the arena so fighters scale with it and stay
-    // on-screen on any viewport (the arena shrinks to fit narrow/mobile widths).
-    // The .action-fighter CSS centers the sprite on this point (feet-biased).
-    cv.style.left = (f.ax / ACTION_GS * 100) + '%';
-    cv.style.top  = (f.ay / ACTION_GS * 100) + '%';
-    // Z-stack: whoever is lower on the field draws on top (basic painter sort).
-    cv.style.zIndex = String(2 + Math.round(f.ay * 10));
+    wrap.style.left = (f.ax / ACTION_GS * 100) + '%';
+    wrap.style.top  = (f.ay / ACTION_GS * 100) + '%';
+    // Z-stack backstop: whoever is lower on the field draws on top (3D depth leads).
+    wrap.style.zIndex = String(2 + Math.round(f.ay * 10));
     renderActionFighter(cv, f);
   });
+  // Charge ring — blooms at the player's feet while an attack is held. Gold fills
+  // toward tier 1; turns crimson (with an outer bloom) when tier 2 is reached.
+  if (_charge && p1.hp > 0){
+    var ccv = document.getElementById('actionP1Cv');
+    if (ccv){
+      var heldS = Math.max(0, (performance.now() - _charge.start) / 1000); // deferred start while cooling → no free progress
+      var cAtk = ATTACKS[_charge.name];
+      var t2ok = cAtk ? chargeTier2Allowed(p1, cAtk) : false;
+      var full = t2ok ? 1.1 : 0.45;
+      var prog = Math.min(1, heldS / full);
+      var isT2 = t2ok && heldS >= 1.1;
+      var cctx = ccv.getContext('2d');
+      cctx.save();
+      cctx.lineWidth = 4;
+      cctx.strokeStyle = isT2 ? '#ef4444' : (heldS >= 0.45 ? '#f59e0b' : 'rgba(212,168,67,0.6)');
+      cctx.beginPath();
+      cctx.arc(ccv.width/2, ccv.height*0.82, ccv.width*0.17, -Math.PI/2, -Math.PI/2 + prog*Math.PI*2);
+      cctx.stroke();
+      if (isT2){
+        cctx.beginPath();
+        cctx.strokeStyle = 'rgba(239,68,68,0.45)';
+        cctx.arc(ccv.width/2, ccv.height*0.82, ccv.width*0.22, 0, Math.PI*2);
+        cctx.stroke();
+      }
+      cctx.restore();
+    }
+  }
   // HUD
   var hp1 = document.getElementById('actHpFillP1');
   var hp2 = document.getElementById('actHpFillP2');
@@ -3049,7 +3179,8 @@ function endActionBattle(){
     actionLog(playerWon ? '✦ Victory!' : '☠ Defeated…', playerWon ? 'crit' : 'miss');
     var res = { winner: playerWon ? 'player' : 'opponent',
       playerHp: Math.max(0, p1.hp), playerMaxHp: p1.maxHp,
-      oppHp: Math.max(0, p2.hp), oppMaxHp: p2.maxHp };
+      oppHp: Math.max(0, p2.hp), oppMaxHp: p2.maxHp,
+      itemsUsed: _guildItemsUsed || null };
     setTimeout(function(){ g.resolve(res); }, 750); // a beat on the result before returning
     return;
   }
@@ -3076,7 +3207,8 @@ function forfeitAction(){
     stopActionLoop();
     g.resolve({ winner: 'opponent', forfeit: true,
       playerHp: Math.max(0, p1.hp), playerMaxHp: p1.maxHp,
-      oppHp: Math.max(0, p2.hp), oppMaxHp: p2.maxHp });
+      oppHp: Math.max(0, p2.hp), oppMaxHp: p2.maxHp,
+      itemsUsed: _guildItemsUsed || null });
     return;
   }
   if (!run) return; // guild/stale context with no live battle — do nothing (no run to abandon)
@@ -3123,15 +3255,23 @@ function guildFighterFromSpec(spec, num){
     appearanceSeed: spec.appearanceSeed || null,
     appearance: spec.appearance || null,
     materia: [], gear: null,   // Phase 1: gear→engine conversion is stubbed
+    _mr: s,                    // raw MR stats — charge-tier gates read these (trained stats grow the kit)
+    _obey: spec.obedience || null, // {discipline, bond, obeyMod} — Foolery rolls in the tactical lens
   };
 }
-function startGuildBattle(p1Spec, p2Spec){
+function startGuildBattle(p1Spec, p2Spec, config){
   return new Promise(function(resolve){
     _guildBattle = { resolve: resolve, done: false };
     p1 = p1Spec; p2 = p2Spec;
     p1.ax = 1.5; p1.ay = 7.5; p1.facing = 0;         // player bottom-left, facing up
     p2.ax = 7.5; p2.ay = 1.5; p2.facing = Math.PI;   // opponent top-right, facing down
     p1._atkCD = 0; p2._atkCD = 0; p1._aiAtkCD = 0; p2._aiAtkCD = 0;
+    // Withdrawn consumables (local copies — the guild decrements REAL stock from itemsUsed).
+    _charge = null;
+    _guildItems = (config && config.items && config.items.length)
+      ? config.items.map(function(it){ return { batchId: it.batchId, name: it.name, glyph: it.glyph, potency: it.potency, qty: it.qty }; })
+      : null;
+    _guildItemsUsed = null;
     gamePhase = 'action';
     showScreen('actionScreen');
     renderActionTiles();
@@ -3142,12 +3282,97 @@ function startGuildBattle(p1Spec, p2Spec){
     startActionLoop();
   });
 }
+// Tactical lens: the same guild battle, played in the TURN-BASED move-queue engine
+// (plan → simultaneous timeline replay → attacks by initiative). Mirrors startBattle()
+// minus its `run.*` lines; the outcome resolves through checkWin's guild interception
+// instead of the roguelike victory/game-over flow, returning the same payload shape
+// as endActionBattle so callers never learn which lens was played.
+function startGuildTacticalBattle(p1Spec, p2Spec, label, opts){
+  return new Promise(function(resolve){
+    _guildBattle = { resolve: resolve, done: false };
+    p1 = p1Spec; p2 = p2Spec;
+    gamePhase='plan';
+    showScreen('battleScreen');
+    turnNum=1;moveQueue=[];lastMoveType=null;selectedAttack=null;executing=false;
+    // Clear per-turn combat flags (same set startBattle clears)
+    delete p1._dashing;delete p2._dashing;
+    delete p1._disengaging;delete p2._disengaging;
+    delete p1._readiedAction;delete p2._readiedAction;
+    delete p1._prone;delete p2._prone;
+    var lg=document.getElementById('log');if(lg)lg.innerHTML=''; // fresh log per match (a run keeps its log; a match doesn't)
+    rollInitiative();
+    document.getElementById('roundBadge').textContent=(label||'Guild Match').toUpperCase();
+    var qs=document.getElementById('qsBadge');if(qs)qs.style.display='none'; // no quicksilver outside a run
+    var fb=document.getElementById('btlForfeitBtn');if(fb)fb.style.display='';
+    // Spectate mode pre-engages the autopilot: the match fights itself turn by turn
+    // and the player can grab the reins at any turn boundary. Otherwise hands-on.
+    _tacAuto=!!(opts&&opts.spectate);
+    var ab=document.getElementById('tacAutoBtn');
+    if(ab){ab.style.display='';ab.classList.toggle('on',_tacAuto);ab.textContent=_tacAuto?'🤖 Watching — tap to take control':'🤖 Watch';}
+    var eb=document.getElementById('execBtn');if(eb)eb.disabled=false;
+    initTiles();faceBothFighters();buildGrid();buildControls();renderAll();
+    startAnimLoop();
+    logMsg(_tacAuto
+      ? '👁 '+p1.name+' vs '+p2.name+' — spectating; take control any turn.'
+      : '⚔ '+p1.name+' vs '+p2.name+' — queue your moves, then EXECUTE!','phase');
+    if(_tacAuto)_maybeAutoPlan();
+  });
+}
+// ─── Watch / autopilot tier (K5) ─────────────────────────────────────────────
+// Toggling 🤖 Watch hands each planning phase to the parameterized AI planner and
+// auto-executes — a pure-watch coach view. Toggle OFF any time: control returns at
+// the next turn boundary (never mid-turn — the timeline must finish its replay).
+var _tacAuto = false;
+function toggleTacticalAuto(){
+  if(!_guildBattle||_guildBattle.done)return;
+  _tacAuto=!_tacAuto;
+  var b=document.getElementById('tacAutoBtn');
+  if(b){b.classList.toggle('on',_tacAuto);b.textContent=_tacAuto?'🤖 Watching — tap to take control':'🤖 Watch';}
+  logMsg(_tacAuto?'🤖 Autopilot — '+(p1.name||'your fighter')+' fights on instinct; take control any turn.':'🎮 You have the reins again.','phase');
+  if(_tacAuto)_maybeAutoPlan();
+}
+// Plan + execute one turn on autopilot (only from a live guild plan phase).
+function _maybeAutoPlan(){
+  if(!_tacAuto||!_guildBattle||_guildBattle.done)return;
+  if(gamePhase!=='plan'||executing)return;
+  moveQueue=genAIMoves(p1,p2);
+  selectedAttack=pickAIAttack(p1,p2);
+  updateMoveQueueUI();renderGrid();
+  setTimeout(function(){
+    if(_tacAuto&&_guildBattle&&!_guildBattle.done&&gamePhase==='plan'&&!executing)executeTurn();
+  },450);
+}
+
+// Forfeit for the tactical lens (battleScreen's twin of forfeitAction). Only live
+// during a guild battle and only in the plan phase — mid-execution, dice overlays
+// and timeline timers are in flight and must finish (checkWin then decides).
+function forfeitTactical(){
+  if(!_guildBattle||_guildBattle.done)return;
+  if(gamePhase!=='plan')return;
+  if(p1.hp<=0||p2.hp<=0)return; // decided — checkWin resolves it authoritatively
+  if(!confirm('Forfeit this match? It counts as a loss.'))return;
+  _guildBattle.done=true;
+  var g=_guildBattle;_guildBattle=null;
+  gamePhase='over';executing=false;
+  stopAnimLoop();
+  g.resolve({winner:'opponent',forfeit:true,
+    playerHp:Math.max(0,p1.hp),playerMaxHp:p1.maxHp,
+    oppHp:Math.max(0,p2.hp),oppMaxHp:p2.maxHp});
+}
 // Public facade for the guild: play a battle between two Person-like specs.
-// config = { player:{name,stats:{POW..},archetype,appearance?,appearanceSeed?,prime?}, opponent:{…} }
-// Returns Promise<{ winner:'player'|'opponent', playerHp, oppHp, … }>.
+// config = { player:{name,stats:{POW..},archetype,appearance?,appearanceSeed?,prime?},
+//            opponent:{…}, mode:'action'|'tactical', label? }
+// Returns Promise<{ winner:'player'|'opponent', playerHp, oppHp, … }> — the SAME
+// payload from either lens, so callers never learn which one was played.
 window.playGuildBattle = function(config){
   config = config || {};
-  return startGuildBattle(guildFighterFromSpec(config.player || {}, 1), guildFighterFromSpec(config.opponent || {}, 2));
+  var f1 = guildFighterFromSpec(config.player || {}, 1);
+  var f2 = guildFighterFromSpec(config.opponent || {}, 2);
+  // (config.items — mid-fight consumables — are an action-lens feature; the tactical
+  //  lens' turn economy gets potions later, alongside its item-action design.)
+  if (config.mode === 'tactical') return startGuildTacticalBattle(f1, f2, config.label);
+  if (config.mode === 'spectate') return startGuildTacticalBattle(f1, f2, config.label, { spectate: true });
+  return startGuildBattle(f1, f2, config);
 };
 
 // ─── Ranch reuse surface ─────────────────────────────────────────────────────
@@ -3397,6 +3622,9 @@ function startVS(){
 function startBattle(){
   gamePhase='plan';
   showScreen('battleScreen');
+  // A run keeps ONE log across its 7 rounds — but round 1 starts it clean, scrubbing
+  // any guild tactical match's transcript left in #log (review fix).
+  if(run&&run.round===1){var _lg=document.getElementById('log');if(_lg)_lg.innerHTML='';}
   turnNum=1;moveQueue=[];lastMoveType=null;selectedAttack=null;executing=false;
   // Clear per-turn combat flags
   delete p1._dashing;delete p2._dashing;
@@ -3407,6 +3635,12 @@ function startBattle(){
   rollInitiative();
   document.getElementById('roundBadge').textContent='ROUND '+run.round+' — '+ROUND_METALS[run.round-1].name;
   document.getElementById('qsBadge').textContent='☿ '+run.quicksilver;
+  document.getElementById('qsBadge').style.display=''; // may have been hidden by a guild tactical match
+  var _fb=document.getElementById('btlForfeitBtn');if(_fb)_fb.style.display='none'; // runs end via game-over, not forfeit
+  _tacAuto=false;var _ab=document.getElementById('tacAutoBtn');if(_ab)_ab.style.display='none'; // Watch is guild-only
+  // Battles end mid-execution (checkWin), which leaves the exec button disabled —
+  // re-arm it for the new battle (finishTurn only re-enables on turns nobody died).
+  document.getElementById('execBtn').disabled=false;
   initTiles();faceBothFighters();buildGrid();buildControls();renderAll();
   startAnimLoop();
   logMsg('⚗ Round '+run.round+': '+ROUND_METALS[run.round-1].name+' — Fight!','phase');
@@ -3546,8 +3780,13 @@ function updateHUD(){
     var hpPct=Math.max(0,f.hp/f.maxHp*100);var fLinks=getFighterLinkCount(f);var rank=getRank(fLinks);
     var borderCol=f===p1?'#d4a843':'#ef4444';
     el.style.borderLeft='3px solid '+borderCol;
+    // Guild battles carry real member names; the roguelike keeps its classic labels.
+    // Keyed off _guildBattle (exact) — `run` is never nulled, so `!run` breaks after
+    // any roguelike run in the same session (review finding).
+    var hudLabel=(_guildBattle&&f.name)?((f===p1?'⚗ ':'☠ ')+f.name.toUpperCase()+(f===p1?' (YOU)':''))
+      :(f===p1?'⚗ ALCHEMIST (YOU)':'☠ OPPONENT');
     el.innerHTML='<h3 style="color:'+borderCol+'">'+
-      (f===p1?'⚗ ALCHEMIST (YOU)':'☠ OPPONENT')+
+      hudLabel+
       '</h3><div class="hp-bar"><div class="hp-fill" style="width:'+hpPct+'%;background:linear-gradient(90deg,'+(hpPct<30?'#ef4444,#f87171':'#22c55e,#4ade80')+')"></div></div>'+
       '<div class="stat-row"><span>HP '+f.hp+'/'+f.maxHp+'</span><span class="rank-badge" style="color:'+rank.col+';border-color:'+rank.col+'">'+rank.sym+' '+rank.name+'</span></div>'+
       buildSocketChainHTML(f);
@@ -3606,7 +3845,7 @@ function buildSocketChainHTML(f){
 function updateStatSheet(){
   if(!p1)return;
   var f=p1;
-  document.getElementById('ssTitle').textContent='⚗ Alchemist — Sheet';
+  document.getElementById('ssTitle').textContent=(_guildBattle&&f.name)?('⚗ '+f.name+' — Sheet'):'⚗ Alchemist — Sheet';
   var body=document.getElementById('ssBody');
   var sg='';
   ['STR','DEX','CON','INT','WIS','CHA'].forEach(function(s){
@@ -3987,6 +4226,21 @@ function getFighterAC(fighter){
 function executeTurn(){
   if(gamePhase!=='plan'||executing)return;
   if(!selectedAttack){logMsg('⚠ Select an attack or action first!');return}
+  // ─── Foolery (K5, guild tactical only) ─────────────────────────────────────
+  // A low-discipline, low-bond fighter may IGNORE the plan: P(obey) =
+  // (discipline+bond)/200 + trait mods, rolled per executed turn. On failure the
+  // parameterized AI plans their turn instead — the timeline replayer makes the
+  // disobedience watchable. (Skipped on autopilot: those are already the AI's orders.)
+  if(_guildBattle && !_guildBattle.done && p1._obey && !_tacAuto){
+    var _ob=p1._obey;
+    var _pObey=Math.max(0,Math.min(1,((_ob.discipline||40)+(_ob.bond||60))/200+(_ob.obeyMod||0)));
+    if(Math.random()>_pObey){
+      moveQueue=genAIMoves(p1,p2);
+      selectedAttack=pickAIAttack(p1,p2);
+      logMsg('🎭 '+(p1.name||'Your fighter')+' ignores your orders and fights their own way!','dissolve');
+      updateMoveQueueUI();
+    }
+  }
   executing=true;document.getElementById('execBtn').disabled=true;gamePhase='execute';
 
   // Set disengaging flag for OA suppression
@@ -4072,6 +4326,7 @@ function finishTurn(){
   document.getElementById('atkDetail').classList.remove('show');
   updateMoveQueueUI();updateHUD();updateStatSheet();renderGrid();
   logMsg('——— Turn '+turnNum+' ———','phase');
+  _maybeAutoPlan(); // Watch tier: the next turn plans + executes itself while toggled on
 }
 
 // ═══ SHOVE (D&D 5e PHB) — Contested Athletics check ═══
@@ -4117,20 +4372,24 @@ function resolveShove(attacker,defender,done){
 }
 
 // ═══ AI ═══
-function genAIMoves(){
-  var q=[];var spd=p2.speed;
-  var atkName=pickAIAttack();var atkRange=ATTACKS[atkName]?ATTACKS[atkName].range:1;
-  var dist=Math.max(Math.abs(p1.x-p2.x),Math.abs(p1.y-p2.y));
+// AI planners, parameterized by actor (K5): default to the classic p2-vs-p1, but the
+// same brain can plan FOR p1 — Foolery (a disobedient hero) and the Watch/autopilot
+// tier both point it at the player's fighter.
+function genAIMoves(self, foe){
+  self = self || p2; foe = foe || p1;
+  var q=[];var spd=self.speed;
+  var atkName=pickAIAttack(self, foe);var atkRange=ATTACKS[atkName]?ATTACKS[atkName].range:1;
+  var dist=Math.max(Math.abs(foe.x-self.x),Math.abs(foe.y-self.y));
 
   // Decide AI strategy: retreat if low HP, flank if close and smart, else pursue
-  var useFlank = dist<=3 && p2.hp>p2.maxHp*0.4 && Math.random()<0.35;
+  var useFlank = dist<=3 && self.hp>self.maxHp*0.4 && Math.random()<0.35;
 
   for(var i=0;i<spd;i++){
     // Placeholder dx/dy for preview (recalculated dynamically at execution)
-    var dx=p1.x-p2.x,dy=p1.y-p2.y;
+    var dx=foe.x-self.x,dy=foe.y-self.y;
     var sdx=dx===0?0:Math.sign(dx),sdy=dy===0?0:Math.sign(dy);
 
-    if(p2.hp<p2.maxHp*0.25&&dist<=2){
+    if(self.hp<self.maxHp*0.25&&dist<=2){
       q.push({dx:-sdx,dy:-sdy,type:'retreat'});
     } else if(dist<=atkRange&&atkRange>0){
       break; // In range — stop moving
@@ -4142,10 +4401,11 @@ function genAIMoves(){
   }
   return q;
 }
-function pickAIAttack(){
-  var attacks=p2.attacks.slice();
-  var dist=Math.max(Math.abs(p1.x-p2.x),Math.abs(p1.y-p2.y));
-  if(p2.hp<p2.maxHp*0.4){var heals=attacks.filter(function(n){return ATTACKS[n]&&ATTACKS[n].special==='heal'});if(heals.length>0)return heals[0]}
+function pickAIAttack(self, foe){
+  self = self || p2; foe = foe || p1;
+  var attacks=self.attacks.slice();
+  var dist=Math.max(Math.abs(foe.x-self.x),Math.abs(foe.y-self.y));
+  if(self.hp<self.maxHp*0.4){var heals=attacks.filter(function(n){return ATTACKS[n]&&ATTACKS[n].special==='heal'});if(heals.length>0)return heals[0]}
   var valid=attacks.filter(function(n){var a=ATTACKS[n];return a&&(a.range===0||a.range>=dist)&&a.dice!=='0d0'});
   if(valid.length>0)return pick(valid);
   return attacks[0];
@@ -4700,7 +4960,7 @@ function resolveOneAttack(attacker,defender,atkName,done){
       if(atk.dice!=='0d0'){dmg=rollDice(atk.dice)+mod+matB.bonusDmg;if(isCrit)dmg+=rollDice(atk.dice);dmg=Math.max(1,dmg)}
       defender.hp=Math.max(0,defender.hp-dmg);
       if(defender.hp<=0){setFighterAnim(defender,'death')}else{setFighterAnim(defender,'hurt')}
-      if(attacker===p1)run.totalDamage+=dmg;
+      if(attacker===p1&&run)run.totalDamage+=dmg; // guard: guild tactical battles have no `run` (twin of the arena's 2989 guard)
       logMsg(aName+' '+atkName+': '+(isCrit?'CRIT! ':'')+'d20('+roll+')+'+toHit+'='+total+' vs AC'+defAC+' ✔ '+dmg+' dmg',isCrit?'crit':'hit');
       if(matB.lifesteal&&dmg>0){var steal=rollDice(matB.lifestealDice||'1d4');attacker.hp=Math.min(attacker.maxHp,attacker.hp+steal);logMsg(aName+' drains '+steal+' HP!','hit')}
       if(atk.special==='dot'){var dotTurns=atk.dotTurns+matB.dotBonus;defender.dot={dice:atk.dotDice,turns:dotTurns};logMsg('Putrefaction! ('+dotTurns+' turns)','dissolve')}
@@ -4780,9 +5040,30 @@ function buildLoadoutSummaryHTML(){
 
 // ═══ WIN/LOSS ═══
 function checkWin(){
+  if(p1.hp>0&&p2.hp>0)return false;
+  // Guild-mode tactical battle: resolve the bridge promise instead of routing into
+  // the roguelike loot/game-over flow. This is the single choke point — every
+  // checkWin call site (executeTurn ×2, resolveAttacks, shove, finishTurn) funnels
+  // here, so no exit path can leak a guild fighter into run-dependent screens.
+  // NOTE: `_guildBattle` stays set (done=true) until the resolve fires, so late
+  // checkWin calls from still-unwinding callback chains are harmless no-ops.
+  if(_guildBattle){
+    if(!_guildBattle.done){
+      _guildBattle.done=true;
+      var g=_guildBattle;
+      var playerWon=p1.hp>0;
+      gamePhase='over';executing=false;
+      var eb=document.getElementById('execBtn');if(eb)eb.disabled=true;
+      logMsg(playerWon?('✦ Victory! '+(p1.name||'You')+' takes the match!'):('☠ '+(p1.name||'You')+' falls…'),playerWon?'win':'dissolve');
+      var res={winner:playerWon?'player':'opponent',
+        playerHp:Math.max(0,p1.hp),playerMaxHp:p1.maxHp,
+        oppHp:Math.max(0,p2.hp),oppMaxHp:p2.maxHp};
+      setTimeout(function(){_guildBattle=null;stopAnimLoop();g.resolve(res);},900); // a beat on the result before returning
+    }
+    return true;
+  }
   if(p1.hp<=0){showGameOver();return true}
-  if(p2.hp<=0){handleVictory();return true}
-  return false;
+  handleVictory();return true;
 }
 function showGameOver(){
   gamePhase='over';executing=false;
@@ -5859,6 +6140,7 @@ Object.assign(window, {
   closeMatDetail, confirmBuilder, confirmDraft, confirmLoadout, craftDrillSocket,
   craftFuseLink, craftLevel, craftRefine, craftSlot, craftUnslot, deleteChampion,
   equipDraftGearTo, equipFromLab, execCraft, executeTurn, forfeitAction, forfeitRun,
+  forfeitTactical, toggleTacticalAuto,
   goToDraft, goToLab, openBuilder, openDebug, pickReadyAttack, randomizeBuilder,
   randomizeDebug, reformMateria, rerollStats, returnToTitle, rotateDraftFace,
   saveChampion, sellGear, sellMateria, setBuilderFace, setDebugFace, setLabPreview,

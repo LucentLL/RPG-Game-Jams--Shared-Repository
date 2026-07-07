@@ -8,7 +8,7 @@
  * fastest; the old decline), how worn-down they are (high Fatigue+Stress tanks gains
  * and risks injury), and morale. Rest is the counterweight that sheds Fatigue/Stress.
  */
-import { HERO_STATS, STAT_CAP } from './hero.js';
+import { HERO_STATS, STAT_CAP, traitMult } from './hero.js';
 
 const GAIN_SCALE = 5;
 
@@ -24,6 +24,65 @@ export const DRILLS = [
 export const REST = { id: 'rest', name: 'Rest & Recover' };
 
 export function getDrill(id) { return id === 'rest' ? REST : (DRILLS.find((d) => d.id === id) || null); }
+
+// ─── Injuries: a severity LADDER, not a boolean ──────────────────────────────
+// condition.injury is now { kind, weeksLeft, statHit } — bruises shrug off in a
+// week; a torn muscle costs a month AND permanently dents the drilled stat.
+export const INJURY_KINDS = {
+  bruised:  { name: 'Bruised',     weeks: 1 },
+  strained: { name: 'Strained',    weeks: 2 },
+  torn:     { name: 'Torn Muscle', weeks: 5, statHit: 2 },
+};
+/** Roll a severity from how far wear overflowed the threshold (worse overflow → worse tears). */
+export function rollInjurySeverity(overflow) {
+  const r = Math.random();
+  if ((overflow || 0) > 60 && r < 0.25) return 'torn';
+  if (r < 0.65) return 'strained';
+  return 'bruised';
+}
+/** Build the injury object; `statHit` names the stat a tear permanently dents. */
+export function makeInjury(kind, hitStat) {
+  const def = INJURY_KINDS[kind] || INJURY_KINDS.strained;
+  return { kind, weeksLeft: def.weeks, statHit: def.statHit && hitStat ? { stat: hitStat, amt: def.statHit } : null };
+}
+/** Short display line: "Torn Muscle — 3wk". Tolerates legacy string injuries. */
+export function injuryLabel(injury) {
+  if (!injury) return null;
+  if (typeof injury === 'string') return injury;
+  const def = INJURY_KINDS[injury.kind] || { name: injury.kind };
+  return `${def.name} — ${injury.weeksLeft}wk`;
+}
+/** One week of healing. `rate` 1 normally, 2 with an Infirmary. Clears when done. */
+function healInjury(c, rate = 1) {
+  if (!c.injury) return;
+  if (typeof c.injury === 'string') { c.injury = makeInjury('strained', null); } // legacy mid-session value
+  c.injury.weeksLeft -= rate;
+  if (c.injury.weeksLeft <= 0) c.injury = null;
+}
+/** Inflict an injury: applies the permanent stat dent (tears) + career tally. */
+export function inflictInjury(hero, kind, hitStat) {
+  const inj = makeInjury(kind, hitStat);
+  hero.condition.injury = inj;
+  if (inj.statHit) hero.stats[inj.statHit.stat] = Math.max(0, Math.min(STAT_CAP, (hero.stats[inj.statHit.stat] || 0) - inj.statHit.amt));
+  if (hero.career) hero.career.injuries = (hero.career.injuries || 0) + 1;
+  return inj;
+}
+
+/**
+ * The HONEST pre-drill injury odds — the same math applyTraining will roll after
+ * this week's fatigue/stress lands, so the picker can't lie (anti-lie principle).
+ * @returns {number} 0..0.6 chance
+ */
+export function previewInjuryChance(hero, intensity, opts = {}) {
+  const c = hero.condition;
+  const heavy = intensity === 'heavy';
+  const fat = Math.max(0, Math.min(100, c.fatigue + (heavy ? 25 : 12)));
+  const str = Math.max(0, Math.min(100, (c.stress || 0) + (heavy ? 14 : 6)));
+  const wear = fat + str * 2;
+  const injThresh = 185 + (opts.injuryBonus || 0);
+  if (wear <= injThresh) return 0;
+  return Math.min(0.6, (wear - injThresh) / 160) * (opts.injuryRiskMod ?? 1) * traitMult(hero, 'injury');
+}
 
 const clampStat = (v) => Math.max(0, Math.min(STAT_CAP, v));
 const clamp100 = (v) => Math.max(0, Math.min(100, Math.round(v)));
@@ -49,13 +108,15 @@ export function applyTraining(hero, drillId, intensity, dietBias = {}, opts = {}
   const c = hero.condition;
   const gains = {}, drops = {};
 
-  // Rest — the recovery counterweight.
+  // Rest — the recovery counterweight. Injuries heal on a WEEKS clock now
+  // (opts.healRate 2 with an Infirmary), not the old fatigue/stress gate.
   if (drillId === 'rest' || !getDrill(drillId)) {
-    c.fatigue = clamp100(c.fatigue - 35);
-    c.stress = clamp100((c.stress || 0) - 20);
-    c.stamina = Math.min(100, (c.stamina || 0) + 25);
+    const rec = traitMult(hero, 'recover'); // Lazy/Glutton rest deeper
+    c.fatigue = clamp100(c.fatigue - 35 * rec);
+    c.stress = clamp100((c.stress || 0) - 20 * rec);
+    c.stamina = Math.min(100, (c.stamina || 0) + Math.round(25 * rec));
     c.morale = clamp100(c.morale + 5);
-    if (c.injury && c.fatigue < 25 && (c.stress || 0) < 25) c.injury = null;
+    healInjury(c, opts.healRate || 1);
     return { gains, drops, rested: true, injury: c.injury };
   }
 
@@ -64,13 +125,18 @@ export function applyTraining(hero, drillId, intensity, dietBias = {}, opts = {}
     c.fatigue = clamp100(c.fatigue - 30);
     c.stress = clamp100((c.stress || 0) - 18);
     c.stamina = Math.min(100, (c.stamina || 0) + 15);
-    if (c.fatigue < 25 && (c.stress || 0) < 25) c.injury = null;
+    healInjury(c, opts.healRate || 1);
     return { gains, drops, injured: true, injury: c.injury };
   }
 
   const drill = getDrill(drillId);
   const heavy = intensity === 'heavy';
-  const base = GAIN_SCALE * (heavy ? 1.8 : 1.0) * wearMult(c) * ageMult(hero) * (0.85 + (c.morale / 100) * 0.3);
+  // Breakthrough (MR's "training went great!"): heavy drills carry a 5% chance the
+  // week clicks — half again the gains and a morale lift. The upside that keeps
+  // heavy-drill gambling interesting opposite the injury ladder.
+  const breakthrough = heavy && Math.random() < 0.05;
+  const base = GAIN_SCALE * (heavy ? 1.8 : 1.0) * (breakthrough ? 1.5 : 1) * traitMult(hero, 'gain')
+    * wearMult(c) * ageMult(hero) * (0.85 + (c.morale / 100) * 0.3);
 
   const grow = (stat, factor) => {
     const cur = hero.stats[stat] || 0;
@@ -92,18 +158,23 @@ export function applyTraining(hero, drillId, intensity, dietBias = {}, opts = {}
   }
 
   c.fatigue = clamp100(c.fatigue + (heavy ? 25 : 12)); // heavy outpaces most diets' relief → fatigue builds
-  c.stress = clamp100((c.stress || 0) + (heavy ? 14 : 6));
+  c.stress = clamp100((c.stress || 0) + (heavy ? 14 : 6) * traitMult(hero, 'stress')); // Stoics shrug it off
   c.stamina = Math.max(0, (c.stamina || 0) - (heavy ? 12 : 6));
-  c.morale = clamp100(c.morale - (heavy ? 2 : 1));
+  c.morale = clamp100(c.morale + (breakthrough ? 8 : -(heavy ? 2 : 1)));
+  c.discipline = clamp100((c.discipline ?? 40) + 1); // drilling instills discipline (obeys better in fights)
   hero.xp += heavy ? 14 : 8;
 
   // Overtraining injury: chance rises with combined wear (Fatigue + Stress*2). A
-  // Sparring Ring (opts.injuryBonus) raises the threshold, so injuries start later.
+  // Sparring Ring (opts.injuryBonus) raises the threshold; the diet's injuryRiskMod
+  // (finally wired) scales the roll; severity scales with the overflow — a tear
+  // permanently dents the drilled stat.
   const wear = c.fatigue + (c.stress || 0) * 2;
   const injThresh = 185 + (opts.injuryBonus || 0);
-  if (wear > injThresh && Math.random() < Math.min(0.6, (wear - injThresh) / 160)) c.injury = 'strained';
+  if (wear > injThresh && Math.random() < Math.min(0.6, (wear - injThresh) / 160) * (opts.injuryRiskMod ?? 1) * traitMult(hero, 'injury')) {
+    inflictInjury(hero, rollInjurySeverity(wear - injThresh), drill.main);
+  }
 
-  return { gains, drops, injury: c.injury };
+  return { gains, drops, injury: c.injury, breakthrough };
 }
 
 /**
@@ -121,7 +192,7 @@ export function applySpar(hero, partner, dietBias = {}, opts = {}) {
   const gains = {}, drops = {};
   const combat = (h) => (h.stats.SKL || 0) + (h.stats.SPD || 0) + (h.stats.POW || 0);
   const edge = Math.max(0.7, Math.min(1.8, combat(partner) / Math.max(1, combat(hero)))); // a stronger partner teaches more
-  const base = GAIN_SCALE * 1.35 * edge * wearMult(c) * ageMult(hero) * (0.85 + (c.morale / 100) * 0.3);
+  const base = GAIN_SCALE * 1.35 * edge * traitMult(hero, 'gain') * wearMult(c) * ageMult(hero) * (0.85 + (c.morale / 100) * 0.3);
   const grow = (stat, factor) => {
     const cur = hero.stats[stat] || 0;
     if (cur >= STAT_CAP) return;
@@ -133,13 +204,18 @@ export function applySpar(hero, partner, dietBias = {}, opts = {}) {
   };
   grow('SKL', 1); grow('SPD', 0.7); grow('POW', 0.4);
   c.fatigue = clamp100(c.fatigue + 18);
-  c.stress = clamp100((c.stress || 0) + 10);
+  c.stress = clamp100((c.stress || 0) + 10 * traitMult(hero, 'stress'));
   c.stamina = Math.max(0, (c.stamina || 0) - 10);
   c.morale = clamp100(c.morale + 1); // a good bout lifts spirits
+  c.discipline = clamp100((c.discipline ?? 40) + 1); // partnered drill work builds discipline too
   hero.xp += 12;
   const wear = c.fatigue + (c.stress || 0) * 2;
   const injThresh = 185 + (opts.injuryBonus || 0); // Sparring Ring softens contact-injury risk
-  if (wear > injThresh && Math.random() < Math.min(0.6, (wear - injThresh) / 150)) c.injury = 'bruised';
+  if (wear > injThresh && Math.random() < Math.min(0.6, (wear - injThresh) / 150) * (opts.injuryRiskMod ?? 1) * traitMult(hero, 'injury')) {
+    // Contact injuries skew light: mostly bruises, the odd strain, rare tears.
+    const r = Math.random();
+    inflictInjury(hero, r < 0.6 ? 'bruised' : rollInjurySeverity(wear - injThresh), 'SKL');
+  }
   return { gains, drops, spar: true, partnerName: partner.name, injury: c.injury };
 }
 

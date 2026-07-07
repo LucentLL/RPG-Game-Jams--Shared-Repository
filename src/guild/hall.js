@@ -9,22 +9,23 @@
 // Consumables/provisioning (an Alchemist's potions a party withdraws) come next.
 
 import { createGuild, FACILITIES, maxRoster, facilityTier, fedCapacity } from './guild.js';
-import { HERO_STATS, heroPower, STAT_CAP } from './hero.js';
+import { HERO_STATS, heroPower, STAT_CAP, lifeStage, lifeFrac, TRAITS, traitMult } from './hero.js';
 import { generateRecruit, hireCost, rollRecruitPool } from './recruiting.js';
-import { DRILLS, REST, getDrill, applyTraining, applySpar } from './training.js';
+import { DRILLS, REST, getDrill, applyTraining, applySpar, injuryLabel, previewInjuryChance, inflictInjury, rollInjurySeverity } from './training.js';
 import { DIET_PLANS, getDietPlan, applyDiet } from './diet.js';
 import { advanceWeek, formatDate } from './calendar.js';
 import { weeklyUpkeep, addGold, guildIncome } from './economy.js';
 import { RECIPES, getRecipe, previewQuality, forge, study, recipeUnlocked } from './smithing.js';
 import { POTION_RECIPES, getPotionRecipe, previewPotency, brew, potionUnlocked, applyPotion } from './alchemy.js';
 import { MATERIALS, createInventory, armoryItems, findItem, addMaterial, gearBonus, EQUIP_SLOTS, findPotion, consumePotion, potionCount } from './inventory.js';
-import { generateQuestBoard, resolveQuest } from './quests.js';
-import { ensureSchedule, nextTournament, resolveTournament, placement, championOdds } from './tournaments.js';
+import { generateQuestBoard, resolveQuest, resolveQuestPlayed } from './quests.js';
+import { nextTournament, resolveTournament, placement, championOdds } from './tournaments.js';
+import { generateSeason, EVENT_TYPES, seasonOf } from './events.js';
 import { roleFor } from './roles.js';
 import { qualityTier } from './item.js';
 import { MATERIAL_PRICE, buyPrice, itemSellValue, createMarket, refreshMarket } from './market.js';
 import { saveGame, loadGame } from '../platform/storage.js';
-import { playTournamentMatch, battleEngineReady } from './battle-bridge.js';
+import { playTournamentMatch, playQuestBout, battleEngineReady } from './battle-bridge.js';
 import { renderRanch, stopRanchLoop } from './ranch.js';
 
 const SLOT = 'guild';
@@ -42,7 +43,8 @@ let selectedId = null;
 let report = null;
 let notice = '';
 let currentRoom = 'hub'; // UI-only: which room the stage shows. Never saved — resets to hub each session.
-let playTournamentId = null; // UI-only: tournament the player opted to PLAY (not simulate) next Advance Week.
+// The play opt-in now lives ON the guild (guild.playPlan = {kind,id,mode}) so it
+// survives reload and can arm quests as well as tournaments. `planFor` reads it.
 let advancing = false; // re-entrancy guard — a played battle makes advanceAll async & minutes-long.
 let ranchView = true; // UI-only: the guild opens on the RANCH (home view); rooms are drill-in detail.
 
@@ -71,18 +73,92 @@ function clamp(n) { return Math.max(0, Math.min(100, Math.round(n))); }
  *  odds, resolution, and the displayed ⚡ so equipping visibly makes a hero stronger. */
 function combatPower(h) { return heroPower(h) + gearBonus(guild.inventory, h); }
 
+/** The armed play lens for an event, or null. guild.playPlan = {kind, id, mode}. */
+function planFor(kind, id) {
+  const p = guild && guild.playPlan;
+  return (p && p.kind === kind && p.id === id) ? p.mode : null;
+}
+
+/** Top two healing batches from the Apothecary — the corner's kit for a played battle. */
+function withdrawPotions() {
+  return (guild.inventory.potions || [])
+    .filter((b) => b.type === 'heal' && b.qty > 0)
+    .sort((a, b) => (b.potency || 0) - (a.potency || 0))
+    .slice(0, 2)
+    .map((b) => ({ batchId: b.id, name: b.name, glyph: b.glyph, potency: b.potency, qty: b.qty }));
+}
+/** Decrement REAL Apothecary stock for potions drunk mid-battle (result.itemsUsed). */
+function spendPotions(used) {
+  for (const id in used) for (let i = 0; i < used[id]; i++) consumePotion(guild.inventory, id);
+}
+
+/** Modal lens chooser for a due match: resolves {mode:'action'|'tactical'|'sim', remember}.
+ *  Shown mid-advanceAll (which is already async); the overlay sits above everything. */
+function chooseLens({ glyph, title, sub }) {
+  return new Promise((resolve) => {
+    const old = document.querySelector('.lens-overlay'); if (old) old.remove();
+    const ov = document.createElement('div');
+    ov.className = 'lens-overlay';
+    ov.innerHTML = `<div class="lens-card">
+        <div class="lens-title">${glyph || '🏆'} ${title}</div>
+        <div class="lens-sub">${sub}</div>
+        <button class="lens-btn" data-m="action">⚔ Fight it live <span>real-time arena — stick + tap</span></button>
+        <button class="lens-btn" data-m="tactical">♟ Command it <span>simultaneous turn-based tactics</span></button>
+        <button class="lens-btn" data-m="spectate">👁 Spectate <span>watch it fought turn by turn — take control anytime</span></button>
+        <button class="lens-btn sim" data-m="sim">▶ Simulate <span>let the week resolve it</span></button>
+        <label class="lens-remember"><input type="checkbox"> don’t ask again — always simulate <span class="dim">(re-enable on the Calendar)</span></label>
+      </div>`;
+    document.body.appendChild(ov);
+    ov.querySelectorAll('.lens-btn').forEach((b) => {
+      b.onclick = () => {
+        const remember = !!ov.querySelector('.lens-remember input').checked;
+        ov.remove();
+        resolve({ mode: b.dataset.m, remember });
+      };
+    });
+  });
+}
+
+/** Between played bracket rounds: fight the next round yourself, or hand the rest
+ *  to the resolver? (Both paths run the same power×variance curve — no hidden tax.) */
+function bracketInterstitial(t) {
+  return (nextRound, rounds, nextFoePower) => new Promise((resolve) => {
+    const old = document.querySelector('.lens-overlay'); if (old) old.remove();
+    const ov = document.createElement('div');
+    ov.className = 'lens-overlay';
+    ov.innerHTML = `<div class="lens-card">
+        <div class="lens-title">${(EVENT_TYPES[t.type] || {}).glyph || '🏆'} ${t.name}</div>
+        <div class="lens-sub">Round won! Next: <b>round ${nextRound} of ${rounds}</b> — a ~${nextFoePower}⚡ foe waits in the ring.</div>
+        <button class="lens-btn" data-v="fight">⚔ Fight on <span>next opponent, same controls</span></button>
+        <button class="lens-btn sim" data-v="sim">▶ Simulate the rest <span>the resolver plays out the remaining rounds</span></button>
+      </div>`;
+    document.body.appendChild(ov);
+    ov.querySelectorAll('.lens-btn').forEach((b) => {
+      b.onclick = () => { ov.remove(); resolve(b.dataset.v === 'fight'); };
+    });
+  });
+}
+
 /** Weekly training multiplier bag = each diet's per-stat bias × the Training Yard's
  *  flat gain multiplier. It merges into training.js's existing (dietBias[stat]||1)
  *  factor, so no gain-formula change is needed — a better yard trains everyone faster. */
 function trainingBias(diet) {
-  const m = FACILITIES.yard.mainMult[facilityTier(guild, 'yard')] || 1;
+  let m = FACILITIES.yard.mainMult[facilityTier(guild, 'yard')] || 1;
+  if (guild.trainer) m *= 1.15; // a retired champion runs the drills — everyone learns faster
   const db = (diet && diet.statBias) || {};
   const bias = {};
   for (const s of HERO_STATS) bias[s] = (db[s] || 1) * m;
   return bias;
 }
-/** Injury headroom from the Sparring Ring, passed as training opts (raises the injury threshold). */
-function ringOpts() { return { injuryBonus: FACILITIES.ring.injuryBonus[facilityTier(guild, 'ring')] || 0 }; }
+/** Training opts bag: Sparring Ring headroom + the diet's injury-risk modifier
+ *  (finally wired) + the Infirmary's healing rate. */
+function ringOpts(diet) {
+  return {
+    injuryBonus: FACILITIES.ring.injuryBonus[facilityTier(guild, 'ring')] || 0,
+    injuryRiskMod: (diet && diet.injuryRiskMod) ?? 1,
+    healRate: FACILITIES.infirmary.healRate[facilityTier(guild, 'infirmary')] || 1,
+  };
+}
 
 // --- Quartermaster: hand armory gear out by policy ---------------------------
 const itemScore = (it) => (it.quality || 0) * (it.durability ? it.durability.current / (it.durability.max || 100) : 1);
@@ -157,6 +233,17 @@ function migrateHero(h) {
   if (h.xp == null) h.xp = 0;
   if (h.age == null) h.age = 0;
   if (h.lifespan == null) h.lifespan = 300;
+  // Career arc + the injury ladder (K4). Legacy string injuries become objects.
+  if (!h.career) h.career = { debut: null, titles: [], wins: 0, losses: 0, injuries: 0, techniques: [] };
+  if (h.retired == null) h.retired = false;
+  if (h.staffRole === undefined) h.staffRole = null;
+  // Personality + obedience (K5). Existing members grew up without traits — roll none
+  // (they're "known quantities"); recruits arrive with two. Discipline starts middling.
+  if (!Array.isArray(h.traits)) h.traits = [];
+  if (h.condition.discipline == null) h.condition.discipline = 40;
+  if (typeof h.condition.injury === 'string') {
+    h.condition.injury = { kind: h.condition.injury === 'bruised' ? 'bruised' : 'strained', weeksLeft: h.condition.injury === 'bruised' ? 1 : 2, statHit: null };
+  }
 }
 
 function load() {
@@ -177,13 +264,21 @@ function load() {
   // Old saves (and pre-Grounds new games) start every facility at tier 0 — cap 6,
   // no training/injury bonus — so nothing changes until the player expands.
   if (!guild.facilities || typeof guild.facilities !== 'object' || Array.isArray(guild.facilities)) {
-    guild.facilities = { quarters: 0, yard: 0, ring: 0, mess: 0 };
+    guild.facilities = {};
   }
-  for (const k of ['quarters', 'yard', 'ring', 'mess']) {
+  for (const k of Object.keys(FACILITIES)) { // derived, not hardcoded — new facilities migrate for free
     if (typeof guild.facilities[k] !== 'number' || guild.facilities[k] < 0) guild.facilities[k] = 0;
   }
+  if (!Array.isArray(guild.hallOfFame)) guild.hallOfFame = [];
+  if (guild.trainer === undefined) guild.trainer = null;
   if (!Array.isArray(guild.schedule)) guild.schedule = []; // tournament calendar (added with the season loop)
-  ensureSchedule(guild); // seed/top-up upcoming tournaments so there's always something on the horizon
+  guild.schedule.forEach((t) => { if (!t.type) t.type = 'tournament'; }); // typed-event migration (added with the season fabric)
+  // Battle prefs + play plan (added with the two-lens playable combat).
+  if (!guild.battlePrefs || typeof guild.battlePrefs !== 'object') guild.battlePrefs = { tournament: 'ask' };
+  if (!['ask', 'sim'].includes(guild.battlePrefs.tournament)) guild.battlePrefs.tournament = 'ask';
+  if (guild.playPlan && !(guild.playPlan.kind && guild.playPlan.id && guild.playPlan.mode)) guild.playPlan = null;
+  if (guild.playPlan === undefined) guild.playPlan = null;
+  generateSeason(guild); // seed/top-up the typed season so there's always a horizon to train toward
   if (!Array.isArray(guild.questBoard) || !guild.questBoard.length) guild.questBoard = generateQuestBoard(guild, 3);
   guild.roster.forEach((h) => { migrateHero(h); ensureAssignment(h); });
   const staleRecruits = guild.recruits && guild.recruits[0] && guild.recruits[0].stats && guild.recruits[0].stats.POW === undefined;
@@ -278,6 +373,7 @@ function hire(id) {
   if (guild.roster.length >= maxRoster(guild)) { notice = `Quarters are full (${maxRoster(guild)}). Expand Living Quarters in the Grounds.`; render(); return; }
   const i = guild.recruits.findIndex((r) => r.id === id); if (i < 0) return;
   const r = guild.recruits[i]; const cost = hireCost(r);
+  if (r.career && r.career.debut == null) r.career.debut = guild.calendar.week; // the career clock starts at signing
   if (guild.gold < cost) { notice = `Not enough gold to hire ${r.name} (${cost}g).`; render(); return; }
   addGold(guild, -cost); migrateHero(r); ensureAssignment(r); guild.roster.push(r); guild.recruits.splice(i, 1);
   selectedId = r.id; notice = `${r.name} joined the guild.`;
@@ -312,7 +408,23 @@ async function advanceAll() {
     const party = parties[questId];
     const quest = guild.questBoard.find((q) => q.id === questId);
     const marchers = quest ? party.filter(canMarch) : [];
-    const outcome = (quest && marchers.length) ? resolveQuest(quest, marchers, combatPower) : null;
+    // Played-quest seam: if the player armed this quest, its climactic bout runs in
+    // the chosen lens (strongest marcher vs the quest's boss). The duel SHIFTS the
+    // resolver's luck band via resolveQuestPlayed — it never replaces the power check.
+    let outcome = null;
+    if (quest && marchers.length) {
+      const qLens = planFor('quest', questId);
+      if (qLens && battleEngineReady()) {
+        guild.playPlan = null; // consume the opt-in
+        const champion = marchers.reduce((a, b) => (combatPower(a) >= combatPower(b) ? a : b));
+        const bout = await playQuestBout(champion, quest, marchers.length, { mode: qLens, items: withdrawPotions() });
+        if (bout && bout.itemsUsed) spendPotions(bout.itemsUsed);
+        outcome = bout ? resolveQuestPlayed(quest, marchers, combatPower, bout.won) : resolveQuest(quest, marchers, combatPower);
+      } else {
+        if (qLens) guild.playPlan = null; // armed but engine missing — consumed either way
+        outcome = resolveQuest(quest, marchers, combatPower);
+      }
+    }
     if (outcome && outcome.success) { // guild rewards, once for the whole party
       addGold(guild, quest.rewards.gold);
       guild.reputation += quest.rewards.reputation;
@@ -324,6 +436,10 @@ async function advanceAll() {
     });
   }
 
+  // The quest board regenerates weekly, so any quest opt-in not consumed above is
+  // dead — clear it or it lingers in the save forever (review fix).
+  if (guild.playPlan && guild.playPlan.kind === 'quest') guild.playPlan = null;
+
   // --- Tournament pre-pass: any scheduled tournament DUE this week resolves now on the
   // entered lineup (uninjured entrants only), as a small bracket vs an escalating field.
   // The guild is paid once, scaled by placement; competing tires the lineup. ---
@@ -333,19 +449,36 @@ async function advanceAll() {
     const lineup = (t.entrants || []).map((id) => heroById(id)).filter((h) => h && !h.condition.injury);
     if (!lineup.length) {
       t.resolved = true; t.result = { forfeit: true };
-      if (t.id === playTournamentId) playTournamentId = null; // the play opt-in dies with the forfeited event
-      tournamentResults.push({ name: t.name, rank: t.rank, forfeit: true, hadEntrants: (t.entrants || []).length > 0 });
+      if (guild.playPlan && guild.playPlan.id === t.id) guild.playPlan = null; // the play opt-in dies with the forfeited event
+      tournamentResults.push({ name: t.name, rank: t.rank, eventType: t.type, forfeit: true, hadEntrants: (t.entrants || []).length > 0 });
       continue;
     }
-    // Seam: PLAY this match through the battle engine when the player opted in
-    // (single-entrant → lineup[0] is the champion), else auto-resolve as before.
-    // playBattle returns the SAME {power,rounds,wins,champion} shape as the resolver.
+    // Seam: PLAY this match through the battle engine — armed in advance (playPlan),
+    // or offered NOW by the due-match chooser (battlePrefs.tournament === 'ask', the
+    // Monster-Rancher "your fight is up" moment). Simulate always remains a choice.
+    // A played result returns the SAME {power,rounds,wins,champion} shape as the resolver.
     let res;
-    if (t.id === playTournamentId && lineup.length && battleEngineReady()) {
-      playTournamentId = null; // consume the opt-in
-      const played = await playTournamentMatch(lineup[0], t);
+    const armed = planFor('tournament', t.id);
+    let lens = armed;
+    if (!lens && guild.battlePrefs.tournament === 'ask' && battleEngineReady()) {
+      const pick = await chooseLens({
+        glyph: '🏆', title: t.name,
+        sub: `${lineup[0].name} steps up — ⚡${combatPower(lineup[0])} vs a ~${t.field}⚡ field. Resolve it how?`,
+      });
+      if (pick.remember) guild.battlePrefs.tournament = 'sim';
+      lens = pick.mode === 'sim' ? null : pick.mode;
+    }
+    if (lens && battleEngineReady()) {
+      if (armed) guild.playPlan = null; // consume the opt-in (a chooser pick never armed one)
+      const played = await playTournamentMatch(lineup[0], t, {
+        mode: lens, items: withdrawPotions(),
+        powerFn: combatPower,               // gear counts, same as the simulated bracket
+        interstitial: bracketInterstitial(t), // per-round: fight on / simulate the rest
+      });
+      if (played && played.itemsUsed) spendPotions(played.itemsUsed);
       res = played || resolveTournament(t, lineup, combatPower); // null → engine missing, fall back
     } else {
+      if (armed) guild.playPlan = null; // armed but declined/unavailable — consumed either way
       res = resolveTournament(t, lineup, combatPower);
     }
     const pl = placement(res);
@@ -357,12 +490,21 @@ async function advanceAll() {
     lineup.forEach((h) => { // competing tires the lineup; a good run lifts morale and teaches Field
       h.condition.stamina = Math.max(0, h.condition.stamina - 20);
       h.condition.fatigue = Math.min(100, h.condition.fatigue + 15);
-      h.condition.morale = clamp(h.condition.morale + (pl.place === 1 ? 12 : pl.place <= 4 ? 4 : -6));
+      // Showmen feel the crowd twice as hard (traitMult 'morale'); wins knit the Bond,
+      // and a title fought BY HAND knits it hardest (the coached-win rule).
+      h.condition.morale = clamp(h.condition.morale + (pl.place === 1 ? 12 : pl.place <= 4 ? 4 : -6) * traitMult(h, 'morale'));
+      const bondGain = (res.champion ? 3 : pl.place <= 4 ? 1 : 0) + (res.played && res.champion ? 2 : 0);
+      if (bondGain) h.condition.loyalty = clamp((h.condition.loyalty ?? 60) + bondGain * traitMult(h, 'bond'));
       for (const k in h.professions) h.professions[k].field = Math.min(100, (h.professions[k].field || 0) + (2 + t.rank));
+      if (h.career) { // the record book (K4): rounds won, the exit, and titles taken
+        h.career.wins += res.wins;
+        if (!res.champion) h.career.losses += 1;
+        else h.career.titles.push(t.name);
+      }
     });
     t.resolved = true;
     t.result = { placement: pl.label, place: pl.place, wins: res.wins, rounds: res.rounds, gold, rep };
-    tournamentResults.push({ name: t.name, rank: t.rank, placement: pl.label, champion: pl.place === 1, gold, rep, party: lineup.length, loot: pl.place === 1 ? t.rewards.loot : null });
+    tournamentResults.push({ name: t.name, rank: t.rank, eventType: t.type, played: !!res.played, placement: pl.label, champion: pl.place === 1, gold, rep, party: lineup.length, loot: pl.place === 1 ? t.rewards.loot : null });
   }
 
   // Snapshot injuries at the START of the week: a member who bruises themselves mid-loop
@@ -381,7 +523,7 @@ async function advanceAll() {
       // Injured members can't work the craft or march — the week is forced rest until
       // they heal (the train path already handles injury inside applyTraining). This
       // keeps the hero card's "will only recover (rest) until healed" promise honest.
-      const res = applyTraining(h, 'rest', 'light', diet.statBias);
+      const res = applyTraining(h, 'rest', 'light', diet.statBias, ringOpts(diet));
       entry.type = 'train'; // recap renders the rest/recovery line
       entry.rested = true; entry.injury = res.injury;
     } else if (a.type === 'forge') {
@@ -407,7 +549,17 @@ async function advanceAll() {
         const success = plan.outcome.success;
         h.condition.stamina = Math.max(0, h.condition.stamina - QUEST_STAMINA);
         h.condition.fatigue = Math.min(100, h.condition.fatigue + (success ? 20 : 35));
-        entry.quest = { title: plan.quest.title, success, party: plan.partySize };
+        // The quest's RISK finally bites: marching can wound you — half as often when
+        // the job goes well, scaled by the diet's injury-risk modifier.
+        if (!h.condition.injury) {
+          const wound = (plan.quest.risk || 0) * (success ? 0.5 : 1) * ((diet.injuryRiskMod) ?? 1);
+          if (Math.random() < wound) {
+            const r = Math.random();
+            const inj = inflictInjury(h, r < 0.45 ? 'bruised' : rollInjurySeverity(30), 'VIT');
+            entry.wounded = injuryLabel(inj);
+          }
+        }
+        entry.quest = { title: plan.quest.title, success, party: plan.partySize, played: !!plan.outcome.played, won: !!plan.outcome.won };
         if (success) {
           const fieldGain = plan.quest.rewards.field; // only a SUCCESSFUL quest teaches Field Insight —
           for (const k in h.professions) h.professions[k].field = Math.min(100, (h.professions[k].field || 0) + fieldGain); // ...and it sharpens every craft the hero practices (smithing AND alchemy)
@@ -426,24 +578,25 @@ async function advanceAll() {
       const mutual = partner && partner.assignment.type === 'train' && partner.assignment.trainingId === 'spar'
         && partner.assignment.sparWith === h.id && !wasInjured.get(partner.id);
       if (h.condition.injury) {
-        const res = applyTraining(h, 'rest', 'light', diet.statBias); // injured — rest, don't spar
+        const res = applyTraining(h, 'rest', 'light', diet.statBias, ringOpts(diet)); // injured — rest, don't spar
         entry.rested = true; entry.injury = res.injury;
       } else if (mutual) {
-        const res = applySpar(h, partner, trainingBias(diet), ringOpts()); // both partners resolve their own side
+        const res = applySpar(h, partner, trainingBias(diet), ringOpts(diet)); // both partners resolve their own side
         entry.drill = 'Spar vs ' + partner.name.split(' ')[0];
         entry.gains = res.gains; entry.drops = res.drops; entry.injury = res.injury;
         entry.trained = Object.keys(res.gains).length > 0; entry.spar = true;
       } else {
-        const res = applyTraining(h, 'skl', 'light', trainingBias(diet), ringOpts()); // partner unavailable — solo footwork
+        const res = applyTraining(h, 'skl', 'light', trainingBias(diet), ringOpts(diet)); // partner unavailable — solo footwork
         entry.drill = 'Spar — no partner';
         entry.gains = res.gains; entry.drops = res.drops; entry.injury = res.injury;
         entry.trained = Object.keys(res.gains).length > 0;
       }
     } else {
-      const res = applyTraining(h, a.trainingId, a.intensity, trainingBias(diet), ringOpts());
+      const res = applyTraining(h, a.trainingId, a.intensity, trainingBias(diet), ringOpts(diet));
       entry.drill = (getDrill(a.trainingId) || REST).name;
       entry.gains = res.gains; entry.drops = res.drops;
       entry.rested = res.rested; entry.injured = res.injured; entry.injury = res.injury;
+      entry.breakthrough = res.breakthrough;
       entry.trained = Object.keys(res.gains).length > 0;
     }
 
@@ -452,17 +605,54 @@ async function advanceAll() {
     let dm = questMorale != null ? questMorale : (a.type === 'forge' || a.type === 'study' || a.type === 'brew' ? -1 : 0);
     if (diet.id === 'feast') dm += 4;
     h.condition.morale = clamp(h.condition.morale + dm);
+    // Bond moves (K5): rest weeks knit it; a NEW injury this week frays it.
+    if (entry.rested) h.condition.loyalty = clamp((h.condition.loyalty ?? 60) + 1 * traitMult(h, 'bond'));
+    if (!wasInjured.get(h.id) && h.condition.injury) h.condition.loyalty = clamp((h.condition.loyalty ?? 60) - 3);
     h.age += 1;
     entry.sta = h.condition.stamina - cb.stamina; entry.fat = h.condition.fatigue - cb.fatigue;
     results.push(entry);
+  }
+
+  // --- Life's arc (K4): Twilight members decay; a spent lifespan retires them
+  // into the Hall of Fame (ceremony, not a silent delete). Their gear returns to
+  // the armory for inheritance. Run AFTER the loop so they get their last week. ---
+  const retiring = [];
+  for (const h of guild.roster) {
+    if (lifeStage(h).key === 'twilight') {
+      for (const s of HERO_STATS) if (Math.random() < 0.5) h.stats[s] = Math.max(1, (h.stats[s] || 0) - 1); // E[−0.5]/stat/week
+    }
+    if (h.age >= h.lifespan) retiring.push(h);
+  }
+  for (const h of retiring) {
+    guild.roster = guild.roster.filter((x) => x.id !== h.id);
+    for (const slot of Object.keys(h.equipped || {})) { // the blade outlives its wielder
+      const it = findItem(guild.inventory, h.equipped[slot]);
+      if (it) { it.location = 'armory'; closeWielder(it); }
+    }
+    h.retired = true;
+    guild.hallOfFame.push({
+      id: h.id, name: h.name, archetype: h.archetype, level: h.level,
+      appearanceSeed: h.appearanceSeed, appearance: h.appearance, prime: h.prime,
+      career: h.career, stats: { ...h.stats }, peakPower: heroPower(h), retiredWeek: week,
+    });
+    results.push({ name: h.name, id: h.id, type: 'retire', career: h.career });
+  }
+  if (retiring.length) {
+    const gone = new Set(retiring.map((h) => h.id));
+    for (const h of guild.roster) { // clear assignments pointing at the departed
+      if (h.assignment.sparWith && gone.has(h.assignment.sparWith)) { h.assignment.sparWith = null; h.assignment.trainingId = 'rest'; }
+    }
+    for (const t of guild.schedule) if (!t.resolved) t.entrants = (t.entrants || []).filter((id) => !gone.has(id));
+    if (selectedId && gone.has(selectedId)) selectedId = guild.roster[0] ? guild.roster[0].id : null;
   }
   if (shortfall > 0) guild.roster.forEach((h) => { h.condition.morale = clamp(h.condition.morale - 8); }); // unpaid wages hurt morale
   advanceWeek(guild.calendar);
   refreshMarket(guild.market);
   guild.questBoard = generateQuestBoard(guild, 3);
   guild.recruits = rollRecruitPool(3);
-  ensureSchedule(guild); // drop the just-resolved tournament(s) and top up the horizon
+  generateSeason(guild); // drop the just-resolved event(s) and keep the season paced ahead
   report = { income, upkeep, shortfall, results, issued, tournaments: tournamentResults };
+  guild.lastReport = report; // persist the recap — it used to vanish on reload
   notice = '';
   currentRoom = 'hub'; // land on the hub so the weekly recap is always seen
   ranchView = false; stopRanchLoop(); // land on the hub recap after a week resolves
@@ -531,7 +721,7 @@ function rosterRow(h) {
     : a.trainingId === 'spar' ? `🤺 Spar ${((heroById(a.sparWith) || {}).name || '?').split(' ')[0]}`
     : `⚔ ${(getDrill(a.trainingId) || REST).name}${a.intensity === 'heavy' ? ' (H)' : ''}`;
   return `<button class="roster-row ${h.id === selectedId ? 'sel' : ''}" onclick="__guild.selectHero('${h.id}')">
-      <span class="rr-portrait">${personSprite(h, 44)}</span>
+      <span class="rr-portrait">${personSprite(h, 60)}</span>
       <span class="rr-main">
         <span class="rr-name">${h.name} <span class="rr-sub">${h.archetype} Lv${h.level}</span></span>
         <span class="rr-assign">${plan} · 🍖 ${getDietPlan(a.dietId).name}</span>
@@ -555,7 +745,7 @@ function equippedLine(h) {
 /** Compact avatar strip to switch which member you're managing inside a work room. */
 function heroSwitcher() {
   if (guild.roster.length <= 1) return '';
-  return `<div class="hero-switch">${guild.roster.map((h) => `<button class="hs-chip ${h.id === selectedId ? 'sel' : ''}" title="${h.name}" onclick="__guild.selectHero('${h.id}')">${personSprite(h, 38)}</button>`).join('')}</div>`;
+  return `<div class="hero-switch">${guild.roster.map((h) => `<button class="hs-chip ${h.id === selectedId ? 'sel' : ''}" title="${h.name}" onclick="__guild.selectHero('${h.id}')">${personSprite(h, 48)}</button>`).join('')}</div>`;
 }
 
 /** The member's stat / condition / gear card — the shared header used in the Roster room. */
@@ -567,10 +757,18 @@ function heroHeader(h) {
     return `<div class="stat-cell"><div class="k">${s}</div><div class="v">${val}<span class="cap">/${STAT_CAP}</span></div>
       <div class="statbar"><span style="width:${Math.round(val / STAT_CAP * 100)}%"></span></div><div class="d">${g ? '+' + g : ''}</div></div>`;
   }).join('');
-  return `<div class="assign-head"><span class="rr-portrait">${personSprite(h, 46)}</span> <b>${h.name}</b> · ${h.archetype} Lv${h.level} · ${h.age} wks · ⚡${combatPower(h)}</div>
+  const stage = lifeStage(h);
+  const cr = h.career || {};
+  const record = (cr.wins || cr.losses || (cr.titles || []).length)
+    ? ` · <span class="dim">${cr.wins || 0}W–${cr.losses || 0}L${(cr.titles || []).length ? ' · 👑' + cr.titles.length : ''}</span>` : '';
+  const chips = (h.traits || []).map((t) => `<span class="trait-chip" title="${(TRAITS[t] || {}).desc || ''}">${t}</span>`).join('');
+  return `<div class="assign-head"><span class="rr-portrait">${personSprite(h, 64)}</span> <b>${h.name}</b> · ${h.archetype} Lv${h.level} · <span style="color:${stage.col}">${stage.name}</span>${record} · ⚡${combatPower(h)}</div>
+      ${chips ? `<div class="trait-row">${chips}</div>` : ''}
       <div class="stat-grid">${stats}</div>
+      ${bar('Life', lifeFrac(h) * 100, stage.col, `${h.age}/${h.lifespan} wks — ${stage.desc}`)}
       ${bar('Stamina', h.condition.stamina, 'var(--success)')}${bar('Fatigue', h.condition.fatigue, '#e08a3c')}${bar('Stress', h.condition.stress || 0, '#c05a8a')}${bar('Morale', h.condition.morale, '#8ab4d8')}
-      ${h.condition.injury ? '<div class="injury-flag">⚠ Injured — will only recover (rest) until healed</div>' : ''}
+      ${bar('Bond', h.condition.loyalty ?? 60, '#c9a0e8')}${bar('Discipline', h.condition.discipline ?? 40, '#9fb8a8')}
+      ${h.condition.injury ? `<div class="injury-flag">⚠ ${injuryLabel(h.condition.injury)} — recovers (rest) until healed; a potent draught cures it</div>` : ''}
       ${equippedLine(h)}`;
 }
 
@@ -596,9 +794,14 @@ function trainBody(h) {
     ? others.map((p) => `<button class="opt ${sparring && h.assignment.sparWith === p.id ? 'active' : ''}" onclick="__guild.setSpar('${p.id}')">
         <span><span class="o-name">🤺 vs ${p.name}</span> <span class="o-desc">both sharpen SKL &amp; SPD · Lv${p.level}</span></span></button>`).join('')
     : '<div class="hint">Recruit another member to spar with.</div>';
+  // The HONEST injury odds for each intensity — the exact roll applyTraining makes
+  // after this week's wear lands (previewInjuryChance shares the math).
+  const diet = getDietPlan(h.assignment.dietId);
+  const riskPct = (i) => Math.round(previewInjuryChance(h, i, ringOpts(diet)) * 100);
+  const rl = riskPct('light'), rh = riskPct('heavy');
   return `<div class="intensity-toggle">
-      <button class="${heavy ? '' : 'on'}" onclick="__guild.setIntensity('light')">Light</button>
-      <button class="${heavy ? 'on' : ''}" onclick="__guild.setIntensity('heavy')">Heavy · +sec −paired</button>
+      <button class="${heavy ? '' : 'on'}" onclick="__guild.setIntensity('light')">Light${rl ? ` · <span class="down">⚠${rl}%</span>` : ''}</button>
+      <button class="${heavy ? 'on' : ''}" onclick="__guild.setIntensity('heavy')">Heavy · +sec −paired${rh ? ` · <span class="down">⚠${rh}%</span>` : ''}</button>
     </div><div class="opt-list">${drillItems}${restItem}</div>
     <div class="plan-title" style="font-size:0.72em;margin-top:10px">🤺 Spar a partner <span class="dim" style="font-weight:400">— both train, pairs up automatically</span></div>
     <div class="opt-list">${sparList}</div>`;
@@ -623,7 +826,15 @@ function questBody(h) {
       <span><span class="o-name">${q.title} <span class="q-rank">R${q.rank}</span></span> <span class="o-desc">${q.patron} · <span class="${odds.cls}">${odds.txt} ~${odds.pct}%</span>${partyTag}</span></span>
       <span class="o-cost">${q.rewards.gold}g · +${q.rewards.reputation}rep${lootTxt}</span></button>`;
   }).join('');
-  return `<div class="opt-list">${list}</div>`;
+  // The chosen quest can be PLAYED: its climactic bout (strongest marcher vs the boss)
+  // in either lens. Winning shifts the luck band; the power check still decides.
+  const cur = at === 'quest' && h.assignment.questId ? guild.questBoard.find((q) => q.id === h.assignment.questId) : null;
+  const lensBar = cur ? `<div class="tourney-lens quest-lens">
+      <button class="tourney-play ${planFor('quest', cur.id) === 'action' ? 'on' : ''}" onclick="__guild.setPlayQuest('${cur.id}','action')">${planFor('quest', cur.id) === 'action' ? '⚔ Leading the bout live' : '⚔ Lead the bout live'}</button>
+      <button class="tourney-play ${planFor('quest', cur.id) === 'tactical' ? 'on' : ''}" onclick="__guild.setPlayQuest('${cur.id}','tactical')">${planFor('quest', cur.id) === 'tactical' ? '♟ Commanding the bout' : '♟ Command the bout'}</button>
+    </div>
+    <div class="hint" style="text-align:left;padding:0 2px 6px">On Advance Week the party's strongest marcher duels <b>${cur.title}</b>'s boss — win it and the job's luck swings your way; the party's ⚡ still decides.</div>` : '';
+  return `<div class="opt-list">${list}</div>${lensBar}`;
 }
 
 /** Forge recipe list for member h. Picking a recipe sets them to Forge. */
@@ -762,8 +973,9 @@ function marketPanel() {
 }
 
 function recapPanel() {
-  if (!report) return '';
-  const lines = report.results.map((r) => {
+  const rep = report || guild.lastReport; // module var this session, persisted copy after a reload
+  if (!rep) return '';
+  const lines = rep.results.map((r) => {
     if (r.type === 'forge') {
       const f = r.forge;
       if (f.ok) return `<div class="r-line"><b>${r.name}</b> forged <span class="up">${f.item.name} (q${f.quality})</span> <span class="dim">· +${f.practiceGain} practice</span></div>`;
@@ -777,43 +989,53 @@ function recapPanel() {
       return `<div class="r-line"><b>${r.name}</b> <span class="down">couldn't brew — ${why}</span></div>`;
     }
     if (r.type === 'study') return `<div class="r-line"><b>${r.name}</b> studied ${r.discipline === 'alchemy' ? 'alchemy' : 'metallurgy'} — <span class="up">Theory +${r.study.theoryGain}</span></div>`;
+    if (r.type === 'retire') {
+      const cr = r.career || {};
+      const titles = (cr.titles || []).length ? ` · 👑 ${(cr.titles || []).length} title${cr.titles.length > 1 ? 's' : ''}` : '';
+      return `<div class="r-line">🎓 <b>${r.name}</b> <span class="up">retires with honors</span> — ${cr.wins || 0}W–${cr.losses || 0}L${titles} · enshrined in the Hall of Fame (Quarters)</div>`;
+    }
     if (r.type === 'quest') {
+      const wound = r.wounded ? ` <span class="down">· ⚠ ${r.wounded}</span>` : '';
+      const led = r.quest && r.quest.played ? ` <span class="dim">· ${r.quest.won ? 'boss felled by hand' : 'the played bout was lost'}</span>` : '';
       if (r.quest && r.quest.noQuest) return `<div class="r-line"><b>${r.name}</b> <span class="down">had no quest assigned</span></div>`;
       if (r.quest && r.quest.tooTired) return `<div class="r-line"><b>${r.name}</b> <span class="down">too exhausted to set out — rest first</span></div>`;
       if (r.quest && r.quest.success) {
         const party = r.quest.party > 1 ? ` <span class="dim">(party of ${r.quest.party})</span>` : '';
         if (r.reward) {
           const loot = r.reward.loot ? ` +1 ${MATERIALS[r.reward.loot].name}` : '';
-          return `<div class="r-line"><b>${r.name}</b> completed <span class="up">${r.quest.title}</span> — <span class="up">+${r.reward.gold}g · +${r.reward.rep} rep${loot}</span> <span class="dim">· Field +${r.field}</span>${party}</div>`;
+          return `<div class="r-line"><b>${r.name}</b> completed <span class="up">${r.quest.title}</span> — <span class="up">+${r.reward.gold}g · +${r.reward.rep} rep${loot}</span> <span class="dim">· Field +${r.field}</span>${party}${led}${wound}</div>`;
         }
-        return `<div class="r-line"><b>${r.name}</b> joined <span class="up">${r.quest.title}</span> <span class="dim">· Field +${r.field}</span>${party}</div>`;
+        return `<div class="r-line"><b>${r.name}</b> joined <span class="up">${r.quest.title}</span> <span class="dim">· Field +${r.field}</span>${party}${led}${wound}</div>`;
       }
-      return `<div class="r-line"><b>${r.name}</b> <span class="down">failed ${r.quest ? r.quest.title : 'a quest'}</span></div>`;
+      return `<div class="r-line"><b>${r.name}</b> <span class="down">failed ${r.quest ? r.quest.title : 'a quest'}</span>${led}${wound}</div>`;
     }
     if (r.rested) return `<div class="r-line"><b>${r.name}</b> rested <span class="dim">— fat ${fmtDelta(r.fat)}${r.injury ? ', still hurt' : ''}</span></div>`;
     if (r.injured) return `<div class="r-line"><b>${r.name}</b> <span class="down">injured — recovering</span> <span class="dim">(fat ${fmtDelta(r.fat)})</span></div>`;
     const ups = HERO_STATS.filter((s) => r.gains && r.gains[s]).map((s) => `<span class="up">${s}+${r.gains[s]}</span>`);
     const downs = HERO_STATS.filter((s) => r.drops && r.drops[s]).map((s) => `<span class="down">${s}−${r.drops[s]}</span>`);
     const body = ups.concat(downs).join(' ') || '<span class="down">no gain — too worn down</span>';
-    return `<div class="r-line"><b>${r.name}</b> · ${body}${r.injury ? ' <span class="down">⚠ strained!</span>' : ''} <span class="dim">(fat ${fmtDelta(r.fat)})</span></div>`;
+    const bt = r.breakthrough ? ' <span class="up">✨ breakthrough!</span>' : '';
+    return `<div class="r-line"><b>${r.name}</b> · ${body}${bt}${r.injury ? ` <span class="down">⚠ ${injuryLabel(r.injury)}!</span>` : ''} <span class="dim">(fat ${fmtDelta(r.fat)})</span></div>`;
   }).join('');
-  const qm = report.issued ? `<div class="r-line dim">🎽 quartermaster issued ${report.issued} item(s) from stores</div>` : '';
-  const tLines = (report.tournaments || []).map((t) => {
-    if (t.forfeit) return `<div class="r-line">🏆 <b>${t.name}</b> <span class="down">${t.hadEntrants ? 'forfeited — entrants unfit to compete' : 'passed — no one entered'}</span></div>`;
+  const qm = rep.issued ? `<div class="r-line dim">🎽 quartermaster issued ${rep.issued} item(s) from stores</div>` : '';
+  const tLines = (rep.tournaments || []).map((t) => {
+    const glyph = (EVENT_TYPES[t.eventType] || {}).glyph || '🏆';
+    if (t.forfeit) return `<div class="r-line">${glyph} <b>${t.name}</b> <span class="down">${t.hadEntrants ? 'forfeited — entrants unfit to compete' : 'passed — no one entered'}</span></div>`;
     const loot = t.loot ? ` +1 ${MATERIALS[t.loot].name}` : '';
     const team = t.party > 1 ? ` <span class="dim">(team of ${t.party})</span>` : '';
     const pay = t.gold || t.rep ? ` — <span class="up">+${t.gold}g · +${t.rep} rep${loot}</span>` : '';
-    return `<div class="r-line">🏆 <b>${t.name}</b> · <span class="${t.champion ? 'up' : ''}">${t.placement}</span>${pay}${team}</div>`;
+    const played = t.played ? ' <span class="dim">· fought by hand</span>' : '';
+    return `<div class="r-line">${glyph} <b>${t.name}</b> · <span class="${t.champion ? 'up' : ''}">${t.placement}</span>${pay}${team}${played}</div>`;
   }).join('');
-  return `<div class="week-report"><h4>Last week</h4>${tLines}${lines}${qm}<div class="r-line">income <span class="up">+${report.income}g</span> · upkeep <span class="down">−${report.upkeep}g</span>${report.shortfall ? ' · <span class="down">insolvent — morale −8 all</span>' : ''}</div></div>`;
+  return `<div class="week-report"><h4>Last week</h4>${tLines}${lines}${qm}<div class="r-line">income <span class="up">+${rep.income}g</span> · upkeep <span class="down">−${rep.upkeep}g</span>${rep.shortfall ? ' · <span class="down">insolvent — morale −8 all</span>' : ''}</div></div>`;
 }
 
 function recruitCard(r) {
   const cost = hireCost(r);
   const afford = guild.gold >= cost && guild.roster.length < maxRoster(guild);
   return `<div class="recruit-card">
-      <span class="rr-portrait rc-portrait">${personSprite(r, 56)}</span>
-      <span class="rc-info"><b>${r.name}</b><span class="rr-sub">${ARCH_GLYPH[r.archetype] || '☉'} ${r.archetype} · Σ${statTotal(r)} · ⚡${heroPower(r)}</span></span>
+      <span class="rr-portrait rc-portrait">${personSprite(r, 76)}</span>
+      <span class="rc-info"><b>${r.name}</b><span class="rr-sub">${ARCH_GLYPH[r.archetype] || '☉'} ${r.archetype} · Σ${statTotal(r)} · ⚡${heroPower(r)}</span>${(r.traits || []).length ? `<span class="rr-sub trait-line">${r.traits.map((t) => `<span class="trait-chip" title="${(TRAITS[t] || {}).desc || ''}">${t}</span>`).join('')}</span>` : ''}</span>
       <button class="rc-hire ${afford ? '' : 'disabled'}" onclick="__guild.hire('${r.id}')">Hire · ${cost}g</button>
     </div>`;
 }
@@ -860,9 +1082,9 @@ function deptRoom(jobType, roleGlyph, roleName, bodyFn) {
   // selectedId is realigned to a worker in openRoom() (navigation time, not render time),
   // so the selected member is a worker here whenever one exists.
   const subject = (heroById(selectedId) && heroById(selectedId).assignment.type === jobType) ? heroById(selectedId) : (workers[0] || null);
-  const chips = workers.map((h) => `<button class="hs-chip ${subject && h.id === subject.id ? 'sel' : ''}" title="${h.name}" onclick="__guild.selectHero('${h.id}')">${personSprite(h, 38)}</button>`).join('');
+  const chips = workers.map((h) => `<button class="hs-chip ${subject && h.id === subject.id ? 'sel' : ''}" title="${h.name}" onclick="__guild.selectHero('${h.id}')">${personSprite(h, 48)}</button>`).join('');
   const available = guild.roster.filter((h) => h.assignment.type !== jobType);
-  const addChips = available.map((h) => `<button class="hs-chip add" title="Assign ${h.name}" onclick="__guild.assignTo('${h.id}','${jobType}')">${personSprite(h, 34)}</button>`).join('');
+  const addChips = available.map((h) => `<button class="hs-chip add" title="Assign ${h.name}" onclick="__guild.assignTo('${h.id}','${jobType}')">${personSprite(h, 42)}</button>`).join('');
   const workerRow = workers.length
     ? `<div class="dept-lbl">${roleGlyph} Working here · ${workers.length}</div><div class="hero-switch">${chips}</div>`
     : `<div class="room-jobline">No one works the ${roleName.toLowerCase()} this week.</div>`;
@@ -906,7 +1128,7 @@ function apothecaryRoom() {
       <div class="plan-title">🩹 Treating · ${h.name}</div>
       ${heroSwitcher()}
       ${bar('Stamina', h.condition.stamina, 'var(--success)')}${bar('Fatigue', h.condition.fatigue, '#e08a3c')}${bar('Stress', h.condition.stress || 0, '#c05a8a')}
-      ${h.condition.injury ? '<div class="injury-flag">⚠ Injured — a Healing or Greater draught can cure it</div>' : ''}
+      ${h.condition.injury ? `<div class="injury-flag">⚠ ${injuryLabel(h.condition.injury)} — a potent draught (p70+) cures it outright</div>` : ''}
       <div class="room-jobline">Pick a member, then <b>Use</b> a potion below to treat them.</div>
     </div>` : '';
   return `${ctx}<div class="plan-card">
@@ -928,8 +1150,36 @@ function armoryRoom() {
     </div>` : '';
   return `${ctx}<div class="room-cols">${armoryPanel()}${quartermasterPanel()}${marketPanel()}</div>`;
 }
-function quartersRoom() {
+/** Appoint a Hall-of-Famer as the guild trainer (+15% training gains, one slot). */
+function appointTrainer(hofId) {
+  const f = (guild.hallOfFame || []).find((x) => x.id === hofId); if (!f) return;
+  guild.trainer = (guild.trainer && guild.trainer.id === hofId) ? null
+    : { id: f.id, name: f.name, archetype: f.archetype, appearanceSeed: f.appearanceSeed, appearance: f.appearance, prime: f.prime };
+  notice = guild.trainer ? `${f.name} now runs the training yard — gains +15%.` : `${f.name} steps down from the yard.`;
+  save(); render();
+}
+
+/** The shrine: retired members' frozen careers, and the trainer appointment. */
+function hallOfFamePanel() {
+  const hof = guild.hallOfFame || [];
+  if (!hof.length) return '';
+  const rows = hof.slice().reverse().map((f) => {
+    const cr = f.career || {};
+    const titles = (cr.titles || []).length ? ` · 👑${cr.titles.length}` : '';
+    const isTrainer = guild.trainer && guild.trainer.id === f.id;
+    return `<div class="opt hof-row">
+        <span><span class="o-name">🎓 ${f.name}</span> <span class="o-desc">${f.archetype} · ${cr.wins || 0}W–${cr.losses || 0}L${titles} · peak ⚡${f.peakPower || '?'}</span></span>
+        <button class="bout-btn ${isTrainer ? 'on' : ''}" onclick="__guild.appointTrainer('${f.id}')">${isTrainer ? '🏋 Head Trainer' : 'Appoint trainer'}</button>
+      </div>`;
+  }).join('');
   return `<div class="plan-card">
+      <div class="plan-title">🏛 Hall of Fame ${guild.trainer ? `· <span class="rr-sub">trainer: ${guild.trainer.name} (+15% gains)</span>` : ''}</div>
+      <div class="opt-list">${rows}</div>
+    </div>`;
+}
+
+function quartersRoom() {
+  return `${hallOfFamePanel()}<div class="plan-card">
       <div class="plan-title">🍺 Tavern · Recruits · roster ${guild.roster.length}/${maxRoster(guild)}</div>
       <div class="recruit-list">${guild.recruits.map(recruitCard).join('')}</div>
       ${guild.roster.length >= maxRoster(guild) ? '<div class="hint">Quarters are full — expand Living Quarters in the 🏕 Grounds to house more.</div>' : ''}
@@ -957,6 +1207,7 @@ function facilityEffect(key, t) {
   if (key === 'mess') return `feeds ${def.fed[t]}`;
   if (key === 'yard') { const p = Math.round((def.mainMult[t] - 1) * 100); return p ? `+${p}% training` : 'standard training'; }
   if (key === 'ring') return def.injuryBonus[t] ? `+${def.injuryBonus[t]} injury guard` : 'no injury guard';
+  if (key === 'infirmary') return def.healRate[t] > 1 ? `injuries heal ×${def.healRate[t]}` : 'bed rest only';
   return '';
 }
 
@@ -1024,8 +1275,8 @@ function groundsRoom() {
   const upkeep = weeklyUpkeep(guild, getDietPlan);
   const named = roster.length; // every roster member is a named hero today
   const trainees = 0;          // generic trainees (the Phase-5 minor league) — counted here, none yet
-  const facGrid = ['quarters', 'yard', 'ring', 'mess'].map(facilityCard).join('');
-  const strip = roster.slice(0, 8).map((h) => `<button class="hs-chip" title="${h.name}" onclick="__guild.selectHero('${h.id}')">${personSprite(h, 38)}</button>`).join('')
+  const facGrid = Object.keys(FACILITIES).map(facilityCard).join(''); // derived — new facilities appear for free
+  const strip = roster.slice(0, 8).map((h) => `<button class="hs-chip" title="${h.name}" onclick="__guild.selectHero('${h.id}')">${personSprite(h, 48)}</button>`).join('')
     + (roster.length > 8 ? `<span class="hs-more">+${roster.length - 8}</span>` : '');
   return `${compoundScene()}
     <div class="plan-card">
@@ -1068,13 +1319,35 @@ function leaveTournament(tId, heroId) {
   t.entrants = (t.entrants || []).filter((id) => id !== heroId);
   save(); render();
 }
-/** Toggle whether the player will PLAY this tournament's match (vs auto-resolve) next Advance Week. */
-function setPlayNext(tId) {
-  playTournamentId = (playTournamentId === tId) ? null : tId;
-  notice = playTournamentId
-    ? 'You’ll fight this match yourself — nominate a champion, then Advance Week.'
+/** Toggle whether the player will PLAY this tournament's match (vs auto-resolve) next
+ *  Advance Week — and in WHICH combat lens: the live arena or turn-based tactics.
+ *  Tapping the already-armed lens disarms it (back to auto-resolve). */
+function setPlayNext(tId, mode) {
+  const m = mode === 'tactical' ? 'tactical' : 'action';
+  guild.playPlan = planFor('tournament', tId) === m ? null : { kind: 'tournament', id: tId, mode: m };
+  notice = guild.playPlan
+    ? (m === 'tactical'
+      ? 'You’ll command this match turn by turn — nominate a champion, then Advance Week.'
+      : 'You’ll fight this match live — nominate a champion, then Advance Week.')
     : 'This match will auto-resolve.';
-  render();
+  save(); render();
+}
+/** Arm (or disarm) PLAYING a quest's climactic bout on Advance Week. */
+function setPlayQuest(qId, mode) {
+  const m = mode === 'tactical' ? 'tactical' : 'action';
+  guild.playPlan = planFor('quest', qId) === m ? null : { kind: 'quest', id: qId, mode: m };
+  notice = guild.playPlan
+    ? 'The party’s strongest marcher will fight the quest’s boss — you at the controls. Advance Week when ready.'
+    : 'The quest will resolve on its own.';
+  save(); render();
+}
+/** Calendar toggle: ask how to resolve each due match, or always simulate quietly. */
+function setAskTournaments() {
+  guild.battlePrefs.tournament = guild.battlePrefs.tournament === 'ask' ? 'sim' : 'ask';
+  notice = guild.battlePrefs.tournament === 'ask'
+    ? 'Due matches will ask: fight it live, command it, or simulate.'
+    : 'Due matches will simulate without asking.';
+  save(); render();
 }
 
 /** One upcoming tournament: countdown, field, rewards, your champion + picker, win odds. */
@@ -1091,16 +1364,20 @@ function tournamentCard(t) {
     : !fit ? '<span class="down">Injured — would forfeit. Heal them, or send someone else.</span>'
     : `${entrant.name} <b>⚡${power}</b> · <span class="${oddsCls}">~${champ}% to win it all</span>`;
   const chip = entrant
-    ? `<button class="hs-chip sel ${entrant.condition.injury ? 'unfit' : ''}" title="${entrant.condition.injury ? entrant.name + ' — injured, cannot compete; withdraw?' : 'Withdraw ' + entrant.name}" onclick="__guild.leaveTournament('${t.id}','${entrant.id}')">${personSprite(entrant, 34)}</button>`
+    ? `<button class="hs-chip sel ${entrant.condition.injury ? 'unfit' : ''}" title="${entrant.condition.injury ? entrant.name + ' — injured, cannot compete; withdraw?' : 'Withdraw ' + entrant.name}" onclick="__guild.leaveTournament('${t.id}','${entrant.id}')">${personSprite(entrant, 42)}</button>`
     : '<span class="dim" style="font-size:0.82em">No champion chosen.</span>';
   const avail = guild.roster.filter((h) => !entrant || h.id !== entrant.id);
-  const addChips = avail.map((h) => `<button class="hs-chip add" title="Send ${h.name}" onclick="__guild.enterTournament('${t.id}','${h.id}')">${personSprite(h, 34)}</button>`).join('');
-  return `<div class="plan-card tourney-card ${weeksOut <= 1 ? 'imminent' : ''}">
-      <div class="tourney-head"><span class="tourney-name">🏆 ${t.name}</span><span class="q-rank">R${t.rank}</span><span class="tourney-when">${when}</span></div>
+  const addChips = avail.map((h) => `<button class="hs-chip add" title="Send ${h.name}" onclick="__guild.enterTournament('${t.id}','${h.id}')">${personSprite(h, 42)}</button>`).join('');
+  return `<div class="plan-card tourney-card ${weeksOut <= 1 ? 'imminent' : ''} ${t.type === 'major' ? 'major' : ''}">
+      <div class="tourney-head"><span class="tourney-name">${(EVENT_TYPES[t.type] || {}).glyph || '🏆'} ${t.name}</span><span class="q-rank">R${t.rank}</span><span class="tourney-when">${when}</span></div>
+      ${t.type === 'major' ? '<div class="rr-sub major-tag">👑 The season’s tentpole — double purse, one rank up, a deeper bracket.</div>' : ''}
       <div class="rr-sub">Field ~${t.field}⚡ · best of ${t.rounds} · Champion <span class="up">${t.rewards.gold}g · +${t.rewards.reputation} rep${loot}</span></div>
       <div class="tourney-odds">${odds}</div>
       ${fit && weeksOut <= 1
-        ? `<button class="tourney-play ${playTournamentId === t.id ? 'on' : ''}" onclick="__guild.setPlayNext('${t.id}')">${playTournamentId === t.id ? '▶ You’ll fight this one — winner take all' : '🎮 Play this match yourself'}</button>`
+        ? `<div class="tourney-lens">
+            <button class="tourney-play ${planFor('tournament', t.id) === 'action' ? 'on' : ''}" title="Real-time arena — move with the stick, tap to attack" onclick="__guild.setPlayNext('${t.id}','action')">${planFor('tournament', t.id) === 'action' ? '⚔ Fighting it live — winner take all' : '⚔ Fight it live'}</button>
+            <button class="tourney-play ${planFor('tournament', t.id) === 'tactical' ? 'on' : ''}" title="Turn-based tactics — queue moves; both sides execute at once" onclick="__guild.setPlayNext('${t.id}','tactical')">${planFor('tournament', t.id) === 'tactical' ? '♟ Commanding it turn by turn' : '♟ Command it (tactics)'}</button>
+          </div>`
         : (fit ? '<div class="hint" style="text-align:left;padding:0 2px 8px">🎮 Playable once it’s a week out.</div>' : '')}
       <div class="dept-lbl">Your champion</div>
       <div class="hero-switch">${chip}</div>
@@ -1111,9 +1388,24 @@ function calendarRoom() {
   const cur = guild.calendar.week;
   const upcoming = (guild.schedule || []).filter((t) => !t.resolved && t.week >= cur).sort((a, b) => a.week - b.week);
   const cards = upcoming.length ? upcoming.map(tournamentCard).join('') : '<div class="plan-card"><div class="hint">No tournaments scheduled — advance a week to refresh the season.</div></div>';
+  // The 12-week season strip: one chip per coming week; glyphs mark booked events.
+  const byWeek = new Map((guild.schedule || []).filter((t) => !t.resolved).map((t) => [t.week, t]));
+  let strip = '';
+  for (let w = cur; w < cur + 12; w++) {
+    const wy = ((guild.calendar.weekOfYear - 1 + (w - cur)) % 48) + 1;
+    const ev = byWeek.get(w);
+    strip += `<span class="cal-chip ${w === cur ? 'now' : ''} ${ev ? 'has-ev' : ''} ${ev && ev.type === 'major' ? 'major' : ''}"
+        title="${ev ? `${ev.name} (R${ev.rank}) — ${seasonOf(wy)}, week ${wy}` : `${seasonOf(wy)}, week ${wy}`}">
+        <span class="cal-wk">${wy}</span><span class="cal-glyph">${ev ? (EVENT_TYPES[ev.type] || {}).glyph || '🏆' : '·'}</span></span>`;
+  }
+  const ask = guild.battlePrefs.tournament === 'ask';
   return `<div class="plan-card">
-      <div class="plan-title">📅 The Season · ${formatDate(guild.calendar)}</div>
+      <div class="plan-title">📅 ${seasonOf(guild.calendar.weekOfYear)} · ${formatDate(guild.calendar)}</div>
+      <div class="cal-strip">${strip}</div>
       <div class="hint" style="text-align:left;padding:2px 2px 4px">Tournaments are set weeks in advance — <b>nominate one champion and train them toward the date</b>. Each resolves automatically on its week as a bracket fought on your champion's ⚡; an injured champion can't compete, so peak them <em>and</em> keep them healthy.</div>
+      <button class="opt" onclick="__guild.setAskTournaments()" style="margin-top:6px;width:100%">
+        <span><span class="o-name">${ask ? '🔔' : '🔕'} Due-match chooser</span> <span class="o-desc">${ask ? 'each due match asks: fight it live, command it, or simulate' : 'due matches simulate quietly (no prompt)'}</span></span>
+        <span class="o-cost">${ask ? 'ON' : 'OFF'}</span></button>
     </div>
     ${cards}`;
 }
@@ -1122,7 +1414,7 @@ function calendarRoom() {
 /** Start a LIVE practice bout right now (independent of Advance Week): your fighter
  *  vs a member or a mirror-strength training dummy. Pure practice — no gold, no
  *  injuries, no stat/morale change — so it can't be farmed; it's just "combat mode". */
-async function practiceBout(myId, oppId) {
+async function practiceBout(myId, oppId, mode) {
   if (advancing) return; // a battle (bout or tournament) is already live
   const me = heroById(myId);
   if (!me) { notice = 'Pick your fighter first.'; render(); return; }
@@ -1134,7 +1426,10 @@ async function practiceBout(myId, oppId) {
   const toSpec = (p) => ({ name: p.name, stats: p.stats, archetype: p.archetype, appearance: p.appearance, appearanceSeed: p.appearanceSeed, prime: p.prime });
   advancing = true;
   try {
-    const result = await window.playGuildBattle({ player: toSpec(me), opponent: toSpec(opp) });
+    const result = await window.playGuildBattle({
+      player: toSpec(me), opponent: toSpec(opp),
+      mode: mode === 'tactical' || mode === 'spectate' ? mode : 'action', label: 'Practice bout',
+    });
     const won = result && result.winner === 'player';
     notice = (result && result.forfeit) ? `${me.name} bowed out of the bout.`
       : won ? `${me.name} won the practice bout vs ${opp.name}!`
@@ -1149,16 +1444,21 @@ async function practiceBout(myId, oppId) {
 function arenaRoom() {
   const h = heroById(selectedId);
   if (!h) return `<div class="plan-card"><div class="plan-title">⚔ The Arena</div><div class="hint">Recruit a member, then step into the ring.</div></div>`;
-  const dummy = `<button class="opt" onclick="__guild.practiceBout('${h.id}','__dummy')">
-      <span><span class="o-name">🥊 Training Dummy</span> <span class="o-desc">a mirror of your own strength</span></span>
-      <span class="o-cost">Fight ▶</span></button>`;
-  const oppList = guild.roster.filter((m) => m.id !== h.id).map((o) => `<button class="opt" onclick="__guild.practiceBout('${h.id}','${o.id}')">
-      <span><span class="o-name">⚔ vs ${o.name}</span> <span class="o-desc">${o.archetype} Lv${o.level} · ⚡${combatPower(o)}</span></span>
-      <span class="o-cost">Fight ▶</span></button>`).join('');
+  // Each opponent offers BOTH combat lenses: ⚔ the live arena, ♟ turn-based tactics.
+  const boutRow = (oppId, name, desc) => `<div class="opt bout-row">
+      <span><span class="o-name">${name}</span> <span class="o-desc">${desc}</span></span>
+      <span class="bout-btns">
+        <button class="bout-btn" title="Real-time — move with the stick, tap to attack" onclick="__guild.practiceBout('${h.id}','${oppId}','action')">⚔ Live</button>
+        <button class="bout-btn" title="Turn-based — queue moves; both sides execute at once" onclick="__guild.practiceBout('${h.id}','${oppId}','tactical')">♟ Tactics</button>
+        <button class="bout-btn" title="Watch it fought turn by turn — take control anytime" onclick="__guild.practiceBout('${h.id}','${oppId}','spectate')">👁</button>
+      </span></div>`;
+  const dummy = boutRow('__dummy', '🥊 Training Dummy', 'a mirror of your own strength');
+  const oppList = guild.roster.filter((m) => m.id !== h.id)
+    .map((o) => boutRow(o.id, `⚔ vs ${o.name}`, `${o.archetype} Lv${o.level} · ⚡${combatPower(o)}`)).join('');
   return `<div class="plan-card">
       <div class="plan-title">⚔ The Arena · <span class="rr-sub">as ${h.name}</span></div>
       ${heroSwitcher()}
-      <div class="room-jobline">Step into the ring <b>right now</b> — move with the on-screen stick (or WASD), tap to attack. Pure practice: no gold, no injuries, just a live fight.</div>
+      <div class="room-jobline">Step into the ring <b>right now</b> — <b>⚔ Live</b> (on-screen stick or WASD, tap to attack) or <b>♟ Tactics</b> (queue your moves; both sides execute simultaneously). Pure practice: no gold, no injuries.</div>
       <div class="dept-lbl">Choose an opponent</div>
       <div class="opt-list">${dummy}${oppList}</div>
     </div>`;
@@ -1180,6 +1480,47 @@ function roleTag(roomId) {
   const r = roleFor(roomId);
   return r ? `<div class="role-banner"><span class="role-name">${r.glyph} ${r.name}</span> <span class="dim">— ${r.blurb}</span></div>` : '';
 }
+
+// --- EO-style room scenes -----------------------------------------------------
+// Every room opens on an illustrated banner (Etrian Odyssey town-facility style):
+// the room's interior as a mood gradient, a giant glyph watermark, the people
+// actually WORKING there this week standing at the counter, and a flavor line.
+const ROOM_FLAVOR = {
+  grounds: 'The compound at dusk — every wall your gold has raised.',
+  calendar: 'The season stretches ahead. Every week is a coin — spend it well.',
+  roster: 'Your people: their weeks, their wounds, their wills.',
+  arena: 'Sand, sweat, and a crowd that never quite goes home.',
+  forge: 'The anvil rings. Sparks settle into steel that will outlive its maker.',
+  kitchen: 'Stew thick enough to stand a spoon in.',
+  apothecary: 'Glass, herbcraft, and the difference between a scar and a grave.',
+  library: 'Dust, vellum, and the long patience of theory.',
+  armory: 'Every blade here has a name, a maker, and a story.',
+  laboratory: 'Something bubbles that probably shouldn’t.',
+  quarters: 'Bunks, tankards, and tomorrow’s legends asleep by nine.',
+};
+/** Who's pictured working the room this week (falls back to the selected member). */
+function roomWorkers(roomId) {
+  const job = ROOM_JOB[roomId];
+  if (job) return guild.roster.filter((h) => h.assignment.type === job);
+  if (roomId === 'arena') return guild.roster.filter((h) => h.assignment.trainingId === 'spar');
+  if (roomId === 'roster' || roomId === 'quarters') return guild.roster.slice(0, 5);
+  if (roomId === 'kitchen') return guild.roster.slice(0, 3);
+  const sel = heroById(selectedId);
+  return sel ? [sel] : [];
+}
+function roomScene(roomId) {
+  const room = getRoom(roomId);
+  if (!room) return '';
+  const workers = roomWorkers(roomId).slice(0, 5);
+  const sprites = workers.map((h) => `<span class="rs-worker" title="${h.name}">${personSprite(h, 52)}</span>`).join('');
+  return `<div class="room-scene scene-${roomId}">
+      <span class="rs-glyph">${room.glyph}</span>
+      <div class="rs-text"><div class="rs-name">${room.glyph} ${room.name}</div>
+        <div class="rs-flavor">${ROOM_FLAVOR[roomId] || ''}</div></div>
+      <div class="rs-floor"></div>
+      <div class="rs-workers">${sprites || '<span class="rs-empty">no one here this week</span>'}</div>
+    </div>`;
+}
 function renderHub() {
   const nt = nextTournament(guild);
   const w = nt ? Math.max(0, nt.week - guild.calendar.week) : 0;
@@ -1193,7 +1534,7 @@ function renderHub() {
 function renderRoom(id) {
   const room = getRoom(id);
   if (id === 'hub' || !room) return renderHub();
-  const hdr = roleTag(id); // every room announces its role
+  const hdr = roomScene(id) + roleTag(id); // EO-style scene banner, then the role line
   if (room.locked) return hdr + roomStub(room);
   switch (id) {
     case 'grounds': return hdr + groundsRoom();
@@ -1326,5 +1667,15 @@ export function openGuild() {
   showScreen('guildScreen');
 }
 
-window.__guild = { selectHero, setActivity, setTraining, setIntensity, setRecipe, setPotion, setDiscipline, usePotion, setDiet, setQuest, assignTo, setSpar, equipItem, unequipSlot, setPolicy, provision, buyMaterial, sellItem, hire, advanceAll, back, openRoom, toggleFullscreen, upgradeFacility, enterTournament, leaveTournament, setPlayNext, practiceBout, openRanch, enterRoomFromRanch, manageMemberFromRanch };
+// Every handler no-ops while a week is advancing (a played battle can be mid-flight;
+// rail buttons still render behind the battle screen and would corrupt the in-flight
+// week). practiceBout/advanceAll keep their own internal checks as a second belt.
+const __guildApi = { selectHero, setActivity, setTraining, setIntensity, setRecipe, setPotion, setDiscipline, usePotion, setDiet, setQuest, assignTo, setSpar, equipItem, unequipSlot, setPolicy, provision, buyMaterial, sellItem, hire, advanceAll, back, openRoom, toggleFullscreen, upgradeFacility, enterTournament, leaveTournament, setPlayNext, setPlayQuest, setAskTournaments, appointTrainer, practiceBout, openRanch, enterRoomFromRanch, manageMemberFromRanch };
+window.__guild = {};
+for (const k in __guildApi) {
+  window.__guild[k] = (...args) => {
+    if (advancing && k !== 'toggleFullscreen') return; // mid-battle/mid-week: guild mutations wait
+    return __guildApi[k](...args);
+  };
+}
 window.openGuild = openGuild;

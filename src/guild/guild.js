@@ -42,6 +42,8 @@ export const FACILITIES = {
     injuryBonus: [0, 20, 35, 50], costs: [0, 500, 1500, 4500] },
   mess: { name: 'Mess Hall', glyph: '🍲', desc: 'Kitchens & stores. Sets how many mouths the guild can feed.',
     fed: [6, 12, 24, 60, 120], costs: [0, 700, 2000, 6000, 14000] },
+  infirmary: { name: 'Infirmary', glyph: '🩹', desc: 'Cots & a surgeon. Injuries heal twice as fast (tier 1+).',
+    healRate: [1, 2, 2, 3], costs: [0, 900, 2400, 6500] },
 };
 
 /** Current (clamped) tier of a facility for this guild. @param {Guild} guild @param {string} key */
@@ -73,6 +75,10 @@ export function createGuild(init = {}) {
     quartermaster: init.quartermaster || 'off', // equip policy: 'off' | 'party' | 'all'
     facilities: init.facilities || { quarters: 0, yard: 0, ring: 0, mess: 0 }, // tier per facility; tier 0 == today's defaults (cap 6, no bonuses)
     schedule: init.schedule || [], // upcoming tournaments — seeded by ensureSchedule() in the hall's load()
+    battlePrefs: init.battlePrefs || { tournament: 'ask' }, // per-event-type combat prefs: 'ask' (chooser on due events) | 'sim' (never ask)
+    playPlan: init.playPlan || null, // armed play opt-in: { kind:'tournament'|'quest', id, mode:'action'|'tactical' } — survives reload
+    hallOfFame: init.hallOfFame || [], // retired members' frozen careers (the shrine)
+    trainer: init.trainer || null, // an appointed retired champion — +15% training gains (staff slots generalize later)
   };
 }
 

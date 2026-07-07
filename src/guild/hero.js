@@ -72,7 +72,7 @@ export function createHero(init = {}) {
     growth: init.growth || ones,
     level: init.level ?? 1,
     xp: init.xp ?? 0,
-    condition: init.condition || { stamina: 100, morale: 70, loyalty: 60, fatigue: 0, stress: 0, injury: null },
+    condition: init.condition || { stamina: 100, morale: 70, loyalty: 60, fatigue: 0, stress: 0, injury: null, discipline: 40 },
     age: init.age ?? 0,
     lifespan: init.lifespan ?? 300,
     dietPlanId: init.dietPlanId || null,
@@ -81,7 +81,56 @@ export function createHero(init = {}) {
     professions: init.professions || { blacksmithing: { theory: 0, practice: 0, field: 0 }, alchemy: { theory: 0, practice: 0, field: 0 } },
     equipped: init.equipped || {}, // slot -> itemId (real Phase-1 armory items)
     traits: init.traits || [],
+    // The Monster-Rancher career arc: a life's record, and what remains after it.
+    career: init.career || { debut: null, titles: [], wins: 0, losses: 0, injuries: 0, techniques: [] },
+    retired: init.retired ?? false,
+    staffRole: init.staffRole || null, // post-retirement posting (e.g. guild trainer)
   };
+}
+
+/**
+ * Personality traits (K5) — every hero rolls TWO at recruitment. Each is a small,
+ * legible modifier read where it matters: training gains (`gain`), injury odds
+ * (`injury`), study/theory (`study`), stamina recovery (`recover`), lifespan
+ * (`lifespan`, applied at roll time), and OBEDIENCE in played tactical fights
+ * (`obey`, added to the (discipline+bond)/200 roll — Foolery when it fails).
+ */
+export const TRAITS = {
+  Fearless:   { desc: 'never disobeys in a fight',            obey: +1 },
+  Hotheaded:  { desc: 'fights their own way; drills hard',    obey: -0.2, gain: 1.1 },
+  Timid:      { desc: 'hesitates under orders; quick feet',   obey: -0.1, gain: 1.05 },
+  Loyal:      { desc: 'bond grows twice as fast',             bond: 2 },
+  Lazy:       { desc: 'trains soft but recovers deeply',      gain: 0.9, recover: 1.4 },
+  Studious:   { desc: 'devours theory',                       study: 1.5 },
+  Prodigy:    { desc: 'burns bright — and burns out sooner',  gain: 1.15, lifespan: 0.85 },
+  Ironbody:   { desc: 'rarely gets hurt',                     injury: 0.6 },
+  Fragile:    { desc: 'pushes hard; breaks easier',           injury: 1.5, gain: 1.1 },
+  Glutton:    { desc: 'lives for the mess hall',              recover: 1.3 },
+  Stoic:      { desc: 'sheds stress like rain',               stress: 0.7 },
+  Showman:    { desc: 'feeds on the crowd — big feelings',    morale: 2 },
+};
+/** Multiply a numeric trait effect across a hero's traits (1 = neutral). */
+export function traitMult(hero, key) {
+  return (hero.traits || []).reduce((m, t) => m * ((TRAITS[t] && TRAITS[t][key]) || 1), 1);
+}
+/** Sum an additive trait effect (0 = neutral) — only `obey` is additive. */
+export function traitAdd(hero, key) {
+  return (hero.traits || []).reduce((s, t) => s + ((TRAITS[t] && typeof TRAITS[t][key] === 'number') ? TRAITS[t][key] : 0), 0);
+}
+
+/** The career arc's stages (fractions of lifespan). Twilight decays; lifespan retires. */
+export const LIFE_STAGES = [
+  { key: 'novice', name: 'Novice', max: 0.15, col: '#6fbf73', desc: 'still growing into the work' },
+  { key: 'prime', name: 'Prime', max: 0.5, col: '#d4a843', desc: 'peak training years' },
+  { key: 'veteran', name: 'Veteran', max: 0.8, col: '#e08a3c', desc: 'gains slow; wisdom shows' },
+  { key: 'twilight', name: 'Twilight', max: 1.01, col: '#b06a6a', desc: 'stats decay — the last seasons' },
+];
+/** @param {Hero} hero */
+export function lifeFrac(hero) { return Math.max(0, Math.min(1, (hero.age || 0) / Math.max(1, hero.lifespan || 300))); }
+/** @param {Hero} hero */
+export function lifeStage(hero) {
+  const f = lifeFrac(hero);
+  return LIFE_STAGES.find((s) => f < s.max) || LIFE_STAGES[LIFE_STAGES.length - 1];
 }
 
 /**

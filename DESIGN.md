@@ -287,6 +287,136 @@ playable); the turn-based tactical grid can return later as a second presentatio
 model). Deferred from Phase 1: gear→engine conversion, multi-round played brackets, and a win/lose
 result overlay.
 
+## The Monster Rancher expansion (owner 2026-07) — the designed direction
+
+> Owner directive: *"more like a Monster Rancher game, with the option for full simultaneous
+> turn-based combat and/or action-RPG combat (ref: Shining Soul). Go all in. Expand guild
+> building and calendar events beyond simulated — let the player manually participate."*
+> Synthesized 2026-07 from a codebase map + reference research + a judged 3-proposal panel.
+
+**Vision.** You open the guild on the Ranch and the calendar is already talking: the Autumn
+Major is nine weeks out, the Harvest Festival in three, your Ranger is mid-errantry, and every
+week is a coin spent from her finite life. When a fight arrives you pick your altitude every
+time: **Simulate** it and keep planning, **Tactics** it in the simultaneous move-queue engine
+(where a low-bond hero may ignore your orders), or **Fight** it yourself in the action arena,
+holding the attack to bloom a charge ring your training weeks unlocked. Heroes age, tear
+muscles, win Majors, retire in ceremony, and return as staff running the Target Range that
+hosts next year's Marksman Cup. *The calendar is the game; combat is the exam; the guild you
+build is the venue.*
+
+### Systems (S1–S11)
+
+- **S1 Battle facade + shared spec.** `window.playGuildBattle(config)` is the single entry for
+  ALL played combat: `{player, opponent, mode:'action'|'tactical', label, items?, rules?}`.
+  Both lenses resolve the identical payload `{winner, playerHp, playerMaxHp, oppHp, oppMaxHp,
+  itemsUsed?, forfeit?}`; `_guildBattle` is shared (lenses are mutually exclusive).
+- **S2 resolveEncounter dispatcher + battle prefs.** One funnel in battle-bridge.js for kinds
+  tournament-round/quest-bout/spar/festival-bout/rival/errantry-boss. `guild.battlePrefs`
+  (`'ask'|'sim'|'action'|'tactical'` per event type), `guild.playPlan` replaces the module-var
+  opt-in (survives reload), `guild.lastReport` persists the recap. Pre-battle chooser overlay
+  **[⚔ Arena] [♟ Tactics] [▶ Simulate]** + "remember for this event type".
+- **S3 Typed event fabric.** `guild.schedule` entries gain `type:'tournament'|'major'|'festival'
+  |'errantry'|'rival'|'exhibition'` (+ migration). `EVENT_TYPES[type] = {generate, card,
+  resolve, playAdapter}` registry in `src/guild/events.js`; `ensureSchedule` grows into
+  `generateSeason()` (48-week year: anchor tournament per season E→S, festival week 6, monthly
+  minors, condition-triggered rivals/invitationals). Calendar room becomes a season strip.
+- **S4 Full brackets.** `playTournamentMatch` loops per-round vs escalating synthetic opponents
+  (shared `roundOpponentPower` ends the resolveTournament/championOdds duplicated-constants
+  lie); lose → stop with *i* wins → `placement()` unchanged, restoring Finalist/Semi payouts.
+  Between rounds: **[Fight on] [Simulate the rest]**.
+- **S5 Lifecycle.** `hero.career{debut,titles,wins,losses,injuries,techniques}`, `retired`,
+  `staffRole`; `guild.hallOfFame`. Stages from age/lifespan: Novice <15%, Prime 15–50%,
+  Veteran 50–80%, Twilight >80% (−0.5/stat/week); forced retirement = ceremony + optional
+  **staff conversion** (+15% to a facility's drill output). Roster lifecycle band with the
+  peak zone marked — the load-bearing MR element.
+- **S6 Injury ladder.** `condition.injury` → `{kind, weeksLeft, statHit}`; severity from wear
+  overflow (bruised 1wk / strained 2wk / torn 4–6wk −2 permanent / career-ending in Twilight).
+  Wire the three dead fields: `diet.injuryRiskMod`, `quest.risk`, breakthrough drills (5%
+  heavy-drill crit: +50% gain). Drill picker shows computed risk % (anti-lie principle).
+- **S7 Personality, bond, Foolery.** Roll 2 traits at creation (~12 pool, small named
+  multipliers); `condition.discipline` new; loyalty becomes **Bond**. Played tactical matches
+  roll `P(obey)=(discipline+bond)/200±trait` each planning phase; failure = **Foolery** — the
+  hero's turn is planned by the (actor-parameterized) AI, watchable on the timeline. Autopilot
+  toggle = pure-watch tier with take-control at turn boundaries.
+- **S8 Errantries + techniques.** `hero.awayUntil` (multi-week unavailability — the one
+  mechanic the codebase lacks), `hero.techniques[]`. Six sites, one per MR stat, 4 weeks,
+  ×1.6 focused gains, ×1.5 injury risk, weekly log lines; return-week boss fight in the
+  player's chosen lens. Win → technique merged into the fighter's attack kit in BOTH lenses.
+- **S9 Festivals, rivals, exhibitions.** Festival week suspends the tick: judged craft
+  exhibition (score = quality × durability% × U(0.85..1.15) vs a field — the smithing/alchemy
+  math IS the contest), playable exhibition duel, festival vendor. Rep thresholds inject
+  persistent named **rivals** whose champion grows between meetings. Player-ordered
+  exhibitions: spend reputation to host your own event at a venue facility.
+- **S10 Facilities = venues + training + staff.** New: range (SKL), track (SPD), bathhouse
+  (VIT/recovery), lodge (rivals/invitationals), festhall (booths), infirmary (halves injury
+  weeks). Entries gain `venue` + drill hooks; facility key lists derived from
+  `Object.keys(FACILITIES)` (pays the 4-site hardcode debt). Tier unlocks drill variants and
+  feeds `generateSeason` (range ≥1 → your guild hosts the Marksman Cup). Staffed by S5
+  veterans or idle heroes. Three Houses rule: everything is one tap from the calendar; the
+  Ranch is sugar, never a corridor.
+- **S11 Action layer (Shining-Soul, trimmed).** Hold-to-charge on the existing keydown/keyup +
+  new pointerdown/up: 2 tiers scaling damage dice + toHit, tier 2 **stat-gated** (POW≥40
+  melee / SKL≥40 ranged / INT≥40 caster) so training visibly grows the kit. Charging
+  suppresses tap-attacks. `config.items` → two tap slots drinking real brewed potions;
+  `result.itemsUsed` decrements real inventory. (Archetype charge *geometry* — arcs, spreads,
+  displacement — deliberately cut: it smuggles area/collision subsystems into a hitscan engine.)
+
+### The two combat lenses
+
+**(a) Tactical** — "full simultaneous turn-based combat": `startGuildTacticalBattle` beside the
+action seam (~80 lines) — set `_guildBattle`, assign p1/p2 (guildFighterFromSpec already emits
+grid-ready fighters), replicate startBattle minus its `run.*` lines, then intercept **checkWin**
+(the single choke point for all 5 call sites) to resolve the promise instead of routing into
+loot/game-over. Guard the one guaranteed crash (`run.totalDamage` at resolveOneAttack) and give
+battleScreen a forfeit twin. Every exit path MUST resolve the promise or the `advancing` lock
+wedges the guild. This lens doubles as the Watch/Coach tier (S7) and is already tap-native.
+**(b) Action** — shipped; S11 additions only.
+**Choice:** every combat-shaped card offers [Simulate] [Tactics] [Arena]; Simulate is never
+removed; prefs remembered per event type; played results map into the canonical resolvers'
+exact output shapes — one simulation, two windows onto it.
+
+### Event taxonomy
+
+| Event | Cadence | Sim / Watch / Play |
+|---|---|---|
+| Anchor tournament (E→S) | last week/season | Sim / Tactics-coach / both lenses, per-round |
+| Major/Invitational | condition-triggered | same, unique loot |
+| Festival | week 6/season | judged booths + playable duel + vendor |
+| Minors | monthly | Sim default, playable on demand |
+| Errantry | player-booked, 4wk | Sim weekly logs; boss finale watch/play |
+| Rival visit | rep threshold | both lenses |
+| Player-ordered exhibition | rep cost | both lenses |
+
+### Keystone plan (each keeps the build green; migrations in `load()`)
+
+- **K1 — Tactical lens (M):** practice bouts + tournament matches playable in the turn-based
+  engine. crucible.js facade + checkWin intercept, index.html forfeit, bridge `mode`, hall
+  lens toggles.
+- **K2 — Chooser + charge + consumables (M):** [Sim/Tactics/Arena] on every battle incl.
+  quests (played bout shifts resolveQuest variance — skill bounds, never replaces, the check);
+  hold-to-charge; potions mid-fight.
+- **K3 — Typed events + season + full brackets (M-L):** events.js registry, generateSeason,
+  season-strip calendar, per-round played brackets with honest Finalist/Semi purses.
+- **K4 — Lifecycle + injury ladder (M):** peak/decline stages, retirement ceremony, staff
+  conversion, injury objects + dead-field wiring, honest drill risk %.
+- **K5 — Personality + coach tier (M):** traits, discipline/bond, Foolery, autopilot watch
+  tier (parameterize genAIMoves/pickAIAttack by actor — budgeted).
+- **K6 — Festivals + errantries (L):** the participable calendar; techniques land on the
+  attack bar in both lenses.
+- **K7 — Facilities-as-venues + rivals + hosted events (L):** build the venue, staff it with
+  your retired champion, host the Cup; recurring rivals.
+
+### Cut list (deliberate)
+
+2v2/FFA true multi-combatant (p1/p2 singletons pervade ~15 functions; sequential 1v1 brackets
+deliver the fantasy; revisit only after the batched renderer, which stays LAST) · archetype
+charge geometry payloads · gear→engine conversion (deferred until durability+repair ship as a
+pair — wiring it now silently nerfs everything) · projectiles/dash/soul-gauge · ward/DOT in the
+arena · mid-battle lens hot-swap (process-wide combat globals) · bespoke minigame engines
+(every contest is a judged prep-check or a combat bout) · festival crowds >4 extra actors
+(compositor ceiling) · cooking/day-granularity/weather/breeding · audio (no assets yet; the
+300 unused FX frames in packs 2–6 are the cheaper spectacle lever).
+
 ## Open design decisions
 
 - **One pool or two?** Recommend heroes and craftspeople are the *same* Person entity (professions

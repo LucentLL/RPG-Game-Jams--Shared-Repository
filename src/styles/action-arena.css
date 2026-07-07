@@ -1,30 +1,47 @@
-/* ═══ ACTION ARENA ═══ */
-#actionScreen{align-items:center;padding:12px;gap:8px}
-.action-hud{display:flex;flex-direction:column;gap:4px;width:min(720px,95vw)}
-.action-hp-row{display:flex;align-items:center;gap:8px}
-.action-hp-label{font-family:'Cinzel',serif;font-size:0.72em;letter-spacing:0.1em;color:#e8e0d0;min-width:130px}
-.action-arena{position:relative;width:720px;height:720px;max-width:95vw;max-height:95vw;background:#1a2418;border:1px solid var(--border);border-radius:6px;overflow:hidden;image-rendering:pixelated;background-size:100% 100%}
-/* Sized & positioned as a % of the arena (via left/top set in actionRender) so
-   fighters scale with the arena and stay on-screen on narrow/mobile viewports.
-   96/720 = 13.333%. translate centers the sprite on its tile point (feet-biased). */
-.action-fighter{position:absolute;width:13.333%;height:13.333%;image-rendering:pixelated;pointer-events:none;transform:translate(-50%,-58%)}
-.action-help{font-size:0.75em;color:var(--muted);font-family:'Cinzel',serif;letter-spacing:0.08em;margin-top:6px}
-.action-attacks{display:flex;flex-wrap:wrap;gap:6px;justify-content:center;max-width:min(720px,95vw)}
-.action-attacks button{padding:8px 14px;background:var(--card);border:1px solid var(--gold);color:var(--gold);border-radius:6px;font-family:'Cinzel',serif;font-size:0.8em;letter-spacing:0.08em;cursor:pointer;transition:all 0.15s}
+/* ═══ ACTION ARENA — 2.5D tilted battleground ═══ */
+#actionScreen{align-items:center;padding:10px 12px;gap:6px}
+.action-hud{display:flex;flex-direction:column;gap:5px;width:min(880px,96vw)}
+.action-hp-row{display:flex;align-items:center;gap:10px}
+.action-hp-label{font-family:'Cinzel',serif;font-size:0.95em;letter-spacing:0.1em;color:#e8e0d0;min-width:210px;text-shadow:0 1px 3px #000}
+
+/* The stage owns the camera + clipping; the arena is the tilted plane (same
+   diorama recipe as the Ranch: rotated ground, counter-rotated standees). */
+.action-stage{position:relative;width:100%;display:flex;justify-content:center;overflow:hidden;
+  perspective:1050px;perspective-origin:50% 14%;
+  background:linear-gradient(180deg,#0b0e1a 0%,#1a2036 40%,#4a3438 47%,#c08050 50%,#302028 53%,#0e1118 60%)}
+.action-arena{position:relative;width:min(120vw,calc(1.25*(100dvh - 260px)));aspect-ratio:1;
+  margin-top:calc(-0.3*(100dvh - 260px));
+  background:#1a2418;border:2px solid rgba(60,46,32,0.9);border-radius:10px;image-rendering:pixelated;background-size:100% 100%;
+  box-shadow:inset 0 0 80px rgba(0,0,0,0.5),0 24px 60px rgba(0,0,0,0.55);
+  transform:rotateX(50deg) translateZ(-120px);transform-style:preserve-3d}
+
+/* Fighter standees: flat wrapper on the plane (shadow lives here), upright inner
+   cutout, oversized sprite (96/720 tile cell, sprite drawn 165% of it). */
+.action-actor{position:absolute;width:13.333%;height:13.333%;transform:translate(-50%,-100%);
+  transform-style:preserve-3d;pointer-events:none}
+.aa-standee{position:absolute;inset:0;transform:rotateX(-50deg);transform-origin:50% 100%;
+  display:flex;align-items:flex-end;justify-content:center}
+.action-fighter{width:165%;height:165%;margin-bottom:-4%;image-rendering:pixelated;pointer-events:none;flex:0 0 auto}
+
+.action-help{font-size:0.82em;color:var(--muted);font-family:'Cinzel',serif;letter-spacing:0.08em;margin-top:2px}
+.action-attacks{display:flex;flex-wrap:wrap;gap:8px;justify-content:center;max-width:min(880px,96vw)}
+.action-attacks button{padding:11px 18px;background:var(--card);border:1px solid var(--gold);color:var(--gold);border-radius:8px;font-family:'Cinzel',serif;font-size:0.95em;letter-spacing:0.08em;cursor:pointer;transition:all 0.15s;touch-action:none}
 .action-attacks button:hover{background:rgba(212,168,67,0.18)}
 .action-attacks button:disabled{opacity:0.4;cursor:default}
 .action-attacks button .atk-key{font-size:0.7em;opacity:0.7;margin-right:4px}
 .action-attacks button.cooling{opacity:0.45}
-.action-log{font-size:0.72em;color:var(--dim);max-width:min(720px,95vw);width:100%;height:78px;overflow-y:auto;background:var(--card);border:1px solid var(--border);border-radius:6px;padding:6px 10px;font-family:'Cormorant Garamond',serif}
+/* Consumable slots — withdrawn Apothecary potions, tap to drink mid-fight */
+.action-attacks button.act-item{border-color:#4ade80;color:#4ade80}
+.action-attacks button.act-item:hover{background:rgba(74,222,128,0.14)}
+.action-attacks button.act-item .item-qty{font-size:0.75em;opacity:0.75;margin-left:4px}
+.action-log{font-size:0.85em;color:var(--dim);max-width:min(880px,96vw);width:100%;height:88px;overflow-y:auto;background:var(--card);border:1px solid var(--border);border-radius:6px;padding:6px 10px;font-family:'Cormorant Garamond',serif}
 .action-log .log-entry{margin:2px 0}
 .action-log .log-entry.hit{color:var(--text)}
 .action-log .log-entry.crit{color:var(--gold);font-weight:600}
 .action-log .log-entry.miss{color:var(--muted);font-style:italic}
 
-/* Virtual movement stick (touch). Overlays the arena's lower-left; created on demand by
-   ensureActionJoystick() and shown only while a battle loop runs (.active). Attacks are
-   already tappable, so this only supplies movement the keyboard otherwise would. */
-.action-joystick{position:absolute;left:12px;bottom:12px;width:104px;height:104px;border-radius:50%;background:radial-gradient(circle,rgba(15,15,22,0.5),rgba(15,15,22,0.28));border:2px solid rgba(212,168,67,0.45);touch-action:none;z-index:20;display:none;align-items:center;justify-content:center}
+/* Virtual movement stick (touch). Lives on the SCREEN-SPACE stage (never on the
+   rotated plane — its pointer math is 2D); shown only while a battle loop runs. */
+.action-joystick{position:absolute;left:14px;bottom:14px;width:112px;height:112px;border-radius:50%;background:radial-gradient(circle,rgba(15,15,22,0.55),rgba(15,15,22,0.3));border:2px solid rgba(212,168,67,0.45);touch-action:none;z-index:30;display:none;align-items:center;justify-content:center}
 .action-joystick.active{display:flex}
-.action-joystick .aj-thumb{width:46px;height:46px;border-radius:50%;background:radial-gradient(circle at 40% 35%,#e0b455,#6b4a1a);border:1px solid rgba(0,0,0,0.45);box-shadow:0 2px 6px rgba(0,0,0,0.45);pointer-events:none}
-
+.action-joystick .aj-thumb{width:50px;height:50px;border-radius:50%;background:radial-gradient(circle at 40% 35%,#e0b455,#6b4a1a);border:1px solid rgba(0,0,0,0.45);box-shadow:0 2px 6px rgba(0,0,0,0.45);pointer-events:none}

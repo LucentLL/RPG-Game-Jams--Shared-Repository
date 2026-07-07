@@ -153,9 +153,11 @@
       <div class="hp-bar"><div class="hp-fill" id="actHpFillP2" style="background:#ef4444"></div></div>
     </div>
   </div>
-  <div class="action-arena" id="actionArena">
-    <canvas id="actionP1Cv" class="action-fighter" width="96" height="96"></canvas>
-    <canvas id="actionP2Cv" class="action-fighter" width="96" height="96"></canvas>
+  <div class="action-stage">
+    <div class="action-arena" id="actionArena">
+      <div class="action-actor" id="actionP1Wrap"><span class="rm-shadow"></span><div class="aa-standee"><canvas id="actionP1Cv" class="action-fighter" width="96" height="96"></canvas></div></div>
+      <div class="action-actor" id="actionP2Wrap"><span class="rm-shadow"></span><div class="aa-standee"><canvas id="actionP2Cv" class="action-fighter" width="96" height="96"></canvas></div></div>
+    </div>
   </div>
   <div class="action-help">Move: WASD / arrows / drag the stick · Attack: tap a button or 1–4</div>
   <div class="action-attacks" id="actionAttackBar"></div>
@@ -196,6 +198,8 @@
     <div class="atk-detail" id="atkDetail"></div>
     <div class="exec-bar">
       <button class="exec-btn" id="execBtn" onclick="executeTurn()">⚗ EXECUTE TURN</button>
+      <button class="exec-btn btl-forfeit" id="tacAutoBtn" style="display:none" onclick="toggleTacticalAuto()">🤖 Watch</button>
+      <button class="exec-btn btl-forfeit" id="btlForfeitBtn" style="display:none" onclick="forfeitTactical()">↩ Forfeit Match</button>
     </div>
   </div>
   <div class="log" id="log"></div>

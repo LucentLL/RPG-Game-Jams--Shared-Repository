@@ -1,8 +1,28 @@
-/* ═══ THE RANCH — living-canvas home view ═══ */
+/* ═══ THE RANCH — 2.5D living home view (Pixy Garden / Monster Rancher style) ═══ */
 /* A sibling of .guild-hall-host inside #guildScreen. Only one is visible at a time
-   (toggled via [hidden]); the ranch owns its own animated canvas subtree + RAF loop. */
+   (toggled via [hidden]); the ranch owns its own animated canvas subtree + RAF loop.
+
+   THE 3D TRICK: the grass field is a real CSS-3D plane (rotateX under perspective);
+   members and buildings are PAPER STANDEES — a flat wrapper sits ON the plane (it
+   owns the ground shadow), and an inner .standee counter-rotates upright about its
+   bottom edge, so sprites stand like pixel-art cutouts on a tilted diorama. */
 #guildScreen { position: relative; }
-.ranch-view { position: absolute; inset: 0; display: flex; flex-direction: column; background: #0e1118; }
+.ranch-view { position: absolute; inset: 0; display: flex; flex-direction: column;
+  /* dusk sky behind the diorama: moon, stars, a WIDE sunset band, horizon haze */
+  background:
+    radial-gradient(circle at 78% 14%, rgba(240, 230, 200, 0.95) 0 7px, rgba(240, 230, 200, 0.28) 10px, transparent 30px),
+    radial-gradient(circle at 22% 26%, rgba(255, 255, 255, 0.14) 0 1px, transparent 2px),
+    radial-gradient(circle at 34% 10%, rgba(255, 255, 255, 0.18) 0 1px, transparent 2px),
+    radial-gradient(circle at 60% 20%, rgba(255, 255, 255, 0.12) 0 1px, transparent 2px),
+    radial-gradient(circle at 12% 15%, rgba(255, 255, 255, 0.1) 0 1px, transparent 2px),
+    radial-gradient(circle at 88% 33%, rgba(255, 255, 255, 0.1) 0 1px, transparent 2px),
+    radial-gradient(ellipse 120% 34% at 50% 46%, rgba(232, 148, 82, 0.28), transparent 68%),
+    linear-gradient(180deg, #0b0e1e 0%, #17203c 26%, #33324e 38%, #6b4444 45%, #b06a42 49%, #e8a060 51.5%, #4a3038 54%, #131720 60%, #0e1118 100%);
+}
+/* Low-lying haze where the plane meets the sky (Pixy Garden's misty treeline). */
+.ranch-stage::before { content: ''; position: absolute; left: 0; right: 0; top: 22%; height: 15%;
+  background: linear-gradient(180deg, transparent, rgba(150, 128, 120, 0.14) 45%, rgba(60, 60, 80, 0.18) 75%, transparent);
+  filter: blur(6px); pointer-events: none; z-index: 1; }
 .ranch-view[hidden] { display: none; }
 
 /* HUD strip (never inside the field, so it isn't z-index shuffled). */
@@ -12,31 +32,124 @@
 .ranch-meta { font-size: 0.8em; color: var(--muted); }
 .ranch-meta b { color: var(--text); }
 .ranch-hud-btns { margin-left: auto; display: flex; gap: 8px; }
-.ranch-btn { border: 1px solid var(--dim); color: var(--silver); background: transparent; border-radius: 8px;
+.ranch-btn { border: 1px solid var(--dim); color: var(--silver); background: rgba(10, 10, 16, 0.55); border-radius: 8px;
   padding: 7px 13px; font-size: 0.8em; font-family: 'Cinzel', serif; letter-spacing: 0.04em; transition: all 0.15s; }
 .ranch-btn:hover { border-color: var(--silver); }
 .ranch-btn.adv { border-color: var(--gold); color: var(--gold); background: linear-gradient(135deg, #2a1a0a, #3a2a10); }
 .ranch-btn.adv:hover { box-shadow: 0 0 12px rgba(212, 168, 67, 0.25); }
 
-/* The field — a centered square sized to fit the area under the HUD. */
-.ranch-stage { flex: 1 1 auto; display: flex; align-items: center; justify-content: center; overflow: hidden; padding: 6px; }
-.ranch-field { position: relative; width: min(96vw, calc(100dvh - 78px)); height: min(96vw, calc(100dvh - 78px));
-  background-size: cover; image-rendering: pixelated; border: 1px solid var(--border); border-radius: 6px;
-  box-shadow: inset 0 0 60px rgba(0, 0, 0, 0.45); overflow: hidden; }
+/* The stage owns the camera. Clipping happens HERE (the field itself must not clip,
+   or upright standees would be sheared off at the plane's edge). */
+.ranch-stage { position: relative; flex: 1 1 auto; display: flex; align-items: center; justify-content: center; overflow: hidden;
+  padding: 0; perspective: 1150px; perspective-origin: 50% 18%; }
+.ranch-field { position: relative;
+  width: min(120vw, calc(1.16 * (100dvh - 78px)));
+  height: min(120vw, calc(1.16 * (100dvh - 78px)));
+  background-size: cover; image-rendering: pixelated;
+  border: 2px solid rgba(60, 46, 32, 0.9); border-radius: 10px;
+  box-shadow: inset 0 0 90px rgba(0, 0, 0, 0.5), 0 30px 80px rgba(0, 0, 0, 0.55);
+  margin-top: calc(-0.32 * (100dvh - 78px)); /* the projection biases downward (near edge grows toward the camera) — lift the layout box so the whole diorama sits in the stage */
+  transform: rotateX(52deg) translateZ(-150px); transform-style: preserve-3d; }
 
-/* Roaming member sprite. Mirrors .action-fighter positioning BUT is tappable
-   (.action-fighter is pointer-events:none) — the one gotcha the design flagged. */
-.ranch-member { position: absolute; width: 13.333%; height: 13.333%; image-rendering: pixelated;
-  transform: translate(-50%, -58%); pointer-events: auto; cursor: pointer; }
-.ranch-member:hover { filter: drop-shadow(0 0 4px rgba(212, 168, 67, 0.7)); }
+/* ── Standees ─────────────────────────────────────────────────────────────── */
+/* Wrapper: a flat tile-sized cell ON the plane, bottom-center pinned to its ground
+   point. Everything flat (the shadow) lives directly in it. */
+.ranch-actor, .ranch-prop { position: absolute; width: 13.333%; height: 13.333%;
+  transform: translate(-50%, -100%); transform-style: preserve-3d;
+  background: none; border: none; padding: 0; cursor: pointer; }
+/* Ground contact shadow — stays flat on the grass. */
+.rm-shadow { position: absolute; left: 50%; bottom: -6%; width: 58%; height: 20%;
+  transform: translateX(-50%); border-radius: 50%;
+  background: radial-gradient(ellipse, rgba(0, 0, 0, 0.42), transparent 68%); pointer-events: none; }
 
-/* Facility / building props — glyph slabs placed on the field, tap to enter the room. */
-.ranch-prop { position: absolute; transform: translate(-50%, -72%); display: flex; flex-direction: column;
-  align-items: center; gap: 0; background: transparent; border: none; color: #e8e0d0; cursor: pointer; }
-.rp-glyph { font-size: 2.1em; line-height: 1; filter: drop-shadow(0 3px 3px rgba(0, 0, 0, 0.6)); transition: transform 0.15s; }
-.ranch-prop.big .rp-glyph { font-size: 3em; }
-.ranch-prop:hover .rp-glyph { transform: translateY(-2px) scale(1.06); }
-.rp-name { font-family: 'Cinzel', serif; font-size: 0.62em; color: #e8e0d0; margin-top: 1px;
-  text-shadow: 0 1px 3px #000, 0 0 4px #000; white-space: nowrap; }
+/* The upright cutout: counter-rotates about its bottom edge (feet stay planted).
+   pointer-events stay ON — the standee is a child of the wrapper <button>, so
+   tapping the visible body (not just the foreshortened ground tile) hits it. */
+.ra-standee, .rp-standee { position: absolute; inset: 0;
+  transform: rotateX(-52deg); transform-origin: 50% 100%; transform-style: preserve-3d;
+  display: flex; flex-direction: column; align-items: center; justify-content: flex-end; }
+
+/* Member sprite + MR-style task bubble + name plate. Sprites render OVERSIZED
+   relative to their tile cell (MR frames its monster big; tiny figures read as
+   board-game tokens, not residents). */
+.ranch-member { width: 165%; height: 165%; margin-bottom: -4%; image-rendering: pixelated; }
+.ranch-actor:hover .ranch-member { filter: drop-shadow(0 0 5px rgba(212, 168, 67, 0.75)); }
+.rm-task { position: absolute; top: -26%; left: 50%; transform: translateX(-50%);
+  font-size: 0.95em; line-height: 1.5; padding: 0 6px; border-radius: 10px;
+  background: rgba(12, 12, 18, 0.82); border: 1px solid var(--border);
+  filter: drop-shadow(0 2px 3px rgba(0, 0, 0, 0.5));
+  animation: rm-bob 2.6s ease-in-out infinite; }
+@keyframes rm-bob { 0%, 100% { margin-top: 0; } 50% { margin-top: -4px; } }
+.rm-name { position: absolute; bottom: -14%; left: 50%; transform: translateX(-50%);
+  font-family: 'Cinzel', serif; font-size: 0.6em; color: #e8e0d0; white-space: nowrap;
+  text-shadow: 0 1px 3px #000, 0 0 4px #000; opacity: 0; transition: opacity 0.15s; }
+.ranch-actor:hover .rm-name { opacity: 1; }
+
+/* Buildings: CSS pixel-cottages (roof + timbered wall + door + glyph sign). A
+   facility's tier raises --grow, so upgrades visibly enlarge the structure. */
+.rp-standee { --grow: 1; justify-content: flex-end; }
+.rp-roof { width: calc(122% * var(--grow)); height: calc(46% * var(--grow));
+  background: linear-gradient(180deg, #7a4230, #4a2a1e 78%, #3a2016);
+  clip-path: polygon(50% 0, 100% 100%, 0 100%);
+  filter: drop-shadow(0 2px 2px rgba(0, 0, 0, 0.5)); }
+.rp-wall { width: calc(94% * var(--grow)); height: calc(74% * var(--grow)); position: relative;
+  background:
+    linear-gradient(90deg, transparent 47%, rgba(58, 46, 32, 0.55) 47% 53%, transparent 53%),
+    linear-gradient(180deg, #93815f, #6b5c42);
+  border: 1px solid #3a2e20; border-top: none; border-radius: 0 0 3px 3px;
+  display: flex; align-items: center; justify-content: center;
+  box-shadow: inset 0 -12px 18px rgba(0, 0, 0, 0.38); }
+.rp-wall::after { content: ''; position: absolute; bottom: 0; left: 50%; transform: translateX(-50%);
+  width: 26%; height: 42%; background: linear-gradient(180deg, #241a10, #171008);
+  border-radius: 4px 4px 0 0; border: 1px solid #0e0a06; border-bottom: none; }
+.ranch-prop.big .rp-roof { width: calc(150% * var(--grow)); height: calc(56% * var(--grow)); background: linear-gradient(180deg, #8a5038, #55321f 78%, #40241a); }
+.ranch-prop.big .rp-wall { width: calc(120% * var(--grow)); height: calc(88% * var(--grow)); }
+.rp-glyph { font-size: 2em; line-height: 1; margin-bottom: 28%;
+  filter: drop-shadow(0 2px 3px rgba(0, 0, 0, 0.6)); transition: transform 0.15s; z-index: 1; }
+.ranch-prop.big .rp-glyph { font-size: 2.7em; }
+.ranch-prop:hover .rp-glyph { transform: translateY(-2px) scale(1.08); }
+.rp-name { position: absolute; bottom: -13%; left: 50%; transform: translateX(-50%);
+  font-family: 'Cinzel', serif; font-size: 0.68em; color: #f0e8d8;
+  text-shadow: 0 1px 3px #000, 0 0 5px #000; white-space: nowrap; }
+
+/* ── Environmental dressing ──────────────────────────────────────────────────
+   Trees/bushes are standees like everything else; the path and pond are FLAT
+   patches that lie in the grass. All decorative, all pointer-transparent. */
+.ranch-decor { position: absolute; width: 13.333%; height: 13.333%;
+  transform: translate(-50%, -100%); transform-style: preserve-3d; pointer-events: none; }
+.rd-standee { position: absolute; inset: 0; transform: rotateX(-52deg); transform-origin: 50% 100%;
+  display: flex; flex-direction: column; align-items: center; justify-content: flex-end; }
+.rd-canopy { width: calc(88% * var(--s, 1)); height: calc(52% * var(--s, 1));
+  background: linear-gradient(180deg, #3d6b34, #27492a 82%, #1d3520);
+  clip-path: polygon(50% 0, 96% 100%, 4% 100%); margin-bottom: -14%;
+  filter: drop-shadow(0 3px 3px rgba(0, 0, 0, 0.45)); }
+.rd-canopy.two { width: calc(106% * var(--s, 1)); height: calc(46% * var(--s, 1)); margin-bottom: -8%; }
+.rd-trunk { width: calc(13% * var(--s, 1)); height: calc(22% * var(--s, 1));
+  background: linear-gradient(90deg, #4a3320, #6b4a2c 55%, #3a2818); border-radius: 0 0 2px 2px; }
+.rd-bush { width: calc(52% * var(--s, 1)); height: calc(30% * var(--s, 1));
+  background: radial-gradient(ellipse at 50% 20%, #47793c, #2a5230 70%, #1e3d24);
+  border-radius: 46% 46% 40% 40%; filter: drop-shadow(0 2px 2px rgba(0, 0, 0, 0.4)); }
+.rd-glyph { font-size: 1em; line-height: 1.1; filter: drop-shadow(0 2px 2px rgba(0, 0, 0, 0.5)); }
+.ranch-path { position: absolute; transform: translateX(-50%); border-radius: 40px;
+  background:
+    radial-gradient(ellipse 12% 6% at 30% 20%, rgba(0, 0, 0, 0.12), transparent),
+    radial-gradient(ellipse 14% 7% at 66% 62%, rgba(0, 0, 0, 0.1), transparent),
+    linear-gradient(180deg, rgba(148, 120, 82, 0.85), rgba(126, 100, 66, 0.85));
+  box-shadow: inset 0 0 14px rgba(60, 44, 26, 0.7); pointer-events: none; }
+.ranch-path.spur { transform: none; border-radius: 40px; }
+.ranch-pond { position: absolute; transform: translate(-50%, -50%); border-radius: 50%;
+  background: radial-gradient(ellipse at 42% 36%, #7fb4c9 0 18%, #3d7a99 55%, #234f68 85%, #1a3a4e);
+  box-shadow: inset 0 3px 10px rgba(0, 0, 0, 0.45), 0 0 0 3px rgba(126, 100, 66, 0.5); pointer-events: none; }
+
+/* ── MR4-style quick menu — chunky actions floating over the scene ─────────── */
+.ranch-menu { position: absolute; left: 12px; bottom: 12px; display: flex; flex-direction: column; gap: 6px; z-index: 40; }
+.rmn-btn { display: flex; align-items: center; gap: 9px; min-width: 158px; padding: 10px 16px 10px 12px;
+  font-family: 'Cinzel', serif; font-size: 0.92em; letter-spacing: 0.06em; color: #f0e4c8; text-align: left;
+  background: linear-gradient(90deg, rgba(20, 14, 8, 0.92), rgba(30, 22, 12, 0.78) 70%, rgba(30, 22, 12, 0.35));
+  border: 1px solid rgba(212, 168, 67, 0.55); border-left: 4px solid var(--gold); border-radius: 0 22px 22px 0;
+  cursor: pointer; transition: transform 0.12s, background 0.15s, padding-left 0.12s;
+  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.5); }
+.rmn-btn .rmn-g { font-size: 1.15em; }
+.rmn-btn:hover { padding-left: 20px; background: linear-gradient(90deg, rgba(42, 26, 10, 0.95), rgba(58, 42, 16, 0.8) 70%, rgba(58, 42, 16, 0.35)); }
 
 .ranch-fallback { margin: auto; color: var(--muted); font-style: italic; }

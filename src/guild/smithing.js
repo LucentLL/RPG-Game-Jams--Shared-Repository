@@ -45,7 +45,8 @@ export function study(hero, discipline = 'blacksmithing') {
   const prof = hero.professions[discipline] || (hero.professions[discipline] = { theory: 0, practice: 0, field: 0 });
   const c = hero.condition;
   const room = (100 - prof.theory) / 100;
-  const gain = Math.max(1, Math.round(6 * (0.3 + 0.7 * room)));
+  const studious = (hero.traits || []).includes('Studious') ? 1.5 : 1; // the Studious trait devours theory
+  const gain = Math.max(1, Math.round(6 * studious * (0.3 + 0.7 * room)));
   prof.theory = Math.min(100, prof.theory + gain);
   c.stamina = Math.max(0, c.stamina - 12);
   c.fatigue = Math.max(0, Math.min(100, c.fatigue + 4));

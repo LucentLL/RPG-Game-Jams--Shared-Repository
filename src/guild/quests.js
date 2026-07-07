@@ -81,3 +81,20 @@ export function resolveQuest(quest, party, powerFn = heroPower) {
   const score = (power / Math.max(1, quest.recommendedPower)) * variance;
   return { success: score >= 1, score, power };
 }
+
+/**
+ * Resolve a quest whose climactic bout the player PLAYED (battle-bridge). The duel's
+ * outcome shifts the luck band — it never replaces the power check: winning the bout
+ * with an underpowered party can still fail the job, and losing it with an overwhelming
+ * party can still scrape a success. Win: variance 0.95..1.25 (skill banked the luck);
+ * loss: 0.55..0.95 (the party carried a beaten leader home).
+ * @param {Quest} quest @param {import('./hero.js').Hero[]} party
+ * @param {(h:import('./hero.js').Hero)=>number} powerFn @param {boolean} won
+ * @returns {{success:boolean, score:number, power:number, played:boolean, won:boolean}}
+ */
+export function resolveQuestPlayed(quest, party, powerFn = heroPower, won = false) {
+  const power = party.reduce((s, h) => s + powerFn(h), 0);
+  const variance = won ? 0.95 + Math.random() * 0.3 : 0.55 + Math.random() * 0.4;
+  const score = (power / Math.max(1, quest.recommendedPower)) * variance;
+  return { success: score >= 1, score, power, played: true, won };
+}

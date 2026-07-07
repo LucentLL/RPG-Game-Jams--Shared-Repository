@@ -40,6 +40,7 @@ function nextId() { return 'tourney_' + _run + (++_seq).toString(36); }
 export function createTournament(init = {}) {
   return {
     id: init.id || nextId(),
+    type: init.type || 'tournament', // event-type discriminator: 'tournament' | 'major' (more via events.js)
     name: init.name || 'Open Tournament',
     rank: init.rank ?? 1,
     week: init.week ?? 1,
@@ -97,10 +98,22 @@ export function nextTournament(guild) {
 }
 
 /**
+ * The field's strength in round `i` (0-based): round 0 ≈ field×0.65, the final ≈
+ * field×1.35. THE single source of bracket math — resolveTournament, championOdds,
+ * and the played-bracket adapter (battle-bridge) all read this, so displayed odds,
+ * simulated brackets, and played brackets can never drift apart.
+ * @param {Tournament} t @param {number} i  round index, 0-based
+ */
+export function roundOpponentPower(t, i) {
+  const rounds = t.rounds || 4;
+  return t.field * (0.65 + i * (0.7 / Math.max(1, rounds - 1)));
+}
+
+/**
  * Resolve a tournament as a small bracket: the lineup's combined power faces an
- * escalating field each round (round 0 ≈ field×0.65 … final ≈ field×1.35); you advance
- * while you win, and the round you lose is your placement. Mirrors resolveQuest's
- * power×variance model so odds stay honest.
+ * escalating field each round (roundOpponentPower); you advance while you win, and
+ * the round you lose is your placement. Mirrors resolveQuest's power×variance model
+ * so odds stay honest.
  * @param {Tournament} t @param {import('./hero.js').Hero[]} lineup
  * @param {(h:import('./hero.js').Hero)=>number} [powerFn]
  * @returns {{power:number, rounds:number, wins:number, champion:boolean}}
@@ -110,9 +123,8 @@ export function resolveTournament(t, lineup, powerFn = heroPower) {
   const rounds = t.rounds || 4;
   let wins = 0;
   for (let i = 0; i < rounds; i++) {
-    const oppPower = t.field * (0.65 + i * (0.7 / Math.max(1, rounds - 1)));
     const variance = 0.8 + Math.random() * 0.4; // 0.8..1.2
-    if (power * variance >= oppPower) wins++;
+    if (power * variance >= roundOpponentPower(t, i)) wins++;
     else break;
   }
   return { power, rounds, wins, champion: wins === rounds };
@@ -136,8 +148,7 @@ export function championOdds(power, t) {
   const rounds = t.rounds || 4;
   let p = 1;
   for (let i = 0; i < rounds; i++) {
-    const oppPower = t.field * (0.65 + i * (0.7 / Math.max(1, rounds - 1)));
-    p *= Math.max(0, Math.min(1, (1.2 - oppPower / Math.max(1, power)) / 0.4));
+    p *= Math.max(0, Math.min(1, (1.2 - roundOpponentPower(t, i) / Math.max(1, power)) / 0.4));
   }
   return p;
 }

@@ -3,7 +3,7 @@
  * Each archetype has distinct GROWTH TALENTS (how fast each stat trains), so
  * a Knight and a Mage diverge over many weeks even from similar starting stats.
  */
-import { createHero, HERO_STATS, STAT_CAP } from './hero.js';
+import { createHero, HERO_STATS, STAT_CAP, TRAITS } from './hero.js';
 
 /**
  * Archetypes with per-stat growth talents (1 = normal, 3 = gifted, 0.5 = weak).
@@ -50,7 +50,16 @@ export function generateRecruit() {
   const growth = {};
   for (const s of HERO_STATS) growth[s] = Math.max(0.5, arch.growth[s] + (rand(3) - 1) * 0.25);
   const name = FIRST[rand(FIRST.length)] + ' ' + EPITHET[rand(EPITHET.length)];
-  return createHero({ name, archetype: arch.name, stats: rollStatBlock(growth), growth });
+  // Two distinct personality traits (K5) — the raising sim's flavor dice.
+  const pool = Object.keys(TRAITS);
+  const t1 = pool[rand(pool.length)];
+  let t2 = pool[rand(pool.length)];
+  while (t2 === t1) t2 = pool[rand(pool.length)];
+  const hero = createHero({ name, archetype: arch.name, stats: rollStatBlock(growth), growth, traits: [t1, t2] });
+  // Prodigies burn bright and retire sooner (trait lifespan multiplier, rolled once).
+  const lifeMult = (TRAITS[t1].lifespan || 1) * (TRAITS[t2].lifespan || 1);
+  if (lifeMult !== 1) hero.lifespan = Math.round(hero.lifespan * lifeMult);
+  return hero;
 }
 
 /**
