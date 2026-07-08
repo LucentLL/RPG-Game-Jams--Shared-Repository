@@ -1,0 +1,284 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>The Crucible — Athanor Mode</title>
+
+  <!-- Fonts. TODO(offline): self-host into public/assets/fonts/ before packaging
+       for Steam / Android so the game runs with no network. -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;600;700&family=Cormorant+Garamond:ital,wght@0,400;0,600;1,400&display=swap" rel="stylesheet" />
+
+  <!-- Vite entry. Module scripts defer, so this runs after the DOM is parsed. -->
+  <script type="module" crossorigin src="./assets/index-CrB9FwnU.js"></script>
+  <link rel="stylesheet" crossorigin href="./assets/index-CxUQCgxC.css">
+</head>
+<body>
+
+<!-- ═══ TITLE SCREEN ═══ -->
+<div class="screen active" id="titleScreen">
+  <div class="title-logo">⚗ THE CRUCIBLE ⚗</div>
+  <div class="title-sub">Athanor Mode — The Alchemical Furnace</div>
+  <button class="title-btn" onclick="openGuild()">🏰 HEROES GUILD 🏰</button>
+  <button class="title-btn secondary" onclick="startTurnFlow()">⚗ Enter the Athanor</button>
+  <button class="title-btn secondary" onclick="startActionFlow()">⚡ Action Arena</button>
+  <button class="title-btn secondary" onclick="showPantheon()">☿ PANTHEON</button>
+  <button class="title-btn secondary" onclick="openDebug()">🔧 DEBUG ROOM</button>
+  <div class="pantheon-preview" id="titlePantheonPreview"></div>
+</div>
+
+<!-- ═══ FORGE CHOICE SCREEN ═══ -->
+<div class="screen" id="forgeChoiceScreen">
+  <div class="forge-choice">
+    <h2>⚒ FORGE AN ALCHEMIST ⚒</h2>
+    <div class="sub">Will you shape your vessel by hand, or let fate cast it?</div>
+    <button class="title-btn" onclick="openBuilder()">✦ FORGE BY HAND ✦</button>
+    <button class="title-btn" onclick="startRunRandom()">☉ RANDOM VESSEL ☉</button>
+    <button class="title-btn secondary" onclick="returnToTitle()">↩ back</button>
+  </div>
+</div>
+
+<!-- ═══ CHARACTER BUILDER SCREEN ═══ -->
+<div class="screen" id="builderScreen">
+  <div class="builder-shell">
+    <div class="builder-header">
+      <h2>⚒ THE FORGE ⚒</h2>
+      <div class="sub">Shape your alchemist. The body type biases stats &amp; palette.</div>
+      <div id="builderSkinStatus" class="sub" style="margin-top:4px"></div>
+    </div>
+    <div class="builder-grid">
+      <div class="builder-preview">
+        <canvas id="builderPreviewCanvas" width="320" height="320" style="width:320px;height:320px"></canvas>
+        <div class="face-tabs">
+          <div class="face-tab" data-face="0" onclick="setBuilderFace(0)">South</div>
+          <div class="face-tab" data-face="2" onclick="setBuilderFace(2)">East</div>
+          <div class="face-tab" data-face="1" onclick="setBuilderFace(1)">West</div>
+          <div class="face-tab" data-face="3" onclick="setBuilderFace(3)">North</div>
+        </div>
+      </div>
+      <div class="builder-controls" id="builderControls"></div>
+    </div>
+    <div class="builder-actions">
+      <button class="builder-back" onclick="showForgeChoice()">↩ back</button>
+      <button class="builder-randomize" onclick="randomizeBuilder()">↻ randomize</button>
+      <button class="title-btn" style="display:inline-block;width:auto;padding:10px 28px" onclick="confirmBuilder()">⚗ ENTER ⚗</button>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ STAT ROLL SCREEN ═══ -->
+<div class="screen" id="statScreen">
+  <div class="stat-reveal" id="statReveal"></div>
+</div>
+
+<!-- ═══ DEBUG ROOM (frame inspector) ═══ -->
+<div class="screen" id="debugScreen">
+  <div class="builder-shell">
+    <div class="builder-header">
+      <h2>🔧 DEBUG ROOM</h2>
+      <div class="sub">Pin a pose &amp; frame; cycle parts to inspect layering.</div>
+    </div>
+    <div class="builder-grid">
+      <div class="builder-preview">
+        <canvas id="debugPreviewCanvas" width="320" height="320" style="width:320px;height:320px"></canvas>
+        <div class="face-tabs">
+          <div class="face-tab" data-face="0" onclick="setDebugFace(0)">South</div>
+          <div class="face-tab" data-face="2" onclick="setDebugFace(2)">East</div>
+          <div class="face-tab" data-face="1" onclick="setDebugFace(1)">West</div>
+          <div class="face-tab" data-face="3" onclick="setDebugFace(3)">North</div>
+        </div>
+        <div id="debugFrameLabel" style="font-size:0.7em;color:var(--dim);text-align:center;font-family:'Cinzel',serif;margin-top:6px;letter-spacing:0.05em"></div>
+      </div>
+      <div class="builder-controls" id="debugControls"></div>
+    </div>
+    <div class="builder-actions">
+      <button class="builder-back" onclick="returnToTitle()">↩ back to title</button>
+      <button class="builder-randomize" onclick="randomizeDebug()">↻ randomize parts</button>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ DRAFT SCREEN ═══ -->
+<div class="screen" id="draftScreen">
+  <div class="draft-header">
+    <h2>⚗ GEAR DRAFT</h2>
+    <div class="round-info" id="draftRoundInfo"></div>
+  </div>
+  <div class="draft-top">
+    <div class="draft-portrait">
+      <div class="face-rotate-stage">
+        <button type="button" class="face-rotate-btn face-rotate-left" onclick="rotateDraftFace(-1)" aria-label="Rotate left">↺</button>
+        <canvas id="draftCharCanvas" width="220" height="220" style="width:220px;height:220px;image-rendering:pixelated"></canvas>
+        <button type="button" class="face-rotate-btn face-rotate-right" onclick="rotateDraftFace(1)" aria-label="Rotate right">↻</button>
+      </div>
+    </div>
+    <div class="equipped-slots" id="equippedSlots"></div>
+  </div>
+  <div class="socket-counter" id="socketCounter"></div>
+  <div class="draft-pool" id="draftPool"></div>
+  <div class="draft-confirm" id="draftConfirm"></div>
+</div>
+
+<!-- ═══ VS SCREEN ═══ -->
+<div class="screen" id="vsScreen">
+  <div class="vs-container">
+    <div class="vs-round" id="vsRound"></div>
+    <div class="vs-fighters">
+      <div class="vs-fighter">
+        <canvas id="vsP1" width="200" height="200" style="width:200px;height:200px;image-rendering:pixelated"></canvas>
+        <h3 id="vsP1Name"></h3>
+        <div class="vs-stats" id="vsP1Stats"></div>
+      </div>
+      <div class="vs-text">VS</div>
+      <div class="vs-fighter">
+        <canvas id="vsP2" width="200" height="200" style="width:200px;height:200px;image-rendering:pixelated"></canvas>
+        <h3 id="vsP2Name"></h3>
+        <div class="vs-stats" id="vsP2Stats"></div>
+      </div>
+    </div>
+    <div class="vs-fog" id="vsFog"></div>
+  </div>
+</div>
+
+<!-- ═══ ACTION ARENA (real-time mode) ═══ -->
+<div class="screen" id="actionScreen">
+  <div class="action-hud">
+    <div class="action-hp-row">
+      <div class="action-hp-label" id="actLblP1">⚗ ALCHEMIST</div>
+      <div class="hp-bar"><div class="hp-fill" id="actHpFillP1" style="background:#4ade80"></div></div>
+    </div>
+    <div class="action-hp-row">
+      <div class="action-hp-label" id="actLblP2">☠ OPPONENT</div>
+      <div class="hp-bar"><div class="hp-fill" id="actHpFillP2" style="background:#ef4444"></div></div>
+    </div>
+  </div>
+  <div class="action-stage">
+    <div class="action-arena" id="actionArena">
+      <div class="action-actor" id="actionP1Wrap"><span class="rm-shadow"></span><div class="aa-standee"><canvas id="actionP1Cv" class="action-fighter" width="96" height="96"></canvas></div></div>
+      <div class="action-actor" id="actionP2Wrap"><span class="rm-shadow"></span><div class="aa-standee"><canvas id="actionP2Cv" class="action-fighter" width="96" height="96"></canvas></div></div>
+    </div>
+  </div>
+  <div class="action-help">Move: WASD / arrows / drag the stick · Attack: tap a button or 1–4</div>
+  <div class="action-attacks" id="actionAttackBar"></div>
+  <div class="action-log" id="actionLog"></div>
+  <button class="reroll-btn" id="actForfeitBtn" style="margin-top:6px" onclick="forfeitAction()">↩ Forfeit Run</button>
+</div>
+
+<!-- ═══ BATTLE SCREEN ═══ -->
+<div class="screen" id="battleScreen">
+  <div class="header">
+    <h1>⚗ THE CRUCIBLE</h1>
+    <span class="round-badge" id="roundBadge">ROUND 1</span>
+    <span class="turn-badge">TURN <span id="turnNum">1</span></span>
+    <span class="qs-badge" id="qsBadge">☿ 0</span>
+  </div>
+  <div class="hud">
+    <div class="hud-panel" id="p1Hud"></div>
+    <div class="hud-panel" id="p2Hud"></div>
+  </div>
+  <div class="stat-sheet">
+    <div class="stat-sheet-header" onclick="toggleStats()">
+      <h3 id="ssTitle">Character Sheet</h3>
+      <span class="toggle" id="ssToggle">▼ SHOW</span>
+    </div>
+    <div class="stat-sheet-body" id="ssBody"></div>
+  </div>
+  <div class="grid-wrap"><div class="grid" id="grid"></div></div>
+  <div class="controls" id="ctrlPanel">
+    <div class="section-label">MOVEMENT</div>
+    <div class="move-controls">
+      <div class="dpad" id="dpad"></div>
+      <div class="auto-moves" id="autoMoves"></div>
+    </div>
+    <div class="move-queue" id="moveQueue"></div>
+    <div class="move-info" id="moveInfo"></div>
+    <div class="section-label">ATTACKS</div>
+    <div class="atk-bar" id="atkBar"></div>
+    <div class="atk-detail" id="atkDetail"></div>
+    <div class="exec-bar">
+      <button class="exec-btn" id="execBtn" onclick="executeTurn()">⚗ EXECUTE TURN</button>
+      <button class="exec-btn btl-forfeit" id="tacAutoBtn" style="display:none" onclick="toggleTacticalAuto()">🤖 Watch</button>
+      <button class="exec-btn btl-forfeit" id="btlForfeitBtn" style="display:none" onclick="forfeitTactical()">↩ Forfeit Match</button>
+    </div>
+  </div>
+  <div class="log" id="log"></div>
+</div>
+
+<!-- ═══ LOOT SCREEN ═══ -->
+<div class="screen" id="lootScreen">
+  <div class="loot-header" id="lootHeader">VICTORY</div>
+  <div class="loot-sub" id="lootSub">The opponent falls. Claim your spoils.</div>
+  <div class="loot-qs" id="lootQs"></div>
+  <div class="loot-items" id="lootItems"></div>
+  <div style="margin-top:16px">
+    <button class="title-btn" onclick="goToLab()" id="lootContinueBtn">⚗ ENTER LABORATORY ⚗</button>
+  </div>
+</div>
+
+<!-- ═══ LABORATORY SCREEN ═══ -->
+<div class="screen" id="labScreen">
+  <div class="lab-header">
+    <h2>⚗ LABORATORY</h2>
+    <div id="labRoundInfo" style="font-size:0.75em;color:var(--gold);margin:2px 0"></div>
+    <div class="lab-qs" id="labQs">☿ 0</div>
+  </div>
+  <div class="lab-section lab-stats-section" id="labStatsPanel"></div>
+  <div class="lab-section" id="labEquipped"></div>
+  <div class="lab-section" id="labMerchant"></div>
+  <div class="lab-section" id="labStored"></div>
+  <div class="lab-section" id="labLooseMateria"></div>
+  <div class="lab-section" id="labMateriaDust"></div>
+  <div class="lab-confirm-btn">
+    <button class="title-btn" onclick="confirmLoadout()" id="labConfirmBtn">⚔ CONFIRM LOADOUT ⚔</button>
+    <div style="margin-top:12px"><button class="title-btn secondary" style="display:inline-block;width:auto;padding:8px 24px;font-size:0.75em" onclick="forfeitRun()">☠ Abandon Run</button></div>
+  </div>
+</div>
+
+<!-- ═══ GAME OVER ═══ -->
+<div class="screen" id="gameOverScreen">
+  <div class="go-title" style="color:var(--danger)">☠ DEFEAT ☠</div>
+  <div class="go-stats" id="goStats"></div>
+  <button class="title-btn" style="margin-top:20px" onclick="returnToTitle()">RETURN TO TITLE</button>
+</div>
+
+<!-- ═══ VICTORY ═══ -->
+<div class="screen" id="victoryScreen">
+  <div class="go-title" style="color:var(--gold)">✦ MAGNUM OPUS COMPLETE ✦</div>
+  <div class="go-stats" id="vicStats"></div>
+  <div style="margin-top:16px;font-family:'Cinzel',serif;font-size:0.85em;color:var(--muted);letter-spacing:0.1em">NAME YOUR CHAMPION</div>
+  <input type="text" class="champ-input" id="champNameInput" placeholder="Enter name..." maxlength="20">
+  <button class="title-btn" onclick="saveChampion()">✦ SAVE TO PANTHEON ✦</button>
+</div>
+
+<!-- ═══ PANTHEON ═══ -->
+<div class="screen" id="pantheonScreen">
+  <div class="pantheon-title">☿ THE PANTHEON ☿</div>
+  <div class="pantheon-list" id="pantheonList"></div>
+  <button class="title-btn secondary" style="margin-top:16px" onclick="returnToTitle()">RETURN</button>
+</div>
+
+<!-- Dice Overlay -->
+<div class="dice-overlay" id="diceOverlay">
+  <div class="dice-header" id="diceHeader"></div>
+  <div class="dice-d20" id="diceD20">20</div>
+  <div class="dice-result" id="diceResult"></div>
+  <div class="dice-damage" id="diceDamage"></div>
+</div>
+
+<!-- Crafting Overlay -->
+<div class="craft-overlay" id="craftOverlay">
+  <div class="craft-panel" id="craftPanel"></div>
+</div>
+
+<!-- Materia Detail Overlay -->
+<div class="mat-detail-overlay" id="matDetailOverlay" onclick="closeMatDetail()">
+  <div class="mat-detail" id="matDetailPanel" onclick="event.stopPropagation()"></div>
+</div>
+
+<!-- ═══ HEROES GUILD (management) ═══ -->
+<div class="screen" id="guildScreen"></div>
+
+</body>
+</html>
