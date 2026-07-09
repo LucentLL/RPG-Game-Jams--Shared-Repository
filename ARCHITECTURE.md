@@ -135,28 +135,28 @@ A full analysis of the original file (413 top‑level symbols) produced the targ
 below — **44 modules**, leaf‑first, so the game keeps running at every step.
 Extract in this order; after each module, `npm run build` + smoke‑test before the next.
 
-> **Progress — Phase A data layer complete & verified:**
-> Extracted out of `crucible.js` (now ~5.7k lines, down from 6.3k):
-> `data/progression.js`, `data/gear.js`, `data/attacks.js`, `data/config.js`,
-> `data/orb-tables.js`, `data/sprite-tables.js`, `data/arena-templates.js`,
-> `items/blacksmithing.js`, `engine/rng.js`.
-> Build green (26 modules); verified live — title→stat→draft renders gear/materia,
-> and the debug room composites sprites (all layers + skin tone) in South & East facings.
+> **Progress — Phase A data layer + first engine/items leaves done & verified.**
+> `crucible.js` is down to **~5.7k lines** (from 6.9k). Extracted and building green
+> (**43 modules**):
+> - **Phase A data layer:** `data/progression.js`, `data/gear.js`, `data/attacks.js`,
+>   `data/config.js`, `data/orb-tables.js`, `data/sprite-tables.js`,
+>   `data/arena-templates.js`, `items/blacksmithing.js`, `engine/rng.js`.
+> - **`state.js` — done.** Shared mutable state lives on a single `export const S = {…}`
+>   in [`src/game/state.js`](src/game/state.js); a transitional bridge mirrors each field
+>   onto `window` (get/set accessors) so crucible.js's bare-name refs still resolve while
+>   new modules `import { S }`. The bridge shrinks as crucible.js is split apart.
+> - **Engine/items leaves (2026-07):** `engine/facing.js`, `engine/procedural-tiles.js`,
+>   `engine/terrain.js` (+ BFS; its 4 arena vars moved onto `S`), `items/stat-gen.js`,
+>   `items/gear-gen.js`, `engine/combat-ai.js`.
 >
-> **`state.js` — done & verified.** Shared mutable state now lives on a single
-> `export const S = {…}` in [`src/game/state.js`](src/game/state.js). Instead of
-> the risky cross-cutting rename, a transitional bridge mirrors each field onto
-> `window` via get/set accessors — so crucible.js keeps its bare-name references
-> (and local `var` shadows still win) while new modules import `S` directly. The
-> bridge shrinks to nothing as crucible.js is split apart. Verified through a full
-> battle: run → draft → fighter build → battle grid (procedural terrain) → combat
-> over two turns, zero console errors.
+> Verified live each step: `npm run build` after every extraction, plus a runtime
+> smoke-test (title→forge→stat→draft with zero console errors, and each extracted
+> module dynamically imported and exercised in the running app).
 >
-> **Next: engine subsystems** (leaf-first, per the order above) — `engine/facing.js`,
-> `engine/arena.js`, `engine/sprite-loader.js`, `engine/compositor.js`, … Each
-> imports `S` for shared state plus its data module(s); crucible.js imports the
-> functions back. These are now mechanical because state + data already live in
-> modules.
+> **The remaining split follows the reconciled staged plan in §5.1 below** — a full
+> coupling analysis of every section of the *current* file. It supersedes the original
+> leaf-first sketch: two of the biggest "state-first" migrations are already done (only
+> `_guildBattle` + `_tacAuto` remain), and the order is re-risked against today's tree.
 
 ### Shared state comes first
 Many globals (`run`, `p1`, `p2`, `gamePhase`, `turnNum`, `moveQueue`, loop flags,
@@ -169,29 +169,44 @@ export const S = { run: null, p1: null, p2: null, gamePhase: 'title', /* … */ 
 ```
 Modules do `S.run = …` / read `S.p1`. This is the largest structural change.
 
-### Extraction order (leaf → entangled)
+### 5.1 Reconciled staged extraction plan (current file)
 
-**Phase A — pure data & leaves** (no game‑state deps):
-`state.js` · `data/config.js` · `data/progression.js` · `data/gear.js` ·
-`data/attacks.js` · `data/sprite-tables.js` · `data/orb-tables.js` ·
-`data/arena-templates.js` · `engine/rng.js` · `items/blacksmithing.js` ·
-`items/stat-gen.js` · `engine/procedural-tiles.js`
+Produced by a full per-section coupling analysis of the **current** `crucible.js`
+(reconciled against `state.js` + the already-extracted modules). Extract strictly
+**one module per commit**, `npm run build` after each, and run an **interactive**
+smoke-test at the 🔴 gates (build alone can't catch a broken image cache, a dropped
+redraw registration, or an rAF double-schedule).
 
-**Phase B — engine subsystems:**
-`engine/sprite-loader.js` (the shared image cache + redraw bus) · `engine/battle-log.js` ·
-`items/gear-gen.js` · `engine/arena.js` · `engine/facing.js` · `engine/skin-tone.js` ·
-`engine/appearance.js` · `engine/cast-fx.js` · `engine/compositor.js` · `engine/orb-render.js`
+**Already on `S` (no migration needed):** `run, p1, p2, gamePhase, turnNum, moveQueue,
+lastMoveType, selectedAttack, tiles, executing, statsOpen, arenaGrid, animLoopRunning,
+actionLoopRunning, _pendingRunMode, _snapshot*Map, arenaElevation/Passable/TerrainCost/Name`.
+**Only two globals still need migrating:** `_guildBattle` and `_tacAuto` (batch **M1** —
+add to `S` **and delete the local `var`s**, or a surviving `var` shadows the bridge).
 
-**Phase C — combat & assembly:**
-`items/fighter-build.js` · `items/opponent-gen.js` · `engine/animation.js` ·
-`items/materia-combat.js` · `engine/sprite-render.js` · `screens/gear-cards.js` ·
-`screens/materia-ui.js` · `engine/combat-ai.js` · `items/crafting.js` · `engine/combat.js`
+| # | Module | Risk | Note |
+|---|---|---|---|
+| ✅ | `engine/procedural-tiles.js`, `engine/terrain.js`, `items/stat-gen.js`, `items/gear-gen.js`, `engine/combat-ai.js` | — | **DONE this pass** |
+| 1 | `engine/appearance.js` (`generateAppearance`, `elementsPickPart`) | low | root of the sprite chain — do before the loader |
+| 2 | `engine/bob-loop.js` (idle-bob rAF) | low | zero imports; delete dead `unregisterBobRenderer` |
+| 3 | `engine/weapon-layers.js` (`effectiveAppearance`, `fighterWeaponLayers`, gear→desc, `GUILD_ARCH_*`) | low | pure over gear-ladder data |
+| 4 | `items/fighter-build.js` (`buildPlayer/OpponentFighter`, materia/attacks) | low | reads `S.run` + data consts |
+| 5 | `engine/sprite-loader.js` (`getElementsPart`, `_elementsImgCache`, **redraw bus**, `getElementsWeapon`) | 🔴 high | **hazard hub** — cache + bus must be the single home |
+| 6 | `engine/skin-tone.js` · 7 `engine/cast-fx.js` · 8 `engine/orb-sprites.js` · 9 `engine/compositor.js` | med | after the loader — **🔴 interactive smoke-test after the compositor** (sprites composite w/ weapons/hats/tones, bob animates, orbs + cast-FX render) |
+| 10 | `screens/run-entry.js` · 11 `items/opponent-gen.js` · 12 `screens/character-builder.js` · 13 `screens/gear-cards.js` (`_gearIconObserver`) | med | 🟡 check builder preview + gear icons after 12/13 |
+| 14 | `engine/sprite-render.js` + `engine/anim-loop.js` | 🔴 high | rAF ownership; preserve `window.renderGuildSprite` / `__ranchGfx` / `pruneDetachedSpriteRedraws` |
+| — | **M1 state migration:** `_guildBattle` + `_tacAuto` → `S` | — | land alone; delete the local `var`s |
+| 15 | `engine/materia.js` (`getMateriaBonus`, `getFighterAC`, `gainMateriaXP`) · 16 `screens/draft.js` · 17 `screens/stat-screen.js` | med–high | draft↔battle cycle → dispatch via `window.*`, never static-import |
+| 18 | `screens/action-arena.js` · 19 `game/guild-battle.js` (action branch only) · 20 `screens/battle-grid.js` · 21 `engine/action-combat.js` · 22 `engine/combat.js` · 23 `engine/attack-resolve.js` · 24 `screens/endscreens.js` | 🔴 high | the turn engine — **🔴 interactive smoke-test after `combat.js` and after `endscreens.js`**: full turn match, action match, and a guild battle returning its exact `{winner,…}` payload |
+| 25 | `screens/lab.js` · 26 `screens/merchant.js` · 27 `screens/crafting.js` (`window._craftFn`) · 28 `screens/loot.js` | med | 🟡 loot→lab→equip/sell→buy→refine/socket/fuse |
+| 29 | `screens/pantheon.js` · 30 `screens/title.js` · 31 `game/main.js` (shrink the `Object.assign(window,…)` bridge) | high | **last** — 🔴 full loop smoke-test |
+| — | `ui/log.js` (`logMsg`/`renderAll`), `screens/materia-detail.js` (`showMatDetail`) | — | deferred separate pass (huge fan-in) |
+| — | `SPRITE_SHEET_MAP`, `spriteImages`, `loadSpriteSheets`, `lastAnimTick`, `unregisterBobRenderer` | — | **dead code — delete, don't carry** |
 
-**Phase D — screen controllers (most entangled, last):**
-`screens/crafting.js` · `screens/loot.js` · `screens/run-entry.js` ·
-`screens/character-builder.js` · `screens/stat-screen.js` · `screens/lab.js` ·
-`screens/title.js` · `screens/debug-room.js` · `screens/action-arena.js` ·
-`screens/draft.js` · `screens/vs-battle.js` · then a thin `game/main.js` (init + bridge)
+**⚠ Do not parallelize.** Every step edits the same three regions of `crucible.js` (the
+import block, the export list, the single `Object.assign(window,…)` bridge at the bottom)
+and the circular edges (draft↔battle, lab↔craft, combat↔battle-grid) only stay safe because
+they resolve at call-time through the window bridge. Two concurrent extractions guarantee
+merge conflicts and silent bridge breakage. Run strictly sequentially, one module per commit.
 
 ### Known refactor hazards (from the analysis)
 1. **Live‑binding trap** — mutable globals must move into the `S` state object (above), not `export let`.
