@@ -482,6 +482,27 @@ knight retires).
   from recruiting. **NEXT:** apprentices develop toward stat/skill/proficiency profiles (not just a
   readiness bar), a scout report with preferences, and Pillar C driving their curriculum.
 
+## The stakes gradient & the World Cup (owner 2026-07-09) — SHIPPED
+
+The mechanic that makes the Academy *matter*: competing carries **injury + death risk that
+rises with the competition**, so your legends can fall — and you keep a successor in training.
+
+- **Stakes tier by event type** (`tournaments.js` `STAKES`): the monthly minors are **Friendlies**
+  (injury ~4%, **death 0%** — safe practice, the run-up matches), the seasonal **Majors** are
+  **Competitive** (injury ~12%, death ~0.6%), and the **World Cup** is **Lethal** (injury ~24%,
+  death ~3% base). `competitionHarm(t, power, res)` scales each by **how deep they fought** ×
+  **how outmatched** they were — an outmatched fighter going deep in the Cup hits ~40% death; a
+  **champion never dies** (they won every round); friendlies never kill.
+- **The World Cup** (`events.js` `worldcup` type, `generateWorldCup`): once every **4 years**
+  (`WORLD_CUP_CADENCE = 192` weeks — one tunable number), a 6-round bracket with the richest purse.
+  `ensureWorldCup` always books the next one so it's visible **looming for years** to breed toward.
+- **Death** (`hall.js` `fellInGlory`): a killed competitor is **enshrined in the Hall of Fame**
+  ("fell at <event>"), gear returned to the armory, entrant/spar/selection refs cleaned — mirrors
+  the age-retirement path. The recap names the fallen; the freed roster slot is what the Academy
+  graduate backfills. **The loop closes.**
+- **NEXT:** team/national events (multiple members compete and can each fall — revives the deferred
+  Team combat lens); a pre-event risk % on the champion card; a "successor ready?" nudge on a death.
+
 ## Relationship to the current codebase
 
 - `src/guild/` already has the bones: `hero` (→ Person), `training`, `diet`, `recruiting`, `calendar`,
