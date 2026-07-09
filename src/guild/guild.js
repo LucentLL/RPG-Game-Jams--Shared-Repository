@@ -36,8 +36,8 @@ import { createMarket } from './market.js';
 export const FACILITIES = {
   quarters: { name: 'Living Quarters', glyph: '🏠', desc: 'Beds & bunks. Raises how many members the guild can house.',
     caps: [6, 10, 20, 60, 120], costs: [0, 800, 2000, 6000, 15000] },
-  yard: { name: 'Training Yard', glyph: '⚔', desc: 'Grounds & equipment. Speeds up every member’s stat training.',
-    mainMult: [1, 1.1, 1.2, 1.3], costs: [0, 600, 1800, 5000] },
+  yard: { name: 'Training Yard', glyph: '⚔', desc: 'Grounds & equipment. Speeds up training and unlocks equipment slots on the ranch (2 / 4 / 6 / 9).',
+    mainMult: [1, 1.1, 1.2, 1.3], slots: [2, 4, 6, 9], costs: [0, 600, 1800, 5000] },
   ring: { name: 'Sparring Ring', glyph: '🥊', desc: 'A padded arena. Lowers the risk of overtraining injuries.',
     injuryBonus: [0, 20, 35, 50], costs: [0, 500, 1500, 4500] },
   mess: { name: 'Mess Hall', glyph: '🍲', desc: 'Kitchens & stores. Sets how many mouths the guild can feed.',
@@ -74,6 +74,7 @@ export function createGuild(init = {}) {
     market: init.market || createMarket(),
     quartermaster: init.quartermaster || 'off', // equip policy: 'off' | 'party' | 'all'
     facilities: init.facilities || { quarters: 0, yard: 0, ring: 0, mess: 0 }, // tier per facility; tier 0 == today's defaults (cap 6, no bonuses)
+    stations: init.stations || [], // placeable training equipment on the ranch (Guild Academy Pillar A)
     schedule: init.schedule || [], // upcoming tournaments — seeded by ensureSchedule() in the hall's load()
     battlePrefs: init.battlePrefs || { tournament: 'ask' }, // per-event-type combat prefs: 'ask' (chooser on due events) | 'sim' (never ask)
     playPlan: init.playPlan || null, // armed play opt-in: { kind:'tournament'|'quest', id, mode:'action'|'tactical' } — survives reload

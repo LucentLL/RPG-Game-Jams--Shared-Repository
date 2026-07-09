@@ -12,6 +12,7 @@ import { createGuild, FACILITIES, maxRoster, facilityTier, fedCapacity } from '.
 import { HERO_STATS, heroPower, STAT_CAP, lifeStage, lifeFrac, TRAITS, traitMult } from './hero.js';
 import { generateRecruit, hireCost, rollRecruitPool } from './recruiting.js';
 import { DRILLS, REST, getDrill, applyTraining, applySpar, injuryLabel, previewInjuryChance, inflictInjury, rollInjurySeverity } from './training.js';
+import { stationBonusFor } from './stations.js';
 import { DIET_PLANS, getDietPlan, applyDiet } from './diet.js';
 import { advanceWeek, formatDate } from './calendar.js';
 import { weeklyUpkeep, addGold, guildIncome } from './economy.js';
@@ -26,7 +27,7 @@ import { qualityTier } from './item.js';
 import { MATERIAL_PRICE, buyPrice, itemSellValue, createMarket, refreshMarket } from './market.js';
 import { saveGame, loadGame } from '../platform/storage.js';
 import { playTournamentMatch, playQuestBout, battleEngineReady } from './battle-bridge.js';
-import { renderRanch, stopRanchLoop } from './ranch.js';
+import { renderRanch, stopRanchLoop, toggleBuild, pickStation, placeStationAt, removeStationById } from './ranch.js';
 
 const SLOT = 'guild';
 // The roster cap is no longer a constant — it's derived from the Living Quarters
@@ -269,6 +270,7 @@ function load() {
   for (const k of Object.keys(FACILITIES)) { // derived, not hardcoded — new facilities migrate for free
     if (typeof guild.facilities[k] !== 'number' || guild.facilities[k] < 0) guild.facilities[k] = 0;
   }
+  if (!Array.isArray(guild.stations)) guild.stations = []; // ranch training equipment (Guild Academy Pillar A)
   if (!Array.isArray(guild.hallOfFame)) guild.hallOfFame = [];
   if (guild.trainer === undefined) guild.trainer = null;
   if (!Array.isArray(guild.schedule)) guild.schedule = []; // tournament calendar (added with the season loop)
@@ -586,13 +588,13 @@ async function advanceAll() {
         entry.gains = res.gains; entry.drops = res.drops; entry.injury = res.injury;
         entry.trained = Object.keys(res.gains).length > 0; entry.spar = true;
       } else {
-        const res = applyTraining(h, 'skl', 'light', trainingBias(diet), ringOpts(diet)); // partner unavailable — solo footwork
+        const res = applyTraining(h, 'skl', 'light', trainingBias(diet), { ...ringOpts(diet), equipMult: stationBonusFor(guild, 'skl') }); // partner unavailable — solo footwork
         entry.drill = 'Spar — no partner';
         entry.gains = res.gains; entry.drops = res.drops; entry.injury = res.injury;
         entry.trained = Object.keys(res.gains).length > 0;
       }
     } else {
-      const res = applyTraining(h, a.trainingId, a.intensity, trainingBias(diet), ringOpts(diet));
+      const res = applyTraining(h, a.trainingId, a.intensity, trainingBias(diet), { ...ringOpts(diet), equipMult: stationBonusFor(guild, a.trainingId) });
       entry.drill = (getDrill(a.trainingId) || REST).name;
       entry.gains = res.gains; entry.drops = res.drops;
       entry.rested = res.rested; entry.injured = res.injured; entry.injury = res.injury;
@@ -1436,7 +1438,7 @@ async function practiceBout(myId, oppId, mode) {
       : `${me.name} lost the bout vs ${opp.name} — no harm done, just practice.`;
   } finally { advancing = false; }
   showScreen('guildScreen'); render();
-  if (ranchView) { renderRanch(guild); applyViewToggle(); } // restart the ranch loop after a bout
+  if (ranchView) { renderRanch(guild, save); applyViewToggle(); } // restart the ranch loop after a bout
 }
 
 /** The Arena — jump straight into a live, playable bout (no Advance Week needed).
@@ -1614,7 +1616,7 @@ function applyViewToggle() {
   if (view) view.hidden = !ranchView;
 }
 /** Go home to the ranch. */
-function openRanch() { ranchView = true; renderRanch(guild); applyViewToggle(); }
+function openRanch() { ranchView = true; renderRanch(guild, save); applyViewToggle(); }
 /** Drill from the ranch into a room's menus. */
 function enterRoomFromRanch(roomId) { stopRanchLoop(); ranchView = false; applyViewToggle(); openRoom(roomId); }
 /** Tap a member on the ranch → open their Roster card. */
@@ -1663,14 +1665,14 @@ export function openGuild() {
     document.addEventListener('webkitfullscreenchange', onFs);
   }
   render({ top: true });        // build the room-hub host (hidden while on the ranch)
-  ranchView = true; renderRanch(guild); applyViewToggle(); // open ON the ranch (home)
+  ranchView = true; renderRanch(guild, save); applyViewToggle(); // open ON the ranch (home)
   showScreen('guildScreen');
 }
 
 // Every handler no-ops while a week is advancing (a played battle can be mid-flight;
 // rail buttons still render behind the battle screen and would corrupt the in-flight
 // week). practiceBout/advanceAll keep their own internal checks as a second belt.
-const __guildApi = { selectHero, setActivity, setTraining, setIntensity, setRecipe, setPotion, setDiscipline, usePotion, setDiet, setQuest, assignTo, setSpar, equipItem, unequipSlot, setPolicy, provision, buyMaterial, sellItem, hire, advanceAll, back, openRoom, toggleFullscreen, upgradeFacility, enterTournament, leaveTournament, setPlayNext, setPlayQuest, setAskTournaments, appointTrainer, practiceBout, openRanch, enterRoomFromRanch, manageMemberFromRanch };
+const __guildApi = { selectHero, setActivity, setTraining, setIntensity, setRecipe, setPotion, setDiscipline, usePotion, setDiet, setQuest, assignTo, setSpar, equipItem, unequipSlot, setPolicy, provision, buyMaterial, sellItem, hire, advanceAll, back, openRoom, toggleFullscreen, upgradeFacility, enterTournament, leaveTournament, setPlayNext, setPlayQuest, setAskTournaments, appointTrainer, practiceBout, openRanch, enterRoomFromRanch, manageMemberFromRanch, ranchBuild: toggleBuild, ranchPick: pickStation, ranchPlace: placeStationAt, ranchRemoveStation: removeStationById };
 window.__guild = {};
 for (const k in __guildApi) {
   window.__guild[k] = (...args) => {

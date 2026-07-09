@@ -152,4 +152,51 @@
 .rmn-btn .rmn-g { font-size: 1.15em; }
 .rmn-btn:hover { padding-left: 20px; background: linear-gradient(90deg, rgba(42, 26, 10, 0.95), rgba(58, 42, 16, 0.8) 70%, rgba(58, 42, 16, 0.35)); }
 
+/* ── Training stations (placeable equipment) + build mode ────────────────────
+   Stations are standees like members/buildings: a flat cell on the plane owns the
+   shadow; the inner .rs-standee counter-rotates upright. Ghost slots are FLAT dashed
+   patches lying in the grass (tap-to-place). */
+.ranch-station { position: absolute; width: 11%; height: 11%;
+  transform: translate(-50%, -100%); transform-style: preserve-3d; pointer-events: none; }
+.rs-standee { position: absolute; inset: 0; transform: rotateX(-52deg); transform-origin: 50% 100%;
+  display: flex; flex-direction: column; align-items: center; justify-content: flex-end; }
+.rs-glyph { font-size: 1.55em; line-height: 1; filter: drop-shadow(0 2px 3px rgba(0, 0, 0, 0.6)); z-index: 1; }
+.rs-post { width: 15%; height: 26%; margin-top: -4%;
+  background: linear-gradient(90deg, #4a3624, #6b5038 55%, #3a2a1a); border-radius: 0 0 2px 2px;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.4); }
+.rs-remove { position: absolute; top: -4%; right: 10%; width: 22px; height: 22px; border-radius: 50%;
+  border: 1px solid #a34; background: rgba(34, 12, 12, 0.92); color: #f2b8b8; font-size: 0.72em; line-height: 1;
+  cursor: pointer; pointer-events: auto; z-index: 3; }
+.rs-remove:hover { background: #7a1f1f; color: #fff; }
+
+.ranch-ghost { position: absolute; width: 9%; height: 9%; transform: translate(-50%, -50%);
+  background: none; border: none; padding: 0; cursor: pointer; }
+.rg-mark { display: flex; align-items: center; justify-content: center; width: 100%; height: 100%;
+  border: 2px dashed rgba(212, 168, 67, 0.7); border-radius: 10px; background: rgba(212, 168, 67, 0.14);
+  color: var(--gold); font-size: 1.1em; transition: all 0.12s; }
+.ranch-ghost:hover .rg-mark { background: rgba(212, 168, 67, 0.24); }
+.ranch-ghost.ready .rg-mark { border-style: solid; background: rgba(212, 168, 67, 0.3); animation: rg-pulse 1.2s ease-in-out infinite; }
+@keyframes rg-pulse { 0%, 100% { opacity: 0.7; } 50% { opacity: 1; } }
+.ranch-btn.on { border-color: var(--gold); color: var(--gold); background: linear-gradient(135deg, #2a1a0a, #3a2a10); }
+
+.ranch-build { position: absolute; right: 12px; top: 62px; width: min(262px, 46vw); z-index: 45;
+  background: linear-gradient(180deg, rgba(20, 14, 8, 0.96), rgba(28, 20, 12, 0.9));
+  border: 1px solid rgba(212, 168, 67, 0.5); border-radius: 12px; padding: 10px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.55); }
+.rbld-head { display: flex; justify-content: space-between; align-items: center;
+  font-family: 'Cinzel', serif; color: var(--gold); font-size: 0.85em; margin-bottom: 4px; }
+.rbld-cap { color: var(--silver); font-size: 0.95em; }
+.rbld-cap.full { color: #e0a0a0; }
+.rbld-hint { font-size: 0.72em; color: var(--muted); margin-bottom: 8px; line-height: 1.35; }
+.rbld-list { display: flex; flex-direction: column; gap: 5px; }
+.rbld-item { display: flex; align-items: center; gap: 8px; padding: 6px 8px; text-align: left; cursor: pointer;
+  background: rgba(10, 10, 16, 0.55); border: 1px solid var(--dim); border-radius: 8px; color: #e8e0d0; transition: all 0.12s; }
+.rbld-item:hover { border-color: var(--silver); }
+.rbld-item.sel { border-color: var(--gold); background: rgba(42, 26, 10, 0.85); }
+.rbld-item.dis { opacity: 0.45; cursor: not-allowed; }
+.rbld-g { font-size: 1.35em; flex: 0 0 auto; }
+.rbld-t { display: flex; flex-direction: column; line-height: 1.2; }
+.rbld-t b { font-size: 0.82em; }
+.rbld-t small { font-size: 0.68em; color: var(--muted); }
+
 .ranch-fallback { margin: auto; color: var(--muted); font-style: italic; }

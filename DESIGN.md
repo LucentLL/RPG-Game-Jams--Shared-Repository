@@ -428,6 +428,32 @@ arena · mid-battle lens hot-swap (process-wide combat globals) · bespoke minig
 - **How deep, how soon?** The persistence/logistics depth (Phase 4) is the soul of the idea but the
   most content; ship Phases 1–3 first so it's a playable game before the deep sim.
 
+## The Guild Academy — training as a school (owner 2026-07-09)
+
+From Monster-Rancher references (place training gear on the ranch; plan a per-monster
+weekly schedule). The guild trains like a **school**: three pillars layered over the
+existing weekly-assignment + training-drill + facility systems.
+
+- **Pillar A — the grounds as a buildable gym (SHIPPED 2026-07-09).** The player places
+  **training stations** on the ranch. One station per drill: Sandbag→POW, Pell Post→DEF,
+  Training Dummy→SKL, Agility Poles→SPD, Meditation Stone→INT, Rucking Track→VIT. Each gives
+  its drill a **+15% weekly gain** (diminishing when the same type stacks). How many fit is
+  gated by the **Training Yard facility tier** (2 / 4 / 6 / 9 slots) — expanding the Yard in
+  Grounds unlocks more. Placement is on-field: tap a 🏗 Build toggle → pick from a palette
+  (gold-gated) → tap a ＋ ground spot. Remove = 50% refund. Members visibly **congregate at
+  the station matching their drill** in the wander loop. New module `src/guild/stations.js`
+  (`STATIONS`, `YARD_SLOTS`, `stationBonusFor`, `stationCapacity`, add/remove); `guild.stations`
+  persists; `applyTraining` gained `opts.equipMult`; the ranch build UI lives in `ranch.js`/`ranch.css`.
+  On branch `feat/ranch-training-equipment`.
+- **Pillar B — per-member week schedules (NEXT).** Today one assignment per week; add a
+  **queue** of drills across upcoming weeks per member (the MR schedule screen). Advance Week
+  pops the front. Gives the tournament calendar teeth — plan a peak/taper toward an event.
+- **Pillar C — the curriculum (auto-scheduler).** Fills those queues: everyone takes the **core**
+  (Conditioning→VIT/stamina, Discipline→stress↓/bond↑), their **combat type** picks a **track**
+  (melee/ranged/magic), and each member takes one **elective** = the existing trades
+  (cooking/alchemy/blacksmithing) which **create & slot materia/consumables**. Also the graduation
+  pipeline for Phase-5 minor-league trainees (finish tracks → become a named hero).
+
 ## Relationship to the current codebase
 
 - `src/guild/` already has the bones: `hero` (→ Person), `training`, `diet`, `recruiting`, `calendar`,

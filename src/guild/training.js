@@ -101,7 +101,7 @@ function wearMult(c) { return Math.max(0.2, 1 - ((c.fatigue || 0) + (c.stress ||
  * @param {string} drillId  a DRILLS id, or 'rest'
  * @param {'light'|'heavy'} intensity
  * @param {Object.<string,number>} [dietBias]
- * @param {{injuryBonus?:number}} [opts]  injuryBonus raises the overtraining-injury threshold (Sparring Ring)
+ * @param {{injuryBonus?:number,equipMult?:number}} [opts]  injuryBonus raises the overtraining-injury threshold (Sparring Ring); equipMult scales gains from placed ranch training stations
  * @returns {{gains:Object,drops:Object,rested?:boolean,injured?:boolean,injury:?string}}
  */
 export function applyTraining(hero, drillId, intensity, dietBias = {}, opts = {}) {
@@ -136,7 +136,8 @@ export function applyTraining(hero, drillId, intensity, dietBias = {}, opts = {}
   // heavy-drill gambling interesting opposite the injury ladder.
   const breakthrough = heavy && Math.random() < 0.05;
   const base = GAIN_SCALE * (heavy ? 1.8 : 1.0) * (breakthrough ? 1.5 : 1) * traitMult(hero, 'gain')
-    * wearMult(c) * ageMult(hero) * (0.85 + (c.morale / 100) * 0.3);
+    * wearMult(c) * ageMult(hero) * (0.85 + (c.morale / 100) * 0.3)
+    * (opts.equipMult ?? 1); // placed training stations (ranch equipment) boost their drill
 
   const grow = (stat, factor) => {
     const cur = hero.stats[stat] || 0;

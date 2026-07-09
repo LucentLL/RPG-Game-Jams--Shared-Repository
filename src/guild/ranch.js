@@ -14,11 +14,16 @@
  */
 import { facilityTier } from './guild.js';
 import { formatDate } from './calendar.js';
+import { STATIONS, YARD_SLOTS, stationDef, stationCapacity, canBuild, addStation, removeStation } from './stations.js';
 
 // --- ephemeral module state -------------------------------------------------
 let actors = [];              // [{ id, actor, cv, ax, ay, facing, _wander }]
 let ranchLoopRunning = false; // re-entrancy guard (mirrors actionLoopRunning)
 let grassURI = null;          // baked once
+let _guild = null;            // last guild passed to renderRanch — build actions + wander AI read it
+let _save = null;             // hall's save() hook, so placing/removing equipment persists
+let buildMode = false;        // yard build/place mode (ephemeral UI state, never saved)
+let pickType = null;          // station type currently armed for placement
 
 // Buildings/zones placed on the GS×GS field (tile coords). Rooms → openRoom on tap.
 const RANCH_PROPS = [
@@ -100,7 +105,8 @@ function taskGlyph(h) {
 }
 
 /** Build (or refresh) the ranch DOM and (re)start the wander loop. Call on entry / on roster change. */
-export function renderRanch(guild) {
+export function renderRanch(guild, save) {
+  _guild = guild; if (save) _save = save;
   const screen = document.getElementById('guildScreen');
   if (!screen) return;
   let view = screen.querySelector('.ranch-view');
@@ -132,17 +138,55 @@ export function renderRanch(guild) {
           <span class="rm-name">${(h.name || '').split(' ')[0]}</span>
         </span></button>`).join('');
 
+  // Training stations — placed equipment standing on the yard slots. In build mode
+  // each grows a ✕ to remove it (50% refund, handled in removeStationById).
+  const stationsHTML = (guild.stations || []).map((st) => {
+    const def = stationDef(st.type); const slot = YARD_SLOTS[st.slot];
+    if (!def || !slot) return '';
+    const z = 2 + Math.round(slot.ty * 10);
+    return `<div class="ranch-station" style="left:${slot.tx / GS * 100}%;top:${slot.ty / GS * 100}%;z-index:${z}" title="${def.name} — +${Math.round(def.boost * 100)}% ${def.stat} training">
+        <span class="rm-shadow"></span>
+        <span class="rs-standee"><span class="rs-glyph">${def.glyph}</span><span class="rs-post"></span></span>
+        ${buildMode ? `<button class="rs-remove" title="Remove (${Math.floor(def.cost * 0.5)}g back)" onclick="__guild.ranchRemoveStation('${st.id}')">✕</button>` : ''}
+      </div>`;
+  }).join('');
+
+  // Build mode: ghost markers on every FREE slot within capacity (tap to place the
+  // armed station), plus the build panel (capacity + station palette).
+  let ghostsHTML = '', buildPanelHTML = '';
+  if (buildMode) {
+    const cap = stationCapacity(guild);
+    const taken = new Set((guild.stations || []).map((s) => s.slot));
+    const armed = pickType && canBuild(guild) && guild.gold >= (stationDef(pickType)?.cost || 0);
+    ghostsHTML = YARD_SLOTS.slice(0, cap).map((slot, i) => taken.has(i) ? '' :
+      `<button class="ranch-ghost ${armed ? 'ready' : ''}" style="left:${slot.tx / GS * 100}%;top:${slot.ty / GS * 100}%;z-index:${2 + Math.round(slot.ty * 10)}" title="${pickType ? 'Place here' : 'Pick a station first'}" onclick="__guild.ranchPlace(${i})"><span class="rg-mark">＋</span></button>`).join('');
+    const count = (guild.stations || []).length, full = count >= cap;
+    const items = STATIONS.map((s) => {
+      const dis = full || guild.gold < s.cost;
+      return `<button class="rbld-item ${pickType === s.type ? 'sel' : ''} ${dis ? 'dis' : ''}" onclick="__guild.ranchPick('${s.type}')">
+          <span class="rbld-g">${s.glyph}</span>
+          <span class="rbld-t"><b>${s.name}</b><small>+${Math.round(s.boost * 100)}% ${s.stat} · ☉${s.cost}g</small></span></button>`;
+    }).join('');
+    buildPanelHTML = `<div class="ranch-build">
+        <div class="rbld-head"><span>🏗 Training yard</span><span class="rbld-cap ${full ? 'full' : ''}">${count} / ${cap}</span></div>
+        <div class="rbld-hint">${full ? 'Yard full — upgrade the Training Yard in Grounds for more slots.' : (pickType ? 'Tap a ＋ spot on the grounds to place it.' : 'Pick a station, then tap a spot on the grounds.')}</div>
+        <div class="rbld-list">${items}</div>
+      </div>`;
+  }
+
   view.innerHTML = `
     <div class="ranch-hud">
       <span class="ranch-title">☙ ${guild.name}</span>
       <span class="ranch-meta">☉ <b>${guild.gold}</b>g · ✦ <b>${guild.reputation}</b> · ${formatDate(guild.calendar)}</span>
       <span class="ranch-hud-btns">
+        <button class="ranch-btn ${buildMode ? 'on' : ''}" onclick="__guild.ranchBuild()">🏗 ${buildMode ? 'Done' : 'Build'}</button>
         <button class="ranch-btn adv" onclick="__guild.advanceAll()">▶ Advance Week</button>
       </span>
     </div>
     <div class="ranch-stage">
-      <div class="ranch-field" style="background-image:url(${grassURI})">${decorHTML(GS)}${propsHTML}${membersHTML}</div>
+      <div class="ranch-field" style="background-image:url(${grassURI})">${decorHTML(GS)}${propsHTML}${stationsHTML}${ghostsHTML}${membersHTML}</div>
     </div>
+    ${buildPanelHTML}
     <div class="ranch-menu">
       <button class="rmn-btn" onclick="__guild.enterRoomFromRanch('roster')"><span class="rmn-g">🛡</span>Roster</button>
       <button class="rmn-btn" onclick="__guild.enterRoomFromRanch('calendar')"><span class="rmn-g">📅</span>Calendar</button>
@@ -162,14 +206,31 @@ export function renderRanch(guild) {
   startRanchLoop();
 }
 
+/** ~45% of the time, route a member who's training a drill to a station that boosts
+ *  it — so placed equipment visibly draws its users. Returns a tile point, or null
+ *  (free roam). */
+function stationWanderTarget(id, GS) {
+  if (!_guild || Math.random() > 0.45) return null;
+  const hero = (_guild.roster || []).find((h) => h.id === id);
+  const a = hero && hero.assignment;
+  const drill = a && a.type === 'train' ? a.trainingId : null;
+  if (!drill) return null;
+  const matches = (_guild.stations || []).filter((s) => { const d = stationDef(s.type); return d && d.drill === drill; });
+  if (!matches.length) return null;
+  const slot = YARD_SLOTS[matches[Math.floor(Math.random() * matches.length)].slot];
+  if (!slot) return null;
+  return { tx: Math.max(0.8, Math.min(GS - 0.8, slot.tx + (Math.random() - 0.5) * 0.5)), ty: Math.min(GS - 0.8, slot.ty + 0.55) };
+}
+
 function ranchTick(dt, now) {
   const gfx = window.__ranchGfx; const GS = gfx.GS;
   for (const a of actors) {
     const w = a._wander;
     if (w.state === 'idle' && now >= w.until) {
       w.state = 'move';
-      w.tx = 0.8 + Math.random() * (GS - 1.6);
-      w.ty = 0.8 + Math.random() * (GS - 1.6);
+      const spot = stationWanderTarget(a.id, GS);
+      if (spot) { w.tx = spot.tx; w.ty = spot.ty; }
+      else { w.tx = 0.8 + Math.random() * (GS - 1.6); w.ty = 0.8 + Math.random() * (GS - 1.6); }
     }
     if (w.state === 'move') {
       const dx = w.tx - a.ax, dy = w.ty - a.ay, d = Math.sqrt(dx * dx + dy * dy);
@@ -220,3 +281,27 @@ function startRanchLoop() {
 }
 
 export function stopRanchLoop() { ranchLoopRunning = false; }
+
+// --- yard build mode (Guild Academy Pillar A) -------------------------------
+/** Toggle the equipment build/place mode on the ranch. */
+export function toggleBuild() { buildMode = !buildMode; if (!buildMode) pickType = null; if (_guild) renderRanch(_guild); }
+/** Arm (or un-arm) a station type for placement. */
+export function pickStation(type) { pickType = (pickType === type ? null : type); if (_guild) renderRanch(_guild); }
+/** Place the armed station on yard slot `slotIdx` — charges its gold cost and persists. */
+export function placeStationAt(slotIdx) {
+  if (!_guild || !pickType) return;
+  const def = stationDef(pickType);
+  if (!def || _guild.gold < def.cost) return;
+  const st = addStation(_guild, pickType, slotIdx);
+  if (st) { _guild.gold -= def.cost; if (_save) _save(); }
+  renderRanch(_guild);
+}
+/** Remove a station, refunding half its cost. */
+export function removeStationById(id) {
+  if (!_guild) return;
+  const st = (_guild.stations || []).find((s) => s.id === id);
+  if (st) { const def = stationDef(st.type); if (def) _guild.gold += Math.floor(def.cost * 0.5); }
+  removeStation(_guild, id);
+  if (_save) _save();
+  renderRanch(_guild);
+}
