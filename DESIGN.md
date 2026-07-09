@@ -455,11 +455,32 @@ existing weekly-assignment + training-drill + facility systems.
   waits. `hero.schedule` persists (init/sanitized in `ensureAssignment`); bridge gained
   `scheduleAdd`/`scheduleRemoveAt`/`scheduleClear`. Pairs with the tournament calendar (peak/taper
   toward an event). NEXT: auto-fill from Pillar C's curriculum.
-- **Pillar C — the curriculum (auto-scheduler).** Fills those queues: everyone takes the **core**
-  (Conditioning→VIT/stamina, Discipline→stress↓/bond↑), their **combat type** picks a **track**
-  (melee/ranged/magic), and each member takes one **elective** = the existing trades
-  (cooking/alchemy/blacksmithing) which **create & slot materia/consumables**. Also the graduation
-  pipeline for Phase-5 minor-league trainees (finish tracks → become a named hero).
+- **Pillar C — the curriculum (auto-scheduler, NEXT).** Fills those queues: everyone takes the
+  **core** (Conditioning→VIT/stamina, Discipline→stress↓/bond↑), their **combat type** picks a
+  **track** (melee/ranged/magic), and each member takes one **elective** = the existing trades
+  (cooking/alchemy/blacksmithing) which **create & slot materia/consumables**. It also directs
+  **apprentice** development (below) — a class studies a curriculum, then graduates.
+
+### The Academy — apprentice farm system (SHIPPED 2026-07-09)
+
+The minor-league pipeline (DESIGN.md Phase 5 realized). The guild houses a pool of **unnamed
+apprentices** the player supplies and teaches, then **drafts** the best into named heroes — the
+GM move, and the substrate for succession planning (draft the magic-leaning prospect as your old
+knight retires).
+
+- **`guild.apprentices`** = lightweight `{id, lean, potential, weeks, readiness}`. `lean` = the
+  archetype they'll graduate into (visible, with a glyph); `potential` = a hidden ceiling shown as
+  a 1–5 **star** scout rating.
+- **Supply gates it:** a new **Dormitory** facility caps bunks (3/6/12/24); each apprentice costs
+  weekly **board** (gold, folded into upkeep = food); a **Trainer** on staff (teachers) speeds
+  development. (Books/Library → dev speed = a later hook.)
+- **Weekly development:** `readiness` climbs ~11%/wk (×1.3 with a trainer) → ready in ~9 weeks.
+- **Graduation = the draft:** a manual **Promote** (needs an open quarters slot) runs `graduate()`
+  — reuses `generateRecruit` for name/traits/lifespan, then sets archetype from the lean and lifts
+  starting stats by potential. The graduate joins the roster as a full hero (assignment + schedule).
+- New `src/guild/apprentices.js`; a 🎓 **Academy** room + a 🎓 ranch building; `ARCHETYPES` exported
+  from recruiting. **NEXT:** apprentices develop toward stat/skill/proficiency profiles (not just a
+  readiness bar), a scout report with preferences, and Pillar C driving their curriculum.
 
 ## Relationship to the current codebase
 
