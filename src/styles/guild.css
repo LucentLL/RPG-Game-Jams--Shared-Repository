@@ -372,6 +372,14 @@
 .app-drop { width: 30px; border: 1px solid var(--border); border-radius: 8px; background: rgba(40, 16, 16, 0.4); color: #d09090; cursor: pointer; }
 .app-drop:hover { background: #7a1f1f; color: #fff; }
 
+/* World Cup + the event stakes gradient */
+.tourney-card.worldcup { border-color: #c0504a; box-shadow: 0 0 0 1px rgba(226, 75, 74, 0.22), 0 6px 18px rgba(0, 0, 0, 0.4); }
+.worldcup-tag { color: #f0b8b0 !important; }
+.stakes-line { font-size: 0.72em; }
+.stakes-tournament { color: #8fc48f; }
+.stakes-major { color: #e0b060; }
+.stakes-worldcup { color: #e8908a; }
+
 /* ═══ THE GROUNDS (outdoors / compound view) ═══ */
 /* The illustrated compound: a sky+ground banner with stylized buildings sitting on
    the ground line. 100% CSS/DOM — no canvas, no RAF, so it costs nothing on battery.

@@ -21,8 +21,8 @@ import { RECIPES, getRecipe, previewQuality, forge, study, recipeUnlocked } from
 import { POTION_RECIPES, getPotionRecipe, previewPotency, brew, potionUnlocked, applyPotion } from './alchemy.js';
 import { MATERIALS, createInventory, armoryItems, findItem, addMaterial, gearBonus, EQUIP_SLOTS, findPotion, consumePotion, potionCount } from './inventory.js';
 import { generateQuestBoard, resolveQuest, resolveQuestPlayed } from './quests.js';
-import { nextTournament, resolveTournament, placement, championOdds } from './tournaments.js';
-import { generateSeason, EVENT_TYPES, seasonOf } from './events.js';
+import { nextTournament, resolveTournament, placement, championOdds, stakesOf, competitionHarm } from './tournaments.js';
+import { generateSeason, EVENT_TYPES, seasonOf, ensureWorldCup } from './events.js';
 import { roleFor } from './roles.js';
 import { qualityTier } from './item.js';
 import { MATERIAL_PRICE, buyPrice, itemSellValue, createMarket, refreshMarket } from './market.js';
@@ -162,6 +162,24 @@ function ringOpts(diet) {
     healRate: FACILITIES.infirmary.healRate[facilityTier(guild, 'infirmary')] || 1,
   };
 }
+/** A competitor killed at an event — enshrined in the Hall of Fame (not a silent
+ *  delete), gear returned to the armory for inheritance. Mirrors the age-retirement
+ *  path; caller handles cleaning dangling entrant/spar/selection refs. */
+function fellInGlory(h, t, week) {
+  guild.roster = guild.roster.filter((x) => x.id !== h.id);
+  for (const slot of Object.keys(h.equipped || {})) {
+    const it = findItem(guild.inventory, h.equipped[slot]);
+    if (it) { it.location = 'armory'; closeWielder(it); }
+  }
+  h.retired = true;
+  if (h.career) h.career.fell = t.name;
+  guild.hallOfFame.push({
+    id: h.id, name: h.name, archetype: h.archetype, level: h.level,
+    appearanceSeed: h.appearanceSeed, appearance: h.appearance, prime: h.prime,
+    career: h.career, stats: { ...h.stats }, peakPower: heroPower(h), retiredWeek: week,
+    cause: `fell at ${t.name}`,
+  });
+}
 
 // --- Quartermaster: hand armory gear out by policy ---------------------------
 const itemScore = (it) => (it.quality || 0) * (it.durability ? it.durability.current / (it.durability.max || 100) : 1);
@@ -286,6 +304,7 @@ function load() {
   if (guild.playPlan && !(guild.playPlan.kind && guild.playPlan.id && guild.playPlan.mode)) guild.playPlan = null;
   if (guild.playPlan === undefined) guild.playPlan = null;
   generateSeason(guild); // seed/top-up the typed season so there's always a horizon to train toward
+  ensureWorldCup(guild); // book the looming World Cup (every ~4 years) so it can be seen coming
   if (!Array.isArray(guild.questBoard) || !guild.questBoard.length) guild.questBoard = generateQuestBoard(guild, 3);
   guild.roster.forEach((h) => { migrateHero(h); ensureAssignment(h); });
   const staleRecruits = guild.recruits && guild.recruits[0] && guild.recruits[0].stats && guild.recruits[0].stats.POW === undefined;
@@ -463,6 +482,7 @@ async function advanceAll() {
   // entered lineup (uninjured entrants only), as a small bracket vs an escalating field.
   // The guild is paid once, scaled by placement; competing tires the lineup. ---
   const tournamentResults = [];
+  const deaths = []; // competitors killed at events this week (processed after the loop)
   for (const t of guild.schedule) {
     if (t.resolved || t.week > week) continue; // future events wait; <= week is due (incl. any straggler)
     const lineup = (t.entrants || []).map((id) => heroById(id)).filter((h) => h && !h.condition.injury);
@@ -506,6 +526,7 @@ async function advanceAll() {
     if (gold) addGold(guild, gold);
     if (rep) guild.reputation += rep;
     if (pl.place === 1 && t.rewards.loot) addMaterial(guild.inventory, t.rewards.loot, 1);
+    const hurt = []; // names injured this event (for the recap)
     lineup.forEach((h) => { // competing tires the lineup; a good run lifts morale and teaches Field
       h.condition.stamina = Math.max(0, h.condition.stamina - 20);
       h.condition.fatigue = Math.min(100, h.condition.fatigue + 15);
@@ -520,10 +541,36 @@ async function advanceAll() {
         if (!res.champion) h.career.losses += 1;
         else h.career.titles.push(t.name);
       }
+      // Stakes: competing can hurt — or, at the deadliest events, kill. Risk scales with
+      // the event tier (friendly → major → World Cup), how deep they fought, and how
+      // outmatched they were. An already-injured hero was filtered out of the lineup.
+      const harm = competitionHarm(t, combatPower(h), res);
+      if (Math.random() < harm.deathChance) {
+        deaths.push({ h, t });
+      } else if (Math.random() < harm.injuryChance) {
+        inflictInjury(h, rollInjurySeverity(harm.severityOverflow), ['POW', 'SKL', 'DEF', 'SPD'][Math.floor(Math.random() * 4)]);
+        hurt.push(h.name.split(' ')[0]);
+      }
     });
     t.resolved = true;
     t.result = { placement: pl.label, place: pl.place, wins: res.wins, rounds: res.rounds, gold, rep };
-    tournamentResults.push({ name: t.name, rank: t.rank, eventType: t.type, played: !!res.played, placement: pl.label, champion: pl.place === 1, gold, rep, party: lineup.length, loot: pl.place === 1 ? t.rewards.loot : null });
+    tournamentResults.push({ name: t.name, rank: t.rank, eventType: t.type, played: !!res.played, placement: pl.label, champion: pl.place === 1, gold, rep, party: lineup.length, loot: pl.place === 1 ? t.rewards.loot : null, hurt });
+  }
+
+  // Deaths (the World-Cup stakes): enshrine the fallen in the Hall of Fame, then clear
+  // their dangling references — future entrants, spar partners, the selection — before
+  // the week resolves. A freed roster slot is exactly what the Academy is bred to fill.
+  if (deaths.length) {
+    const gone = new Set(deaths.map((d) => d.h.id));
+    for (const { h, t } of deaths) {
+      fellInGlory(h, t, week);
+      tournamentResults.push({ name: t.name, rank: t.rank, eventType: t.type, casualty: h.name });
+    }
+    for (const h of guild.roster) {
+      if (h.assignment.sparWith && gone.has(h.assignment.sparWith)) { h.assignment.sparWith = null; h.assignment.trainingId = 'rest'; }
+    }
+    for (const tt of guild.schedule) if (!tt.resolved) tt.entrants = (tt.entrants || []).filter((id) => !gone.has(id));
+    if (selectedId && gone.has(selectedId)) selectedId = guild.roster[0] ? guild.roster[0].id : null;
   }
 
   // Snapshot injuries at the START of the week: a member who bruises themselves mid-loop
@@ -683,6 +730,7 @@ async function advanceAll() {
   guild.questBoard = generateQuestBoard(guild, 3);
   guild.recruits = rollRecruitPool(3);
   generateSeason(guild); // drop the just-resolved event(s) and keep the season paced ahead
+  ensureWorldCup(guild); // re-book the next World Cup once one resolves
   report = { income, upkeep, shortfall, results, issued, tournaments: tournamentResults };
   guild.lastReport = report; // persist the recap — it used to vanish on reload
   notice = '';
@@ -1065,12 +1113,14 @@ function recapPanel() {
   const qm = rep.issued ? `<div class="r-line dim">🎽 quartermaster issued ${rep.issued} item(s) from stores</div>` : '';
   const tLines = (rep.tournaments || []).map((t) => {
     const glyph = (EVENT_TYPES[t.eventType] || {}).glyph || '🏆';
+    if (t.casualty) return `<div class="r-line"><span class="down">☠ <b>${t.casualty}</b> fell at ${t.name} — enshrined in the Hall of Fame. A slot opens for the next to rise.</span></div>`;
     if (t.forfeit) return `<div class="r-line">${glyph} <b>${t.name}</b> <span class="down">${t.hadEntrants ? 'forfeited — entrants unfit to compete' : 'passed — no one entered'}</span></div>`;
     const loot = t.loot ? ` +1 ${MATERIALS[t.loot].name}` : '';
     const team = t.party > 1 ? ` <span class="dim">(team of ${t.party})</span>` : '';
     const pay = t.gold || t.rep ? ` — <span class="up">+${t.gold}g · +${t.rep} rep${loot}</span>` : '';
     const played = t.played ? ' <span class="dim">· fought by hand</span>' : '';
-    return `<div class="r-line">${glyph} <b>${t.name}</b> · <span class="${t.champion ? 'up' : ''}">${t.placement}</span>${pay}${team}${played}</div>`;
+    const hurtTxt = (t.hurt && t.hurt.length) ? ` <span class="down">⚠ ${t.hurt.join(', ')} hurt</span>` : '';
+    return `<div class="r-line">${glyph} <b>${t.name}</b> · <span class="${t.champion ? 'up' : ''}">${t.placement}</span>${pay}${team}${played}${hurtTxt}</div>`;
   }).join('');
   return `<div class="week-report"><h4>Last week</h4>${tLines}${lines}${qm}<div class="r-line">income <span class="up">+${rep.income}g</span> · upkeep <span class="down">−${rep.upkeep}g</span>${rep.shortfall ? ' · <span class="down">insolvent — morale −8 all</span>' : ''}</div></div>`;
 }
@@ -1477,9 +1527,11 @@ function tournamentCard(t) {
     : '<span class="dim" style="font-size:0.82em">No champion chosen.</span>';
   const avail = guild.roster.filter((h) => !entrant || h.id !== entrant.id);
   const addChips = avail.map((h) => `<button class="hs-chip add" title="Send ${h.name}" onclick="__guild.enterTournament('${t.id}','${h.id}')">${personSprite(h, 42)}</button>`).join('');
-  return `<div class="plan-card tourney-card ${weeksOut <= 1 ? 'imminent' : ''} ${t.type === 'major' ? 'major' : ''}">
+  return `<div class="plan-card tourney-card ${weeksOut <= 1 ? 'imminent' : ''} ${t.type === 'major' ? 'major' : ''} ${t.type === 'worldcup' ? 'worldcup' : ''}">
       <div class="tourney-head"><span class="tourney-name">${(EVENT_TYPES[t.type] || {}).glyph || '🏆'} ${t.name}</span><span class="q-rank">R${t.rank}</span><span class="tourney-when">${when}</span></div>
       ${t.type === 'major' ? '<div class="rr-sub major-tag">👑 The season’s tentpole — double purse, one rank up, a deeper bracket.</div>' : ''}
+      ${t.type === 'worldcup' ? '<div class="rr-sub major-tag worldcup-tag">🌍 The World Cup — once every four years. The richest purse in the game, and the only bracket that can kill.</div>' : ''}
+      <div class="rr-sub stakes-line stakes-${t.type}">${stakesOf(t).glyph} <b>${stakesOf(t).tier}</b> · ${stakesOf(t).danger}</div>
       <div class="rr-sub">Field ~${t.field}⚡ · best of ${t.rounds} · Champion <span class="up">${t.rewards.gold}g · +${t.rewards.reputation} rep${loot}</span></div>
       <div class="tourney-odds">${odds}</div>
       ${fit && weeksOut <= 1

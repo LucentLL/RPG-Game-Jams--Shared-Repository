@@ -11,7 +11,7 @@
  * display identity (and, as later keystones land festivals/errantries/rivals, their
  * generators and resolvers). Old saves migrate in hall.js load() (type → 'tournament').
  */
-import { createTournament, generateTournament } from './tournaments.js';
+import { createTournament, generateTournament, generateWorldCup, WORLD_CUP_CADENCE } from './tournaments.js';
 
 /** Four 12-week seasons per 48-week year. */
 export const SEASONS = ['Spring', 'Summer', 'Autumn', 'Winter'];
@@ -29,6 +29,7 @@ const MAJOR_NAMES = ['The Rite of Blossoms', 'The Solstice Crucible', 'The Harve
 export const EVENT_TYPES = {
   tournament: { glyph: '🏆', name: 'Tournament', blurb: 'a monthly open bracket' },
   major:      { glyph: '👑', name: 'Seasonal Major', blurb: 'the season’s tentpole — double purse, brutal field' },
+  worldcup:   { glyph: '🌍', name: 'World Cup', blurb: 'once every four years — the deadliest bracket; win it or fall trying' },
 };
 
 /** weekOfYear (1..48) for an absolute week, anchored on the current calendar. */
@@ -61,7 +62,7 @@ export function generateSeason(guild, horizon = 14) {
       // place (entrants preserved) rather than silently cancelling the season's
       // tentpole (review fix).
       if (seasonWeek === 12) {
-        const t = guild.schedule.find((x) => x.week === w && !x.resolved && x.type !== 'major');
+        const t = guild.schedule.find((x) => x.week === w && !x.resolved && x.type !== 'major' && x.type !== 'worldcup');
         if (t) {
           t.type = 'major';
           t.name = MAJOR_NAMES[Math.floor((wy - 1) / 12)] || 'The Grand Crucible';
@@ -90,6 +91,27 @@ export function generateSeason(guild, horizon = 14) {
       booked.add(w);
     }
   }
+  guild.schedule.sort((a, b) => a.week - b.week);
+  return guild.schedule;
+}
+
+/**
+ * Keep the next World Cup on the calendar. World Cups land every WORLD_CUP_CADENCE
+ * weeks; we book the upcoming one as soon as it's computed so the guild can SEE it
+ * looming for years and breed a successor for it. If a minor/major already squats on
+ * that week, it's promoted in place (entrants preserved). Call after generateSeason.
+ * @param {import('./guild.js').Guild} guild
+ */
+export function ensureWorldCup(guild) {
+  const cal = guild.calendar;
+  const next = Math.ceil((cal.week + 1) / WORLD_CUP_CADENCE) * WORLD_CUP_CADENCE; // next cadence multiple after now
+  guild.schedule = (guild.schedule || []).filter((t) => !t.resolved);
+  if (guild.schedule.some((t) => t.type === 'worldcup' && t.week === next)) return; // already booked
+  const repRank = Math.min(4, 1 + Math.floor((guild.reputation || 0) / 60));
+  const wc = generateWorldCup(Math.min(4, repRank + 1), next);
+  const existing = guild.schedule.find((t) => t.week === next && !t.resolved);
+  if (existing) Object.assign(existing, wc, { id: existing.id, entrants: existing.entrants }); // promote in place
+  else guild.schedule.push(wc);
   guild.schedule.sort((a, b) => a.week - b.week);
   return guild.schedule;
 }
