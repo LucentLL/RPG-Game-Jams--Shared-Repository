@@ -34,6 +34,13 @@ export const S = {
   _snapshotIntervalMap: new Map(), // entity -> boundary times (seconds)
   _snapshotPathMap: new Map(),     // entity -> movement path steps
   _snapshotStartMap: new Map(),    // entity -> {x, y, facing}
+  // Arena terrain — set by generateArena() (engine/terrain.js); read by the
+  // combat engine and the grid renderer. Bridged onto window so crucible.js's
+  // remaining bare-name reads (arenaName/arenaPassable/arenaTerrainCost) resolve.
+  arenaElevation: null,
+  arenaPassable: null,
+  arenaTerrainCost: null,
+  arenaName: '',
 };
 
 if (typeof window !== 'undefined') {
