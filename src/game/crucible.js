@@ -45,6 +45,8 @@ import {
   BF_TEMPLATES,
 } from './data/arena-templates.js';
 import { gearLevel, getRefineChance, getDrillChance, getLinkChance } from './items/blacksmithing.js';
+import { rollStats, deriveStats } from './items/stat-gen.js';
+import { generateGearPiece, generateDraftPool, generateGearPieceOfType } from './items/gear-gen.js';
 import { tileRng, elementsRng, rollDice, statMod, matXpNeeded, randInt, pick } from './engine/rng.js';
 import { drawProceduralTile, drawGrass } from './engine/procedural-tiles.js';
 import { generateArena, isCellPassable, getCellCost, getCellElevation, canTraverseTerrain, bfsNextStep, renderBattlefield } from './engine/terrain.js';
@@ -1284,86 +1286,7 @@ function showScreen(id){
   document.getElementById(id).classList.add('active');
 }
 
-// ═══ STAT GENERATION (§3) ═══
-function rollStats(){
-  var stats={};
-  ['STR','DEX','CON','INT','WIS','CHA'].forEach(function(s){
-    // 8 + sum(3d6 keep highest 2)
-    var rolls=[];
-    for(var i=0;i<3;i++)rolls.push(Math.floor(Math.random()*6)+1);
-    rolls.sort(function(a,b){return b-a});
-    stats[s]=8+rolls[0]+rolls[1];
-  });
-  return stats;
-}
-function deriveStats(stats){
-  var dexMod=Math.floor((stats.DEX-10)/2);
-  return{
-    hp:20+stats.CON*2,
-    ac:10+dexMod,
-    speed:Math.max(2,Math.min(6,3+dexMod)),
-    proficiency:2
-  };
-}
-
-// ═══ GEAR GENERATION (§4) ═══
-function generateGearPiece(round){
-  var gt=pick(GEAR_TYPES);
-  return generateGearPieceOfType(gt,round);
-}
-
-function generateDraftPool(round){
-  // 12 pieces: guarantee at least 2 weapons, 1 shield, 2 body, 2 head, 2 lower
-  var pool=[];
-  var weaponTypes=GEAR_TYPES.filter(function(g){return g.pos==='Hand'&&WEAPON_GEAR_TYPES.indexOf(g.type)>=0});
-  var shieldTypes=GEAR_TYPES.filter(function(g){return g.pos==='Hand'&&SHIELD_GEAR_TYPES.indexOf(g.type)>=0});
-  var bodyTypes=GEAR_TYPES.filter(function(g){return g.pos==='Body'});
-  var headTypes=GEAR_TYPES.filter(function(g){return g.pos==='Head'});
-  var lowerTypes=GEAR_TYPES.filter(function(g){return g.pos==='Lower'});
-  for(var w=0;w<2;w++)pool.push(generateGearPieceOfType(pick(weaponTypes),round));
-  for(var s=0;s<1;s++)pool.push(generateGearPieceOfType(pick(shieldTypes),round));
-  for(var b=0;b<2;b++)pool.push(generateGearPieceOfType(pick(bodyTypes),round));
-  for(var h=0;h<2;h++)pool.push(generateGearPieceOfType(pick(headTypes),round));
-  for(var lo=0;lo<2;lo++)pool.push(generateGearPieceOfType(pick(lowerTypes),round));
-  // Fill remaining randomly
-  for(var i=0;i<3;i++)pool.push(generateGearPiece(round));
-  // Shuffle
-  for(var j=pool.length-1;j>0;j--){
-    var k=Math.floor(Math.random()*(j+1));
-    var t=pool[j];pool[j]=pool[k];pool[k]=t;
-  }
-  return pool;
-}
-
-function generateGearPieceOfType(gt,round){
-  var tier=Math.min(6,round-1);
-  var sockets=randInt(gt.sMin,gt.sMax);
-  // Fill rate scales with round: R1=40%, R3=65%, R5=85%, R7=100%
-  var fillChance=Math.min(1.0,0.3+round*0.1);
-  var materia=[];
-  for(var i=0;i<sockets;i++){
-    if(Math.random()<fillChance){
-      var pIdx=randInt(0,PLANETS.length-1);
-      var lvl=1;
-      if(round>=5)lvl=randInt(2,Math.min(4,round-2));
-      else if(round>=3)lvl=randInt(1,2);
-      materia.push({planetIdx:pIdx,level:lvl,xp:0});
-    }
-  }
-  // Links: only between adjacent filled sockets
-  var maxLinks=Math.max(0,materia.length-1);
-  var links=0;
-  for(var j=0;j<maxLinks;j++){
-    if(Math.random()<0.1+(round*0.06))links++;
-  }
-  var matArr=GEAR_MATERIALS[tier];
-  return{
-    id:Math.random().toString(36).substr(2,8),
-    name:pick(matArr)+' '+gt.type,type:gt.type,pos:gt.pos,icon:gt.icon,
-    sockets:sockets,materia:materia,links:links,
-    tier:tier,refinement:0,stressed:false,scarred:false,noExterior:false
-  };
-}
+// ═══ STAT + GEAR GENERATION — extracted to items/stat-gen.js + items/gear-gen.js ═══
 
 // ═══ RENDER GEAR CARD ═══
 // Produces inline HTML for a small pixel-art gear icon. Use this anywhere
