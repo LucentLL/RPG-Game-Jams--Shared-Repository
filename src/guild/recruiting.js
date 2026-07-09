@@ -9,7 +9,7 @@ import { createHero, HERO_STATS, STAT_CAP, TRAITS } from './hero.js';
  * Archetypes with per-stat growth talents (1 = normal, 3 = gifted, 0.5 = weak).
  * Growth multiplies training gains, so talents shape a hero's long-term ceiling-pace.
  */
-const ARCHETYPES = [
+export const ARCHETYPES = [
   { name: 'Knight',    growth: { POW: 3, DEF: 3, SKL: 2, SPD: 1, INT: 0.5, VIT: 2 } },
   { name: 'Mage',      growth: { POW: 0.5, DEF: 1, SKL: 2, SPD: 2, INT: 3, VIT: 2 } },
   { name: 'Ranger',    growth: { POW: 2, DEF: 1, SKL: 3, SPD: 3, INT: 1, VIT: 1 } },

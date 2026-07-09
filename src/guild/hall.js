@@ -11,6 +11,7 @@
 import { createGuild, FACILITIES, maxRoster, facilityTier, fedCapacity } from './guild.js';
 import { HERO_STATS, heroPower, STAT_CAP, lifeStage, lifeFrac, TRAITS, traitMult } from './hero.js';
 import { generateRecruit, hireCost, rollRecruitPool } from './recruiting.js';
+import { makeApprentice, normalizeApprentice, dormCapacity, academyBoard, developApprentice, developmentRate, graduate, potentialStars, LEAN_GLYPH, APPRENTICE_INTAKE } from './apprentices.js';
 import { DRILLS, REST, getDrill, applyTraining, applySpar, injuryLabel, previewInjuryChance, inflictInjury, rollInjurySeverity } from './training.js';
 import { stationBonusFor } from './stations.js';
 import { DIET_PLANS, getDietPlan, applyDiet } from './diet.js';
@@ -63,6 +64,7 @@ const ROOMS = [
   { id: 'armory', glyph: '🗡', name: 'Armory', tag: 'STORAGE' },
   { id: 'laboratory', glyph: '⚗', name: 'Laboratory', tag: 'WORK' },
   { id: 'quarters', glyph: '🍺', name: 'Quarters', tag: 'LIVING' },
+  { id: 'academy', glyph: '🎓', name: 'Academy', tag: 'LIVING' },
 ];
 function getRoom(id) { return ROOMS.find((r) => r.id === id) || null; }
 
@@ -273,6 +275,7 @@ function load() {
     if (typeof guild.facilities[k] !== 'number' || guild.facilities[k] < 0) guild.facilities[k] = 0;
   }
   if (!Array.isArray(guild.stations)) guild.stations = []; // ranch training equipment (Guild Academy Pillar A)
+  guild.apprentices = Array.isArray(guild.apprentices) ? guild.apprentices.map(normalizeApprentice).filter(Boolean) : []; // academy pool
   if (!Array.isArray(guild.hallOfFame)) guild.hallOfFame = [];
   if (guild.trainer === undefined) guild.trainer = null;
   if (!Array.isArray(guild.schedule)) guild.schedule = []; // tournament calendar (added with the season loop)
@@ -402,7 +405,7 @@ async function advanceAll() {
   try {
   const income = guildIncome(guild);            // patron retainer (stopgap until quest income)
   addGold(guild, income);
-  const upkeep = weeklyUpkeep(guild, getDietPlan);
+  const upkeep = weeklyUpkeep(guild, getDietPlan) + academyBoard(guild); // wages/diet + apprentice board (food)
   const shortfall = Math.max(0, upkeep - guild.gold); // can't fully pay wages this week?
   addGold(guild, -upkeep);
   const week = guild.calendar.week;
@@ -673,6 +676,8 @@ async function advanceAll() {
       h.assignment.sparWith = null; // planned weeks are solo drills
     }
   }
+  // Academy (farm system): apprentices develop toward graduation each week (board billed via upkeep above).
+  for (const a of (guild.apprentices || [])) developApprentice(a, guild);
   advanceWeek(guild.calendar);
   refreshMarket(guild.market);
   guild.questBoard = generateQuestBoard(guild, 3);
@@ -1094,6 +1099,7 @@ function roomStatus(id) {
     case 'kitchen': return 'set diets';
     case 'armory': { const n = guild.inventory.items.length; return `${n} item${n === 1 ? '' : 's'}`; }
     case 'quarters': return `${guild.recruits.length} for hire`;
+    case 'academy': { const a = guild.apprentices || []; const ready = a.filter((x) => x.readiness >= 1).length; return ready ? `${a.length} · ${ready} ready` : `${a.length}/${dormCapacity(guild)} bunks`; }
     case 'laboratory': { const n = r.filter((h) => h.assignment.type === 'brew').length; return n ? `${n} brewing` : 'idle'; }
     case 'apothecary': { const n = potionCount(guild.inventory); return `${n} potion${n === 1 ? '' : 's'}`; }
     default: return '';
@@ -1225,6 +1231,68 @@ function quartersRoom() {
       ${guild.roster.length >= maxRoster(guild) ? '<div class="hint">Quarters are full — expand Living Quarters in the 🏕 Grounds to house more.</div>' : ''}
     </div>`;
 }
+
+// --- Academy (the minor-league / farm system) -------------------------------
+/** One apprentice card: lean, scouted potential (stars), readiness bar, graduate/release. */
+function apprenticeCard(a) {
+  const stars = potentialStars(a.potential);
+  const starStr = '★'.repeat(stars) + '☆'.repeat(5 - stars);
+  const pct = Math.round(a.readiness * 100);
+  const ready = a.readiness >= 1;
+  const rosterFull = guild.roster.length >= maxRoster(guild);
+  const gradLabel = ready ? (rosterFull ? '🎓 Roster full' : '🎓 Graduate → roster') : `Developing · ${pct}%`;
+  return `<div class="app-card ${ready ? 'ready' : ''}">
+      <div class="app-head"><span class="app-lean">${LEAN_GLYPH[a.lean] || '🎓'} Leans ${a.lean}</span><span class="app-stars" title="scouted potential">${starStr}</span></div>
+      <div class="app-bar"><span style="width:${pct}%"></span></div>
+      <div class="app-meta">${ready ? '<b>Ready to graduate</b>' : `week ${a.weeks} in the academy`}</div>
+      <div class="app-actions">
+        <button class="app-grad" ${ready && !rosterFull ? '' : 'disabled'} onclick="__guild.promoteApprentice('${a.id}')">${gradLabel}</button>
+        <button class="app-drop" title="Release this apprentice" onclick="__guild.dismissApprentice('${a.id}')">✕</button>
+      </div>
+    </div>`;
+}
+function academyRoom() {
+  const apps = guild.apprentices || [];
+  const cap = dormCapacity(guild);
+  const board = apps.length * 6;
+  const canTake = apps.length < cap;
+  const rate = Math.round(developmentRate(guild) * 100);
+  const cards = apps.length
+    ? apps.map(apprenticeCard).join('')
+    : '<div class="hint">No apprentices yet. Take one in to start your farm system — house them, feed them, and graduate the best into named heroes.</div>';
+  return `<div class="plan-card">
+      <div class="plan-title">🎓 Academy · ${apps.length}/${cap} bunks · board ${board}g/wk</div>
+      <div class="hint" style="text-align:left">Apprentices develop ~${rate}%/week${guild.trainer ? ' (your trainer mentors the class)' : ' — appoint a trainer to teach faster'}. When one is ready, graduate them into a named hero — a draft shaped by their lean &amp; potential. Bunks = the 🎓 Dormitory (expand in 🏕 Grounds).</div>
+      <button class="app-take" ${canTake ? '' : 'disabled'} onclick="__guild.takeApprentice()">${canTake ? `＋ Take in an apprentice · ☉${APPRENTICE_INTAKE}g` : 'Dormitory full — expand it in the Grounds'}</button>
+      <div class="app-list">${cards}</div>
+    </div>`;
+}
+function takeApprentice() {
+  if (!Array.isArray(guild.apprentices)) guild.apprentices = [];
+  if (guild.apprentices.length >= dormCapacity(guild)) { notice = 'The Dormitory is full — expand it in the 🏕 Grounds.'; render(); return; }
+  if (guild.gold < APPRENTICE_INTAKE) { notice = `Taking in an apprentice costs ${APPRENTICE_INTAKE}g.`; render(); return; }
+  addGold(guild, -APPRENTICE_INTAKE);
+  guild.apprentices.push(makeApprentice());
+  save(); render();
+}
+function promoteApprentice(id) {
+  const i = (guild.apprentices || []).findIndex((a) => a.id === id);
+  if (i < 0) return;
+  const app = guild.apprentices[i];
+  if (app.readiness < 1) { notice = 'That apprentice is not ready to graduate yet.'; render(); return; }
+  if (guild.roster.length >= maxRoster(guild)) { notice = `Quarters are full (${maxRoster(guild)}). Expand Living Quarters before graduating.`; render(); return; }
+  const hero = graduate(app);
+  migrateHero(hero); ensureAssignment(hero);
+  guild.roster.push(hero);
+  guild.apprentices.splice(i, 1);
+  selectedId = hero.id;
+  notice = `🎓 ${hero.name} graduated from the academy as a ${hero.archetype}!`;
+  save(); render();
+}
+function dismissApprentice(id) {
+  guild.apprentices = (guild.apprentices || []).filter((a) => a.id !== id);
+  save(); render();
+}
 function roomStub(room) {
   return `<div class="plan-card room-soon">
       <div class="room-soon-glyph">${room.glyph}</div>
@@ -1248,6 +1316,7 @@ function facilityEffect(key, t) {
   if (key === 'yard') { const p = Math.round((def.mainMult[t] - 1) * 100); return p ? `+${p}% training` : 'standard training'; }
   if (key === 'ring') return def.injuryBonus[t] ? `+${def.injuryBonus[t]} injury guard` : 'no injury guard';
   if (key === 'infirmary') return def.healRate[t] > 1 ? `injuries heal ×${def.healRate[t]}` : 'bed rest only';
+  if (key === 'dorm') return `${def.beds[t]} bunks`;
   return '';
 }
 
@@ -1588,6 +1657,7 @@ function renderRoom(id) {
     case 'apothecary': return hdr + apothecaryRoom();
     case 'armory': return hdr + armoryRoom();
     case 'quarters': return hdr + quartersRoom();
+    case 'academy': return hdr + academyRoom();
     default: return renderHub();
   }
 }
@@ -1710,7 +1780,7 @@ export function openGuild() {
 // Every handler no-ops while a week is advancing (a played battle can be mid-flight;
 // rail buttons still render behind the battle screen and would corrupt the in-flight
 // week). practiceBout/advanceAll keep their own internal checks as a second belt.
-const __guildApi = { selectHero, setActivity, setTraining, setIntensity, scheduleAdd, scheduleRemoveAt, scheduleClear, setRecipe, setPotion, setDiscipline, usePotion, setDiet, setQuest, assignTo, setSpar, equipItem, unequipSlot, setPolicy, provision, buyMaterial, sellItem, hire, advanceAll, back, openRoom, toggleFullscreen, upgradeFacility, enterTournament, leaveTournament, setPlayNext, setPlayQuest, setAskTournaments, appointTrainer, practiceBout, openRanch, enterRoomFromRanch, manageMemberFromRanch, ranchBuild: toggleBuild, ranchPick: pickStation, ranchPlace: placeStationAt, ranchRemoveStation: removeStationById };
+const __guildApi = { selectHero, setActivity, setTraining, setIntensity, scheduleAdd, scheduleRemoveAt, scheduleClear, setRecipe, setPotion, setDiscipline, usePotion, setDiet, setQuest, assignTo, setSpar, equipItem, unequipSlot, setPolicy, provision, buyMaterial, sellItem, hire, takeApprentice, promoteApprentice, dismissApprentice, advanceAll, back, openRoom, toggleFullscreen, upgradeFacility, enterTournament, leaveTournament, setPlayNext, setPlayQuest, setAskTournaments, appointTrainer, practiceBout, openRanch, enterRoomFromRanch, manageMemberFromRanch, ranchBuild: toggleBuild, ranchPick: pickStation, ranchPlace: placeStationAt, ranchRemoveStation: removeStationById };
 window.__guild = {};
 for (const k in __guildApi) {
   window.__guild[k] = (...args) => {

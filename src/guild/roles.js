@@ -28,6 +28,7 @@ export const ROLES = {
   apothecary: { name: 'Apothecary',    glyph: '🏺', kind: 'storage', skill: 'alchemy',       blurb: 'Keeps & dispenses potions and supplies.' },
   laboratory: { name: 'Alchemist',     glyph: '⚗', kind: 'work',    skill: 'alchemy',       blurb: 'Brews potions from gathered herbs.' },
   quarters:   { name: 'Steward',       glyph: '🍺', kind: 'living',  skill: null,           blurb: 'Runs the hall and takes on recruits.' },
+  academy:    { name: 'The Academy',    glyph: '🎓', kind: 'living',  skill: null,           blurb: 'Houses & teaches apprentices; graduate them into named heroes.' },
 };
 
 /** @param {string} roomId @returns {?Role} */

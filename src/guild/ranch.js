@@ -34,6 +34,7 @@ const RANCH_PROPS = [
   { glyph: '🗡', name: 'Armory', room: 'armory', tx: 7.5, ty: 5.6 },
   { glyph: '🍲', name: 'Kitchen', room: 'kitchen', tx: 3.0, ty: 7.5 },
   { glyph: '⚔', name: 'Arena', room: 'arena', tx: 6.4, ty: 7.4 },
+  { glyph: '🎓', name: 'Academy', room: 'academy', tx: 8.4, ty: 6.6 },
 ];
 
 // Environmental dressing (Pixy-Garden set dressing, MR-ranch density): CSS trees,
