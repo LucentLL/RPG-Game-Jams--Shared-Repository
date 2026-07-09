@@ -445,9 +445,16 @@ existing weekly-assignment + training-drill + facility systems.
   (`STATIONS`, `YARD_SLOTS`, `stationBonusFor`, `stationCapacity`, add/remove); `guild.stations`
   persists; `applyTraining` gained `opts.equipMult`; the ranch build UI lives in `ranch.js`/`ranch.css`.
   On branch `feat/ranch-training-equipment`.
-- **Pillar B — per-member week schedules (NEXT).** Today one assignment per week; add a
-  **queue** of drills across upcoming weeks per member (the MR schedule screen). Advance Week
-  pops the front. Gives the tournament calendar teeth — plan a peak/taper toward an event.
+- **Pillar B — per-member week schedules (SHIPPED 2026-07-09).** Each hero has a `schedule` =
+  a FIFO queue of upcoming training weeks `{trainingId, intensity}` (this week stays the live
+  `assignment`; the queue is the weeks *after*). The Train panel has a **📅 Plan ahead** row: set
+  Light/Heavy, tap `+ POW` etc. to append (each item captures the intensity it was added at — so
+  you can queue "POW heavy → SPD light"), ✕ to drop, clear to reset (cap 8). On Advance Week a
+  post-pass shifts each training hero's queue front into their assignment, so a plan plays out
+  automatically; a hero on a non-training activity (quest/forge) doesn't consume the plan — it
+  waits. `hero.schedule` persists (init/sanitized in `ensureAssignment`); bridge gained
+  `scheduleAdd`/`scheduleRemoveAt`/`scheduleClear`. Pairs with the tournament calendar (peak/taper
+  toward an event). NEXT: auto-fill from Pillar C's curriculum.
 - **Pillar C — the curriculum (auto-scheduler).** Fills those queues: everyone takes the **core**
   (Conditioning→VIT/stamina, Discipline→stress↓/bond↑), their **combat type** picks a **track**
   (melee/ranged/magic), and each member takes one **elective** = the existing trades

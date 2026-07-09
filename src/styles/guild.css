@@ -335,6 +335,20 @@
 .injury-flag { border: 1px solid var(--danger); background: rgba(239, 68, 68, 0.1); color: var(--danger);
   border-radius: 8px; padding: 6px 10px; margin-bottom: 10px; font-size: 0.76em; text-align: center; }
 
+/* Plan-ahead training queue (Pillar B) */
+.sched-queue { display: flex; flex-wrap: wrap; gap: 5px; margin-bottom: 7px; min-height: 4px; }
+.sched-chip { display: inline-flex; align-items: center; gap: 5px; padding: 3px 4px 3px 9px; font-size: 0.72em;
+  color: #e8dfce; background: rgba(20, 16, 10, 0.6); border: 1px solid var(--dim); border-radius: 14px; }
+.sched-chip button { width: 17px; height: 17px; border-radius: 50%; border: 1px solid var(--border);
+  background: rgba(60, 20, 20, 0.6); color: #e8b0b0; font-size: 0.85em; line-height: 1; cursor: pointer; }
+.sched-chip button:hover { background: #7a1f1f; color: #fff; }
+.sched-add { display: flex; flex-wrap: wrap; gap: 5px; margin-bottom: 16px; }
+.sched-btn { padding: 4px 9px; font-size: 0.72em; font-family: 'Cinzel', serif; letter-spacing: 0.04em;
+  color: var(--silver); background: rgba(0, 0, 0, 0.28); border: 1px solid var(--border); border-radius: 8px; cursor: pointer; transition: all 0.12s; }
+.sched-btn:hover { border-color: var(--gold); color: var(--gold); }
+.sched-btn.clear { margin-left: auto; color: var(--muted); }
+.sched-btn.clear:hover { border-color: var(--danger); color: var(--danger); }
+
 /* ═══ THE GROUNDS (outdoors / compound view) ═══ */
 /* The illustrated compound: a sky+ground banner with stylized buildings sitting on
    the ground line. 100% CSS/DOM — no canvas, no RAF, so it costs nothing on battery.

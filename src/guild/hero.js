@@ -77,6 +77,8 @@ export function createHero(init = {}) {
     lifespan: init.lifespan ?? 300,
     dietPlanId: init.dietPlanId || null,
     assignment: init.assignment || null,
+    schedule: init.schedule || [], // Pillar B: queued FUTURE training weeks [{trainingId,intensity}]; Advance Week shifts the front into `assignment`
+
     loadout: init.loadout || { gear: {}, materia: [] },
     professions: init.professions || { blacksmithing: { theory: 0, practice: 0, field: 0 }, alchemy: { theory: 0, practice: 0, field: 0 } },
     equipped: init.equipped || {}, // slot -> itemId (real Phase-1 armory items)

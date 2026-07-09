@@ -214,6 +214,8 @@ function ensureAssignment(h) {
     dietId: getDietPlan(a.dietId) ? a.dietId : (getDietPlan(h.dietPlanId) ? h.dietPlanId : 'balanced'),
   };
   if (!h.dietPlanId) h.dietPlanId = h.assignment.dietId;
+  if (!Array.isArray(h.schedule)) h.schedule = []; // Pillar B: multi-week training plan
+  else h.schedule = h.schedule.filter((p) => p && (p.trainingId === 'rest' || getDrill(p.trainingId))).slice(0, 8); // sanitize legacy/oversized queues
 }
 
 // Migrate old saves: D&D stats -> MR stats, and add professions/equipped/inventory.
@@ -311,6 +313,18 @@ function setSpar(partnerId) {
   save(); render();
 }
 function setIntensity(level) { const h = heroById(selectedId); if (h) { h.assignment.intensity = level === 'heavy' ? 'heavy' : 'light'; h.assignment.type = 'train'; h.assignment.questId = null; save(); render(); } }
+// Pillar B — the multi-week training plan. Adds capture the CURRENT intensity toggle,
+// so you can queue "POW heavy, then SPD light" by flipping intensity between adds.
+function scheduleAdd(drillId) {
+  const h = heroById(selectedId); if (!h) return;
+  if (!Array.isArray(h.schedule)) h.schedule = [];
+  if (h.schedule.length >= 8) return; // cap the plan at 8 weeks out
+  const id = (drillId === 'rest' || getDrill(drillId)) ? drillId : 'pow';
+  h.schedule.push({ trainingId: id, intensity: h.assignment.intensity === 'heavy' ? 'heavy' : 'light' });
+  save(); render();
+}
+function scheduleRemoveAt(i) { const h = heroById(selectedId); if (h && Array.isArray(h.schedule)) { h.schedule.splice(i, 1); save(); render(); } }
+function scheduleClear() { const h = heroById(selectedId); if (h) { h.schedule = []; save(); render(); } }
 function setRecipe(id) { const h = heroById(selectedId); if (h) { h.assignment.recipeId = id; h.assignment.type = 'forge'; h.assignment.questId = null; save(); render(); } }
 function setPotion(id) { const h = heroById(selectedId); if (h) { h.assignment.potionId = id; h.assignment.type = 'brew'; h.assignment.questId = null; save(); render(); } }
 function setDiscipline(d) { const h = heroById(selectedId); if (h) { h.assignment.discipline = d === 'alchemy' ? 'alchemy' : 'blacksmithing'; h.assignment.type = 'study'; h.assignment.questId = null; save(); render(); } }
@@ -648,6 +662,17 @@ async function advanceAll() {
     if (selectedId && gone.has(selectedId)) selectedId = guild.roster[0] ? guild.roster[0].id : null;
   }
   if (shortfall > 0) guild.roster.forEach((h) => { h.condition.morale = clamp(h.condition.morale - 8); }); // unpaid wages hurt morale
+  // Schedule advance (Pillar B): a member on the training track pulls the next planned
+  // week off their queue, so a multi-week plan plays out automatically. Non-training
+  // weeks (quest/forge/…) don't consume the plan — it waits until they train again.
+  for (const h of guild.roster) {
+    if (h.assignment.type === 'train' && Array.isArray(h.schedule) && h.schedule.length) {
+      const p = h.schedule.shift();
+      h.assignment.trainingId = p.trainingId;
+      h.assignment.intensity = p.intensity === 'heavy' ? 'heavy' : 'light';
+      h.assignment.sparWith = null; // planned weeks are solo drills
+    }
+  }
   advanceWeek(guild.calendar);
   refreshMarket(guild.market);
   guild.questBoard = generateQuestBoard(guild, 3);
@@ -801,10 +826,23 @@ function trainBody(h) {
   const diet = getDietPlan(h.assignment.dietId);
   const riskPct = (i) => Math.round(previewInjuryChance(h, i, ringOpts(diet)) * 100);
   const rl = riskPct('light'), rh = riskPct('heavy');
+  // Plan-ahead queue (Pillar B): coming weeks, each a drill captured at the intensity
+  // that was set when it was added. Advance Week shifts the front into this week.
+  const sched = Array.isArray(h.schedule) ? h.schedule : [];
+  const chips = sched.length
+    ? sched.map((p, i) => `<span class="sched-chip">${i + 1}. ${(getDrill(p.trainingId) || REST).name}${p.intensity === 'heavy' ? ' ·H' : ''}<button onclick="__guild.scheduleRemoveAt(${i})" title="Remove from plan">✕</button></span>`).join('')
+    : '<span class="dim" style="font-size:0.75em">No plan — next week repeats this one.</span>';
+  const addBtns = DRILLS.map((d) => `<button class="sched-btn" onclick="__guild.scheduleAdd('${d.id}')" title="Queue ${d.name} (${heavy ? 'heavy' : 'light'})">+ ${d.main}</button>`).join('')
+    + `<button class="sched-btn" onclick="__guild.scheduleAdd('rest')" title="Queue Rest">+ 💤</button>`
+    + (sched.length ? `<button class="sched-btn clear" onclick="__guild.scheduleClear()">clear</button>` : '');
+  const schedHTML = `<div class="plan-title" style="font-size:0.72em;margin-top:10px">📅 Plan ahead <span class="dim" style="font-weight:400">— each Advance Week runs the next drill (adds as ${heavy ? 'heavy' : 'light'})</span></div>
+    <div class="sched-queue">${chips}</div>
+    <div class="sched-add">${addBtns}</div>`;
   return `<div class="intensity-toggle">
       <button class="${heavy ? '' : 'on'}" onclick="__guild.setIntensity('light')">Light${rl ? ` · <span class="down">⚠${rl}%</span>` : ''}</button>
       <button class="${heavy ? 'on' : ''}" onclick="__guild.setIntensity('heavy')">Heavy · +sec −paired${rh ? ` · <span class="down">⚠${rh}%</span>` : ''}</button>
     </div><div class="opt-list">${drillItems}${restItem}</div>
+    ${schedHTML}
     <div class="plan-title" style="font-size:0.72em;margin-top:10px">🤺 Spar a partner <span class="dim" style="font-weight:400">— both train, pairs up automatically</span></div>
     <div class="opt-list">${sparList}</div>`;
 }
@@ -1672,7 +1710,7 @@ export function openGuild() {
 // Every handler no-ops while a week is advancing (a played battle can be mid-flight;
 // rail buttons still render behind the battle screen and would corrupt the in-flight
 // week). practiceBout/advanceAll keep their own internal checks as a second belt.
-const __guildApi = { selectHero, setActivity, setTraining, setIntensity, setRecipe, setPotion, setDiscipline, usePotion, setDiet, setQuest, assignTo, setSpar, equipItem, unequipSlot, setPolicy, provision, buyMaterial, sellItem, hire, advanceAll, back, openRoom, toggleFullscreen, upgradeFacility, enterTournament, leaveTournament, setPlayNext, setPlayQuest, setAskTournaments, appointTrainer, practiceBout, openRanch, enterRoomFromRanch, manageMemberFromRanch, ranchBuild: toggleBuild, ranchPick: pickStation, ranchPlace: placeStationAt, ranchRemoveStation: removeStationById };
+const __guildApi = { selectHero, setActivity, setTraining, setIntensity, scheduleAdd, scheduleRemoveAt, scheduleClear, setRecipe, setPotion, setDiscipline, usePotion, setDiet, setQuest, assignTo, setSpar, equipItem, unequipSlot, setPolicy, provision, buyMaterial, sellItem, hire, advanceAll, back, openRoom, toggleFullscreen, upgradeFacility, enterTournament, leaveTournament, setPlayNext, setPlayQuest, setAskTournaments, appointTrainer, practiceBout, openRanch, enterRoomFromRanch, manageMemberFromRanch, ranchBuild: toggleBuild, ranchPick: pickStation, ranchPlace: placeStationAt, ranchRemoveStation: removeStationById };
 window.__guild = {};
 for (const k in __guildApi) {
   window.__guild[k] = (...args) => {
