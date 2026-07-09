@@ -1537,8 +1537,46 @@ function renderSpriteStatic(canvas, prime, angle, animName, frame, fighter){
 // canvas. Guild people carry `archetype` (Knight/Mage/...) rather than a `prime`, so
 // map that to a body type; ensureAppearance() then derives a STABLE appearance from
 // the person's name (and caches it onto person.appearance) if none is stored yet.
-// Guild people have `equipped`, not battle `gear`, so the weapon/FX paths no-op.
+// Guild people have `equipped` (real armory items), not battle `gear`; the FX path
+// no-ops, but we hand the compositor a cosmetic weapon by archetype (see guildCosmeticGear).
 var GUILD_ARCH_PRIME = { Knight: 'salt', Cleric: 'salt', Adventurer: 'salt', Berserker: 'sulfur', Ranger: 'sulfur', Mage: 'mercury', Rogue: 'mercury' };
+
+// ─── Cosmetic weapons for guild heroes (VISUAL ONLY) ─────────────────────────
+// DESIGN.md defers the MECHANICAL gear→engine conversion (durability + repair must
+// ship together, or wiring gear stats now "silently nerfs everything"). But a hero
+// with empty hands reads as unfinished — so every guild fighter / roamer / portrait
+// gets a weapon chosen by archetype, purely for the sprite. These descriptors carry
+// no `refinement`/`links`/`sockets`, and `pos:'Hand'` makes effectiveAppearance skip
+// them (gearToBodyDesc returns null), so they flow ONLY through fighterWeaponLayers
+// into the compositor: zero combat-stat impact. Fancier stems/finishes unlock as
+// trained stats rise. Same pattern the character builder already uses (BUILDER_HAND_CYCLE).
+var GUILD_ARCH_WEAPON = {
+  Knight:     { r: 'Sword',  l: 'Buckler' },
+  Cleric:     { r: 'Hammer', l: 'Buckler' },
+  Berserker:  { r: 'Axe',    l: null       },   // two-handed feel — no off-hand
+  Ranger:     { r: 'Bow',    l: null       },
+  Mage:       { r: 'Wand',   l: null       },
+  Rogue:      { r: 'Dagger', l: 'Dagger'   },   // dual-wield (slotSuffix → daggerL/daggerR)
+  Adventurer: { r: 'Sword',  l: null       },
+};
+// Average of the six MR stats (0..100) → a 0..5 weapon-tier band, so a green recruit
+// carries a plain blade and a trained veteran a fancier one. Ladders self-clamp, so a
+// tier past a short ladder's end just picks its top stem.
+function guildWeaponTier(stats){
+  if (!stats) return 0;
+  var keys = ['POW','DEF','SKL','SPD','INT','VIT'], sum = 0, n = 0;
+  for (var i = 0; i < keys.length; i++){ var v = stats[keys[i]]; if (typeof v === 'number'){ sum += v; n++; } }
+  if (!n) return 0;
+  return Math.max(0, Math.min(5, Math.floor((sum / n) / 18)));
+}
+// Archetype (+ stats, for tier) → cosmetic { RHand, LHand } gear for the compositor.
+function guildCosmeticGear(archetype, stats){
+  var m = GUILD_ARCH_WEAPON[archetype] || GUILD_ARCH_WEAPON.Adventurer;
+  var tier = guildWeaponTier(stats);
+  var mk = function(type){ return type ? { type: type, tier: tier, pos: 'Hand' } : null; };
+  return { RHand: mk(m.r), LHand: mk(m.l) };
+}
+
 function renderGuildSprite(canvas, person, facing){
   if (!canvas || !person) return;
   var prime = person.prime || person.bodyType || GUILD_ARCH_PRIME[person.archetype] || 'salt';
@@ -1558,7 +1596,8 @@ function renderGuildSprite(canvas, person, facing){
   // portraits at once, and recompositing all of them every frame would burn
   // battery on mobile. Register a redraw so the portrait still fills in when the
   // async sprite sheets finish loading, but never join the per-frame bob loop.
-  compositeCharacter(canvas, appearance, 'idle', 0, row, null, { excite: 0, phase: 0 });
+  var weapons = fighterWeaponLayers({ gear: guildCosmeticGear(person.archetype, person.stats) });
+  compositeCharacter(canvas, appearance, 'idle', 0, row, weapons, { excite: 0, phase: 0 });
   elementsRegisterRedraw(canvas, function(){ renderGuildSprite(canvas, person, facing); });
 }
 window.renderGuildSprite = renderGuildSprite;
@@ -3254,7 +3293,10 @@ function guildFighterFromSpec(spec, num){
     _bobPhase: Math.floor(Math.random() * 1400), _bobExcite: 0,
     appearanceSeed: spec.appearanceSeed || null,
     appearance: spec.appearance || null,
-    materia: [], gear: null,   // Phase 1: gear→engine conversion is stubbed
+    materia: [],
+    // Cosmetic weapon by archetype so fighters don't duel bare-handed. This is
+    // VISUAL ONLY — the mechanical gear→engine conversion stays stubbed (DESIGN.md).
+    gear: guildCosmeticGear(spec.archetype, s),
     _mr: s,                    // raw MR stats — charge-tier gates read these (trained stats grow the kit)
     _obey: spec.obedience || null, // {discipline, bond, obeyMod} — Foolery rolls in the tactical lens
   };
@@ -3392,7 +3434,8 @@ function makeRanchActor(person){
   }
   return {
     id: person.id, name: person.name,
-    appearance: ensureAppearance(person, prime), prime: prime, gear: null,
+    appearance: ensureAppearance(person, prime), prime: prime,
+    gear: guildCosmeticGear(person.archetype, person.stats), // cosmetic weapon (visual only)
     anim: { name: 'idle', frame: 0, timer: performance.now(), onDone: null },
     facing: Math.PI, _bobExcite: 0, _bobPhase: Math.floor(Math.random() * 1400),
   };
