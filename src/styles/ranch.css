@@ -39,22 +39,30 @@
 .ranch-btn.adv:hover { box-shadow: 0 0 12px rgba(212, 168, 67, 0.25); }
 
 /* The stage owns the camera. Clipping happens HERE (the field itself must not clip,
-   or upright standees would be sheared off at the plane's edge). */
+   or upright standees would be sheared off at the plane's edge). Drag pans, wheel/
+   pinch zooms — touch-action:none hands touch gestures to the pointer handlers. */
 .ranch-stage { position: relative; flex: 1 1 auto; display: flex; align-items: center; justify-content: center; overflow: hidden;
-  padding: 0; perspective: 1150px; perspective-origin: 50% 18%; }
+  padding: 0; perspective: 1150px; perspective-origin: 50% 18%;
+  cursor: grab; touch-action: none; }
+.ranch-stage.dragging { cursor: grabbing; }
+/* The CAMPUS plane: sized from its grid (--rgs tiles) so each tile keeps the classic
+   9-grid tile scale — a 22-tile estate is physically ~2.4× the old field, and the
+   JS camera (scale + translate composed after the rotateX) navigates it. */
 .ranch-field { position: relative;
-  width: min(120vw, calc(1.16 * (100dvh - 78px)));
-  height: min(120vw, calc(1.16 * (100dvh - 78px)));
+  width: calc(var(--rgs, 9) / 9 * min(120vw, 1.16 * (100dvh - 78px)));
+  height: calc(var(--rgs, 9) / 9 * min(120vw, 1.16 * (100dvh - 78px)));
   background-size: cover; image-rendering: pixelated;
-  border: 2px solid rgba(60, 46, 32, 0.9); border-radius: 10px;
-  box-shadow: inset 0 0 90px rgba(0, 0, 0, 0.5), 0 30px 80px rgba(0, 0, 0, 0.55);
-  margin-top: calc(-0.32 * (100dvh - 78px)); /* the projection biases downward (near edge grows toward the camera) — lift the layout box so the whole diorama sits in the stage */
-  transform: rotateX(52deg) translateZ(-150px); transform-style: preserve-3d; }
+  border: 4px solid rgba(60, 46, 32, 0.9); border-radius: 12px;
+  box-shadow: inset 0 0 140px rgba(0, 0, 0, 0.5), 0 30px 80px rgba(0, 0, 0, 0.55);
+  transform: rotateX(52deg) translateZ(-150px) scale(0.8); /* pre-JS default; applyCamera() owns it after */
+  transform-origin: 50% 50%; transform-style: preserve-3d; will-change: transform; }
 
 /* ── Standees ─────────────────────────────────────────────────────────────── */
 /* Wrapper: a flat tile-sized cell ON the plane, bottom-center pinned to its ground
    point. Everything flat (the shadow) lives directly in it. */
-.ranch-actor, .ranch-prop { position: absolute; width: 13.333%; height: 13.333%;
+/* Cells derive from the grid so standees keep the same ABSOLUTE size the 9-grid had
+   (13.333% of 9 tiles ≈ 120%/GS of the field). */
+.ranch-actor, .ranch-prop { position: absolute; width: calc(120% / var(--rgs, 9)); height: calc(120% / var(--rgs, 9));
   transform: translate(-50%, -100%); transform-style: preserve-3d;
   background: none; border: none; padding: 0; cursor: pointer; }
 /* Ground contact shadow — stays flat on the grass. */
@@ -115,7 +123,7 @@
 /* ── Environmental dressing ──────────────────────────────────────────────────
    Trees/bushes are standees like everything else; the path and pond are FLAT
    patches that lie in the grass. All decorative, all pointer-transparent. */
-.ranch-decor { position: absolute; width: 13.333%; height: 13.333%;
+.ranch-decor { position: absolute; width: calc(120% / var(--rgs, 9)); height: calc(120% / var(--rgs, 9));
   transform: translate(-50%, -100%); transform-style: preserve-3d; pointer-events: none; }
 .rd-standee { position: absolute; inset: 0; transform: rotateX(-52deg); transform-origin: 50% 100%;
   display: flex; flex-direction: column; align-items: center; justify-content: flex-end; }
@@ -141,6 +149,13 @@
   background: radial-gradient(ellipse at 42% 36%, #7fb4c9 0 18%, #3d7a99 55%, #234f68 85%, #1a3a4e);
   box-shadow: inset 0 3px 10px rgba(0, 0, 0, 0.45), 0 0 0 3px rgba(126, 100, 66, 0.5); pointer-events: none; }
 
+/* ── Camera zoom controls — floating over the scene, opposite the menu ───────── */
+.ranch-zoom { position: absolute; right: 12px; bottom: 12px; display: flex; flex-direction: column; gap: 6px; z-index: 40; }
+.rz-btn { width: 42px; height: 42px; border-radius: 50%; font-size: 1.15em; line-height: 1;
+  color: #f0e4c8; background: rgba(20, 14, 8, 0.9); border: 1px solid rgba(212, 168, 67, 0.55);
+  cursor: pointer; box-shadow: 0 3px 10px rgba(0, 0, 0, 0.5); transition: background 0.12s, transform 0.12s; }
+.rz-btn:hover { background: rgba(42, 26, 10, 0.95); transform: scale(1.06); }
+
 /* ── MR4-style quick menu — chunky actions floating over the scene ─────────── */
 .ranch-menu { position: absolute; left: 12px; bottom: 12px; display: flex; flex-direction: column; gap: 6px; z-index: 40; }
 .rmn-btn { display: flex; align-items: center; gap: 9px; min-width: 158px; padding: 10px 16px 10px 12px;
@@ -156,7 +171,7 @@
    Stations are standees like members/buildings: a flat cell on the plane owns the
    shadow; the inner .rs-standee counter-rotates upright. Ghost slots are FLAT dashed
    patches lying in the grass (tap-to-place). */
-.ranch-station { position: absolute; width: 11%; height: 11%;
+.ranch-station { position: absolute; width: calc(99% / var(--rgs, 9)); height: calc(99% / var(--rgs, 9));
   transform: translate(-50%, -100%); transform-style: preserve-3d; pointer-events: none; }
 .rs-standee { position: absolute; inset: 0; transform: rotateX(-52deg); transform-origin: 50% 100%;
   display: flex; flex-direction: column; align-items: center; justify-content: flex-end; }
@@ -169,7 +184,7 @@
   cursor: pointer; pointer-events: auto; z-index: 3; }
 .rs-remove:hover { background: #7a1f1f; color: #fff; }
 
-.ranch-ghost { position: absolute; width: 9%; height: 9%; transform: translate(-50%, -50%);
+.ranch-ghost { position: absolute; width: calc(81% / var(--rgs, 9)); height: calc(81% / var(--rgs, 9)); transform: translate(-50%, -50%);
   background: none; border: none; padding: 0; cursor: pointer; }
 .rg-mark { display: flex; align-items: center; justify-content: center; width: 100%; height: 100%;
   border: 2px dashed rgba(212, 168, 67, 0.7); border-radius: 10px; background: rgba(212, 168, 67, 0.14);

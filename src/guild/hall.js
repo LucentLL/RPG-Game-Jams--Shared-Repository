@@ -30,7 +30,7 @@ import { qualityTier } from './item.js';
 import { MATERIAL_PRICE, buyPrice, itemSellValue, createMarket, refreshMarket } from './market.js';
 import { saveGame, loadGame } from '../platform/storage.js';
 import { playTournamentMatch, playQuestBout, battleEngineReady } from './battle-bridge.js';
-import { renderRanch, stopRanchLoop, toggleBuild, pickStation, placeStationAt, removeStationById } from './ranch.js';
+import { renderRanch, stopRanchLoop, toggleBuild, pickStation, placeStationAt, removeStationById, ranchZoomIn, ranchZoomOut, ranchZoomFit } from './ranch.js';
 
 const SLOT = 'guild';
 // The roster cap is no longer a constant — it's derived from the Living Quarters
@@ -2228,7 +2228,7 @@ export function openGuild() {
 // Every handler no-ops while a week is advancing (a played battle can be mid-flight;
 // rail buttons still render behind the battle screen and would corrupt the in-flight
 // week). practiceBout/advanceAll keep their own internal checks as a second belt.
-const __guildApi = { selectHero, setActivity, setTraining, setIntensity, scheduleAdd, scheduleRemoveAt, scheduleClear, setRecipe, setForgeMode, setRefineItem, setPotion, setDiscipline, usePotion, setDiet, setQuest, assignTo, setSpar, equipItem, unequipSlot, setPolicy, provision, buyMaterial, sellItem, buyBook, hire, takeApprentice, promoteApprentice, dismissApprentice, advanceAll, back, openRoom, toggleFullscreen, upgradeFacility, enterTournament, leaveTournament, setPlayNext, setPlayQuest, setAskTournaments, toggleDraw, praiseHero, scoldHero, openAssembly, closeAssembly, appointTrainer, practiceBout, openRanch, enterRoomFromRanch, manageMemberFromRanch, ranchBuild: toggleBuild, ranchPick: pickStation, ranchPlace: placeStationAt, ranchRemoveStation: removeStationById };
+const __guildApi = { selectHero, setActivity, setTraining, setIntensity, scheduleAdd, scheduleRemoveAt, scheduleClear, setRecipe, setForgeMode, setRefineItem, setPotion, setDiscipline, usePotion, setDiet, setQuest, assignTo, setSpar, equipItem, unequipSlot, setPolicy, provision, buyMaterial, sellItem, buyBook, hire, takeApprentice, promoteApprentice, dismissApprentice, advanceAll, back, openRoom, toggleFullscreen, upgradeFacility, enterTournament, leaveTournament, setPlayNext, setPlayQuest, setAskTournaments, toggleDraw, praiseHero, scoldHero, openAssembly, closeAssembly, appointTrainer, practiceBout, openRanch, enterRoomFromRanch, manageMemberFromRanch, ranchBuild: toggleBuild, ranchPick: pickStation, ranchPlace: placeStationAt, ranchRemoveStation: removeStationById, ranchZoomIn, ranchZoomOut, ranchZoomFit };
 window.__guild = {};
 for (const k in __guildApi) {
   window.__guild[k] = (...args) => {

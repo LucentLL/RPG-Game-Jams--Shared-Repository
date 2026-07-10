@@ -3452,13 +3452,54 @@ function renderRanchTilesToDataURI(){
   }
   return cv.toDataURL();
 }
+/** Worn dirt — paths and training-yard ground (same pixel-noise grammar as drawGrass). */
+function drawPath(ctx, x, y, size, rng){
+  ctx.fillStyle = '#8a6b46';
+  ctx.fillRect(x, y, size, size);
+  var step = Math.max(4, size / 16);
+  for (var py = 0; py < size; py += step){
+    for (var px = 0; px < size; px += step){
+      var v = rng();
+      if (v < 0.13) ctx.fillStyle = 'rgba(58, 42, 24, 0.4)';
+      else if (v < 0.25) ctx.fillStyle = 'rgba(164, 134, 94, 0.45)';
+      else if (v < 0.29) ctx.fillStyle = 'rgba(120, 96, 62, 0.5)';
+      else continue;
+      ctx.fillRect(x + px, y + py, step, step);
+    }
+  }
+}
+/**
+ * Bake an arbitrary campus ground into a data-URI: `typeAt(col,row)` names each
+ * tile ('grass'|'path'|'water'|'rock'|'flowers'), painted with the same procedural
+ * pixel painters the battle grid uses. The guild's Ranch supplies the layout — this
+ * stays a dumb rasterizer so world design lives in the guild layer.
+ */
+function bakeCampusToDataURI(cols, rows, typeAt){
+  var T = 64;
+  var cv = document.createElement('canvas'); cv.width = cols * T; cv.height = rows * T;
+  var ctx = cv.getContext('2d'); ctx.imageSmoothingEnabled = false;
+  for (var r = 0; r < rows; r++){
+    for (var c = 0; c < cols; c++){
+      var rng = tileRng(r * 137 + c * 311 + 9);
+      var t = typeAt ? typeAt(c, r) : 'grass';
+      var x = c * T, y = r * T;
+      if (t === 'water'){ drawWater(ctx, x, y, T, rng); continue; }
+      if (t === 'path'){ drawPath(ctx, x, y, T, rng); continue; }
+      drawGrass(ctx, x, y, T, rng);
+      if (t === 'rock') drawRock(ctx, x, y, T, rng, (r + c) % 2);
+      else if (t === 'flowers') drawFlowers(ctx, x, y, T, rng, (r + c) % 2);
+    }
+  }
+  return cv.toDataURL();
+}
 window.__ranchGfx = {
   makeActor:   makeRanchActor,          // (person) → ranch actor
   renderActor: renderActionFighter,     // (canvas, actor) → composite anim+frame+facing
   tickActor:   _stepFighterAnim,        // (actor, now) → step its anim frame
-  setAnim:     setFighterAnim,          // (actor, 'move'|'idle') → set actor.anim
+  setAnim:     setFighterAnim,          // (actor, 'move'|'idle'|'slash'|'parry'|'cast'|'jump'|…) → set actor.anim
   bakeGrass:   renderRanchTilesToDataURI,
-  GS:          ACTION_GS,               // field grid size (tiles)
+  bakeCampus:  bakeCampusToDataURI,     // (cols, rows, typeAt) → data-URI ground for the big campus
+  GS:          ACTION_GS,               // arena field grid size (tiles) — the RANCH has its own, larger grid
 };
 
 // ═══ OPPONENT GENERATION (§7) ═══

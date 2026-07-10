@@ -617,11 +617,25 @@ The good news: **the game already speaks this language in CSS.** The ranch is a
 sprites; the action arena is the same recipe at 50°. The direction formalizes that grammar and
 carries it to canvas when scale demands it. Three stages, each shippable:
 
-1. **Now — CSS-3D dioramas (shipped).** Ranch + arena stay the reference implementation: the
-   camera numbers (52°/1150px), standee counter-rotation, y-sort z-index (`2 + round(ty*10)`),
-   and the baked procedural ground texture ARE the art direction. New scenes (rooms, festival
-   grounds) reuse this recipe; sprites always render integer-scaled, `image-rendering:
-   pixelated`, no smoothing.
+1. **Now — CSS-3D dioramas + THE CAMPUS (shipped 2026-07-09).** Ranch + arena stay the
+   reference implementation: the camera numbers (52°/1150px), standee counter-rotation, y-sort
+   z-index (`2 + round(ty*10)`), and the baked procedural ground ARE the art direction. The
+   ranch is now a **22×22-tile navigable campus** (`RANCH_GS`, ranch.js): districts — the Great
+   Hall avenue, a crafts quarter (Forge/Armory/Laboratory/Apothecary), a worn **training yard**,
+   the arena, a pond, tree-lined borders, a south gate — over a ground baked by `bakeCampus`
+   (crucible.js) from the procedural tile painters (grass/path/water/rocks/flowers). A real
+   **camera** navigates it: drag to pan, wheel/pinch/± to zoom, ⤢ to survey the whole estate
+   (the transform composes `scale·translate` after the plane's rotateX, so panning moves along
+   the ground). And members **visibly perform their weekly assignment** (the MR ask): a duty
+   loop replaces wandering — POW slashes the sandbag, DEF parries at the pell, SKL runs forms
+   at the dummy, SPD dashes-and-jumps the poles, INT sits at the meditation stone, VIT rucks
+   the yard perimeter, spar pairs square off at the arena, smiths hammer (side-on) at the
+   Forge door, alchemists stir at the Laboratory, questers muster restless at the gate, the
+   resting drift between the pond and Quarters. Missing equipment = shadow-drilling the open
+   yard, so placing gear visibly upgrades the theater. Off-screen actors skip their per-frame
+   recomposite (rough viewport cull); a tick error logs and never freezes the loop; grow the
+   grid number for a bigger estate. New scenes reuse this recipe; sprites always render
+   integer-scaled, `image-rendering: pixelated`, no smoothing.
 2. **Mid — the single scene-canvas renderer** (the perf plan's path, unlocks crowds): replace
    per-character `<canvas>` + DOM moves with ONE canvas per scene — project the same tilted-
    plane camera in code, blit **baked per-character atlases** (spawn-time `compositeCharacter`

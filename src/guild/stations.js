@@ -25,13 +25,15 @@ export const STATIONS = [
 ];
 export function stationDef(type) { return STATIONS.find((s) => s.type === type) || null; }
 
-/** Predefined training-yard slots — tile coords on the GS×GS ranch field, laid out
- *  as a tidy 3×3 in the open ground between the Great Hall and the Kitchen. Stations
- *  occupy these by index; the Yard tier decides how many are usable. */
+/** Predefined training-yard slots — tile coords on the RANCH campus grid (22×22,
+ *  see ranch.js RANCH_GS), laid out as a spacious 3×3 across the worn-ground
+ *  TRAINING YARD district in the campus's south-west. Stations occupy these by
+ *  index (old saves keep their stations — the yard simply relocated with the
+ *  campus expansion); the Yard facility tier decides how many are usable. */
 export const YARD_SLOTS = [
-  { tx: 3.5, ty: 2.6 }, { tx: 4.7, ty: 2.5 }, { tx: 5.9, ty: 2.7 },
-  { tx: 3.4, ty: 3.8 }, { tx: 4.7, ty: 3.7 }, { tx: 5.9, ty: 3.9 },
-  { tx: 3.5, ty: 5.0 }, { tx: 4.7, ty: 4.9 }, { tx: 5.9, ty: 5.1 },
+  { tx: 5.0, ty: 13.0 }, { tx: 7.0, ty: 12.9 }, { tx: 9.0, ty: 13.1 },
+  { tx: 4.9, ty: 14.8 }, { tx: 7.0, ty: 14.7 }, { tx: 9.0, ty: 14.9 },
+  { tx: 5.0, ty: 16.5 }, { tx: 7.0, ty: 16.4 }, { tx: 9.0, ty: 16.6 },
 ];
 
 /** How many equipment slots the Training Yard unlocks per tier (0..3). */
