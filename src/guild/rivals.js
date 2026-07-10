@@ -31,11 +31,13 @@ const AFT = ['Ashvale', 'the Unbowed', 'of the Reach', 'Thornwood', 'Greyspur', 
   'Half-Moon', 'Ironquill', 'of Duskmere', 'the Younger', 'Stormsong', 'Redmarsh', 'the Patient',
   'Coalbrand', 'of the Nine Fords', 'Whitecrow', 'the Long-Odds', 'Marrowgate', 'Two-Rivers'];
 
-/** Spread a rival's power evenly-ish across the six MR stats (mirrors the bridge's foes). */
+/** Spread a rival's power evenly-ish across the six MR stats (mirrors the bridge's
+ *  foes, INCLUDING its per-stat 100 cap — the played engine's tables assume heroic
+ *  scale; the RESOLVER's check uses rival.power, which stays uncapped and honest). */
 function spreadStats(power) {
-  const per = Math.max(8, Math.round((power || 120) / 6));
+  const per = Math.max(8, Math.min(100, Math.round((power || 120) / 6)));
   const stats = {};
-  HERO_STATS.forEach((s) => { stats[s] = Math.max(6, per + Math.round((Math.random() - 0.5) * 10)); });
+  HERO_STATS.forEach((s) => { stats[s] = Math.max(6, Math.min(100, per + Math.round((Math.random() - 0.5) * 10))); });
   return stats;
 }
 
@@ -136,7 +138,12 @@ export function recordFieldOutcome(guild, t, res) {
   });
   if (!res || res.forfeit || !res.champion) {
     const finalRival = rivalById(guild, ids[rounds - 1]);
-    if (finalRival) { finalRival.titles += 1; finalRival.record.w += 1; } // someone lifts the cup
+    if (finalRival) {
+      finalRival.titles += 1; // someone lifts the cup
+      // The W for beating YOUR champion in the final was already booked by the
+      // stopped-you branch above — don't count the same match twice (review fix).
+      if (!res || res.forfeit || res.wins < rounds - 1) finalRival.record.w += 1;
+    }
   }
 }
 

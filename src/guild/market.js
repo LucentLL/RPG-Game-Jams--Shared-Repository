@@ -38,5 +38,14 @@ function defaultStock() { return { iron_ore: 24, steel_ore: 10, mithril_ore: 3, 
 export function createMarket(init = {}) { return { stock: init.stock || defaultStock(), bookStock: init.bookStock || rollBookStock() }; }
 
 /** Restock the market (called each week). Scarce materials stay scarce; the
- *  bookseller's shelf turns over completely — buy a rare volume when you see it. */
-export function refreshMarket(market) { market.stock = defaultStock(); market.bookStock = rollBookStock(); }
+ *  bookseller's shelf turns over completely — buy a rare volume when you see it.
+ *  FOOD scales with `foodMouths` (the Mess Hall's fed capacity): a bigger Mess Hall
+ *  means bigger standing contracts with the farms, so a 120-bed guild can actually
+ *  keep its pantry stocked (base supply feeds ~42; review finding). */
+export function refreshMarket(market, foodMouths = 6) {
+  const scale = Math.max(1, Math.ceil(foodMouths / 6));
+  market.stock = defaultStock();
+  market.stock.grain *= scale;
+  market.stock.salted_meat *= scale;
+  market.bookStock = rollBookStock();
+}

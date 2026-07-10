@@ -139,6 +139,10 @@ function tourneyLadder(t, champ) {
  */
 function tourneyBoard(t, champ) {
   return new Promise((resolve) => {
+    // Two due events where the first was PLAYED can land here while the battle
+    // screen is still up — the overlay lives in #guildScreen, so an inactive screen
+    // would hide it with no way to click, wedging the awaited advance (review fix).
+    showScreen('guildScreen');
     const old = document.querySelector('.lens-overlay'); if (old) old.remove();
     const odds = Math.round(championOdds(combatPower(champ), t) * 100);
     const s = stakesOf(t);
@@ -355,6 +359,10 @@ function load() {
   if (guild.trainer === undefined) guild.trainer = null;
   if (!Array.isArray(guild.schedule)) guild.schedule = []; // tournament calendar (added with the season loop)
   guild.schedule.forEach((t) => { if (!t.type) t.type = 'tournament'; }); // typed-event migration (added with the season fabric)
+  // A recap saved before the Assembly shipped has no conduct fields — reopening it
+  // would badge everyone "recovering" with live praise/scold buttons. Retire it.
+  if (guild.lastReport && Array.isArray(guild.lastReport.results) && guild.lastReport.results.length
+    && !guild.lastReport.results.some((r) => 'conduct' in r)) guild.lastReport = null;
   // Battle prefs + play plan (added with the two-lens playable combat).
   if (!guild.battlePrefs || typeof guild.battlePrefs !== 'object') guild.battlePrefs = { tournament: 'ask' };
   if (!['ask', 'sim'].includes(guild.battlePrefs.tournament)) guild.battlePrefs.tournament = 'ask';
@@ -695,7 +703,12 @@ async function advanceAll() {
         entry.refine = (it && it.location === 'armory') ? refine(h, it, guild.inventory, week) : { ok: false, reason: 'gone' };
         entry.recipeName = it ? it.name : 'a missing piece';
         entry.conduct = entry.refine.ok ? ((entry.refine.to - entry.refine.from) >= 8 ? 'exceeded' : 'solid') : 'failed';
-        if (!entry.refine.ok) a.refineItemId = null; // a dead job doesn't repeat silently next week
+        // Only a DEAD job clears (piece gone / beyond their craft) — and the smith goes
+        // back to forging fresh, not to repeating a fabricated failure every week.
+        // Transient failures (ore, stamina) keep the job and simply retry next week.
+        if (!entry.refine.ok && (entry.refine.reason === 'gone' || entry.refine.reason === 'mastered')) {
+          a.refineItemId = null; a.forgeMode = 'new';
+        }
       } else {
         const recipe = getRecipe(a.recipeId);
         entry.forge = forge(h, recipe, guild.inventory, week);
@@ -768,11 +781,15 @@ async function advanceAll() {
         entry.trained = Object.keys(res.gains).length > 0; entry.spar = true;
         entry.conduct = entry.trained ? 'solid' : 'failed'; // a partner keeps you honest — no slacking a spar
       } else {
-        const res = applyTraining(h, 'skl', 'light', trainingBias(diet), { ...ringOpts(diet), equipMult: stationBonusFor(guild, 'skl') }); // partner unavailable — solo footwork
+        // Partner unavailable — solo footwork. Unsupervised like any solo drill, so it
+        // rolls conduct too (a stale spar link must not be a slack-proof hideout).
+        const effort = rollConduct(h);
+        const res = applyTraining(h, 'skl', 'light', trainingBias(diet), { ...ringOpts(diet), equipMult: stationBonusFor(guild, 'skl'), effort });
         entry.drill = 'Spar — no partner';
         entry.gains = res.gains; entry.drops = res.drops; entry.injury = res.injury;
+        entry.slacked = !!res.slacked;
         entry.trained = Object.keys(res.gains).length > 0;
-        entry.conduct = entry.trained ? 'solid' : 'failed';
+        entry.conduct = entry.slacked ? 'cheated' : entry.trained ? 'solid' : 'failed';
       }
     } else {
       // Conduct (the Assembly): unsupervised drills invite coasting — low Discipline,
@@ -852,7 +869,7 @@ async function advanceAll() {
   // Academy (farm system): apprentices develop toward graduation each week (board billed via upkeep above).
   for (const a of (guild.apprentices || [])) developApprentice(a, guild);
   advanceWeek(guild.calendar);
-  refreshMarket(guild.market);
+  refreshMarket(guild.market, fedCapacity(guild)); // Mess Hall contracts scale the weekly food supply
   guild.questBoard = generateQuestBoard(guild, 3);
   guild.recruits = rollRecruitPool(3);
   generateSeason(guild); // drop the just-resolved event(s) and keep the season paced ahead
@@ -923,7 +940,7 @@ function qualHTML(item) { const t = qualityTier(item.quality); return `<span sty
 function questTitle(id) { const q = guild.questBoard.find((x) => x.id === id); return q ? q.title : null; }
 function rosterRow(h) {
   const a = h.assignment;
-  const plan = a.type === 'forge' ? (a.forgeMode === 'refine' ? `♻ Refine ${(findItem(guild.inventory, a.refineItemId) || {}).name || '(pick a piece)'}` : `🔨 ${getRecipe(a.recipeId).name}`)
+  const plan = a.type === 'forge' ? (a.forgeMode === 'refine' ? `♻ Refine ${refineItemName(a)}` : `🔨 ${getRecipe(a.recipeId).name}`)
     : a.type === 'brew' ? `⚗ ${(getPotionRecipe(a.potionId) || {}).name || 'Brew'}`
     : a.type === 'study' ? `📖 Study ${a.discipline === 'alchemy' ? 'Alchemy' : 'Smithing'}`
     : a.type === 'quest' ? `🗺 ${a.questId ? (questTitle(a.questId) || 'On Quest') : '(choose quest)'}`
@@ -1149,10 +1166,16 @@ function dietBody(h) {
       <span><span class="o-name">${d.name}</span> <span class="o-desc">${d.description}</span></span><span class="o-cost">${d.weeklyCost}g/wk</span></button>`).join('')}</div>`;
 }
 
+/** The refine job's target, matching the RESOLVER's exact check (armory-only) — an
+ *  equipped/sold piece reads "(pick a piece)" instead of promising a doomed job. */
+function refineItemName(a) {
+  const it = a.refineItemId ? findItem(guild.inventory, a.refineItemId) : null;
+  return (it && it.location === 'armory') ? it.name : '(pick a piece)';
+}
 /** One-line summary of what a member is doing this week. */
 function jobLabel(h) {
   const a = h.assignment;
-  return a.type === 'forge' ? (a.forgeMode === 'refine' ? `♻ Refining ${(findItem(guild.inventory, a.refineItemId) || {}).name || '(pick a piece)'}` : `🔨 Forging ${(getRecipe(a.recipeId) || {}).name || ''}`)
+  return a.type === 'forge' ? (a.forgeMode === 'refine' ? `♻ Refining ${refineItemName(a)}` : `🔨 Forging ${(getRecipe(a.recipeId) || {}).name || ''}`)
     : a.type === 'brew' ? `⚗ Brewing ${(getPotionRecipe(a.potionId) || {}).name || ''}`
     : a.type === 'study' ? `📖 Studying ${a.discipline === 'alchemy' ? 'alchemy' : 'metallurgy'}`
     : a.type === 'quest' ? `🗺 ${a.questId ? (questTitle(a.questId) || 'On a quest') : 'Quest (pick one)'}`
@@ -1416,6 +1439,9 @@ function assemblyCard(r) {
 function showAssembly() {
   const rep = report || guild.lastReport;
   if (!rep || !rep.results || !rep.results.length) return;
+  // Praise/scold rebuilds this overlay — keep the reader's place (it's the scroller).
+  const prevOv = document.querySelector('.assembly-overlay');
+  const keepScroll = prevOv ? prevOv.scrollTop : 0;
   closeAssembly();
   const tLines = (rep.tournaments || []).map((t) => {
     const glyph = (EVENT_TYPES[t.eventType] || {}).glyph || '🏆';
@@ -1439,6 +1465,7 @@ function showAssembly() {
   // Sibling of .guild-hall-host inside #guildScreen: render() never wipes it, and
   // paintSprites' #guildScreen selector reaches the portrait canvases.
   (document.getElementById('guildScreen') || document.body).appendChild(ov);
+  ov.scrollTop = keepScroll;
   paintSprites();
 }
 function closeAssembly() { const ov = document.querySelector('.assembly-overlay'); if (ov) ov.remove(); }
