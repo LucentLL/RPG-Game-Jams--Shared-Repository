@@ -503,6 +503,144 @@ rises with the competition**, so your legends can fall — and you keep a succes
 - **NEXT:** team/national events (multiple members compete and can each fall — revives the deferred
   Team combat lens); a pre-event risk % on the champion card; a "successor ready?" nudge on a death.
 
+## The Tourney Board — brackets, previews & records (owner 2026-07-09) — SHIPPED
+
+> Owner directive (from Monster-Rancher-DS league screenshots): *"I'd like to see tournament
+> brackets, combatant previews, win/loss/draw records, not just instantly starting a round fight."*
+
+The circuit has **faces** now. Tournaments used to be fought against an anonymous power curve
+(synthetic foes minted mid-fight and discarded); now every scheduled event draws a **field of
+persistent named rivals** you can scout, and no fight starts unannounced.
+
+- **The rival circuit** (`src/guild/rivals.js`): `guild.rivals` — a persistent pool of named
+  competitors (`{name, archetype, appearanceSeed, power, stats, record:{w,l,d}, titles}`).
+  `ensureField(guild, t)` draws one rival per bracket round into `t.rivalIds` (called from
+  `load()` and after each Advance Week — **never mid-render**), preferring pool rivals near that
+  round's strength so faces recur across seasons. **Anti-lie:** a drawn rival is *retuned* to
+  exactly `roundOpponentPower(t, i)` — the ⚡ on the board IS the number the resolver checks and
+  the stat spread a played round fights (`battle-bridge` `roundOpponent` consumes the same rival).
+- **The Tourney Board**: when an event is due (battlePrefs `'ask'`), the bare lens chooser is
+  replaced by the full **ladder** — final at the top, round 1 at the bottom, every rival with
+  portrait, archetype, ⚡, and career record; your champion (record + title odds) beneath. The
+  lens choice ([⚔ Fight live] [♟ Command] [👁 Spectate] [▶ Simulate]) lives *on* the board.
+  The same ladder is available any time from the Calendar card ("🏟 View the draw"), and the
+  between-rounds interstitial names the next rival. Simulate is never removed.
+- **Records on both sides**: `hero.career` gains `draws` (W–L–D shown on the roster header and
+  the board); `recordFieldOutcome` writes each event into the rivals' careers — reaching round
+  *i* banks *i* wins, your champion's run adds their L (or the W of the one who stopped you),
+  and if the guild doesn't lift the cup, the final-round rival takes the **title**. Forfeit an
+  event and the field plays itself out. Rivals unseen for ~2 years prune away (drawn ones never).
+- **NEXT:** head-to-head grudge records (you vs. THIS rival across seasons), rival growth
+  between meetings (K7's persistent rivals), and a league-grid presentation for round-robin
+  minors (the MR-DS screenshot's grid — needs a round-robin event type first).
+
+## The Weekly Assembly — reports, praise & scold (owner 2026-07-09) — SHIPPED
+
+> Owner directive: *"weekly updates for all named heroes on screen at once — successes,
+> failures, skill point increases; reports on if they failed, cheated, or exceeded
+> expectations; the opportunity to praise or scold."* (Monster Rancher's post-training beat.)
+
+After Advance Week, the **Assembly overlay** lines up every named member's week on one screen:
+what they did, what it earned (stat/skill chips, forged/brewed goods, quest outcomes, injuries),
+and their **conduct** — with one **Praise/Scold** per member per week.
+
+- **Conduct** (`training.js` `rollConduct` + per-branch classification in `advanceAll`):
+  `✨ exceeded` (breakthrough drills, comfortable quest clears at score ≥1.3, near-ceiling
+  crafts, book-fed theory leaps) · `✓ solid` · `🤥 cheated` (**slacked and hid it** — a
+  discipline/morale roll, Lazy ×2 / Hotheaded ×1.4 / Loyal ×0.6; a slacked week trains at ~⅓
+  strength for half the wear, never breaks through, never gets hurt, and *feels great*) ·
+  `✗ failed` (no gains, failed quests, jobs that couldn't run). Resting/recovering weeks carry
+  no conduct.
+- **Praise/scold is a read on conduct, not a free buff** (the MR grammar): praise exceeded →
+  Bond +4, morale +8; praise a hidden slack → they beam *and file away that nobody checks*
+  (Discipline −5); scold the cheat → Discipline +6, they own it; scold honest excellence →
+  Bond −5, morale −8 — that's how you lose people. Feedback notes say how it landed; the choice
+  persists on `guild.lastReport` (reopen the assembly from the hub recap).
+- The overlay also banners tournament results/casualties, the pantry shortfall, retirements,
+  and an Academy roll-up. It is a **sibling of the room-hub host** inside `#guildScreen`, so
+  room re-renders never wipe it and `paintSprites` reaches its portraits.
+- **NEXT:** apprentice conduct in the roll-up; a season-end review (the same grammar at
+  12-week scale); conduct history influencing traits (a serially-praised slacker hardens
+  into Lazy).
+
+## Room stores — every workshop keeps its own shelf (owner 2026-07-09) — SHIPPED
+
+> Owner directive: *"Parts of the guild should have their own inventory to perform work:
+> Forge, Kitchen, Apothecary, Laboratory. Armory can be used to Forge for refining, but is a
+> separate storage. Library stores books that can be studied to improve skills — bought from
+> the world or found on quests."*
+
+One `guild.inventory` still persists everything (no save-shape upheaval), but every store now
+**belongs to a room**, is shown there, and is worked from there:
+
+| Room | Its store | Worked by |
+|---|---|---|
+| 🔨 Forge | **Stockroom** — ore stacks | forging **and refining** draw ore |
+| ⚗ Laboratory | **Stores** — herb stacks | brewing draws herbs |
+| 🏺 Apothecary | potion batches (as before) | treatment + battle kits |
+| 🍲 Kitchen | **Pantry** — grain & salted meat | *diets eat it* (below) |
+| 🗡 Armory | finished gear ONLY (materials moved out) | equip/sell/**refine** |
+| 📖 Library | **the Shelf** — book instances | study is guided by it |
+
+- **The pantry is real** (the first slice of supply-gated diet): every diet draws 1 food/week —
+  grain for plain tables, **salted meat** for Protein/Feast. A short pantry means **plain
+  rations**: Balanced recovery, no growth bias, no feast morale, −2 morale grumbling, a recap
+  warning. Market sells grain (3g) and salted meat (9g); the full Cook trade still arrives with
+  Phase 5.
+- **Refining — the Armory feeds the Forge** (`smithing.js` `refine`): a smith's week can rework
+  a shelved piece instead of forging fresh. Quality closes **half the gap** toward what the
+  smith could forge outright (same Practice/Field math — anti-lie), capped by the material
+  ceiling; durability restores; the work is stamped into `history.repairs[]` so a storied blade
+  improves **without losing its story** (pillar 2). Costs 1 ore of its material; a smith whose
+  own work is no better than the piece is told it's *beyond their craft*. Equipped items must
+  be unequipped first (they're not in the Armory).
+- **Books — the Library's own inventory** (`src/guild/books.js`): real shelved instances
+  (`{title, subject, tier 1–3, source}`), never consumed. The best shelved volume on a subject
+  multiplies Study's weekly Theory gain (×1.25/×1.5/×1.75 by tier; Studious stacks). They enter
+  the guild **only** through the world: the market's rotating bookseller shelf (1–2 volumes/week,
+  60/140/300g) or **recovered on rank-2+ quests** (~20%, deeper jobs shelter deeper theory).
+  This is pillar 4 made physical — the shelf is institutional memory that outlives its readers.
+- **NEXT:** ore purity & herb freshness per room store; pantry variety feeding preference
+  morale (supply-gated diet, Phase 5); technique manuals (books that teach combat techniques,
+  pairing with K6 errantries); withdrawing room stock into quest supply manifests (Phase 3
+  provisioning).
+
+## Visual direction — 2D sprites in a 3D world (owner 2026-07-09)
+
+> Owner directive: *"Visually, I'd like to do something like Shining Soul or Ys VI. 2D
+> sprites and 3D world."*
+
+The target look: crisp 48px pixel-art characters standing IN a world with real depth — Ys VI /
+Shining Soul's grammar of billboarded sprites over dimensional ground, not flat top-down tiles.
+The good news: **the game already speaks this language in CSS.** The ranch is a
+`rotateX(52°)` ground plane under `perspective:1150px` with counter-rotated "paper standee"
+sprites; the action arena is the same recipe at 50°. The direction formalizes that grammar and
+carries it to canvas when scale demands it. Three stages, each shippable:
+
+1. **Now — CSS-3D dioramas (shipped).** Ranch + arena stay the reference implementation: the
+   camera numbers (52°/1150px), standee counter-rotation, y-sort z-index (`2 + round(ty*10)`),
+   and the baked procedural ground texture ARE the art direction. New scenes (rooms, festival
+   grounds) reuse this recipe; sprites always render integer-scaled, `image-rendering:
+   pixelated`, no smoothing.
+2. **Mid — the single scene-canvas renderer** (the perf plan's path, unlocks crowds): replace
+   per-character `<canvas>` + DOM moves with ONE canvas per scene — project the same tilted-
+   plane camera in code, blit **baked per-character atlases** (spawn-time `compositeCharacter`
+   → used frames × facings at native 48px, ~0.7 MB/char), painter's-algorithm y-sort, viewport
+   cull, low-Hz sim tick. This is the *same* look at 100 characters (the war-exercise renderer,
+   Modes Phase 5) — the diorama grammar, drawn faster. Ground graduates from painted-flat to
+   parallax strips/heightened tiles as art allows (`public/assets/tiles/` + a `TILES_BASE`
+   in `config/assets.js` when real tile art lands).
+3. **Later/Steam — true-3D ground, still 2D sprites** (optional): a real perspective scene
+   (Three.js or hand-rolled) with a textured ground mesh and **billboarded sprite quads** —
+   Ys VI exactly. Only if stage 2's projection wants real camera moves (rotation, dolly);
+   nothing before it depends on this.
+
+**Constraints carried from the perf analysis** (see ARCHITECTURE.md + the render map): never
+per-frame per-character canvases; bake at native 48px, not display size; `willReadFrequently`
+on bake-time scratch canvases; nameplates/HP into the canvas or a batched overlay; every loop
+gates on its screen being active. Characters stay Elements-compositor output — the art
+investment is in **world** art, not redrawing the cast.
+
 ## Relationship to the current codebase
 
 - `src/guild/` already has the bones: `hero` (→ Person), `training`, `diet`, `recruiting`, `calendar`,
