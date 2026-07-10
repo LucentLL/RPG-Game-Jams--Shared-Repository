@@ -45,12 +45,18 @@ function foeStats(targetPower) {
 const CONTENDER_NAMES = ['Bracket Contender', 'The Gatekeeper', 'A Rising Blade', 'The Veteran Circuit-Runner', 'The Crowd Favorite'];
 
 /**
- * The synthetic opponent for round `i` of a tournament bracket, scaled to that
- * round's field strength (roundOpponentPower — the same curve the resolver and the
- * displayed odds use). The FINAL round is the rank-styled champion.
+ * The opponent for round `i` of a tournament bracket. When the event carries a
+ * drawn field (opts.field — the persistent named rivals the Tourney Board showed),
+ * round `i` fights THAT rival: same name, face, and stat spread the player scouted.
+ * Without a field (legacy events mid-save), fall back to a synthetic foe scaled to
+ * the round's strength (roundOpponentPower — the resolver's own curve either way).
  * @param {import('./tournaments.js').Tournament} t @param {number} i 0-based round
+ * @param {?{name:string,archetype:string,stats:Object,appearanceSeed:number}} rival
  */
-function roundOpponent(t, i) {
+function roundOpponent(t, i, rival) {
+  if (rival && rival.stats) {
+    return { name: rival.name, archetype: rival.archetype, stats: rival.stats, appearanceSeed: rival.appearanceSeed };
+  }
   const rounds = t.rounds || 4;
   const isFinal = i >= rounds - 1;
   return {
@@ -91,7 +97,7 @@ export function battleEngineReady() {
  * @param {import('./hero.js').Hero} hero  the guild's nominated champion (single-entrant)
  * @param {import('./tournaments.js').Tournament} t
  * @param {{mode?:'action'|'tactical', items?:?Array,
- *          powerFn?:(h:any)=>number,
+ *          powerFn?:(h:any)=>number, field?:?Array,
  *          interstitial?:(nextRound:number, rounds:number, nextFoePower:number)=>Promise<boolean>}} [opts]
  * @returns {Promise<?{power:number, rounds:number, wins:number, champion:boolean, played:boolean, itemsUsed:?Object}>}
  */
@@ -100,6 +106,7 @@ export async function playTournamentMatch(hero, t, opts = {}) {
   const rounds = t.rounds || 4;
   const powerFn = opts.powerFn || heroPower;
   const mode = opts.mode === 'tactical' || opts.mode === 'spectate' ? opts.mode : 'action';
+  const field = Array.isArray(opts.field) ? opts.field : []; // drawn rivals, one per round (may be empty)
   const items = (opts.items || []).map((it) => ({ ...it })); // local kit — depletes across rounds
   const itemsUsed = {};
   let wins = 0;
@@ -111,7 +118,7 @@ export async function playTournamentMatch(hero, t, opts = {}) {
       break;
     }
     const result = await window.playGuildBattle({
-      player: heroSpec(hero), opponent: roundOpponent(t, i),
+      player: heroSpec(hero), opponent: roundOpponent(t, i, field[i]),
       mode, label: t.name + ' — round ' + (i + 1) + ' of ' + rounds,
       items: items.filter((it) => it.qty > 0),
     });

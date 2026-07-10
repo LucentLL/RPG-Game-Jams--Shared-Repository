@@ -99,15 +99,15 @@ export function createHero(init = {}) {
  */
 export const TRAITS = {
   Fearless:   { desc: 'never disobeys in a fight',            obey: +1 },
-  Hotheaded:  { desc: 'fights their own way; drills hard',    obey: -0.2, gain: 1.1 },
+  Hotheaded:  { desc: 'fights their own way; drills hard',    obey: -0.2, gain: 1.1, slack: 1.4 },
   Timid:      { desc: 'hesitates under orders; quick feet',   obey: -0.1, gain: 1.05 },
-  Loyal:      { desc: 'bond grows twice as fast',             bond: 2 },
-  Lazy:       { desc: 'trains soft but recovers deeply',      gain: 0.9, recover: 1.4 },
+  Loyal:      { desc: 'bond grows twice as fast',             bond: 2, slack: 0.6 },
+  Lazy:       { desc: 'trains soft but recovers deeply',      gain: 0.9, recover: 1.4, slack: 2 },
   Studious:   { desc: 'devours theory',                       study: 1.5 },
   Prodigy:    { desc: 'burns bright — and burns out sooner',  gain: 1.15, lifespan: 0.85 },
   Ironbody:   { desc: 'rarely gets hurt',                     injury: 0.6 },
   Fragile:    { desc: 'pushes hard; breaks easier',           injury: 1.5, gain: 1.1 },
-  Glutton:    { desc: 'lives for the mess hall',              recover: 1.3 },
+  Glutton:    { desc: 'lives for the mess hall',              recover: 1.3, slack: 1.2 },
   Stoic:      { desc: 'sheds stress like rain',               stress: 0.7 },
   Showman:    { desc: 'feeds on the crowd — big feelings',    morale: 2 },
 };

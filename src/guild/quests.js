@@ -25,6 +25,7 @@ function nextQuestId() { return 'quest_' + _questRun + (++_questSeq).toString(36
  * @property {number} rank @property {number} recommendedPower @property {number} durationWeeks
  * @property {{gold:number, reputation:number, field:number}} rewards
  * @property {?string} loot   material id awarded on success, or null
+ * @property {?{subject:string, tier:number}} book  a recovered volume for the Library, or null
  * @property {number} risk
  */
 
@@ -39,6 +40,7 @@ export function createQuest(init = {}) {
     durationWeeks: init.durationWeeks ?? 1,
     rewards: init.rewards || { gold: 70, reputation: 3, field: 6 },
     loot: init.loot ?? null,
+    book: init.book ?? null,
     risk: init.risk ?? 0.15,
   };
 }
@@ -53,6 +55,9 @@ export function generateQuest(rank = 1) {
     recommendedPower: 110 + (r - 1) * 100,
     rewards: { gold: 45 + r * 20, reputation: r * 3, field: 4 + r * 2 }, // kept in line with forge profit
     loot: Math.random() < 0.5 ? LOOT[rand(LOOT.length)] : null,
+    // Ruins and relic-vaults hold BOOKS: rank-2+ jobs sometimes recover a volume for
+    // the Library (deeper jobs shelter deeper theory). The other way books enter is trade.
+    book: r >= 2 && Math.random() < 0.2 ? { subject: Math.random() < 0.5 ? 'blacksmithing' : 'alchemy', tier: Math.min(3, r - 1) } : null,
     risk: Math.min(0.55, 0.1 + r * 0.06),
   });
 }

@@ -12,17 +12,19 @@ import { createGuild, FACILITIES, maxRoster, facilityTier, fedCapacity } from '.
 import { HERO_STATS, heroPower, STAT_CAP, lifeStage, lifeFrac, TRAITS, traitMult } from './hero.js';
 import { generateRecruit, hireCost, rollRecruitPool } from './recruiting.js';
 import { makeApprentice, normalizeApprentice, dormCapacity, academyBoard, developApprentice, developmentRate, graduate, potentialStars, LEAN_GLYPH, APPRENTICE_INTAKE } from './apprentices.js';
-import { DRILLS, REST, getDrill, applyTraining, applySpar, injuryLabel, previewInjuryChance, inflictInjury, rollInjurySeverity } from './training.js';
+import { DRILLS, REST, getDrill, applyTraining, applySpar, injuryLabel, previewInjuryChance, inflictInjury, rollInjurySeverity, rollConduct } from './training.js';
 import { stationBonusFor } from './stations.js';
-import { DIET_PLANS, getDietPlan, applyDiet } from './diet.js';
+import { DIET_PLANS, getDietPlan, applyDiet, consumeDietFood } from './diet.js';
 import { advanceWeek, formatDate } from './calendar.js';
 import { weeklyUpkeep, addGold, guildIncome } from './economy.js';
-import { RECIPES, getRecipe, previewQuality, forge, study, recipeUnlocked } from './smithing.js';
+import { RECIPES, getRecipe, previewQuality, forge, study, recipeUnlocked, refine, recipeForItem, previewRefine, REFINE_COST } from './smithing.js';
 import { POTION_RECIPES, getPotionRecipe, previewPotency, brew, potionUnlocked, applyPotion } from './alchemy.js';
-import { MATERIALS, createInventory, armoryItems, findItem, addMaterial, gearBonus, EQUIP_SLOTS, findPotion, consumePotion, potionCount } from './inventory.js';
+import { MATERIALS, createInventory, armoryItems, findItem, addMaterial, gearBonus, EQUIP_SLOTS, findPotion, consumePotion, potionCount, roomMaterialIds } from './inventory.js';
+import { BOOK_SUBJECTS, mintBook, addBook, bestBook, bookStudyMult, bookPrice } from './books.js';
 import { generateQuestBoard, resolveQuest, resolveQuestPlayed } from './quests.js';
-import { nextTournament, resolveTournament, placement, championOdds, stakesOf, competitionHarm } from './tournaments.js';
+import { nextTournament, resolveTournament, placement, championOdds, stakesOf, competitionHarm, roundOpponentPower } from './tournaments.js';
 import { generateSeason, EVENT_TYPES, seasonOf, ensureWorldCup } from './events.js';
+import { rivalById, ensureField, recordFieldOutcome, pruneRivals } from './rivals.js';
 import { roleFor } from './roles.js';
 import { qualityTier } from './item.js';
 import { MATERIAL_PRICE, buyPrice, itemSellValue, createMarket, refreshMarket } from './market.js';
@@ -95,23 +97,66 @@ function spendPotions(used) {
   for (const id in used) for (let i = 0; i < used[id]; i++) consumePotion(guild.inventory, id);
 }
 
-/** Modal lens chooser for a due match: resolves {mode:'action'|'tactical'|'sim', remember}.
- *  Shown mid-advanceAll (which is already async); the overlay sits above everything. */
-function chooseLens({ glyph, title, sub }) {
+/** "12W–3L–0D" from a {w,l,d} record (rivals) or a hero career ({wins,losses,draws}). */
+function recordStr(rec) {
+  if (!rec) return '0W–0L–0D';
+  const w = rec.w ?? rec.wins ?? 0, l = rec.l ?? rec.losses ?? 0, d = rec.d ?? rec.draws ?? 0;
+  return `${w}W–${l}L–${d}D`;
+}
+
+/**
+ * The event's LADDER: the drawn field, final at the top, round 1 at the bottom —
+ * every rival a face, a record, and the exact ⚡ the resolver will check for that
+ * round. Read-only: the field was drawn in load()/advanceAll (never mid-render).
+ * @param {Object} t @param {?import('./hero.js').Hero} champ  highlight rounds already cleared
+ */
+function tourneyLadder(t, champ) {
+  const rounds = t.rounds || 4;
+  const rows = [];
+  for (let i = rounds - 1; i >= 0; i--) {
+    const r = rivalById(guild, (t.rivalIds || [])[i]);
+    const tag = i === rounds - 1 ? '👑 Final' : `Round ${i + 1}`;
+    rows.push(r ? `<div class="tb-row ${i === rounds - 1 ? 'final' : ''}">
+        <span class="tb-round">${tag}</span>
+        <span class="rr-portrait">${personSprite(r, 44)}</span>
+        <span class="tb-main"><b>${r.name}</b><span class="rr-sub">${ARCH_GLYPH[r.archetype] || '☉'} ${r.archetype} · ⚡${r.power} · ${recordStr(r.record)}${r.titles ? ' · 👑' + r.titles : ''}</span></span>
+      </div>` : `<div class="tb-row"><span class="tb-round">${tag}</span><span class="tb-main dim">an unseeded contender · ~⚡${Math.round(roundOpponentPower(t, i))}</span></div>`);
+  }
+  const champRow = champ ? `<div class="tb-row you">
+      <span class="tb-round">You</span>
+      <span class="rr-portrait">${personSprite(champ, 44)}</span>
+      <span class="tb-main"><b>${champ.name}</b><span class="rr-sub">${ARCH_GLYPH[champ.archetype] || '☉'} ${champ.archetype} · ⚡${combatPower(champ)} · ${recordStr(champ.career)}</span></span>
+    </div>` : '';
+  return `<div class="tb-ladder">${rows.join('')}${champRow}</div>`;
+}
+
+/**
+ * The Tourney Board — the pre-match moment the fight used to skip. Shown when an
+ * event is DUE: the full drawn ladder (scout every rival's face, ⚡ and record),
+ * your champion's record and title odds, THEN the choice of lens. Resolves
+ * {mode:'action'|'tactical'|'spectate'|'sim', remember} exactly like the old bare
+ * chooser, so advanceAll's flow is unchanged — the fight just stops arriving unannounced.
+ */
+function tourneyBoard(t, champ) {
   return new Promise((resolve) => {
     const old = document.querySelector('.lens-overlay'); if (old) old.remove();
+    const odds = Math.round(championOdds(combatPower(champ), t) * 100);
+    const s = stakesOf(t);
     const ov = document.createElement('div');
     ov.className = 'lens-overlay';
-    ov.innerHTML = `<div class="lens-card">
-        <div class="lens-title">${glyph || '🏆'} ${title}</div>
-        <div class="lens-sub">${sub}</div>
+    ov.innerHTML = `<div class="lens-card tb-card">
+        <div class="lens-title">${(EVENT_TYPES[t.type] || {}).glyph || '🏆'} ${t.name}</div>
+        <div class="lens-sub">${s.glyph} <b>${s.tier}</b> · best of ${t.rounds} · <span class="${odds >= 50 ? 'up' : odds >= 20 ? '' : 'down'}">~${odds}% to win it all</span></div>
+        ${tourneyLadder(t, champ)}
         <button class="lens-btn" data-m="action">⚔ Fight it live <span>real-time arena — stick + tap</span></button>
         <button class="lens-btn" data-m="tactical">♟ Command it <span>simultaneous turn-based tactics</span></button>
         <button class="lens-btn" data-m="spectate">👁 Spectate <span>watch it fought turn by turn — take control anytime</span></button>
         <button class="lens-btn sim" data-m="sim">▶ Simulate <span>let the week resolve it</span></button>
         <label class="lens-remember"><input type="checkbox"> don’t ask again — always simulate <span class="dim">(re-enable on the Calendar)</span></label>
       </div>`;
-    document.body.appendChild(ov);
+    // Lives under #guildScreen (not body) so paintSprites reaches the ladder's canvases.
+    (document.getElementById('guildScreen') || document.body).appendChild(ov);
+    paintSprites();
     ov.querySelectorAll('.lens-btn').forEach((b) => {
       b.onclick = () => {
         const remember = !!ov.querySelector('.lens-remember input').checked;
@@ -123,15 +168,20 @@ function chooseLens({ glyph, title, sub }) {
 }
 
 /** Between played bracket rounds: fight the next round yourself, or hand the rest
- *  to the resolver? (Both paths run the same power×variance curve — no hidden tax.) */
+ *  to the resolver? (Both paths run the same power×variance curve — no hidden tax.)
+ *  The drawn field means the ring holds a NAME now, not just a power number. */
 function bracketInterstitial(t) {
   return (nextRound, rounds, nextFoePower) => new Promise((resolve) => {
     const old = document.querySelector('.lens-overlay'); if (old) old.remove();
+    const rival = rivalById(guild, (t.rivalIds || [])[nextRound - 1]);
+    const foeTxt = rival
+      ? `<b>${rival.name}</b> (${recordStr(rival.record)} · ⚡${rival.power}) waits in the ring`
+      : `a ~${nextFoePower}⚡ foe waits in the ring`;
     const ov = document.createElement('div');
     ov.className = 'lens-overlay';
     ov.innerHTML = `<div class="lens-card">
         <div class="lens-title">${(EVENT_TYPES[t.type] || {}).glyph || '🏆'} ${t.name}</div>
-        <div class="lens-sub">Round won! Next: <b>round ${nextRound} of ${rounds}</b> — a ~${nextFoePower}⚡ foe waits in the ring.</div>
+        <div class="lens-sub">Round won! Next: <b>round ${nextRound} of ${rounds}</b> — ${foeTxt}.</div>
         <button class="lens-btn" data-v="fight">⚔ Fight on <span>next opponent, same controls</span></button>
         <button class="lens-btn sim" data-v="sim">▶ Simulate the rest <span>the resolver plays out the remaining rounds</span></button>
       </div>`;
@@ -228,6 +278,8 @@ function ensureAssignment(h) {
     intensity: a.intensity === 'heavy' ? 'heavy' : 'light',
     sparWith: a.sparWith || null,
     recipeId: getRecipe(a.recipeId) ? a.recipeId : 'iron_sword',
+    forgeMode: a.forgeMode === 'refine' ? 'refine' : 'new', // the Forge's two jobs: forge fresh, or refine from the Armory
+    refineItemId: a.refineItemId || null,
     potionId: getPotionRecipe(a.potionId) ? a.potionId : 'minor_heal',
     discipline: a.discipline === 'alchemy' ? 'alchemy' : 'blacksmithing',
     questId: a.questId || null,
@@ -258,6 +310,7 @@ function migrateHero(h) {
   if (h.lifespan == null) h.lifespan = 300;
   // Career arc + the injury ladder (K4). Legacy string injuries become objects.
   if (!h.career) h.career = { debut: null, titles: [], wins: 0, losses: 0, injuries: 0, techniques: [] };
+  if (h.career.draws == null) h.career.draws = 0; // W–L–D records (the Tourney Board)
   if (h.retired == null) h.retired = false;
   if (h.staffRole === undefined) h.staffRole = null;
   // Personality + obedience (K5). Existing members grew up without traits — roll none
@@ -279,8 +332,12 @@ function load() {
   }
   if (!guild.inventory) guild.inventory = createInventory();
   if (!Array.isArray(guild.inventory.potions)) guild.inventory.potions = []; // Apothecary storage (added with the Alchemist)
+  if (!Array.isArray(guild.inventory.books)) guild.inventory.books = []; // Library shelf (added with room stores)
+  if (guild.inventory.materials.grain == null) guild.inventory.materials.grain = 12; // seed the Kitchen pantry into older saves
+  if (guild.inventory.materials.salted_meat == null) guild.inventory.materials.salted_meat = 4;
   if (!guild.market) guild.market = createMarket();
-  else { const def = createMarket().stock; for (const k in def) if (guild.market.stock[k] == null) guild.market.stock[k] = def[k]; } // seed herbs into pre-Alchemist saves
+  else { const def = createMarket().stock; for (const k in def) if (guild.market.stock[k] == null) guild.market.stock[k] = def[k]; } // seed herbs/foodstuffs into older saves
+  if (!Array.isArray(guild.market.bookStock)) guild.market.bookStock = createMarket().bookStock; // the bookseller arrives
   if (!['off', 'party', 'all'].includes(guild.quartermaster)) guild.quartermaster = 'off';
   if (typeof guild.reputation !== 'number') guild.reputation = 0;
   // Facilities: the Grounds reshaped this from a legacy string[] into a tier map.
@@ -305,6 +362,11 @@ function load() {
   if (guild.playPlan === undefined) guild.playPlan = null;
   generateSeason(guild); // seed/top-up the typed season so there's always a horizon to train toward
   ensureWorldCup(guild); // book the looming World Cup (every ~4 years) so it can be seen coming
+  // The rival circuit (Tourney Board): every unresolved event carries a drawn field of
+  // persistent named rivals. Drawn HERE (and after each Advance Week), never mid-render.
+  if (!Array.isArray(guild.rivals)) guild.rivals = [];
+  for (const t of guild.schedule) ensureField(guild, t);
+  pruneRivals(guild);
   if (!Array.isArray(guild.questBoard) || !guild.questBoard.length) guild.questBoard = generateQuestBoard(guild, 3);
   guild.roster.forEach((h) => { migrateHero(h); ensureAssignment(h); });
   const staleRecruits = guild.recruits && guild.recruits[0] && guild.recruits[0].stats && guild.recruits[0].stats.POW === undefined;
@@ -347,7 +409,31 @@ function scheduleAdd(drillId) {
 }
 function scheduleRemoveAt(i) { const h = heroById(selectedId); if (h && Array.isArray(h.schedule)) { h.schedule.splice(i, 1); save(); render(); } }
 function scheduleClear() { const h = heroById(selectedId); if (h) { h.schedule = []; save(); render(); } }
-function setRecipe(id) { const h = heroById(selectedId); if (h) { h.assignment.recipeId = id; h.assignment.type = 'forge'; h.assignment.questId = null; save(); render(); } }
+function setRecipe(id) { const h = heroById(selectedId); if (h) { h.assignment.recipeId = id; h.assignment.type = 'forge'; h.assignment.forgeMode = 'new'; h.assignment.questId = null; save(); render(); } }
+/** Switch the smith's week between forging fresh and refining from the Armory. */
+function setForgeMode(mode) { const h = heroById(selectedId); if (h) { h.assignment.forgeMode = mode === 'refine' ? 'refine' : 'new'; h.assignment.type = 'forge'; h.assignment.questId = null; save(); render(); } }
+/** Pick which armory piece the smith reworks this week. */
+function setRefineItem(itemId) {
+  const h = heroById(selectedId); if (!h) return;
+  const it = findItem(guild.inventory, itemId); if (!it || it.location !== 'armory') return;
+  h.assignment.type = 'forge'; h.assignment.forgeMode = 'refine'; h.assignment.refineItemId = itemId; h.assignment.questId = null;
+  save(); render();
+}
+/** Buy a volume off the market's shelf — it lands in the Library. */
+function buyBook(bookId) {
+  const m = guild.market;
+  const i = (m.bookStock || []).findIndex((b) => b.id === bookId);
+  if (i < 0) return;
+  const b = m.bookStock[i];
+  const price = bookPrice(b);
+  if (guild.gold < price) { notice = `Not enough gold — “${b.title}” costs ${price}g.`; render(); return; }
+  addGold(guild, -price);
+  m.bookStock.splice(i, 1);
+  b.source = 'market'; b.week = guild.calendar.week;
+  addBook(guild.inventory, b);
+  notice = `“${b.title}” joins the Library's shelf.`;
+  save(); render();
+}
 function setPotion(id) { const h = heroById(selectedId); if (h) { h.assignment.potionId = id; h.assignment.type = 'brew'; h.assignment.questId = null; save(); render(); } }
 function setDiscipline(d) { const h = heroById(selectedId); if (h) { h.assignment.discipline = d === 'alchemy' ? 'alchemy' : 'blacksmithing'; h.assignment.type = 'study'; h.assignment.questId = null; save(); render(); } }
 function setDiet(id) { const h = heroById(selectedId); if (h) { h.assignment.dietId = id; h.dietPlanId = id; save(); render(); } }
@@ -428,6 +514,7 @@ async function advanceAll() {
   const shortfall = Math.max(0, upkeep - guild.gold); // can't fully pay wages this week?
   addGold(guild, -upkeep);
   const week = guild.calendar.week;
+  const weekLabel = formatDate(guild.calendar); // the week being RESOLVED (advanceWeek moves the clock below)
   const results = [];
 
   // --- Quartermaster: auto-issue gear BEFORE quests resolve so it counts in the field. ---
@@ -463,13 +550,15 @@ async function advanceAll() {
         outcome = resolveQuest(quest, marchers, combatPower);
       }
     }
+    let bookGained = null;
     if (outcome && outcome.success) { // guild rewards, once for the whole party
       addGold(guild, quest.rewards.gold);
       guild.reputation += quest.rewards.reputation;
       if (quest.loot) addMaterial(guild.inventory, quest.loot, 1);
+      if (quest.book) bookGained = addBook(guild.inventory, mintBook(quest.book.subject, quest.book.tier, 'quest', week)).title; // a recovered volume, shelved in the Library
     }
     party.forEach((h) => {
-      questPlan[h.id] = { quest, outcome, marched: marchers.includes(h), isLead: marchers[0] === h, partySize: marchers.length };
+      questPlan[h.id] = { quest, outcome, marched: marchers.includes(h), isLead: marchers[0] === h, partySize: marchers.length, bookGained };
       h.assignment.questId = null; // dispatch spent — pick a new quest next week
     });
   }
@@ -488,30 +577,30 @@ async function advanceAll() {
     const lineup = (t.entrants || []).map((id) => heroById(id)).filter((h) => h && !h.condition.injury);
     if (!lineup.length) {
       t.resolved = true; t.result = { forfeit: true };
+      recordFieldOutcome(guild, t, null); // the field plays itself out — the final rival lifts the cup
       if (guild.playPlan && guild.playPlan.id === t.id) guild.playPlan = null; // the play opt-in dies with the forfeited event
       tournamentResults.push({ name: t.name, rank: t.rank, eventType: t.type, forfeit: true, hadEntrants: (t.entrants || []).length > 0 });
       continue;
     }
     // Seam: PLAY this match through the battle engine — armed in advance (playPlan),
-    // or offered NOW by the due-match chooser (battlePrefs.tournament === 'ask', the
-    // Monster-Rancher "your fight is up" moment). Simulate always remains a choice.
-    // A played result returns the SAME {power,rounds,wins,champion} shape as the resolver.
+    // or offered NOW by the TOURNEY BOARD (battlePrefs.tournament === 'ask', the
+    // Monster-Rancher "your fight is up" moment): the drawn ladder, every rival's
+    // record, THEN the lens choice. Simulate always remains a choice. A played
+    // result returns the SAME {power,rounds,wins,champion} shape as the resolver.
     let res;
     const armed = planFor('tournament', t.id);
     let lens = armed;
     if (!lens && guild.battlePrefs.tournament === 'ask' && battleEngineReady()) {
-      const pick = await chooseLens({
-        glyph: '🏆', title: t.name,
-        sub: `${lineup[0].name} steps up — ⚡${combatPower(lineup[0])} vs a ~${t.field}⚡ field. Resolve it how?`,
-      });
+      const pick = await tourneyBoard(t, lineup[0]);
       if (pick.remember) guild.battlePrefs.tournament = 'sim';
       lens = pick.mode === 'sim' ? null : pick.mode;
     }
     if (lens && battleEngineReady()) {
-      if (armed) guild.playPlan = null; // consume the opt-in (a chooser pick never armed one)
+      if (armed) guild.playPlan = null; // consume the opt-in (a board pick never armed one)
       const played = await playTournamentMatch(lineup[0], t, {
         mode: lens, items: withdrawPotions(),
         powerFn: combatPower,               // gear counts, same as the simulated bracket
+        field: (t.rivalIds || []).map((id) => rivalById(guild, id)), // fight the SAME rivals the board showed
         interstitial: bracketInterstitial(t), // per-round: fight on / simulate the rest
       });
       if (played && played.itemsUsed) spendPotions(played.itemsUsed);
@@ -520,6 +609,7 @@ async function advanceAll() {
       if (armed) guild.playPlan = null; // armed but declined/unavailable — consumed either way
       res = resolveTournament(t, lineup, combatPower);
     }
+    recordFieldOutcome(guild, t, res); // the rivals' careers move too — records persist across seasons
     const pl = placement(res);
     const gold = Math.round(t.rewards.gold * pl.frac);
     const rep = Math.round(t.rewards.reputation * pl.frac);
@@ -578,10 +668,16 @@ async function advanceAll() {
   const wasInjured = new Map(guild.roster.map((x) => [x.id, !!x.condition.injury]));
   for (const h of guild.roster) {
     const a = h.assignment;
-    const diet = getDietPlan(a.dietId);
+    const wanted = getDietPlan(a.dietId);
     h.dietPlanId = a.dietId;
+    // The Kitchen pantry is REAL: each diet draws its food from the Kitchen's store
+    // (grain for plain tables, salted meat for the rich ones). A short pantry means
+    // plain rations this week — growth bias, recovery, and mood all downgrade.
+    const fed = consumeDietFood(guild.inventory, wanted);
+    const diet = fed ? wanted : getDietPlan('balanced');
     const cb = { stamina: h.condition.stamina, fatigue: h.condition.fatigue };
     let entry = { name: h.name, id: h.id, type: a.type };
+    if (!fed) entry.hungry = wanted.name;
     let questMorale = null;
     let onExpedition = false; // true only if the hero actually marched out this week
 
@@ -593,23 +689,40 @@ async function advanceAll() {
       entry.type = 'train'; // recap renders the rest/recovery line
       entry.rested = true; entry.injury = res.injury;
     } else if (a.type === 'forge') {
-      const recipe = getRecipe(a.recipeId);
-      entry.forge = forge(h, recipe, guild.inventory, week);
-      entry.recipeName = recipe.name;
+      if (a.forgeMode === 'refine') {
+        // The Armory feeds the Forge: rework a shelved piece instead of forging fresh.
+        const it = a.refineItemId ? findItem(guild.inventory, a.refineItemId) : null;
+        entry.refine = (it && it.location === 'armory') ? refine(h, it, guild.inventory, week) : { ok: false, reason: 'gone' };
+        entry.recipeName = it ? it.name : 'a missing piece';
+        entry.conduct = entry.refine.ok ? ((entry.refine.to - entry.refine.from) >= 8 ? 'exceeded' : 'solid') : 'failed';
+        if (!entry.refine.ok) a.refineItemId = null; // a dead job doesn't repeat silently next week
+      } else {
+        const recipe = getRecipe(a.recipeId);
+        entry.forge = forge(h, recipe, guild.inventory, week);
+        entry.recipeName = recipe.name;
+        // Conduct (the Assembly): landing within a whisker of the material's ceiling is mastery.
+        entry.conduct = entry.forge.ok ? (entry.forge.quality >= (recipe.ceil || 100) - 4 ? 'exceeded' : 'solid') : 'failed';
+      }
     } else if (a.type === 'brew') {
       const recipe = getPotionRecipe(a.potionId) || POTION_RECIPES[0];
       entry.brew = brew(h, recipe, guild.inventory, week);
       entry.recipeName = recipe.name;
+      entry.conduct = entry.brew.ok ? (entry.brew.potency >= (recipe.ceil || 100) - 4 ? 'exceeded' : 'solid') : 'failed';
     } else if (a.type === 'study') {
       const disc = a.discipline === 'alchemy' ? 'alchemy' : 'blacksmithing';
-      entry.study = study(h, disc);
+      const bk = bestBook(guild.inventory, disc); // the Library's shelf at work — the best volume guides the week
+      entry.study = study(h, disc, bookStudyMult(bk));
       entry.discipline = disc;
+      if (bk) entry.book = bk.title;
+      entry.conduct = entry.study.theoryGain >= 8 ? 'exceeded' : 'solid';
     } else if (a.type === 'quest') {
       const plan = questPlan[h.id];
       if (!plan || !plan.quest) {
         entry.quest = { noQuest: true };
+        entry.conduct = 'failed';
       } else if (!plan.marched) {
         entry.quest = { tooTired: true }; // too tired/injured to march this week
+        entry.conduct = 'failed';
       } else {
         onExpedition = true;
         const success = plan.outcome.success;
@@ -626,11 +739,13 @@ async function advanceAll() {
           }
         }
         entry.quest = { title: plan.quest.title, success, party: plan.partySize, played: !!plan.outcome.played, won: !!plan.outcome.won };
+        // Conduct: a comfortable clear (score well past the bar) reads as excellence.
+        entry.conduct = success ? ((plan.outcome.score || 1) >= 1.3 ? 'exceeded' : 'solid') : 'failed';
         if (success) {
           const fieldGain = plan.quest.rewards.field; // only a SUCCESSFUL quest teaches Field Insight —
           for (const k in h.professions) h.professions[k].field = Math.min(100, (h.professions[k].field || 0) + fieldGain); // ...and it sharpens every craft the hero practices (smithing AND alchemy)
           entry.field = fieldGain;
-          if (plan.isLead) entry.reward = { gold: plan.quest.rewards.gold, rep: plan.quest.rewards.reputation, loot: plan.quest.loot };
+          if (plan.isLead) entry.reward = { gold: plan.quest.rewards.gold, rep: plan.quest.rewards.reputation, loot: plan.quest.loot, book: plan.bookGained };
           questMorale = 8;
         } else {
           entry.field = 0;
@@ -651,25 +766,36 @@ async function advanceAll() {
         entry.drill = 'Spar vs ' + partner.name.split(' ')[0];
         entry.gains = res.gains; entry.drops = res.drops; entry.injury = res.injury;
         entry.trained = Object.keys(res.gains).length > 0; entry.spar = true;
+        entry.conduct = entry.trained ? 'solid' : 'failed'; // a partner keeps you honest — no slacking a spar
       } else {
         const res = applyTraining(h, 'skl', 'light', trainingBias(diet), { ...ringOpts(diet), equipMult: stationBonusFor(guild, 'skl') }); // partner unavailable — solo footwork
         entry.drill = 'Spar — no partner';
         entry.gains = res.gains; entry.drops = res.drops; entry.injury = res.injury;
         entry.trained = Object.keys(res.gains).length > 0;
+        entry.conduct = entry.trained ? 'solid' : 'failed';
       }
     } else {
-      const res = applyTraining(h, a.trainingId, a.intensity, trainingBias(diet), { ...ringOpts(diet), equipMult: stationBonusFor(guild, a.trainingId) });
+      // Conduct (the Assembly): unsupervised drills invite coasting — low Discipline,
+      // low morale, and the Lazy/Hotheaded temperaments all raise the odds. A slacked
+      // week still shows up as "trained" in passing; the Assembly report exposes it.
+      const effort = (a.trainingId !== 'rest' && !h.condition.injury) ? rollConduct(h) : 'honest';
+      const res = applyTraining(h, a.trainingId, a.intensity, trainingBias(diet), { ...ringOpts(diet), equipMult: stationBonusFor(guild, a.trainingId), effort });
       entry.drill = (getDrill(a.trainingId) || REST).name;
       entry.gains = res.gains; entry.drops = res.drops;
       entry.rested = res.rested; entry.injured = res.injured; entry.injury = res.injury;
-      entry.breakthrough = res.breakthrough;
+      entry.breakthrough = res.breakthrough; entry.slacked = !!res.slacked;
       entry.trained = Object.keys(res.gains).length > 0;
+      entry.conduct = entry.rested || entry.injured ? null
+        : entry.slacked ? 'cheated'
+        : entry.breakthrough ? 'exceeded'
+        : entry.trained ? 'solid' : 'failed';
     }
 
     if (!onExpedition) applyDiet(h, diet); // only heroes who actually marched out skip guild rest
     // Training/rest morale is applied inside applyTraining; forge/study take a small dip; quests set questMorale.
     let dm = questMorale != null ? questMorale : (a.type === 'forge' || a.type === 'study' || a.type === 'brew' ? -1 : 0);
     if (diet.id === 'feast') dm += 4;
+    if (entry.hungry) dm -= 2; // plain rations when they wanted better — grumbling
     h.condition.morale = clamp(h.condition.morale + dm);
     // Bond moves (K5): rest weeks knit it; a NEW injury this week frays it.
     if (entry.rested) h.condition.loyalty = clamp((h.condition.loyalty ?? 60) + 1 * traitMult(h, 'bond'));
@@ -731,12 +857,15 @@ async function advanceAll() {
   guild.recruits = rollRecruitPool(3);
   generateSeason(guild); // drop the just-resolved event(s) and keep the season paced ahead
   ensureWorldCup(guild); // re-book the next World Cup once one resolves
-  report = { income, upkeep, shortfall, results, issued, tournaments: tournamentResults };
+  for (const t of guild.schedule) ensureField(guild, t); // freshly booked events draw their rival fields now
+  pruneRivals(guild);
+  report = { weekLabel, income, upkeep, shortfall, results, issued, tournaments: tournamentResults };
   guild.lastReport = report; // persist the recap — it used to vanish on reload
   notice = '';
   currentRoom = 'hub'; // land on the hub so the weekly recap is always seen
   ranchView = false; stopRanchLoop(); // land on the hub recap after a week resolves
   save(); showScreen('guildScreen'); applyViewToggle(); render({ top: true });
+  showAssembly(); // the Weekly Assembly: every member's week on one screen, praise/scold in hand
   } finally { advancing = false; }
 }
 
@@ -756,8 +885,8 @@ function personSprite(person, px) {
   const p = px || 40;
   return `<canvas class="hero-sprite" width="${p * 2}" height="${p * 2}" data-hid="${person.id}" aria-label="${person.name}"></canvas>`;
 }
-/** A member OR a tavern recruit, by id. */
-function personById(id) { return heroById(id) || (guild.recruits || []).find((r) => r.id === id) || null; }
+/** A member, a tavern recruit, OR a circuit rival, by id (all render the same way). */
+function personById(id) { return heroById(id) || (guild.recruits || []).find((r) => r.id === id) || rivalById(guild, id); }
 /** After each render, draw every sprite canvas via the shared Elements renderer. */
 function paintSprites() {
   if (typeof window.renderGuildSprite !== 'function') return; // crucible.js not loaded (shouldn't happen)
@@ -794,7 +923,7 @@ function qualHTML(item) { const t = qualityTier(item.quality); return `<span sty
 function questTitle(id) { const q = guild.questBoard.find((x) => x.id === id); return q ? q.title : null; }
 function rosterRow(h) {
   const a = h.assignment;
-  const plan = a.type === 'forge' ? `🔨 ${getRecipe(a.recipeId).name}`
+  const plan = a.type === 'forge' ? (a.forgeMode === 'refine' ? `♻ Refine ${(findItem(guild.inventory, a.refineItemId) || {}).name || '(pick a piece)'}` : `🔨 ${getRecipe(a.recipeId).name}`)
     : a.type === 'brew' ? `⚗ ${(getPotionRecipe(a.potionId) || {}).name || 'Brew'}`
     : a.type === 'study' ? `📖 Study ${a.discipline === 'alchemy' ? 'Alchemy' : 'Smithing'}`
     : a.type === 'quest' ? `🗺 ${a.questId ? (questTitle(a.questId) || 'On Quest') : '(choose quest)'}`
@@ -839,8 +968,8 @@ function heroHeader(h) {
   }).join('');
   const stage = lifeStage(h);
   const cr = h.career || {};
-  const record = (cr.wins || cr.losses || (cr.titles || []).length)
-    ? ` · <span class="dim">${cr.wins || 0}W–${cr.losses || 0}L${(cr.titles || []).length ? ' · 👑' + cr.titles.length : ''}</span>` : '';
+  const record = (cr.wins || cr.losses || cr.draws || (cr.titles || []).length)
+    ? ` · <span class="dim">${recordStr(cr)}${(cr.titles || []).length ? ' · 👑' + cr.titles.length : ''}</span>` : '';
   const chips = (h.traits || []).map((t) => `<span class="trait-chip" title="${(TRAITS[t] || {}).desc || ''}">${t}</span>`).join('');
   return `<div class="assign-head"><span class="rr-portrait">${personSprite(h, 64)}</span> <b>${h.name}</b> · ${h.archetype} Lv${h.level} · <span style="color:${stage.col}">${stage.name}</span>${record} · ⚡${combatPower(h)}</div>
       ${chips ? `<div class="trait-row">${chips}</div>` : ''}
@@ -930,22 +1059,51 @@ function questBody(h) {
   return `<div class="opt-list">${list}</div>${lensBar}`;
 }
 
-/** Forge recipe list for member h. Picking a recipe sets them to Forge. */
+/** Forge body for member h: forge a fresh piece, or REFINE one from the Armory. */
 function forgeBody(h) {
   const at = h.assignment.type;
   const isForge = at === 'forge';
+  const refining = h.assignment.forgeMode === 'refine';
   const prof = h.professions.blacksmithing;
-  const forgeList = RECIPES.map((r) => {
-    const cost = Object.keys(r.cost).map((k) => `${MATERIALS[k].name} ×${r.cost[k]}`).join(', ');
-    const enough = Object.keys(r.cost).every((k) => (guild.inventory.materials[k] || 0) >= r.cost[k]);
-    if (!recipeUnlocked(h, r)) {
-      return `<button class="opt lack" disabled><span><span class="o-name">🔒 ${r.name}</span> <span class="o-desc">study to unlock</span></span><span class="o-cost">Theory ${r.reqTheory}</span></button>`;
-    }
-    return `<button class="opt ${isForge && r.id === h.assignment.recipeId ? 'active' : ''} ${enough ? '' : 'lack'}" onclick="__guild.setRecipe('${r.id}')">
-      <span><span class="o-name">${KIND_GLYPH[r.kind] || ''} ${r.name}</span> <span class="o-desc">${cost}</span></span>
-      <span class="o-cost">~q${previewQuality(r, prof.practice, prof.field)}</span></button>`;
-  }).join('');
-  return `${skillShapeOf(h)}<div class="opt-list">${forgeList}</div>`;
+  const modeToggle = `<div class="intensity-toggle">
+      <button class="${isForge && !refining ? 'on' : ''}" onclick="__guild.setForgeMode('new')">🔨 Forge new</button>
+      <button class="${isForge && refining ? 'on' : ''}" onclick="__guild.setForgeMode('refine')">♻ Refine from the Armory</button>
+    </div>`;
+  let body;
+  if (refining) {
+    const shelf = armoryItems(guild.inventory);
+    body = shelf.length ? shelf.map((it) => {
+      const rec = recipeForItem(it);
+      const cost = REFINE_COST[it.material] || { iron_ore: 1 };
+      const costTxt = Object.keys(cost).map((k) => `${MATERIALS[k].name} ×${cost[k]}`).join(', ');
+      const enough = Object.keys(cost).every((k) => (guild.inventory.materials[k] || 0) >= cost[k]);
+      if (!recipeUnlocked(h, rec)) {
+        return `<button class="opt lack" disabled><span><span class="o-name">🔒 ${it.name}</span> <span class="o-desc">study ${it.material} theory to rework it</span></span><span class="o-cost">Theory ${rec.reqTheory}</span></button>`;
+      }
+      const to = previewRefine(it, prof.practice, prof.field);
+      if (to <= it.quality) {
+        return `<button class="opt lack" disabled><span><span class="o-name">${KIND_GLYPH[it.kind] || '▪'} ${it.name}</span> <span class="o-desc">beyond ${h.name.split(' ')[0]}'s craft — find a better smith</span></span><span class="o-cost">q${it.quality}</span></button>`;
+      }
+      return `<button class="opt ${isForge && refining && h.assignment.refineItemId === it.id ? 'active' : ''} ${enough ? '' : 'lack'}" onclick="__guild.setRefineItem('${it.id}')">
+        <span><span class="o-name">${KIND_GLYPH[it.kind] || '▪'} ${it.name}</span> <span class="o-desc">${costTxt} · durability restored</span></span>
+        <span class="o-cost">q${it.quality} → ~q${to}</span></button>`;
+    }).join('') : '<div class="hint">The Armory shelf is bare — forge something first, or unequip a piece to rework it.</div>';
+    body = `<div class="opt-list">${body}</div>
+      <div class="hint" style="text-align:left;padding:4px 0">Refining reworks a real armory piece: quality climbs toward what the smith could forge outright, durability is restored, and the work joins the item's history — the blade keeps its story.</div>`;
+  } else {
+    const forgeList = RECIPES.map((r) => {
+      const cost = Object.keys(r.cost).map((k) => `${MATERIALS[k].name} ×${r.cost[k]}`).join(', ');
+      const enough = Object.keys(r.cost).every((k) => (guild.inventory.materials[k] || 0) >= r.cost[k]);
+      if (!recipeUnlocked(h, r)) {
+        return `<button class="opt lack" disabled><span><span class="o-name">🔒 ${r.name}</span> <span class="o-desc">study to unlock</span></span><span class="o-cost">Theory ${r.reqTheory}</span></button>`;
+      }
+      return `<button class="opt ${isForge && !refining && r.id === h.assignment.recipeId ? 'active' : ''} ${enough ? '' : 'lack'}" onclick="__guild.setRecipe('${r.id}')">
+        <span><span class="o-name">${KIND_GLYPH[r.kind] || ''} ${r.name}</span> <span class="o-desc">${cost}</span></span>
+        <span class="o-cost">~q${previewQuality(r, prof.practice, prof.field)}</span></button>`;
+    }).join('');
+    body = `<div class="opt-list">${forgeList}</div>`;
+  }
+  return `${skillShapeOf(h)}${modeToggle}${body}`;
 }
 
 function alchemyShapeOf(h) {
@@ -994,7 +1152,7 @@ function dietBody(h) {
 /** One-line summary of what a member is doing this week. */
 function jobLabel(h) {
   const a = h.assignment;
-  return a.type === 'forge' ? `🔨 Forging ${(getRecipe(a.recipeId) || {}).name || ''}`
+  return a.type === 'forge' ? (a.forgeMode === 'refine' ? `♻ Refining ${(findItem(guild.inventory, a.refineItemId) || {}).name || '(pick a piece)'}` : `🔨 Forging ${(getRecipe(a.recipeId) || {}).name || ''}`)
     : a.type === 'brew' ? `⚗ Brewing ${(getPotionRecipe(a.potionId) || {}).name || ''}`
     : a.type === 'study' ? `📖 Studying ${a.discipline === 'alchemy' ? 'alchemy' : 'metallurgy'}`
     : a.type === 'quest' ? `🗺 ${a.questId ? (questTitle(a.questId) || 'On a quest') : 'Quest (pick one)'}`
@@ -1002,25 +1160,66 @@ function jobLabel(h) {
     : `⚔ ${(getDrill(a.trainingId) || REST).name}${a.intensity === 'heavy' ? ' (Heavy)' : ''}`;
 }
 
+// The Armory is a SEPARATE store now — finished gear only. Raw materials live in
+// the room that works them (ore → Forge stockroom, herbs → Laboratory, food →
+// Kitchen pantry), each shown by its room's storesPanel.
 function armoryPanel() {
   const inv = guild.inventory;
-  const mats = Object.keys(MATERIALS).map((k) => `<span class="mat"><b style="color:${MATERIALS[k].col}">${inv.materials[k] || 0}</b> ${MATERIALS[k].name}</span>`).join('');
   const shelf = armoryItems(inv);
   const carried = inv.items.filter((it) => it.location !== 'armory');
-  const shelfHTML = shelf.length ? shelf.map((it) => `<div class="armory-item">
+  const shelfHTML = shelf.length ? shelf.map((it) => {
+    const reworked = (it.history.repairs || []).length;
+    return `<div class="armory-item">
       <span class="ai-icon">${KIND_GLYPH[it.kind] || '▪'}</span>
-      <span class="ai-main"><b>${it.name}</b><span class="rr-sub">${qualHTML(it)}${it.history.forgedByName ? ' · forged by ' + it.history.forgedByName : ''}</span></span>
+      <span class="ai-main"><b>${it.name}</b><span class="rr-sub">${qualHTML(it)}${it.history.forgedByName ? ' · forged by ' + it.history.forgedByName : ''}${reworked ? ` · reworked ×${reworked}` : ''}</span></span>
       <span class="ai-actions">
         <button class="rc-hire" onclick="__guild.equipItem('${it.id}')">Equip</button>
         <button class="rc-hire sell" onclick="__guild.sellItem('${it.id}')">Sell ${itemSellValue(it)}g</button>
       </span>
-    </div>`).join('') : '<div class="hint">Empty. Assign a hero to the Forge to make weapons.</div>';
+    </div>`;
+  }).join('') : '<div class="hint">Empty. Assign a hero to the Forge to make weapons.</div>';
 
   return `<div class="plan-card">
-      <div class="plan-title">🏛 Armory</div>
-      <div class="materials">${mats}</div>
+      <div class="plan-title">🏛 Armory · finished gear</div>
       <div class="armory-shelf">${shelfHTML}</div>
       ${carried.length ? `<div class="rr-sub" style="margin-top:8px">${carried.length} item(s) carried by heroes.</div>` : ''}
+      <div class="hint" style="text-align:left;padding:6px 0 0">The Forge can ♻ refine shelved pieces — raw ore lives in the Forge's own stockroom.</div>
+    </div>`;
+}
+
+/** A work room's own store: the raw-material stacks it works from. */
+function storesPanel(title, roomId, hint) {
+  const inv = guild.inventory;
+  const rows = roomMaterialIds(roomId)
+    .map((k) => `<span class="mat"><b style="color:${MATERIALS[k].col}">${inv.materials[k] || 0}</b> ${MATERIALS[k].name}</span>`).join('');
+  return `<div class="plan-card">
+      <div class="plan-title">${title}</div>
+      <div class="materials">${rows}</div>
+      ${hint ? `<div class="hint" style="text-align:left;padding:6px 0 0">${hint}</div>` : ''}
+    </div>`;
+}
+
+/** The Library's own inventory: the shelf of real, permanent volumes. */
+function libraryShelfPanel() {
+  const books = guild.inventory.books || [];
+  const rows = books.length ? books.map((b) => {
+    const sub = BOOK_SUBJECTS[b.subject] || { glyph: '📖', label: b.subject };
+    return `<div class="armory-item">
+        <span class="ai-icon">${sub.glyph}</span>
+        <span class="ai-main"><b>${b.title}</b><span class="rr-sub">${sub.label} · ${'★'.repeat(b.tier)}${'☆'.repeat(3 - b.tier)}${b.source === 'quest' ? ' · recovered on a quest' : ' · bought at market'}</span></span>
+      </div>`;
+  }).join('') : '<div class="hint">Bare shelves. Buy volumes at the ⚖ Market (Armory room) — or recover them on rank-2+ quests.</div>';
+  const best = { blacksmithing: bestBook(guild.inventory, 'blacksmithing'), alchemy: bestBook(guild.inventory, 'alchemy') };
+  const guide = ['blacksmithing', 'alchemy'].map((s) => {
+    const sub = BOOK_SUBJECTS[s];
+    return best[s]
+      ? `<div class="r-line">${sub.glyph} ${sub.label} study is guided by <b>${best[s].title}</b> — <span class="up">Theory ×${bookStudyMult(best[s]).toFixed(2)}</span></div>`
+      : `<div class="r-line dim">${sub.glyph} No ${sub.label.toLowerCase()} volume shelved — scholars study from loose notes.</div>`;
+  }).join('');
+  return `<div class="plan-card">
+      <div class="plan-title">📚 The Shelf · ${books.length} volume${books.length === 1 ? '' : 's'}</div>
+      <div class="armory-shelf">${rows}</div>
+      <div style="margin-top:8px;font-size:0.82em">${guide}</div>
     </div>`;
 }
 
@@ -1058,10 +1257,21 @@ function marketPanel() {
         <button class="rc-hire ${afford ? '' : 'disabled'}" onclick="__guild.buyMaterial('${id}')">Buy · ${price}g</button>
       </div>`;
   }).join('');
+  const bookRows = (m.bookStock || []).map((b) => {
+    const sub = BOOK_SUBJECTS[b.subject] || { glyph: '📖', label: b.subject };
+    const price = bookPrice(b);
+    const afford = guild.gold >= price;
+    return `<div class="market-row">
+        <span class="mk-name"><b>${sub.glyph} ${b.title}</b> <span class="rr-sub">${sub.label} · ${'★'.repeat(b.tier)}</span></span>
+        <button class="rc-hire ${afford ? '' : 'disabled'}" onclick="__guild.buyBook('${b.id}')">Buy · ${price}g</button>
+      </div>`;
+  }).join('');
   return `<div class="plan-card">
       <div class="plan-title">⚖ Market · Buy Materials</div>
       <div class="market-list">${rows}</div>
-      <div class="hint" style="text-align:left;padding:6px 0 0">Sell forged goods from the Armory above. Stock refreshes each week.</div>
+      <div class="dept-lbl" style="margin-top:8px">📚 The bookseller's shelf</div>
+      <div class="market-list">${bookRows || '<div class="hint">Sold out this week — the shelf turns over each Advance Week.</div>'}</div>
+      <div class="hint" style="text-align:left;padding:6px 0 0">Materials deliver to their room's store (ore → Forge, herbs → Laboratory, food → Kitchen); books shelve in the 📖 Library. Sell forged goods from the Armory above. Stock refreshes each week.</div>
     </div>`;
 }
 
@@ -1069,6 +1279,13 @@ function recapPanel() {
   const rep = report || guild.lastReport; // module var this session, persisted copy after a reload
   if (!rep) return '';
   const lines = rep.results.map((r) => {
+    if (r.type === 'forge' && r.refine) {
+      const f = r.refine;
+      if (f.ok) return `<div class="r-line"><b>${r.name}</b> refined <span class="up">${f.item.name} — q${f.from} → q${f.to}</span> <span class="dim">· edge trued, +${f.practiceGain} practice</span></div>`;
+      const why = f.reason === 'materials' ? 'out of ore' : f.reason === 'locked' ? 'theory not yet studied' : f.reason === 'stamina' ? 'too tired to work'
+        : f.reason === 'mastered' ? 'the piece is beyond their craft' : 'the piece left the armory';
+      return `<div class="r-line"><b>${r.name}</b> <span class="down">couldn't refine — ${why}</span></div>`;
+    }
     if (r.type === 'forge') {
       const f = r.forge;
       if (f.ok) return `<div class="r-line"><b>${r.name}</b> forged <span class="up">${f.item.name} (q${f.quality})</span> <span class="dim">· +${f.practiceGain} practice</span></div>`;
@@ -1081,7 +1298,7 @@ function recapPanel() {
       const why = b.reason === 'materials' ? 'out of herbs' : (b.reason === 'locked' ? 'recipe not yet unlocked' : 'too tired to brew');
       return `<div class="r-line"><b>${r.name}</b> <span class="down">couldn't brew — ${why}</span></div>`;
     }
-    if (r.type === 'study') return `<div class="r-line"><b>${r.name}</b> studied ${r.discipline === 'alchemy' ? 'alchemy' : 'metallurgy'} — <span class="up">Theory +${r.study.theoryGain}</span></div>`;
+    if (r.type === 'study') return `<div class="r-line"><b>${r.name}</b> studied ${r.discipline === 'alchemy' ? 'alchemy' : 'metallurgy'} — <span class="up">Theory +${r.study.theoryGain}</span>${r.book ? ` <span class="dim">· guided by “${r.book}”</span>` : ''}</div>`;
     if (r.type === 'retire') {
       const cr = r.career || {};
       const titles = (cr.titles || []).length ? ` · 👑 ${(cr.titles || []).length} title${cr.titles.length > 1 ? 's' : ''}` : '';
@@ -1096,7 +1313,8 @@ function recapPanel() {
         const party = r.quest.party > 1 ? ` <span class="dim">(party of ${r.quest.party})</span>` : '';
         if (r.reward) {
           const loot = r.reward.loot ? ` +1 ${MATERIALS[r.reward.loot].name}` : '';
-          return `<div class="r-line"><b>${r.name}</b> completed <span class="up">${r.quest.title}</span> — <span class="up">+${r.reward.gold}g · +${r.reward.rep} rep${loot}</span> <span class="dim">· Field +${r.field}</span>${party}${led}${wound}</div>`;
+          const bookTxt = r.reward.book ? ` · 📖 “${r.reward.book}” recovered` : '';
+          return `<div class="r-line"><b>${r.name}</b> completed <span class="up">${r.quest.title}</span> — <span class="up">+${r.reward.gold}g · +${r.reward.rep} rep${loot}</span>${bookTxt} <span class="dim">· Field +${r.field}</span>${party}${led}${wound}</div>`;
         }
         return `<div class="r-line"><b>${r.name}</b> joined <span class="up">${r.quest.title}</span> <span class="dim">· Field +${r.field}</span>${party}${led}${wound}</div>`;
       }
@@ -1111,6 +1329,8 @@ function recapPanel() {
     return `<div class="r-line"><b>${r.name}</b> · ${body}${bt}${r.injury ? ` <span class="down">⚠ ${injuryLabel(r.injury)}!</span>` : ''} <span class="dim">(fat ${fmtDelta(r.fat)})</span></div>`;
   }).join('');
   const qm = rep.issued ? `<div class="r-line dim">🎽 quartermaster issued ${rep.issued} item(s) from stores</div>` : '';
+  const hungryN = rep.results.filter((r) => r.hungry).length;
+  const pantryLine = hungryN ? `<div class="r-line"><span class="down">🍞 The pantry ran short — ${hungryN} member${hungryN === 1 ? '' : 's'} ate plain rations. Restock at the Market.</span></div>` : '';
   const tLines = (rep.tournaments || []).map((t) => {
     const glyph = (EVENT_TYPES[t.eventType] || {}).glyph || '🏆';
     if (t.casualty) return `<div class="r-line"><span class="down">☠ <b>${t.casualty}</b> fell at ${t.name} — enshrined in the Hall of Fame. A slot opens for the next to rise.</span></div>`;
@@ -1122,7 +1342,171 @@ function recapPanel() {
     const hurtTxt = (t.hurt && t.hurt.length) ? ` <span class="down">⚠ ${t.hurt.join(', ')} hurt</span>` : '';
     return `<div class="r-line">${glyph} <b>${t.name}</b> · <span class="${t.champion ? 'up' : ''}">${t.placement}</span>${pay}${team}${played}${hurtTxt}</div>`;
   }).join('');
-  return `<div class="week-report"><h4>Last week</h4>${tLines}${lines}${qm}<div class="r-line">income <span class="up">+${rep.income}g</span> · upkeep <span class="down">−${rep.upkeep}g</span>${rep.shortfall ? ' · <span class="down">insolvent — morale −8 all</span>' : ''}</div></div>`;
+  return `<div class="week-report"><h4>Last week</h4>${tLines}${lines}${qm}${pantryLine}<div class="r-line">income <span class="up">+${rep.income}g</span> · upkeep <span class="down">−${rep.upkeep}g</span>${rep.shortfall ? ' · <span class="down">insolvent — morale −8 all</span>' : ''}</div>
+    <button class="tb-toggle" style="margin:8px 0 0" onclick="__guild.openAssembly()">📋 Reopen the weekly assembly — praise &amp; scold</button></div>`;
+}
+
+// --- The Weekly Assembly: the whole roster's week on one screen ---------------
+// Monster-Rancher's post-training beat, scaled to a guild: after Advance Week an
+// overlay lines up EVERY named member — what they did, what it earned (stat/skill
+// gains), and their CONDUCT (exceeded / solid / slacked-and-hid-it / fell short) —
+// with one Praise/Scold per member. Feedback lands on morale/Bond/Discipline, and
+// reading conduct right matters: scolding honest work frays the Bond; praising a
+// hidden slack teaches them that coasting pays.
+const CONDUCT_BADGE = {
+  exceeded: { cls: 'exceeded', txt: '✨ Exceeded expectations' },
+  solid:    { cls: 'solid',    txt: '✓ Did the work' },
+  cheated:  { cls: 'cheated',  txt: '🤥 Slacked off — and hid it' },
+  failed:   { cls: 'failed',   txt: '✗ Fell short' },
+};
+
+/** One line of what the member's week actually produced (gains, items, outcomes). */
+function assemblyOutcome(r) {
+  if (r.type === 'forge' && r.refine) {
+    const f = r.refine;
+    return f.ok ? `refined <span class="up">${f.item.name} — q${f.from} → q${f.to}</span>`
+      : `<span class="down">couldn't refine — ${f.reason === 'materials' ? 'out of ore' : f.reason === 'locked' ? 'theory unstudied' : f.reason === 'stamina' ? 'too tired' : f.reason === 'mastered' ? 'beyond their craft' : 'piece gone'}</span>`;
+  }
+  if (r.type === 'forge') {
+    const f = r.forge;
+    return f.ok ? `forged <span class="up">${f.item.name} (q${f.quality})</span>`
+      : `<span class="down">couldn't forge — ${f.reason === 'materials' ? 'out of materials' : f.reason === 'locked' ? 'recipe locked' : 'too tired'}</span>`;
+  }
+  if (r.type === 'brew') {
+    const b = r.brew;
+    return b.ok ? `brewed <span class="up">${b.qty}× ${b.batch.name} (p${b.potency})</span>`
+      : `<span class="down">couldn't brew — ${b.reason === 'materials' ? 'out of herbs' : b.reason === 'locked' ? 'recipe locked' : 'too tired'}</span>`;
+  }
+  if (r.type === 'study') return `studied ${r.discipline === 'alchemy' ? 'alchemy' : 'metallurgy'} — <span class="up">Theory +${r.study.theoryGain}</span>${r.book ? ` <span class="dim">· ${r.book}</span>` : ''}`;
+  if (r.type === 'quest') {
+    if (r.quest.noQuest) return '<span class="down">had no quest assigned</span>';
+    if (r.quest.tooTired) return '<span class="down">too exhausted to march</span>';
+    return `${r.quest.success ? `<span class="up">completed</span>` : `<span class="down">failed</span>`} ${r.quest.title}${r.wounded ? ` <span class="down">· ⚠ ${r.wounded}</span>` : ''}`;
+  }
+  if (r.rested) return `rested <span class="dim">— fat ${fmtDelta(r.fat)}${r.injury ? ', still hurt' : ''}</span>`;
+  if (r.injured) return '<span class="down">recovering from injury</span>';
+  const ups = HERO_STATS.filter((s) => r.gains && r.gains[s]).map((s) => `<span class="up">${s}+${r.gains[s]}</span>`);
+  const downs = HERO_STATS.filter((s) => r.drops && r.drops[s]).map((s) => `<span class="down">${s}−${r.drops[s]}</span>`);
+  const body = ups.concat(downs).join(' ') || '<span class="down">no gain</span>';
+  return `${r.drill ? `<span class="dim">${r.drill}</span> · ` : ''}${body}${r.injury ? ` <span class="down">⚠ ${injuryLabel(r.injury)}</span>` : ''}`;
+}
+
+/** One member's Assembly card: portrait, the week's outcome, conduct, praise/scold. */
+function assemblyCard(r) {
+  const h = heroById(r.id);
+  if (r.type === 'retire') {
+    return `<div class="as-member as-retire"><div class="as-head"><b>${r.name}</b></div>
+      <div class="as-outcome">🎓 <span class="up">retires with honors</span> — ${recordStr(r.career)} · enshrined in the Hall of Fame</div></div>`;
+  }
+  const badge = CONDUCT_BADGE[r.conduct];
+  const fb = r.feedback;
+  const actions = h ? `<div class="as-actions">
+      <button class="as-praise ${fb === 'praised' ? 'on' : ''}" ${fb ? 'disabled' : ''} onclick="__guild.praiseHero('${r.id}')">${fb === 'praised' ? '👏 Praised' : '👏 Praise'}</button>
+      <button class="as-scold ${fb === 'scolded' ? 'on' : ''}" ${fb ? 'disabled' : ''} onclick="__guild.scoldHero('${r.id}')">${fb === 'scolded' ? '😠 Scolded' : '😠 Scold'}</button>
+    </div>${r.feedbackNote ? `<div class="as-note">${r.feedbackNote}</div>` : ''}` : '';
+  return `<div class="as-member">
+      <div class="as-head"><span class="rr-portrait">${h ? personSprite(h, 40) : ''}</span><b>${r.name}</b></div>
+      <div class="as-outcome">${assemblyOutcome(r)}${r.hungry ? ` <span class="down">· 🍞 wanted ${r.hungry} — pantry bare</span>` : ''}</div>
+      ${badge ? `<div class="as-badge ${badge.cls}">${badge.txt}</div>` : '<div class="as-badge dim">— recovering —</div>'}
+      ${actions}
+    </div>`;
+}
+
+/** Build + show the Assembly overlay for the latest report (idempotent — replaces any open one). */
+function showAssembly() {
+  const rep = report || guild.lastReport;
+  if (!rep || !rep.results || !rep.results.length) return;
+  closeAssembly();
+  const tLines = (rep.tournaments || []).map((t) => {
+    const glyph = (EVENT_TYPES[t.eventType] || {}).glyph || '🏆';
+    if (t.casualty) return `<div class="as-event down">☠ <b>${t.casualty}</b> fell at ${t.name}</div>`;
+    if (t.forfeit) return `<div class="as-event dim">${glyph} ${t.name} — ${t.hadEntrants ? 'forfeited' : 'no one entered'}</div>`;
+    return `<div class="as-event">${glyph} <b>${t.name}</b> — <span class="${t.champion ? 'up' : ''}">${t.placement}</span>${t.gold ? ` <span class="up">+${t.gold}g</span>` : ''}${(t.hurt && t.hurt.length) ? ` <span class="down">⚠ ${t.hurt.join(', ')} hurt</span>` : ''}</div>`;
+  }).join('');
+  const apps = guild.apprentices || [];
+  const ready = apps.filter((a) => a.readiness >= 1).length;
+  const appLine = apps.length ? `<div class="as-event dim">🎓 ${apps.length} apprentice${apps.length === 1 ? '' : 's'} in the academy${ready ? ` — <span class="up">${ready} ready to graduate</span>` : ''}</div>` : '';
+  const ov = document.createElement('div');
+  ov.className = 'assembly-overlay';
+  ov.innerHTML = `<div class="assembly-card">
+      <div class="as-title">📋 The Weekly Assembly <span class="rr-sub">· ${rep.weekLabel || 'last week'}</span></div>
+      <div class="as-sub">The guild lines up. Praise the deserving, scold the coasting — they remember which.</div>
+      ${tLines}${appLine}
+      <div class="as-grid">${rep.results.map(assemblyCard).join('')}</div>
+      <div class="as-event dim">income <span class="up">+${rep.income}g</span> · upkeep <span class="down">−${rep.upkeep}g</span>${rep.shortfall ? ' · <span class="down">wages short — morale −8 all</span>' : ''}</div>
+      <button class="advance-btn as-close" onclick="__guild.closeAssembly()">Dismiss the assembly</button>
+    </div>`;
+  // Sibling of .guild-hall-host inside #guildScreen: render() never wipes it, and
+  // paintSprites' #guildScreen selector reaches the portrait canvases.
+  (document.getElementById('guildScreen') || document.body).appendChild(ov);
+  paintSprites();
+}
+function closeAssembly() { const ov = document.querySelector('.assembly-overlay'); if (ov) ov.remove(); }
+function openAssembly() { showAssembly(); }
+
+/** Praise a member's week. One reaction per member per week; the note says how it landed. */
+function praiseHero(id) {
+  const rep = report || guild.lastReport;
+  const r = rep && rep.results ? rep.results.find((x) => x.id === id) : null;
+  const h = heroById(id);
+  if (!r || r.feedback || !h) return;
+  const c = h.condition;
+  r.feedback = 'praised';
+  if (r.conduct === 'cheated') {
+    // Warm words for a hidden slack: they feel great — and learn that coasting pays.
+    c.morale = clamp(c.morale + 8 * traitMult(h, 'morale'));
+    c.discipline = clamp((c.discipline ?? 40) - 5);
+    c.loyalty = clamp((c.loyalty ?? 60) + 2 * traitMult(h, 'bond'));
+    r.feedbackNote = `${h.name.split(' ')[0]} beams… and files away that nobody checks.`;
+  } else if (r.conduct === 'exceeded') {
+    c.morale = clamp(c.morale + 8 * traitMult(h, 'morale'));
+    c.loyalty = clamp((c.loyalty ?? 60) + 4 * traitMult(h, 'bond'));
+    c.stress = Math.max(0, (c.stress || 0) - 6);
+    r.feedbackNote = `${h.name.split(' ')[0]} glows — the work was seen.`;
+  } else if (r.conduct === 'failed') {
+    c.morale = clamp(c.morale + 6 * traitMult(h, 'morale'));
+    c.loyalty = clamp((c.loyalty ?? 60) + 3 * traitMult(h, 'bond'));
+    c.discipline = clamp((c.discipline ?? 40) - 2);
+    r.feedbackNote = `Kind words after a hard week — ${h.name.split(' ')[0]} stands a little straighter.`;
+  } else {
+    c.morale = clamp(c.morale + 5 * traitMult(h, 'morale'));
+    c.loyalty = clamp((c.loyalty ?? 60) + 2 * traitMult(h, 'bond'));
+    r.feedbackNote = `${h.name.split(' ')[0]} nods, quietly pleased.`;
+  }
+  save(); render(); showAssembly();
+}
+/** Scold a member's week. Deserved, it builds Discipline; unjust, it frays the Bond. */
+function scoldHero(id) {
+  const rep = report || guild.lastReport;
+  const r = rep && rep.results ? rep.results.find((x) => x.id === id) : null;
+  const h = heroById(id);
+  if (!r || r.feedback || !h) return;
+  const c = h.condition;
+  r.feedback = 'scolded';
+  if (r.conduct === 'cheated') {
+    c.discipline = clamp((c.discipline ?? 40) + 6);
+    c.morale = clamp(c.morale - 4 * traitMult(h, 'morale'));
+    c.stress = Math.min(100, (c.stress || 0) + 4);
+    r.feedbackNote = `Caught cold — ${h.name.split(' ')[0]} owns it. Discipline takes root.`;
+  } else if (r.conduct === 'exceeded') {
+    // Scolding excellence is how you lose people.
+    c.loyalty = clamp((c.loyalty ?? 60) - 5);
+    c.morale = clamp(c.morale - 8 * traitMult(h, 'morale'));
+    c.discipline = clamp((c.discipline ?? 40) + 1);
+    r.feedbackNote = `${h.name.split(' ')[0]}'s jaw sets. Their best wasn't enough for you.`;
+  } else if (r.conduct === 'failed') {
+    c.discipline = clamp((c.discipline ?? 40) + 3);
+    c.morale = clamp(c.morale - 6 * traitMult(h, 'morale'));
+    c.stress = Math.min(100, (c.stress || 0) + 5);
+    c.loyalty = clamp((c.loyalty ?? 60) - 2);
+    r.feedbackNote = `${h.name.split(' ')[0]} takes the dressing-down in silence.`;
+  } else {
+    c.discipline = clamp((c.discipline ?? 40) + 3);
+    c.morale = clamp(c.morale - 5 * traitMult(h, 'morale'));
+    c.loyalty = clamp((c.loyalty ?? 60) - 3);
+    r.feedbackNote = `Scolded for honest work — ${h.name.split(' ')[0]} won't forget it.`;
+  }
+  save(); render(); showAssembly();
 }
 
 function recruitCard(r) {
@@ -1145,8 +1529,8 @@ function roomStatus(id) {
     case 'calendar': { const t = nextTournament(guild); if (!t) return 'no events'; const w = Math.max(0, t.week - guild.calendar.week); return `${w === 0 ? 'this week' : w + 'w'} · R${t.rank}`; }
     case 'roster': return `${r.length} member${r.length === 1 ? '' : 's'}`;
     case 'forge': { const n = r.filter((h) => h.assignment.type === 'forge').length; return n ? `${n} forging` : 'idle'; }
-    case 'library': { const n = r.filter((h) => h.assignment.type === 'study').length; return n ? `${n} studying` : 'idle'; }
-    case 'kitchen': return 'set diets';
+    case 'library': { const n = r.filter((h) => h.assignment.type === 'study').length; const b = (guild.inventory.books || []).length; return n ? `${n} studying` : `${b} book${b === 1 ? '' : 's'}`; }
+    case 'kitchen': { const p = (guild.inventory.materials.grain || 0) + (guild.inventory.materials.salted_meat || 0); return `${p} ration${p === 1 ? '' : 's'}`; }
     case 'armory': { const n = guild.inventory.items.length; return `${n} item${n === 1 ? '' : 's'}`; }
     case 'quarters': return `${guild.recruits.length} for hire`;
     case 'academy': { const a = guild.apprentices || []; const ready = a.filter((x) => x.readiness >= 1).length; return ready ? `${a.length} · ${ready} ready` : `${a.length}/${dormCapacity(guild)} bunks`; }
@@ -1192,9 +1576,17 @@ function deptRoom(jobType, roleGlyph, roleName, bodyFn) {
     </div>`;
 }
 
-function forgeRoom() { return deptRoom('forge', '🔨', 'Forge', forgeBody); }
-function libraryRoom() { return deptRoom('study', '📖', 'Library', studyBody); }
-function laboratoryRoom() { return deptRoom('brew', '⚗', 'Laboratory', brewBody); }
+// Each work room carries its OWN inventory beneath the job picker: the Forge its
+// ore, the Laboratory its herbs, the Library its shelf of books.
+function forgeRoom() {
+  return deptRoom('forge', '🔨', 'Forge', forgeBody)
+    + storesPanel('🪨 Forge Stockroom · ore', 'forge', 'Ore bought at market or bartered from quests is delivered here. Forging and ♻ refining both draw from this stock.');
+}
+function libraryRoom() { return deptRoom('study', '📖', 'Library', studyBody) + libraryShelfPanel(); }
+function laboratoryRoom() {
+  return deptRoom('brew', '⚗', 'Laboratory', brewBody)
+    + storesPanel('🌿 Laboratory Stores · herbs', 'laboratory', 'Herbs for the Alchemist’s brews. Finished potions shelve next door in the 🏺 Apothecary.');
+}
 
 /** The Kitchen is the guild MENU — everyone eats, so it lists every member's diet
  *  (not a worker roster). Pick a member to change their diet. */
@@ -1205,15 +1597,14 @@ function kitchenRoom() {
           <span class="rr-portrait sm">${personSprite(m, 34)}</span>
           <span class="rr-main"><span class="rr-name">${m.name}</span><span class="rr-assign">🍖 ${getDietPlan(m.assignment.dietId).name}</span></span>
         </button>`).join('')}</div>
-      <div class="hint" style="text-align:left;padding:6px 2px 0">Everyone eats. Supply-gated meals — where a member only gets their diet if the Kitchen stocks it — arrive with the Cook mechanic.</div></div>`;
-  if (!h) return menu;
-  return `${menu}<div class="plan-card"><div class="plan-title">🍖 ${h.name}'s Diet</div>${dietBody(h)}</div>`;
+      <div class="hint" style="text-align:left;padding:6px 2px 0">Every diet draws its food from the pantry each week — plain tables eat grain, the rich ones salted meat. A short pantry means plain rations and grumbling.</div></div>`;
+  const pantry = storesPanel('🍞 The Pantry · provisions', 'kitchen', 'Restock at the ⚖ Market (Armory room). One unit feeds one member for a week.');
+  if (!h) return menu + pantry;
+  return `${menu}<div class="plan-card"><div class="plan-title">🍖 ${h.name}'s Diet</div>${dietBody(h)}</div>${pantry}`;
 }
 function apothecaryRoom() {
   const inv = guild.inventory;
   const h = heroById(selectedId);
-  const herbs = Object.keys(MATERIALS).filter((k) => MATERIALS[k].kind === 'herb')
-    .map((k) => `<span class="mat"><b style="color:${MATERIALS[k].col}">${inv.materials[k] || 0}</b> ${MATERIALS[k].name}</span>`).join('');
   const shelf = inv.potions || [];
   const shelfHTML = shelf.length ? shelf.map((b) => `<div class="armory-item">
       <span class="ai-icon">${b.glyph || '🧪'}</span>
@@ -1229,8 +1620,8 @@ function apothecaryRoom() {
     </div>` : '';
   return `${ctx}<div class="plan-card">
       <div class="plan-title">🏺 Apothecary · ${potionCount(inv)} potion(s)</div>
-      <div class="materials">${herbs}</div>
       <div class="armory-shelf">${shelfHTML}</div>
+      <div class="hint" style="text-align:left;padding:6px 0 0">The Apothecary shelves finished brews only — raw herbs live in the ⚗ Laboratory's stores.</div>
     </div>`;
 }
 
@@ -1500,6 +1891,9 @@ function setPlayQuest(qId, mode) {
     : 'The quest will resolve on its own.';
   save(); render();
 }
+/** Which tournament card has its draw ladder open (UI-only, never saved). */
+let drawOpenId = null;
+function toggleDraw(tId) { drawOpenId = drawOpenId === tId ? null : tId; render(); }
 /** Calendar toggle: ask how to resolve each due match, or always simulate quietly. */
 function setAskTournaments() {
   guild.battlePrefs.tournament = guild.battlePrefs.tournament === 'ask' ? 'sim' : 'ask';
@@ -1534,6 +1928,8 @@ function tournamentCard(t) {
       <div class="rr-sub stakes-line stakes-${t.type}">${stakesOf(t).glyph} <b>${stakesOf(t).tier}</b> · ${stakesOf(t).danger}</div>
       <div class="rr-sub">Field ~${t.field}⚡ · best of ${t.rounds} · Champion <span class="up">${t.rewards.gold}g · +${t.rewards.reputation} rep${loot}</span></div>
       <div class="tourney-odds">${odds}</div>
+      <button class="tb-toggle" onclick="__guild.toggleDraw('${t.id}')">${drawOpenId === t.id ? '🏟 Hide the draw' : `🏟 View the draw — who waits in each round`}</button>
+      ${drawOpenId === t.id ? tourneyLadder(t, fit) : ''}
       ${fit && weeksOut <= 1
         ? `<div class="tourney-lens">
             <button class="tourney-play ${planFor('tournament', t.id) === 'action' ? 'on' : ''}" title="Real-time arena — move with the stick, tap to attack" onclick="__guild.setPlayNext('${t.id}','action')">${planFor('tournament', t.id) === 'action' ? '⚔ Fighting it live — winner take all' : '⚔ Fight it live'}</button>
@@ -1832,7 +2228,7 @@ export function openGuild() {
 // Every handler no-ops while a week is advancing (a played battle can be mid-flight;
 // rail buttons still render behind the battle screen and would corrupt the in-flight
 // week). practiceBout/advanceAll keep their own internal checks as a second belt.
-const __guildApi = { selectHero, setActivity, setTraining, setIntensity, scheduleAdd, scheduleRemoveAt, scheduleClear, setRecipe, setPotion, setDiscipline, usePotion, setDiet, setQuest, assignTo, setSpar, equipItem, unequipSlot, setPolicy, provision, buyMaterial, sellItem, hire, takeApprentice, promoteApprentice, dismissApprentice, advanceAll, back, openRoom, toggleFullscreen, upgradeFacility, enterTournament, leaveTournament, setPlayNext, setPlayQuest, setAskTournaments, appointTrainer, practiceBout, openRanch, enterRoomFromRanch, manageMemberFromRanch, ranchBuild: toggleBuild, ranchPick: pickStation, ranchPlace: placeStationAt, ranchRemoveStation: removeStationById };
+const __guildApi = { selectHero, setActivity, setTraining, setIntensity, scheduleAdd, scheduleRemoveAt, scheduleClear, setRecipe, setForgeMode, setRefineItem, setPotion, setDiscipline, usePotion, setDiet, setQuest, assignTo, setSpar, equipItem, unequipSlot, setPolicy, provision, buyMaterial, sellItem, buyBook, hire, takeApprentice, promoteApprentice, dismissApprentice, advanceAll, back, openRoom, toggleFullscreen, upgradeFacility, enterTournament, leaveTournament, setPlayNext, setPlayQuest, setAskTournaments, toggleDraw, praiseHero, scoldHero, openAssembly, closeAssembly, appointTrainer, practiceBout, openRanch, enterRoomFromRanch, manageMemberFromRanch, ranchBuild: toggleBuild, ranchPick: pickStation, ranchPlace: placeStationAt, ranchRemoveStation: removeStationById };
 window.__guild = {};
 for (const k in __guildApi) {
   window.__guild[k] = (...args) => {

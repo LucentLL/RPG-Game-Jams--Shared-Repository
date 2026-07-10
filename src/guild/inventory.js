@@ -4,8 +4,9 @@
  * expiry come in later phases — see DESIGN.md.)
  */
 
-/** Raw materials. `kind` groups them (ore → smithing, herb → alchemy); `tier` sets
- *  the quality floor of what they craft into. All enter via the market or quest barter. */
+/** Raw materials. `kind` groups them BY ROOM (ore → Forge stockroom, herb → Laboratory
+ *  stores, food → Kitchen pantry); `tier` sets the quality floor of what they craft
+ *  into. All enter via the market or quest barter and are DELIVERED to their room. */
 export const MATERIALS = {
   iron_ore: { id: 'iron_ore', name: 'Iron Ore', kind: 'ore', tier: 1, col: '#c45040' },
   steel_ore: { id: 'steel_ore', name: 'Steel Ore', kind: 'ore', tier: 2, col: '#b8c4d0' },
@@ -13,21 +14,32 @@ export const MATERIALS = {
   sunleaf: { id: 'sunleaf', name: 'Sunleaf', kind: 'herb', tier: 1, col: '#7bbf5a' },
   emberroot: { id: 'emberroot', name: 'Emberroot', kind: 'herb', tier: 2, col: '#d07a3c' },
   nightcap: { id: 'nightcap', name: 'Nightcap', kind: 'herb', tier: 3, col: '#9a7bd0' },
+  grain: { id: 'grain', name: 'Grain', kind: 'food', tier: 1, col: '#d8c268' },
+  salted_meat: { id: 'salted_meat', name: 'Salted Meat', kind: 'food', tier: 2, col: '#c0705a' },
 };
+
+/** Which room a material kind is stored in (its working inventory). */
+export const ROOM_OF_KIND = { ore: 'forge', herb: 'laboratory', food: 'kitchen' };
+/** The material ids shelved in a given room's store. */
+export function roomMaterialIds(roomId) {
+  return Object.keys(MATERIALS).filter((k) => ROOM_OF_KIND[MATERIALS[k].kind] === roomId);
+}
 
 /**
  * @typedef {Object} Inventory
- * @property {import('./item.js').Item[]} items  forged weapon/armor instances
- * @property {Object.<string,number>} materials  raw material stacks (ore + herb)
- * @property {Object[]} potions  brewed potion batches { id, type, potency, qty, ... }
+ * @property {import('./item.js').Item[]} items  forged weapon/armor instances (the Armory)
+ * @property {Object.<string,number>} materials  raw material stacks (ore + herb + food, shelved per room)
+ * @property {Object[]} potions  brewed potion batches { id, type, potency, qty, ... } (the Apothecary)
+ * @property {import('./books.js').Book[]} books  shelved volumes (the Library)
  */
 
 /** @param {Partial<Inventory>} [init] @returns {Inventory} */
 export function createInventory(init = {}) {
   return {
     items: init.items || [],
-    materials: init.materials || { iron_ore: 20, steel_ore: 8, mithril_ore: 2, sunleaf: 6, emberroot: 2, nightcap: 1 }, // starter stock
+    materials: init.materials || { iron_ore: 20, steel_ore: 8, mithril_ore: 2, sunleaf: 6, emberroot: 2, nightcap: 1, grain: 12, salted_meat: 4 }, // starter stock
     potions: init.potions || [],
+    books: init.books || [],
   };
 }
 

@@ -35,18 +35,21 @@ export function recipeUnlocked(hero, recipe) {
 }
 
 /**
- * Spend the week STUDYING a discipline (books/notes) — grows that profession's Theory
- * track, which unlocks its recipes. Light on stamina (it's reading, not hammering).
+ * Spend the week STUDYING a discipline — grows that profession's Theory track,
+ * which unlocks its recipes. Light on stamina (it's reading, not hammering).
  * Theory grows with the same cap-taper as Practice. The Library Scholar can study
- * metallurgy ('blacksmithing') or 'alchemy'.
- * @param {import('./hero.js').Hero} hero @param {string} [discipline] @returns {{theoryGain:number}}
+ * metallurgy ('blacksmithing') or 'alchemy'. `bookMult` is the Library's shelf at
+ * work: studying FROM a real book (books.js `bestBook` → `bookStudyMult`) beats
+ * studying from loose notes, so stocking the shelf compounds across every scholar.
+ * @param {import('./hero.js').Hero} hero @param {string} [discipline] @param {number} [bookMult]
+ * @returns {{theoryGain:number}}
  */
-export function study(hero, discipline = 'blacksmithing') {
+export function study(hero, discipline = 'blacksmithing', bookMult = 1) {
   const prof = hero.professions[discipline] || (hero.professions[discipline] = { theory: 0, practice: 0, field: 0 });
   const c = hero.condition;
   const room = (100 - prof.theory) / 100;
   const studious = (hero.traits || []).includes('Studious') ? 1.5 : 1; // the Studious trait devours theory
-  const gain = Math.max(1, Math.round(6 * studious * (0.3 + 0.7 * room)));
+  const gain = Math.max(1, Math.round(6 * studious * (bookMult || 1) * (0.3 + 0.7 * room)));
   prof.theory = Math.min(100, prof.theory + gain);
   c.stamina = Math.max(0, c.stamina - 12);
   c.fatigue = Math.max(0, Math.min(100, c.fatigue + 4));
@@ -99,4 +102,65 @@ export function forge(hero, recipe, inv, week) {
   c.fatigue = Math.min(100, c.fatigue + 12);
   hero.xp += 8;
   return { ok: true, item, quality, practiceGain: gain };
+}
+
+// ─── Refining: the Armory feeds the Forge ────────────────────────────────────
+// A smith's week can REWORK an existing armory piece instead of forging fresh:
+// true the edge, re-temper, re-fit. Quality closes half the gap toward what the
+// smith could forge outright (same Practice/Field math — the anti-lie principle),
+// capped by the material's ceiling; durability is restored; the work is stamped
+// into the item's history (repairs[]), so a storied blade IMPROVES without losing
+// its story. Costs one ore of the item's material. A smith whose own work is no
+// better than the piece can't improve it ('mastered' — find a better smith).
+
+export const REFINE_STAMINA = 26;
+/** Ore consumed to rework an item, by its material. */
+export const REFINE_COST = { iron: { iron_ore: 1 }, steel: { steel_ore: 1 }, mithril: { mithril_ore: 1 } };
+
+/** The recipe governing an item's material (its quality ceiling + Theory gate). */
+export function recipeForItem(item) {
+  return RECIPES.find((r) => r.material === item.material && r.kind === item.kind)
+    || RECIPES.find((r) => r.material === item.material) || RECIPES[0];
+}
+
+/** Expected post-refine quality for the UI preview (no jitter, same halfway math). */
+export function previewRefine(item, practice, field) {
+  const recipe = recipeForItem(item);
+  const target = previewQuality(recipe, practice, field);
+  if (target <= item.quality) return item.quality;
+  return Math.max(item.quality + 1, Math.min(recipe.ceil, Math.round((item.quality + target) / 2)));
+}
+
+/**
+ * Rework one armory item this week. Mutates the smith, the inventory (ore), and
+ * the ITEM (quality, durability, history). Returns a recap-shaped result.
+ * @param {import('./hero.js').Hero} hero @param {import('./item.js').Item} item
+ * @param {import('./inventory.js').Inventory} inv @param {number} week
+ * @returns {{ok:boolean, reason?:string, item?:import('./item.js').Item, from?:number, to?:number, practiceGain?:number}}
+ */
+export function refine(hero, item, inv, week) {
+  const c = hero.condition;
+  const prof = hero.professions.blacksmithing;
+  const recipe = recipeForItem(item);
+  if (!recipeUnlocked(hero, recipe)) return { ok: false, reason: 'locked' };
+  if (previewQuality(recipe, prof.practice, prof.field) <= item.quality) return { ok: false, reason: 'mastered' };
+  const cost = REFINE_COST[item.material] || { iron_ore: 1 };
+  if (!hasMaterials(inv, cost)) return { ok: false, reason: 'materials' };
+  if (c.stamina < REFINE_STAMINA) return { ok: false, reason: 'stamina' };
+
+  spendMaterials(inv, cost);
+  const from = item.quality;
+  const target = Math.max(5, Math.min(recipe.ceil, Math.round(recipe.base + prof.practice * 0.5 + prof.field * 0.2 + jitter())));
+  item.quality = Math.max(from + 1, Math.min(recipe.ceil, Math.round((from + Math.max(from, target)) / 2)));
+  if (item.durability) item.durability.current = item.durability.max; // trued and re-edged
+  item.history.repairs.push({ week, smithId: hero.id, smithName: hero.name, from, to: item.quality });
+
+  const room = (100 - prof.practice) / 100; // reworking teaches, a little less than forging fresh
+  const gain = Math.max(1, Math.round(3 * (0.3 + 0.7 * room)));
+  prof.practice = Math.min(100, prof.practice + gain);
+
+  c.stamina = Math.max(0, c.stamina - REFINE_STAMINA);
+  c.fatigue = Math.min(100, c.fatigue + 10);
+  hero.xp += 7;
+  return { ok: true, item, from, to: item.quality, practiceGain: gain };
 }

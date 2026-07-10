@@ -7,9 +7,11 @@
  * the guild's early income. Good materials are scarce: stock is limited and
  * refreshes each week. (Quest barter/service income arrives in Phase 3.)
  */
+import { rollBookStock } from './books.js';
 
-/** Buy price per material unit (sell-back is half). Ores feed the Forge, herbs the Lab. */
-export const MATERIAL_PRICE = { iron_ore: 8, steel_ore: 20, mithril_ore: 55, sunleaf: 6, emberroot: 16, nightcap: 42 };
+/** Buy price per material unit (sell-back is half). Ores feed the Forge, herbs the
+ *  Lab, foodstuffs the Kitchen pantry — each delivered to its room's store. */
+export const MATERIAL_PRICE = { iron_ore: 8, steel_ore: 20, mithril_ore: 55, sunleaf: 6, emberroot: 16, nightcap: 42, grain: 3, salted_meat: 9 };
 
 // Item value = recoup the ore (floor) + a skill premium for quality above the
 // material's unskilled base — so an unskilled smith barely breaks even and PROFIT
@@ -30,10 +32,11 @@ export function itemSellValue(item) {
   return Math.max(1, Math.round(floor + Math.max(0, item.quality - base) * gain));
 }
 
-function defaultStock() { return { iron_ore: 24, steel_ore: 10, mithril_ore: 3, sunleaf: 16, emberroot: 8, nightcap: 3 }; }
+function defaultStock() { return { iron_ore: 24, steel_ore: 10, mithril_ore: 3, sunleaf: 16, emberroot: 8, nightcap: 3, grain: 30, salted_meat: 12 }; }
 
 /** @param {Object} [init] */
-export function createMarket(init = {}) { return { stock: init.stock || defaultStock() }; }
+export function createMarket(init = {}) { return { stock: init.stock || defaultStock(), bookStock: init.bookStock || rollBookStock() }; }
 
-/** Restock the market (called each week). Scarce materials stay scarce. */
-export function refreshMarket(market) { market.stock = defaultStock(); }
+/** Restock the market (called each week). Scarce materials stay scarce; the
+ *  bookseller's shelf turns over completely — buy a rare volume when you see it. */
+export function refreshMarket(market) { market.stock = defaultStock(); market.bookStock = rollBookStock(); }
