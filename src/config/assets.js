@@ -28,3 +28,8 @@ export const FX_BASE = ASSET_BASE + 'fx/';
 // Audio (populated as music/sfx are added).
 export const AUDIO_MUSIC_BASE = ASSET_BASE + 'audio/music/';
 export const AUDIO_SFX_BASE = ASSET_BASE + 'audio/sfx/';
+
+// Curated world/interior pixel art, hand-picked into the build from the shared
+// `rpg-assets/` library (the repo-root source packs — see rpg-assets/README.md).
+// Sprites are cropped from these sheets via src/guild/art.js.
+export const ART_BASE = ASSET_BASE + 'art/';

@@ -22,6 +22,7 @@
 import { facilityTier } from './guild.js';
 import { formatDate } from './calendar.js';
 import { STATIONS, YARD_SLOTS, stationDef, stationCapacity, canBuild, addStation, removeStation } from './stations.js';
+import { artSprite } from './art.js';
 
 // --- the campus world ---------------------------------------------------------
 /** Campus grid (tiles per side). The arena keeps its own 9 — this is the ESTATE. */
@@ -78,6 +79,11 @@ function buildDecor() {
     d.push({ kind: 'tree', tx: 0.8 + jit(i, 7) * 0.5, ty: y + jit(i, 8) * 0.8, s: 1 + jit(i, 9) * 0.5 });
     d.push({ kind: 'tree', tx: RANCH_GS - 0.8 + jit(i, 10) * 0.5, ty: y + jit(i, 11) * 0.8, s: 1 + jit(i, 12) * 0.5 });
   }
+  // set pieces from the shared art library: the village well on the avenue, and a
+  // little market row flanking the south gate (the wagon that brings the goods in)
+  d.push({ kind: 'art', art: 'well', tx: 12.8, ty: 8.9, w: 170 },
+    { kind: 'art', art: 'stall', tx: 9.1, ty: 19.3, w: 235 },
+    { kind: 'art', art: 'wagon', tx: 13.4, ty: 19.6, w: 255 });
   // pond grove + scattered dressing
   d.push({ kind: 'tree', tx: 20.2, ty: 14.6, s: 1.25 }, { kind: 'tree', tx: 15.1, ty: 18.9, s: 1.1 },
     { kind: 'tree', tx: 19.9, ty: 18.8, s: 0.95 }, { kind: 'tree', tx: 14.6, ty: 6.9, s: 1.15 },
@@ -94,9 +100,12 @@ const RANCH_DECOR = buildDecor();
 
 function decorHTML() {
   const GS = RANCH_GS;
-  return RANCH_DECOR.map((d) => {
+  return RANCH_DECOR.map((d, i) => {
     const pos = `left:${d.tx / GS * 100}%;top:${d.ty / GS * 100}%;z-index:${2 + Math.round(d.ty * 10)}`;
-    if (d.kind === 'tree') return `<span class="ranch-decor" style="${pos}"><span class="rm-shadow"></span><span class="rd-standee" style="--s:${d.s}"><span class="rd-canopy"></span><span class="rd-canopy two"></span><span class="rd-trunk"></span></span></span>`;
+    // Trees are REAL art now (the Elements tree from the shared library), two
+    // silhouettes alternating for a natural line. Bushes stay cheap CSS.
+    if (d.kind === 'tree') return `<span class="ranch-decor" style="${pos}"><span class="rm-shadow"></span><span class="rd-standee" style="--s:${d.s}">${artSprite(i % 3 === 2 ? 'treeSmall' : 'tree', 'rd-art-tree')}</span></span>`;
+    if (d.kind === 'art') return `<span class="ranch-decor" style="${pos}"><span class="rm-shadow"></span><span class="rd-standee">${artSprite(d.art, 'rd-art', `width:${d.w}%`)}</span></span>`;
     if (d.kind === 'bush') return `<span class="ranch-decor" style="${pos}"><span class="rd-standee" style="--s:${d.s || 1}"><span class="rd-bush"></span></span></span>`;
     return `<span class="ranch-decor" style="${pos}"><span class="rd-standee"><span class="rd-glyph">${d.g}</span></span></span>`;
   }).join('');

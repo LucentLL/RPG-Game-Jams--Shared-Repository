@@ -31,6 +31,7 @@ import { MATERIAL_PRICE, buyPrice, itemSellValue, createMarket, refreshMarket } 
 import { saveGame, loadGame } from '../platform/storage.js';
 import { playTournamentMatch, playQuestBout, battleEngineReady } from './battle-bridge.js';
 import { renderRanch, stopRanchLoop, toggleBuild, pickStation, placeStationAt, removeStationById, ranchZoomIn, ranchZoomOut, ranchZoomFit } from './ranch.js';
+import { artSprite } from './art.js';
 
 const SLOT = 'guild';
 // The roster cap is no longer a constant — it's derived from the Living Quarters
@@ -2082,6 +2083,15 @@ const ROOM_FLAVOR = {
   laboratory: 'Something bubbles that probably shouldn’t.',
   quarters: 'Bunks, tankards, and tomorrow’s legends asleep by nine.',
 };
+// Real furniture from the shared art library, dressed into each room's scene
+// banner (heights are % of the art row; aspect-ratio keeps each piece true).
+const SCENE_ART = {
+  kitchen: [['oven', 'height:92%'], ['counter', 'height:30%'], ['oven', 'height:92%']],
+  library: [['bookshelf', 'height:94%'], ['bookshelf', 'height:94%'], ['bookshelf', 'height:94%']],
+  forge: [['anvil', 'height:46%']],
+  quarters: [['bed', 'height:90%'], ['bed', 'height:90%']],
+};
+
 /** Who's pictured working the room this week (falls back to the selected member). */
 function roomWorkers(roomId) {
   const job = ROOM_JOB[roomId];
@@ -2097,10 +2107,12 @@ function roomScene(roomId) {
   if (!room) return '';
   const workers = roomWorkers(roomId).slice(0, 5);
   const sprites = workers.map((h) => `<span class="rs-worker" title="${h.name}">${personSprite(h, 52)}</span>`).join('');
+  const art = (SCENE_ART[roomId] || []).map(([n, st]) => artSprite(n, 'rs-art', st)).join('');
   return `<div class="room-scene scene-${roomId}">
       <span class="rs-glyph">${room.glyph}</span>
       <div class="rs-text"><div class="rs-name">${room.glyph} ${room.name}</div>
         <div class="rs-flavor">${ROOM_FLAVOR[roomId] || ''}</div></div>
+      ${art ? `<div class="rs-artrow">${art}</div>` : ''}
       <div class="rs-floor"></div>
       <div class="rs-workers">${sprites || '<span class="rs-empty">no one here this week</span>'}</div>
     </div>`;
