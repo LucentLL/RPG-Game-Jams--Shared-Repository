@@ -65,7 +65,14 @@ var MAX_SOCKETS=5;
 var WEAPON_GEAR_TYPES = ['Sword','Dagger','Club','Wand','Bow','Axe','Hammer'];
 var SHIELD_GEAR_TYPES = ['Buckler'];
 
+// Two-handed weapons occupy BOTH hands: equipping one clears the off-hand, and no
+// shield or second weapon can sit alongside it. Bows and crossbows are drawn with
+// two hands (and loose a projectile in combat).
+var TWO_HANDED_GEAR_TYPES = ['Bow','Crossbow'];
+function isTwoHandedType(type){ return TWO_HANDED_GEAR_TYPES.indexOf(type) >= 0; }
+
 export {
   GEAR_TYPES, EQUIP_SLOTS, GEAR_MATERIALS, REFINE_TABLE,
   MAX_REFINEMENT, MAX_SOCKETS, WEAPON_GEAR_TYPES, SHIELD_GEAR_TYPES,
+  TWO_HANDED_GEAR_TYPES, isTwoHandedType,
 };

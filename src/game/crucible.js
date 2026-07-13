@@ -38,6 +38,7 @@ import { PLANETS, COMPOUNDS, ROUND_METALS, RANKS } from './data/progression.js';
 import {
   GEAR_TYPES, EQUIP_SLOTS, GEAR_MATERIALS, REFINE_TABLE,
   MAX_REFINEMENT, MAX_SOCKETS, WEAPON_GEAR_TYPES, SHIELD_GEAR_TYPES,
+  isTwoHandedType,
 } from './data/gear.js';
 import { BASIC_ATTACK, ALL_ATTACKS, ATTACKS } from './data/attacks.js';
 import {
@@ -2724,12 +2725,17 @@ function renderDraftCharacter(){
 
 function canEquipGear(gear){
   if(gear.pos==='Hand'){
+    var lh=run.equipped.LHand, rh=run.equipped.RHand;
+    // A two-handed weapon needs BOTH hands free (it fills them both).
+    if(isTwoHandedType(gear.type)) return !lh && !rh;
+    // A two-handed weapon already equipped leaves no hand for anything else.
+    if((lh&&isTwoHandedType(lh.type))||(rh&&isTwoHandedType(rh.type))) return false;
     // Must have an empty hand slot
-    if(run.equipped.LHand&&run.equipped.RHand)return false;
+    if(lh&&rh)return false;
     // Enforce: one weapon + one shield, no dual wielding
     var isWeapon=WEAPON_GEAR_TYPES.indexOf(gear.type)>=0;
     var isShield=SHIELD_GEAR_TYPES.indexOf(gear.type)>=0;
-    var existingGear=run.equipped.LHand||run.equipped.RHand;
+    var existingGear=lh||rh;
     if(existingGear){
       var existIsWeapon=WEAPON_GEAR_TYPES.indexOf(existingGear.type)>=0;
       var existIsShield=SHIELD_GEAR_TYPES.indexOf(existingGear.type)>=0;
@@ -2756,15 +2762,24 @@ function _canDropGearOn(gear, slotPos){
 function _equipDroppedGear(gear, slotPos){
   if (!_canDropGearOn(gear, slotPos)) return;
   if (gear.pos === 'Hand'){
-    var otherHand = (slotPos === 'LHand') ? 'RHand' : 'LHand';
-    var existing  = run.equipped[otherHand];
-    if (existing){
-      var draggedIsWeapon = WEAPON_GEAR_TYPES.indexOf(gear.type) >= 0;
-      var existIsWeapon   = WEAPON_GEAR_TYPES.indexOf(existing.type) >= 0;
-      if (draggedIsWeapon === existIsWeapon){
-        // Dropping a weapon when other hand also has a weapon (or shield with shield):
-        // clear the other hand so the new one can fit the rules.
-        run.equipped[otherHand] = null;
+    var lh = run.equipped.LHand, rh = run.equipped.RHand;
+    if (isTwoHandedType(gear.type)){
+      // A two-handed weapon fills both hands — clear whatever's in either.
+      run.equipped.LHand = null; run.equipped.RHand = null;
+    } else if ((lh && isTwoHandedType(lh.type)) || (rh && isTwoHandedType(rh.type))){
+      // A two-handed weapon can't share a hand — dropping anything else removes it.
+      run.equipped.LHand = null; run.equipped.RHand = null;
+    } else {
+      var otherHand = (slotPos === 'LHand') ? 'RHand' : 'LHand';
+      var existing  = run.equipped[otherHand];
+      if (existing){
+        var draggedIsWeapon = WEAPON_GEAR_TYPES.indexOf(gear.type) >= 0;
+        var existIsWeapon   = WEAPON_GEAR_TYPES.indexOf(existing.type) >= 0;
+        if (draggedIsWeapon === existIsWeapon){
+          // Dropping a weapon when other hand also has a weapon (or shield with shield):
+          // clear the other hand so the new one can fit the rules.
+          run.equipped[otherHand] = null;
+        }
       }
     }
   }
@@ -2779,6 +2794,14 @@ function _equipDroppedGear(gear, slotPos){
 
 function equipDraftGear(gear){
   if(gear.pos==='Hand'){
+    // Two-handed weapon: fills both hands (dominant hand holds it), no main/off prompt.
+    if(isTwoHandedType(gear.type)){
+      var d2=run.dominantHand||'R';
+      run.equipped.LHand=null; run.equipped.RHand=null;
+      run.equipped[(d2==='L')?'LHand':'RHand']=gear;
+      renderDraft();
+      return;
+    }
     var dom=run.dominantHand||'R';
     var mainSlot=(dom==='L')?'LHand':'RHand';
     var offSlot =(dom==='L')?'RHand':'LHand';
@@ -3187,7 +3210,10 @@ function tryActionAttack(attacker, defender, atkName, opts){
   }
   // Face the target as we swing.
   attacker.facing = Math.atan2(ddx, -ddy);
-  setFighterAnim(attacker, 'slash');
+  // A bow/crossbow shot draws-and-looses (nockBow); everything else swings (slash).
+  var _wtype = equippedWeaponType(attacker);
+  var _drawsBow = atk.range >= 2 && (_wtype === 'Bow' || _wtype === 'Crossbow');
+  setFighterAnim(attacker, _drawsBow ? 'nockBow' : 'slash');
   attacker._atkCD = (atk.range > 1 ? 0.95 : 0.7) + (chargeTier ? 0.25 : 0); // a charged swing recovers a touch slower
   // Ranged attack → loose a projectile that flies to the target (arrow / bolt /
   // thrown blade, tinted by the attack's element). Melee (range 1) stays hand-to-hand.
@@ -3229,10 +3255,24 @@ var _actionProjectiles = []; // { x0,y0,x1,y1, start, dur, kind, c, angDeg, el }
 // purple, tip-coloured arrow the artist made for "poison-dipped"; Sol a warm
 // hue, Luna a cool one. Physical keeps the plain fletching.
 var PROJ_ELEMENT_COLOR = { physical: 0, sol: 4, luna: 2, mercury: 6 };
+// The weapon a fighter is actually wielding, checking BOTH hands (a left-dominant
+// fighter carries their weapon in the off-slot). Crossbow is a valid weapon even
+// though it isn't a lootable GEAR_TYPES entry, so it's matched explicitly.
+function equippedWeaponType(fighter){
+  var g = fighter && fighter.gear; if (!g) return null;
+  var hands = [g.RHand, g.LHand];
+  for (var i = 0; i < hands.length; i++){
+    var it = hands[i];
+    if (!it) continue;
+    if (WEAPON_GEAR_TYPES.indexOf(it.type) >= 0 || it.type === 'Crossbow') return it.type;
+  }
+  return null;
+}
 // Equipped ranged weapon → projectile kind (bows loose arrows; a rogue's off-hand
-// throws blades; a heavy crossbow throws the bigger bolt).
+// throws blades; a heavy crossbow throws the bigger bolt). No specific ammo → the
+// plain brown/gray arrow (arrow1 at colour 0).
 function projectileKindFor(attacker){
-  var wt = attacker && attacker.gear && attacker.gear.RHand && attacker.gear.RHand.type;
+  var wt = equippedWeaponType(attacker);
   if (wt === 'Crossbow') return 'arrow2';
   if (wt === 'Dagger') return 'throwblade2';
   return 'arrow1';
@@ -3294,6 +3334,12 @@ if (typeof window !== 'undefined'){
     return { spawned: _actionProjectiles.length };
   };
   window.__projStep = function(now){ renderActionProjectiles(now == null ? performance.now() : now); return _actionProjectiles.length; };
+  // Reflect a fighter's live combat state for headless checks (weapon detection,
+  // current animation, basic-attack routing) — the same reason __projStep exists.
+  window.__fighterState = function(which){
+    var f = which === 2 ? p2 : p1; if (!f) return 'no fighter';
+    return { weapon: equippedWeaponType(f), anim: f.anim && f.anim.name, attacks: f.attacks && f.attacks.slice() };
+  };
 }
 
 function actionRender(){
@@ -3787,10 +3833,23 @@ function buildFighterMateria(equipped){
   return result;
 }
 
+// The equipped weapon decides the basic attack: a bow/crossbow looses an Arrow Shot
+// (ranged — spawns a projectile) in place of the melee Strike.
+function basicAttackForEquipped(equipped){
+  if(equipped){
+    var hands=[equipped.RHand, equipped.LHand];
+    for(var i=0;i<hands.length;i++){
+      var it=hands[i];
+      if(it && (it.type==='Bow' || it.type==='Crossbow')) return 'Arrow Shot';
+    }
+  }
+  return 'Strike';
+}
 function buildAttacksFromMateria(equipped){
-  // Always have basic Strike
-  var atkNames=['Strike'];
-  var seen={Strike:true};
+  // Basic attack depends on the weapon (bow → Arrow Shot, else melee Strike).
+  var basic=basicAttackForEquipped(equipped);
+  var atkNames=[basic];
+  var seen={};seen[basic]=true;
   EQUIP_SLOTS.forEach(function(pos){
     var gear=equipped[pos];
     if(!gear)return;
