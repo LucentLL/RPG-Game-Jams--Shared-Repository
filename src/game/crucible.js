@@ -1407,6 +1407,27 @@ function getElementsWeapon(file, c){
   return null;
 }
 
+// ─── Projectile objects (arrows / throwing blades) ───────────────────────────
+// The single-frame 16×16 sprites that FLY across the field when a ranged attack
+// fires (public/assets/sprites/*/projectile/). Loaded like weapons — filename +
+// optional _cN colour — but drawn as free objects, not composited onto a body.
+// Falls back to the base colour on a missing variant.
+function getProjectileImg(file, c){
+  if (!file) return null;
+  var fname = file + (c ? '_c' + c : '');
+  var key = 'projectile/' + fname;
+  var v = _elementsImgCache[key];
+  if (v && v !== 'loading' && v !== 'failed') return v;
+  if (v === 'loading') return null;
+  if (v === 'failed'){ if (c) return getProjectileImg(file, 0); return null; }
+  _elementsImgCache[key] = 'loading';
+  _tryLoadFromBases('projectile', fname,
+    function(img){ _elementsImgCache[key] = img; _elementsFireRedraws(); },
+    function(){ _elementsImgCache[key] = 'failed'; if (c){ getProjectileImg(file, 0); _elementsFireRedraws(); } }
+  );
+  return null;
+}
+
 
 // Legacy alias — ticking code reads .frames/.speed/.loop, which match ELEMENTS_ANIMS.
 
@@ -2957,6 +2978,7 @@ function tryUseItem(slot){
 function startActionLoop(){
   if (actionLoopRunning) return;
   actionLoopRunning = true;
+  clearActionProjectiles(); // no arrows carried over from a prior battle
   _actionKeys = {};
   var lastTime = performance.now();
   _actionKeyHandler = function(e){
@@ -2999,6 +3021,7 @@ function startActionLoop(){
 function stopActionLoop(){
   actionLoopRunning = false;
   _charge = null; // never leave a half-held charge across battles
+  clearActionProjectiles(); // remove any in-flight arrow elements
   if (_actionKeyHandler) document.removeEventListener('keydown', _actionKeyHandler);
   if (_actionKeyUpHandler) document.removeEventListener('keyup', _actionKeyUpHandler);
   _actionKeyHandler = _actionKeyUpHandler = null;
@@ -3161,6 +3184,9 @@ function tryActionAttack(attacker, defender, atkName, opts){
   attacker.facing = Math.atan2(ddx, -ddy);
   setFighterAnim(attacker, 'slash');
   attacker._atkCD = (atk.range > 1 ? 0.95 : 0.7) + (chargeTier ? 0.25 : 0); // a charged swing recovers a touch slower
+  // Ranged attack → loose a projectile that flies to the target (arrow / bolt /
+  // thrown blade, tinted by the attack's element). Melee (range 1) stays hand-to-hand.
+  if (atk.range >= 2) spawnActionProjectile(attacker, defender, atk);
   // Roll-to-hit reuses the same stat → modifier → +prof + materia chain.
   // A charged release lands more reliably (+2 to-hit — SS2's "charges connect").
   var sMod = Math.floor((attacker.stats[atk.stat] - 10) / 2);
@@ -3183,6 +3209,70 @@ function tryActionAttack(attacker, defender, atkName, opts){
     actionLog(tag+aName+' '+atk.name+' — '+dmg+(crit?' (critical)':''), (crit||chargeTier===2)?'crit':'hit');
   } else {
     actionLog('⚔ '+aName+' '+atk.name+' misses', 'miss');
+  }
+}
+
+// ─── Action-arena projectiles ────────────────────────────────────────────────
+// A ranged attack SPAWNS a projectile that flies from the attacker to the target
+// across the tilted field, then vanishes on impact. Each is a small element
+// parented to #actionArena, positioned by the same tile→% mapping the standees
+// use and rotated (IN the ground plane) to its flight angle, so it reads as an
+// arrow skimming toward the target. No per-frame compositing — a cheap object.
+var _actionProjectiles = []; // { x0,y0,x1,y1, start, dur, kind, c, angDeg, el }
+
+// Element → projectile colour variant. Mercury (quick / poison) uses the
+// purple, tip-coloured arrow the artist made for "poison-dipped"; Sol a warm
+// hue, Luna a cool one. Physical keeps the plain fletching.
+var PROJ_ELEMENT_COLOR = { physical: 0, sol: 4, luna: 2, mercury: 6 };
+// Equipped ranged weapon → projectile kind (bows loose arrows; a rogue's off-hand
+// throws blades; a heavy crossbow throws the bigger bolt).
+function projectileKindFor(attacker){
+  var wt = attacker && attacker.gear && attacker.gear.RHand && attacker.gear.RHand.type;
+  if (wt === 'Crossbow') return 'arrow2';
+  if (wt === 'Dagger') return 'throwblade2';
+  return 'arrow1';
+}
+// The object sprites are drawn pointing LEFT (arrowhead on the west side), so the
+// flight angle needs a half-turn offset to aim the head at the target.
+var PROJ_BASE_ANGLE = 180;
+function spawnActionProjectile(attacker, defender, atk){
+  var x0 = attacker.ax, y0 = attacker.ay, x1 = defender.ax, y1 = defender.ay;
+  var dist = Math.sqrt((x1-x0)*(x1-x0) + (y1-y0)*(y1-y0));
+  if (dist < 0.4) return; // point-blank — no visible flight
+  var kind = projectileKindFor(attacker);
+  var c = PROJ_ELEMENT_COLOR[atk.type] != null ? PROJ_ELEMENT_COLOR[atk.type] : 0;
+  var dur = Math.max(160, Math.min(480, dist * 78)); // ms — a quick, readable streak
+  var angDeg = Math.atan2(y1 - y0, x1 - x0) * 180 / Math.PI + PROJ_BASE_ANGLE;
+  _actionProjectiles.push({ x0:x0, y0:y0, x1:x1, y1:y1, start: performance.now(), dur:dur, kind:kind, c:c, angDeg:angDeg, el:null });
+}
+function clearActionProjectiles(){
+  for (var i=0;i<_actionProjectiles.length;i++){ var p=_actionProjectiles[i]; if(p.el&&p.el.parentNode) p.el.parentNode.removeChild(p.el); }
+  _actionProjectiles.length = 0;
+}
+function renderActionProjectiles(now){
+  if (!_actionProjectiles.length) return;
+  var arena = document.getElementById('actionArena');
+  if (!arena) { clearActionProjectiles(); return; }
+  for (var i = _actionProjectiles.length - 1; i >= 0; i--){
+    var p = _actionProjectiles[i];
+    var t = (now - p.start) / p.dur;
+    if (t >= 1){ if(p.el&&p.el.parentNode) p.el.parentNode.removeChild(p.el); _actionProjectiles.splice(i,1); continue; }
+    if (!p.el){
+      p.el = document.createElement('div');
+      p.el.className = 'action-proj';
+      var cv = document.createElement('canvas'); cv.width = 16; cv.height = 16; cv.className = 'action-proj-img';
+      p.el.appendChild(cv);
+      p.el.style.setProperty('--ang', p.angDeg + 'deg');
+      arena.appendChild(p.el);
+    }
+    // Draw the sprite each frame (fills in once the async image loads).
+    var im = getProjectileImg(p.kind, p.c);
+    if (im){ var g = p.el.firstChild.getContext('2d'); g.clearRect(0,0,16,16); g.imageSmoothingEnabled=false; g.drawImage(im,0,0); }
+    var x = p.x0 + (p.x1 - p.x0) * t;
+    var y = p.y0 + (p.y1 - p.y0) * t;
+    p.el.style.left = (x / ACTION_GS * 100) + '%';
+    p.el.style.top  = (y / ACTION_GS * 100) + '%';
+    p.el.style.zIndex = String(4 + Math.round(y * 10)); // above the fighters on its row
   }
 }
 
@@ -3240,6 +3330,8 @@ function actionRender(){
     var btn = document.getElementById('actAtk_'+i);
     if (btn) btn.classList.toggle('cooling', (p1._atkCD||0) > 0);
   });
+  // Projectiles in flight (ranged attacks) fly across the field this frame.
+  renderActionProjectiles(performance.now());
 }
 
 function renderActionFighter(cv, fighter){
@@ -3319,10 +3411,10 @@ var GUILD_ATTACKS_BY_ARCH = {
   Knight:     ['Strike', 'Calcination Strike', 'Coagulation Slam'],
   Berserker:  ['Strike', 'Calcination Strike', 'Coagulation Slam'],
   Adventurer: ['Strike', 'Calcination Strike'],
-  Ranger:     ['Strike', 'Calcination Strike', 'Coagulation Slam'],
+  Ranger:     ['Arrow Shot', 'Strike', 'Coagulation Slam'],   // a bow archer — leads with the shot
   Mage:       ['Strike', 'Distillation Bolt', 'Conjunction'],
   Cleric:     ['Strike', 'Exaltation', 'Calcination Strike'],
-  Rogue:      ['Strike', 'Mercury Shift', 'Calcination Strike'],
+  Rogue:      ['Strike', 'Thrown Blade', 'Mercury Shift'],     // throws blades, then closes
 };
 // MR stat 0..100 → engine 8..20 so deriveStats' hp/ac/speed stay in the engine's band.
 function _mrToEng(v){ return Math.max(8, Math.min(20, Math.round(8 + (Math.max(0, Math.min(100, v || 0)) / 100) * 12))); }

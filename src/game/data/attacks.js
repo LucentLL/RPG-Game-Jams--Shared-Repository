@@ -15,7 +15,12 @@ var ALL_ATTACKS=[
   {name:'Dissolution Wave',type:'mercury',dice:'1d4',stat:'INT',range:3,desc:'Entropic wave: ranged, strips purity.',purity:0,dissolve:2},
   {name:'Putrefaction Touch',type:'sol',dice:'1d4',stat:'CHA',range:1,desc:'Inflicts DOT: 1d4 for 2 turns.',purity:0,dissolve:0,special:'dot',dotDice:'1d4',dotTurns:2},
   {name:'Putrefaction Mist',type:'mercury',dice:'1d4',stat:'INT',range:2,desc:'DOT cloud: 1d4 for 2 turns.',purity:0,dissolve:0,special:'dot',dotDice:'1d4',dotTurns:2},
-  {name:'Exaltation',type:'luna',dice:'0d0',stat:'WIS',range:0,desc:'Luna healing: restore 2d6 HP.',purity:0,dissolve:0,special:'heal',healDice:'2d6'}
+  {name:'Exaltation',type:'luna',dice:'0d0',stat:'WIS',range:0,desc:'Luna healing: restore 2d6 HP.',purity:0,dissolve:0,special:'heal',healDice:'2d6'},
+  // Physical ranged attacks — these LOOSE a projectile object across the field
+  // (the combat projectile system keys off range>=2). An archer's bow shot and a
+  // rogue's thrown blade.
+  {name:'Arrow Shot',type:'physical',dice:'1d8',stat:'DEX',range:5,desc:'A loosed arrow finds its mark.',purity:0,dissolve:0},
+  {name:'Thrown Blade',type:'physical',dice:'1d6',stat:'DEX',range:3,desc:'A blade spun from the hand.',purity:0,dissolve:0}
 ];
 var ATTACKS={};ALL_ATTACKS.forEach(function(a){ATTACKS[a.name]=a});
 

@@ -23,6 +23,14 @@
   display:flex;align-items:flex-end;justify-content:center}
 .action-fighter{width:165%;height:165%;margin-bottom:-4%;image-rendering:pixelated;pointer-events:none;flex:0 0 auto}
 
+/* Flying projectiles (arrows / bolts / thrown blades) loosed by ranged attacks.
+   Children of the tilted plane, so they lie IN the ground and rotate (--ang) to
+   the flight direction — an arrow skimming toward the target. Sized as % of the
+   arena so they scale with the field. */
+.action-proj{position:absolute;width:5.5%;transform:translate(-50%,-50%);transform-style:preserve-3d;pointer-events:none}
+.action-proj-img{display:block;width:100%;height:auto;image-rendering:pixelated;
+  transform:rotate(var(--ang,0deg));filter:drop-shadow(0 2px 2px rgba(0,0,0,0.5))}
+
 .action-help{font-size:0.82em;color:var(--muted);font-family:'Cinzel',serif;letter-spacing:0.08em;margin-top:2px}
 .action-attacks{display:flex;flex-wrap:wrap;gap:8px;justify-content:center;max-width:min(880px,96vw)}
 .action-attacks button{padding:11px 18px;background:var(--card);border:1px solid var(--gold);color:var(--gold);border-radius:8px;font-family:'Cinzel',serif;font-size:0.95em;letter-spacing:0.08em;cursor:pointer;transition:all 0.15s;touch-action:none}
