@@ -105,6 +105,7 @@ export function hasDiorama(roomId) { return !!ROOM_SET[roomId]; }
 // ─── module state (survives hall.js render() via rebind) ─────────────────────
 let roomActors = [];        // [{ id, actor, cv, station, gesture, nextAct }]
 let roomLoopRunning = false;
+let roomRaf = 0;            // the single in-flight rAF handle (cancelled on stop/restart)
 let curRoom = null;
 
 const between = (lo, hi) => lo + Math.random() * (hi - lo);
@@ -209,14 +210,20 @@ function startRoomLoop() {
     if (!scr || !scr.classList.contains('active') || !host || host.offsetParent === null) { stopRoomLoop(); return; }
     try { roomTick(now); drawRoomActors(); }
     catch (e) { console.error('room diorama tick error', e); }
-    requestAnimationFrame(loop);
+    roomRaf = requestAnimationFrame(loop);
   }
-  requestAnimationFrame(loop);
+  roomRaf = requestAnimationFrame(loop);
 }
-export function stopRoomLoop() { roomLoopRunning = false; }
+/** Stop the loop AUTHORITATIVELY: flip the flag AND cancel the pending frame, so a
+ *  stop-then-restart in the same frame window can't leave an orphaned rAF chain
+ *  running alongside the new one (2× animation/CPU — review fix). */
+export function stopRoomLoop() {
+  roomLoopRunning = false;
+  if (roomRaf) { cancelAnimationFrame(roomRaf); roomRaf = 0; }
+}
 
 // Dev probe (headless verification: hidden windows never fire rAF — step by hand).
 if (typeof window !== 'undefined') {
-  window.__roomDebug = () => ({ running: roomLoopRunning, room: curRoom, actors: roomActors.map((a) => ({ id: a.id, anim: a.actor.anim.name, cv: !!(a.cv && a.cv.isConnected) })) });
+  window.__roomDebug = () => ({ running: roomLoopRunning, room: curRoom, now: performance.now(), actors: roomActors.map((a) => ({ id: a.id, anim: a.actor.anim.name, gesture: a.gesture, nextAct: Math.round(a.nextAct), cv: !!(a.cv && a.cv.isConnected) })) });
   window.__roomStep = (now) => { roomTick(now ?? performance.now()); drawRoomActors(); };
 }

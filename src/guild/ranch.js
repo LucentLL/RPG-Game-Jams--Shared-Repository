@@ -114,6 +114,7 @@ function decorHTML() {
 // --- ephemeral module state -----------------------------------------------------
 let actors = [];              // [{ id, actor, el, cv, ax, ay, facing, _duty, _mode, ... }]
 let ranchLoopRunning = false; // re-entrancy guard (mirrors actionLoopRunning)
+let ranchRaf = 0;             // the single in-flight rAF handle (cancelled on stop/restart)
 let groundURI = null;         // baked once per session
 let _guild = null;            // last guild passed to renderRanch — duties + build actions read it
 let _save = null;             // hall's save() hook, so placing/removing equipment persists
@@ -569,12 +570,17 @@ function startRanchLoop() {
     // A duty bug must never freeze the campus: log it, keep the loop alive.
     try { ranchTick(dt, now); ranchRender(); }
     catch (e) { console.error('ranch tick error', e); window.__ranchErr = String((e && e.stack) || e); }
-    requestAnimationFrame(loop);
+    ranchRaf = requestAnimationFrame(loop);
   }
-  requestAnimationFrame(loop);
+  ranchRaf = requestAnimationFrame(loop);
 }
 
-export function stopRanchLoop() { ranchLoopRunning = false; }
+/** Stop authoritatively: flip the flag AND cancel the pending frame, so a
+ *  stop-then-restart in one frame window can't leave two rAF chains running. */
+export function stopRanchLoop() {
+  ranchLoopRunning = false;
+  if (ranchRaf) { cancelAnimationFrame(ranchRaf); ranchRaf = 0; }
+}
 
 // Dev probes: inspect the duty loop, and step it by hand (headless windows never
 // fire rAF, so automated checks drive the simulation clock manually).
