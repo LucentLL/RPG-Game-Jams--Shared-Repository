@@ -6461,3 +6461,48 @@ Object.assign(window, {
   showUnslotPicker, startActionFlow, startRunRandom, startTurnFlow, toggleStats,
   unequipGear,
 });
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Character generator — public API (for collaborators / tooling).
+//
+// crucible.js has no ES exports, so window.CharGen is the stable handle over the
+// two halves of the generator:
+//   • generateAppearance(seed, prime) — the deterministic procedural "look"
+//   • the layered Elements compositor  — draws that look (+ optional gear) onto a canvas
+// The sprite DATA (BODY_TYPES, ELEMENTS_MANIFEST, ELEMENTS_ANIMS, skin tones) lives
+// in src/game/data/sprite-tables.js and is separately importable. Full guide +
+// examples: CHARACTER_GENERATOR.md.
+// ═══════════════════════════════════════════════════════════════════════════
+window.CharGen = {
+  BODY_TYPES: BODY_TYPES.slice(),      // ['sulfur','salt','mercury'] — the "prime" body archetype
+  ANIMS: Object.keys(ELEMENTS_ANIMS),  // 'idle','move','slash','nockBow','cast','hurt','death',…
+  FACES: { south: 0, west: 1, east: 2, north: 3 },
+  // Deterministic: the SAME (seed, prime) always yields the same character, so a
+  // character can be shared as just those two numbers/strings. prime defaults random.
+  generate: function(seed, prime){
+    return generateAppearance(seed | 0, prime || pick(BODY_TYPES));
+  },
+  // Draw a character into a <canvas>. opts:
+  //   seed        number  — with `prime`, (re)generates the look (ignored if `appearance` passed)
+  //   prime       string  — body type from BODY_TYPES (default 'salt')
+  //   appearance  object  — a prior generate() result, to draw an EXACT saved look
+  //   anim        string  — an ANIMS name (default 'idle')
+  //   frame       number  — animation column index (default 0)
+  //   face        number  — FACES value 0..3 (default 0 = south / front)
+  //   gear        object  — optional cosmetic { RHand, LHand, Body, Head, Lower } pieces, e.g. { RHand:{ type:'Bow' } }
+  // Returns the appearance used (capture it to reuse a random roll).
+  render: function(canvas, opts){
+    opts = opts || {};
+    var self = this;
+    var prime = opts.prime || 'salt';
+    var appearance = opts.appearance || generateAppearance((opts.seed | 0) || 1, prime);
+    var gear = opts.gear || null;
+    var eff = gear ? effectiveAppearance(appearance, gear) : appearance;
+    var weapons = gear ? fighterWeaponLayers({ gear: gear }) : null;
+    compositeCharacter(canvas, eff, opts.anim || 'idle', opts.frame | 0, opts.face | 0, weapons);
+    // Redraw once the async part PNGs finish loading (mirrors the builder preview).
+    var ropts = { prime: prime, appearance: appearance, anim: opts.anim, frame: opts.frame, face: opts.face, gear: gear };
+    elementsRegisterRedraw(canvas, function(){ self.render(canvas, ropts); });
+    return appearance;
+  },
+};
