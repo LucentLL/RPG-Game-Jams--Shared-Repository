@@ -3078,6 +3078,11 @@ function ensureActionJoystick(){
 
 function actionTick(dt){
   if (p1.hp <= 0 || p2.hp <= 0){
+    // Let a KILLING ranged shot finish its flight before the scene freezes — the
+    // loop keeps rendering (fighters held, arrow flying) until the projectile lands,
+    // THEN we stop and cue the result beat. Without this the decisive arrow would be
+    // cleared by stopActionLoop the very frame it spawned (never visibly flies).
+    if (_actionProjectiles.length) return; // still airborne — keep looping
     stopActionLoop();
     _koTimer = setTimeout(endActionBattle, 500);
     return;
