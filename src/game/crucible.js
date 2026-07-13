@@ -3232,9 +3232,9 @@ function projectileKindFor(attacker){
   if (wt === 'Dagger') return 'throwblade2';
   return 'arrow1';
 }
-// The object sprites are drawn pointing LEFT (arrowhead on the west side), so the
-// flight angle needs a half-turn offset to aim the head at the target.
-var PROJ_BASE_ANGLE = 180;
+// The object sprites are drawn pointing RIGHT (the sharp point/tip is the thin
+// east end), which matches atan2's 0° = east, so no base offset is needed.
+var PROJ_BASE_ANGLE = 0;
 function spawnActionProjectile(attacker, defender, atk){
   var x0 = attacker.ax, y0 = attacker.ay, x1 = defender.ax, y1 = defender.ay;
   var dist = Math.sqrt((x1-x0)*(x1-x0) + (y1-y0)*(y1-y0));
@@ -3274,6 +3274,21 @@ function renderActionProjectiles(now){
     p.el.style.top  = (y / ACTION_GS * 100) + '%';
     p.el.style.zIndex = String(4 + Math.round(y * 10)); // above the fighters on its row
   }
+}
+
+// Dev probes: force-spawn a projectile between the two fighters and step the
+// projectile render by hand (headless windows never fire rAF).
+if (typeof window !== 'undefined'){
+  window.__projTest = function(kind, type){
+    if (!p1 || !p2) return 'no fighters';
+    p1.ax = 3; p1.ay = 6; p2.ax = 6; p2.ay = 3;
+    var atk = { type: type || 'physical', range: 5 };
+    var g = p1.gear; p1.gear = { RHand: { type: kind === 'arrow2' ? 'Crossbow' : kind === 'throwblade2' ? 'Dagger' : 'Sword' } };
+    spawnActionProjectile(p1, p2, atk);
+    p1.gear = g;
+    return { spawned: _actionProjectiles.length };
+  };
+  window.__projStep = function(now){ renderActionProjectiles(now == null ? performance.now() : now); return _actionProjectiles.length; };
 }
 
 function actionRender(){
