@@ -27,9 +27,12 @@ const SHEETS = {
   bakery_1x: { w: 112, h: 128 },
   oven_1x: { w: 192, h: 128 },
   beds_3x: { w: 432, h: 384 },
+  floppyfish: { w: 48, h: 128 },
+  kitchenC: { w: 256, h: 256 },
 };
 
-/** Named crops: { sheet, x, y, w, h } in sheet pixels. */
+/** Named crops: { sheet, x, y, w, h } in sheet pixels. Crops tagged `MEASURE`
+ *  are provisional and refined against the real sheet with the alpha-box probe. */
 export const ART = {
   tree:      { sheet: 'tree_3x', x: 96, y: 0, w: 96, h: 144 },   // the full Elements tree
   treeSmall: { sheet: 'tree_3x', x: 0, y: 0, w: 96, h: 120 },    // its rounder sibling
@@ -41,6 +44,13 @@ export const ART = {
   bed:       { sheet: 'beds_3x', x: 21, y: 27, w: 102, h: 147 },      // a made bunk
   oven:      { sheet: 'oven_1x', x: 0, y: 64, w: 48, h: 64 },         // the big stone oven, fire lit
   counter:   { sheet: 'bakery_1x', x: 0, y: 72, w: 112, h: 24 },      // kitchen counter run
+  // Kitchen dressing — crops measured against the real sheets (alpha-box probe).
+  counterLong:  { sheet: 'bakery_1x', x: 0, y: 72, w: 112, h: 24 },   // the counter run
+  counterFront: { sheet: 'bakery_1x', x: 0, y: 100, w: 112, h: 24 },
+  floppyfish:{ sheet: 'floppyfish', x: 14, y: 0, w: 20, h: 16 },      // one fish, flopping
+  breadPile: { sheet: 'bakery_1x', x: 16, y: 2, w: 48, h: 14 },       // a row of loaves
+  tools:     { sheet: 'bakery_1x', x: 0, y: 19, w: 50, h: 14 },       // rolling pin
+  sacks:     { sheet: 'bakery_1x', x: 80, y: 16, w: 32, h: 48 },      // stacked sacks / baskets
 };
 
 /**

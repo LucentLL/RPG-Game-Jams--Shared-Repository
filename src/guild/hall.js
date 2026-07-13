@@ -32,6 +32,7 @@ import { saveGame, loadGame } from '../platform/storage.js';
 import { playTournamentMatch, playQuestBout, battleEngineReady } from './battle-bridge.js';
 import { renderRanch, stopRanchLoop, toggleBuild, pickStation, placeStationAt, removeStationById, ranchZoomIn, ranchZoomOut, ranchZoomFit } from './ranch.js';
 import { artSprite } from './art.js';
+import { hasDiorama, roomSceneHTML, bindRoomScene, stopRoomLoop } from './rooms.js';
 
 const SLOT = 'guild';
 // The roster cap is no longer a constant — it's derived from the Living Quarters
@@ -2105,8 +2106,15 @@ function roomWorkers(roomId) {
 function roomScene(roomId) {
   const room = getRoom(roomId);
   if (!room) return '';
-  const workers = roomWorkers(roomId).slice(0, 5);
-  const sprites = workers.map((h) => `<span class="rs-worker" title="${h.name}">${personSprite(h, 52)}</span>`).join('');
+  const workers = roomWorkers(roomId).slice(0, 6);
+  // Rooms with a living INTERIOR (kitchen, forge, library, …) render a full
+  // illustrated diorama with the workers animated inside; bindRoomScene (called
+  // after render) rebinds the canvases and runs the animation loop. Rooms without
+  // a set keep the compact EO-style banner.
+  if (hasDiorama(roomId)) {
+    return roomSceneHTML(roomId, workers, room, ROOM_FLAVOR[roomId] || '');
+  }
+  const sprites = workers.slice(0, 5).map((h) => `<span class="rs-worker" title="${h.name}">${personSprite(h, 52)}</span>`).join('');
   const art = (SCENE_ART[roomId] || []).map(([n, st]) => artSprite(n, 'rs-art', st)).join('');
   return `<div class="room-scene scene-${roomId}">
       <span class="rs-glyph">${room.glyph}</span>
@@ -2199,6 +2207,11 @@ function render({ top = false } = {}) {
   const stage = host.querySelector('.room-stage');
   if (stage) stage.scrollTop = keepScroll;
   paintSprites(); // canvases exist now — draw the Elements sprites into them
+  // Living room interior: rebind the freshly-rendered diorama canvases to the
+  // animation loop (or stop it if this room has no interior). Skipped while the
+  // ranch view owns the screen (its own loop is running there instead).
+  if (!ranchView && hasDiorama(currentRoom)) bindRoomScene(currentRoom, roomWorkers(currentRoom).slice(0, 6));
+  else stopRoomLoop();
 }
 
 // --- ranch (home view) ------------------------------------------------------
@@ -2211,7 +2224,7 @@ function applyViewToggle() {
   if (view) view.hidden = !ranchView;
 }
 /** Go home to the ranch. */
-function openRanch() { ranchView = true; renderRanch(guild, save); applyViewToggle(); }
+function openRanch() { ranchView = true; stopRoomLoop(); renderRanch(guild, save); applyViewToggle(); }
 /** Drill from the ranch into a room's menus. */
 function enterRoomFromRanch(roomId) { stopRanchLoop(); ranchView = false; applyViewToggle(); openRoom(roomId); }
 /** Tap a member on the ranch → open their Roster card. */

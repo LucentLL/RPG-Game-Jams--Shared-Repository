@@ -188,6 +188,51 @@
 .scene-quarters   { --sc-a: #322416; --sc-b: #140e08; }
 .scene-grounds    { --sc-a: #14282e; --sc-b: #0a1114; }
 
+/* ═══ Living room INTERIORS (dioramas) — a full illustrated room with the
+   assigned member animated inside (rooms.js). Side-view stage: a back WALL,
+   a FLOOR plane, bottom-anchored PROPS from the art library, and one animated
+   canvas per worker. Reuses each room's --sc-a/--sc-b tint. ═══ */
+.room-diorama { position: relative; max-width: 860px; height: 246px; margin: 0 auto 12px;
+  border: 1px solid var(--border); border-radius: 12px; overflow: hidden;
+  background: linear-gradient(180deg, var(--sc-b, #100d14), var(--sc-a, #1c1824) 62%);
+  box-shadow: inset 0 -40px 60px rgba(0, 0, 0, 0.45), 0 6px 20px rgba(0, 0, 0, 0.4); }
+/* Back wall: a slightly lighter panel with a faint brick/plaster wash. */
+.rdi-wall { position: absolute; left: 0; right: 0; top: 0; height: 60%;
+  background:
+    repeating-linear-gradient(90deg, transparent 0 46px, rgba(0,0,0,0.14) 46px 48px),
+    linear-gradient(180deg, rgba(255,255,255,0.05), rgba(0,0,0,0.12));
+  border-bottom: 2px solid rgba(0, 0, 0, 0.35); }
+/* Floor plane: a warm receding gradient with a plank/tile wash + a highlight
+   line where it meets the wall (the baseboard). */
+.rdi-floor { position: absolute; left: 0; right: 0; bottom: 0; height: 40%;
+  background:
+    repeating-linear-gradient(90deg, rgba(0,0,0,0.10) 0 1px, transparent 1px 54px),
+    linear-gradient(180deg, color-mix(in srgb, var(--sc-a, #1c1824) 70%, #3a2c1c) 0%, rgba(0,0,0,0.5) 100%);
+  box-shadow: inset 0 3px 0 rgba(255, 220, 170, 0.06); }
+.rdi-caption { position: absolute; top: 9px; left: 13px; right: 13px; z-index: 200; pointer-events: none; }
+.rdi-title { font-family: 'Cinzel', serif; color: var(--gold); letter-spacing: 0.12em; font-size: 0.9em;
+  text-transform: uppercase; text-shadow: 0 2px 6px rgba(0, 0, 0, 0.8); }
+.rdi-flavor { display: block; font-style: italic; color: var(--muted); font-size: 0.78em; margin-top: 2px;
+  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.9); }
+.rdi-stage { position: absolute; inset: 0; }
+/* Props: bottom-anchored, centered on their x. .rdi-art is the px-art sprite. */
+.rdi-prop { position: absolute; transform: translateX(-50%); pointer-events: none;
+  filter: drop-shadow(0 3px 3px rgba(0, 0, 0, 0.5)); }
+.rdi-prop .rdi-art { display: block; width: 100%; }
+/* Workers: a scaled 96px canvas standing on the floor, a soft contact shadow,
+   and a name that fades in on hover. */
+.rdi-actor { position: absolute; transform: translateX(-50%);
+  display: flex; flex-direction: column; align-items: center; }
+.rdi-actor::after { content: ''; position: absolute; bottom: 4px; left: 50%; transform: translateX(-50%);
+  width: 46px; height: 12px; border-radius: 50%;
+  background: radial-gradient(ellipse, rgba(0, 0, 0, 0.5), transparent 70%); z-index: -1; }
+.rdi-cv { display: block; width: 98px; height: 98px; image-rendering: pixelated; }
+.rdi-name { font-family: 'Cinzel', serif; font-size: 0.62em; color: #e8e0d0; white-space: nowrap;
+  margin-top: -10px; text-shadow: 0 1px 3px #000, 0 0 4px #000; opacity: 0; transition: opacity 0.15s; }
+.rdi-actor:hover .rdi-name { opacity: 1; }
+.rdi-empty { position: absolute; left: 0; right: 0; bottom: 30%; text-align: center;
+  color: var(--dim); font-style: italic; font-size: 0.8em; z-index: 100; }
+
 .plan-title { font-family: 'Cinzel', serif; color: var(--gold); font-size: 0.78em; letter-spacing: 0.14em; margin-bottom: 8px; text-transform: uppercase; }
 .opt-list { display: flex; flex-direction: column; gap: 6px; margin-bottom: 18px; }
 .opt {
