@@ -14,6 +14,11 @@ been hand-picked into `public/assets/` (curated copies; crops are registered in
 - `20XXpatronbundle/` — yearly bundles, most sheets in three scales:
   `1x` (16px tiles) · `2x_RMVX` (32px) · `3x_MV/MZ/MMV` (48px — **matches the
   game's 48px world; prefer these**).
+- `weapons/` — Elements weapon-format sheets (1104×192, a 23×4 grid of 48px
+  cells) that drop straight into the character compositor: `maces/`,
+  `wizardstaff/`, `bow2_and_crossbow/`, plus the back-worn `backsheath1and2/`
+  and `backsheath3andquiver/`. Colour variants use the `_cN` suffix. These are
+  already wired in — see the weapons table below.
 - Loose PNGs at the root — one-off tilesets (kitchens, bathrooms, airships,
   minecarts, shipwrecks, tools, world-map pieces…).
 
@@ -29,11 +34,17 @@ been hand-picked into `public/assets/` (curated copies; crops are registered in
 | Anvil | `2017patronbundle/.../blacksmith_bigsheet_mv.png` | Forge room scene |
 | Stone ovens + counters | `ultint_oven1a.png`, `.../bakerykitchentiles_e_1.png` | Kitchen room scene |
 | Bunks | `2018patronbundle/.../bigbeds_3.png` | Quarters room scene |
+| Maces (held) | `weapons/maces/mace1-3` | combat, generator, Cleric heroes |
+| Staves (held) | `weapons/wizardstaff/staff1-3` | combat, generator, Mage heroes |
+| Crossbow, Bow2 (held) | `weapons/bow2_and_crossbow/` | combat, generator, Ranger tiers |
+| Sheathed weapons (back) | `weapons/backsheath*/`, `backquiver` | out-of-combat sprites + generator "Back" slot |
 
-To add more: copy the sheet into `public/assets/art/`, measure the crop (the
-alpha-cluster probe in session notes, or any pixel editor), and register it in
-`src/guild/art.js` — `artSprite('name')` then renders it anywhere, pixel-crisp
-at any size.
+Room set-pieces are cropped via `src/guild/art.js` (`artSprite('name')`).
+Character weapons instead go straight into the Elements compositor: copy the
+sheet (base + every `_cN`) into `public/assets/sprites/core/weapon/`, then add
+a ladder entry in `src/game/data/orb-tables.js` (`GEAR_WEAPON_LADDER`) for a
+held weapon, or map an archetype to it via `GUILD_ARCH_WEAPON` /
+`GUILD_ARCH_WEAPON[...].sheath` in `crucible.js` for a back-worn one.
 
 ## The mining map — where to dig next
 

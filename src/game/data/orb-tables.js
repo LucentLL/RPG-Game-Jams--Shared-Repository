@@ -18,9 +18,15 @@ var GEAR_WEAPON_LADDER = {
   ],
   Dagger: [ {stem:'dagger', maxC:3, slotSuffix:true} ],
   Wand:   [ {stem:'wand1', maxC:8} ],
-  Bow:    [ {stem:'bow1', maxC:0}, {stem:'bow1', maxC:0}, {stem:'bow1arrow1', maxC:0} ],
+  // Staff (wizardstaff pack): plain rod → capped → gemmed (staff3 carries 12 finishes).
+  Staff:  [ {stem:'staff1', maxC:3}, {stem:'staff1', maxC:3}, {stem:'staff2', maxC:3}, {stem:'staff2', maxC:3}, {stem:'staff3', maxC:12} ],
+  Bow:    [ {stem:'bow1', maxC:0}, {stem:'bow1', maxC:0}, {stem:'bow1arrow1', maxC:0}, {stem:'bow2', maxC:4}, {stem:'bow2', maxC:4} ],
+  // Crossbow (bow2_and_crossbow pack) — a distinct ranged option from the bow.
+  Crossbow:[ {stem:'crossbow', maxC:4} ],
   Axe:    [ {stem:'axe1', maxC:3}, {stem:'axe1', maxC:3}, {stem:'axe2', maxC:3}, {stem:'axe2', maxC:3} ],
   Hammer: [ {stem:'hammer', maxC:3} ],
+  // Mace (maces pack): flanged → spiked → ornate head, five finishes each.
+  Mace:   [ {stem:'mace1', maxC:5}, {stem:'mace1', maxC:5}, {stem:'mace2', maxC:5}, {stem:'mace2', maxC:5}, {stem:'mace3', maxC:5} ],
   Club:   [ {stem:'pickaxe1', maxC:2} ],
   Buckler:[ {stem:'shield1', maxC:0, slotSuffix:true}, {stem:'shield1', maxC:0, slotSuffix:true}, {stem:'shield2', maxC:6, slotSuffix:true}, {stem:'shield2', maxC:6, slotSuffix:true} ]
 };

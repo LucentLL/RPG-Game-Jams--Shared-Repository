@@ -1221,6 +1221,12 @@ function compositeCharacter(canvas, appearance, animName, frame, facingRow, weap
         ctx.rect(dx, dy, drawSize, Math.round(drawSize * 0.88));
         ctx.clip();
       }
+      // A SHEATHED back weapon sits behind the torso in front/side facings, and is
+      // revealed over the back when the camera is behind (north). Drawn before the
+      // hand weapons so a drawn blade would overlay it. Sheaths paint every cell,
+      // so they track the walk frame like the body.
+      var sheathWant = ((facingRow|0) === 3) ? 'front' : 'back';
+      if (weapons && weapons.back && sheathWant === want && drawWeapon(weapons.back, off)) anyDrawn = true;
       if (weapons && weapons.lhand && lZ === want && drawWeapon(weapons.lhand, off)) anyDrawn = true;
       if (weapons && weapons.rhand && rZ === want && drawWeapon(weapons.rhand, off)) anyDrawn = true;
       if (clipped) ctx.restore();
@@ -1344,13 +1350,30 @@ function gearToCardIconDesc(gear, slot) {
   return null;
 }
 
-// Resolve weapons for a fighter — produces { lhand, rhand } where each is a
-// descriptor (or null) for the weapon-layer compositor.
-function fighterWeaponLayers(fighter) {
-  var out = { lhand: null, rhand: null };
+// A back-worn sheath gear piece → a weapon descriptor. Used for the builder's
+// explicit "Back" slot ({ type:'Sheath', tier, file, maxC }).
+function gearToSheathDesc(g){
+  if (!g || !g.file) return null;
+  return { file: g.file, c: weaponTierToColor(g.tier || 0, g.maxC || 0), mirror: false };
+}
+
+// Resolve weapons for a fighter — produces { lhand, rhand, back } descriptors (or
+// null) for the weapon-layer compositor. `back` is a weapon worn on the back:
+//  · `sheathed:true` → EXCLUSIVE: draw the archetype's `gear.sheath` on the back and
+//    empty the hands (the out-of-combat look — a roamer with a weapon on their back).
+//  · otherwise → the hand weapons draw; an EXPLICIT `gear.Back` (builder cosmetic)
+//    still rides the back additively (e.g. a bow slung while a sword is in hand).
+function fighterWeaponLayers(fighter, sheathed) {
+  var out = { lhand: null, rhand: null, back: null };
   if (!fighter || !fighter.gear) return out;
-  out.lhand = gearToWeaponDesc(fighter.gear.LHand, 'LHand');
-  out.rhand = gearToWeaponDesc(fighter.gear.RHand, 'RHand');
+  var g = fighter.gear;
+  if (sheathed && g.sheath){
+    out.back = { file: g.sheath.file, c: g.sheath.c || 0, mirror: false };
+    return out; // sheathed: weapon rests on the back, hands empty
+  }
+  out.lhand = gearToWeaponDesc(g.LHand, 'LHand');
+  out.rhand = gearToWeaponDesc(g.RHand, 'RHand');
+  if (g.Back) out.back = gearToSheathDesc(g.Back); // explicit back-worn cosmetic
   return out;
 }
 
@@ -1550,14 +1573,19 @@ var GUILD_ARCH_PRIME = { Knight: 'salt', Cleric: 'salt', Adventurer: 'salt', Ber
 // them (gearToBodyDesc returns null), so they flow ONLY through fighterWeaponLayers
 // into the compositor: zero combat-stat impact. Fancier stems/finishes unlock as
 // trained stats rise. Same pattern the character builder already uses (BUILDER_HAND_CYCLE).
+// Each archetype gets a hand loadout AND a `sheath` — the weapon worn on the BACK
+// when the hero is OUT of combat (idle portraits, roaming the ranch). The sheath is
+// a back-mounted cosmetic (backsheath/backquiver sheets from the weapons packs); it
+// swaps for the drawn hand weapon the moment they strike a combat pose. `sheath` is
+// { file, maxC } — the color follows the hero's weapon tier, like the hand weapon.
 var GUILD_ARCH_WEAPON = {
-  Knight:     { r: 'Sword',  l: 'Buckler' },
-  Cleric:     { r: 'Hammer', l: 'Buckler' },
-  Berserker:  { r: 'Axe',    l: null       },   // two-handed feel — no off-hand
-  Ranger:     { r: 'Bow',    l: null       },
-  Mage:       { r: 'Wand',   l: null       },
-  Rogue:      { r: 'Dagger', l: 'Dagger'   },   // dual-wield (slotSuffix → daggerL/daggerR)
-  Adventurer: { r: 'Sword',  l: null       },
+  Knight:     { r: 'Sword',  l: 'Buckler', sheath: { file: 'backsheath1', maxC: 8 } },
+  Cleric:     { r: 'Mace',   l: 'Buckler', sheath: { file: 'backsheath2', maxC: 8 } },
+  Berserker:  { r: 'Axe',    l: null,       sheath: { file: 'backsheath2', maxC: 8 } },   // two-handed feel — no off-hand
+  Ranger:     { r: 'Bow',    l: null,       sheath: { file: 'backquiver',  maxC: 2 } },   // a quiver rides the back
+  Mage:       { r: 'Staff',  l: null,       sheath: { file: 'backsheath3', maxC: 2 } },
+  Rogue:      { r: 'Dagger', l: 'Dagger',   sheath: { file: 'backsheath1b', maxC: 2 } },  // dual-wield (slotSuffix → daggerL/daggerR)
+  Adventurer: { r: 'Sword',  l: null,       sheath: { file: 'backsheath1', maxC: 8 } },
 };
 // Average of the six MR stats (0..100) → a 0..5 weapon-tier band, so a green recruit
 // carries a plain blade and a trained veteran a fancier one. Ladders self-clamp, so a
@@ -1569,12 +1597,15 @@ function guildWeaponTier(stats){
   if (!n) return 0;
   return Math.max(0, Math.min(5, Math.floor((sum / n) / 18)));
 }
-// Archetype (+ stats, for tier) → cosmetic { RHand, LHand } gear for the compositor.
+// Archetype (+ stats, for tier) → cosmetic { RHand, LHand, sheath } for the compositor.
+// `sheath` is a back-mounted descriptor { file, c } used OUTSIDE combat (portraits,
+// roaming); it's resolved to a color from the same weapon tier as the hand weapon.
 function guildCosmeticGear(archetype, stats){
   var m = GUILD_ARCH_WEAPON[archetype] || GUILD_ARCH_WEAPON.Adventurer;
   var tier = guildWeaponTier(stats);
   var mk = function(type){ return type ? { type: type, tier: tier, pos: 'Hand' } : null; };
-  return { RHand: mk(m.r), LHand: mk(m.l) };
+  var sheath = m.sheath ? { file: m.sheath.file, c: weaponTierToColor(tier, m.sheath.maxC) } : null;
+  return { RHand: mk(m.r), LHand: mk(m.l), sheath: sheath };
 }
 
 function renderGuildSprite(canvas, person, facing){
@@ -1596,7 +1627,8 @@ function renderGuildSprite(canvas, person, facing){
   // portraits at once, and recompositing all of them every frame would burn
   // battery on mobile. Register a redraw so the portrait still fills in when the
   // async sprite sheets finish loading, but never join the per-frame bob loop.
-  var weapons = fighterWeaponLayers({ gear: guildCosmeticGear(person.archetype, person.stats) });
+  // Portraits are out-of-combat: the hero wears their weapon SHEATHED on the back.
+  var weapons = fighterWeaponLayers({ gear: guildCosmeticGear(person.archetype, person.stats) }, true);
   compositeCharacter(canvas, appearance, 'idle', 0, row, weapons, { excite: 0, phase: 0 });
   elementsRegisterRedraw(canvas, function(){ renderGuildSprite(canvas, person, facing); });
 }
@@ -1893,7 +1925,7 @@ function openBuilder(){
     appearance: generateAppearance(seed, bodyType),
     face: 0,                                           // south
     dominantHand: 'R',                                 // default right-handed
-    cosmeticGear: { LHand:null, Body:null, RHand:null } // cosmetic only — not carried into the draft
+    cosmeticGear: { LHand:null, Body:null, RHand:null, Back:null } // cosmetic only — not carried into the draft
   };
   showScreen('builderScreen');
   renderBuilderControls();
@@ -1988,10 +2020,10 @@ function renderBuilderControls(){
   var mainSlot = (bdom === 'L') ? 'LHand' : 'RHand';
   var offSlot  = (bdom === 'L') ? 'RHand' : 'LHand';
   html += '<div style="font-size:0.7em;color:var(--muted);text-align:center;margin:6px 0 2px;letter-spacing:0.1em;font-family:\'Cinzel\',serif">~ cosmetic loadout ~</div>';
-  [[mainSlot,'Weapon'],[offSlot,'Off-Hand'],['Body','Armor']].forEach(function(pair){
+  [[mainSlot,'Weapon'],[offSlot,'Off-Hand'],['Back','Back'],['Body','Armor']].forEach(function(pair){
     var slot = pair[0], label = pair[1];
     var item = builderState.cosmeticGear[slot];
-    var lbl = item ? (item.type + ' T' + (item.tier|0)) : '—';
+    var lbl = item ? (item.pos === 'Back' ? (_SHEATH_LABEL[item.file] || 'Sheath') : (item.type + ' T' + (item.tier|0))) : '—';
     var cls = item ? '' : 'dim';
     html += '<div class="builder-row">'
       + '<div class="b-label">'+label+'</div>'
@@ -2012,16 +2044,31 @@ var BUILDER_HAND_CYCLE = [
   null,
   {type:'Sword', tier:0, pos:'Hand'}, {type:'Sword', tier:2, pos:'Hand'}, {type:'Sword', tier:4, pos:'Hand'},
   {type:'Dagger', tier:0, pos:'Hand'}, {type:'Dagger', tier:2, pos:'Hand'},
+  {type:'Mace', tier:0, pos:'Hand'}, {type:'Mace', tier:2, pos:'Hand'}, {type:'Mace', tier:4, pos:'Hand'},
+  {type:'Staff', tier:0, pos:'Hand'}, {type:'Staff', tier:2, pos:'Hand'}, {type:'Staff', tier:4, pos:'Hand'},
   {type:'Wand', tier:0, pos:'Hand'}, {type:'Wand', tier:3, pos:'Hand'},
-  {type:'Bow', tier:0, pos:'Hand'}, {type:'Bow', tier:2, pos:'Hand'},
+  {type:'Bow', tier:0, pos:'Hand'}, {type:'Bow', tier:3, pos:'Hand'},
+  {type:'Crossbow', tier:0, pos:'Hand'},
   {type:'Axe', tier:0, pos:'Hand'}, {type:'Axe', tier:2, pos:'Hand'},
   {type:'Hammer', tier:0, pos:'Hand'}, {type:'Hammer', tier:2, pos:'Hand'},
   {type:'Club', tier:0, pos:'Hand'},
   {type:'Buckler', tier:0, pos:'Hand'}, {type:'Buckler', tier:3, pos:'Hand'}
 ];
+// Back-worn sheath cosmetics — a weapon slung across the back. Distinct `file`s are
+// distinguished by _cosmeticMatches; `maxC` drives the color from the tier.
+var BUILDER_BACK_CYCLE = [
+  null,
+  {type:'Sheath', tier:0, pos:'Back', file:'backsheath1', maxC:8},
+  {type:'Sheath', tier:3, pos:'Back', file:'backsheath1', maxC:8},
+  {type:'Sheath', tier:0, pos:'Back', file:'backsheath2', maxC:8},
+  {type:'Sheath', tier:3, pos:'Back', file:'backsheath2', maxC:8},
+  {type:'Sheath', tier:0, pos:'Back', file:'backsheath3', maxC:2},
+  {type:'Sheath', tier:0, pos:'Back', file:'backquiver',  maxC:2}
+];
 var BUILDER_COSMETIC_CYCLES = {
   RHand: BUILDER_HAND_CYCLE,
   LHand: BUILDER_HAND_CYCLE,
+  Back:  BUILDER_BACK_CYCLE,
   Body: [
     null,
     {type:'Plate', tier:0, pos:'Body'}, {type:'Plate', tier:2, pos:'Body'}, {type:'Plate', tier:4, pos:'Body'},
@@ -2035,8 +2082,11 @@ var BUILDER_COSMETIC_CYCLES = {
 function _cosmeticMatches(a, b){
   if (a === null && b === null) return true;
   if (!a || !b) return false;
-  return a.type === b.type && (a.tier|0) === (b.tier|0);
+  if (a.type !== b.type || (a.tier|0) !== (b.tier|0)) return false;
+  return (a.file || null) === (b.file || null); // sheath variants share type+tier — tell them apart by file
 }
+// Friendly label for a back-sheath cosmetic (the builder Back-slot spinner).
+var _SHEATH_LABEL = { backsheath1: 'Sword', backsheath1b: 'Shortblade', backsheath2: 'Greatblade', backsheath3: 'Staff', backquiver: 'Quiver' };
 
 function shiftBuilderCosmetic(slot, delta){
   if (!builderState) return;
@@ -2204,7 +2254,7 @@ function openDebug(){
     appearance: generateAppearance(seed, bodyType),
     face: 0,
     dominantHand: 'R',
-    cosmeticGear: { LHand:null, Body:null, RHand:null },
+    cosmeticGear: { LHand:null, Body:null, RHand:null, Back:null },
     animName: 'idle',
     frame: 0
   };
@@ -3202,7 +3252,11 @@ function renderActionFighter(cv, fighter){
   // Use typeof check — fighter.facing of 0 (north) would otherwise hit the
   // falsy `|| Math.PI` branch and incorrectly render the south sprite.
   var row = facingToRow(typeof fighter.facing === 'number' ? fighter.facing : Math.PI);
-  var weapons = fighterWeaponLayers(fighter);
+  // Ranch roamers (sheatheWhenIdle) wear the weapon on the back while idle/walking
+  // and DRAW it the instant they strike a combat pose (a drill swing, a cast). Real
+  // battle fighters never sheathe. `_PASSIVE_ANIMS` names the at-rest anims.
+  var sheathed = !!fighter.sheatheWhenIdle && !!_PASSIVE_ANIMS[animName];
+  var weapons = fighterWeaponLayers(fighter, sheathed);
   var bobOpts = { excite: getBobExcite(fighter), phase: fighter._bobPhase||0 };
   compositeCharacter(cv, appearance, animName, frame, row, weapons, bobOpts);
   drawCastFxOnCanvas(cv, fighter);
@@ -3438,6 +3492,7 @@ function makeRanchActor(person){
     gear: guildCosmeticGear(person.archetype, person.stats), // cosmetic weapon (visual only)
     anim: { name: 'idle', frame: 0, timer: performance.now(), onDone: null },
     facing: Math.PI, _bobExcite: 0, _bobPhase: Math.floor(Math.random() * 1400),
+    sheatheWhenIdle: true, // roaming the ranch: weapon on the back; drawn only for drills
   };
 }
 /** Bake the arena's procedural grass into a data-URI (for a CSS background). Cache the result. */
