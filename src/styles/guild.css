@@ -50,7 +50,7 @@
    bump the stage's base size so every em-based card, list, and label scales up,
    and cap line length so wide monitors don't stretch cards into ribbons. */
 .room-stage { flex: 1 1 auto; min-width: 0; overflow-y: auto; padding: 14px 16px 32px; font-size: 1.14em; }
-.room-stage > * { max-width: 880px; margin-left: auto; margin-right: auto; }
+.room-stage > * { max-width: 1080px; margin-left: auto; margin-right: auto; }
 .room-rail { font-size: 1.06em; }
 
 /* --- hub (room grid) --- */
@@ -83,7 +83,7 @@
 .hs-chip.sel { border-color: var(--gold); box-shadow: 0 0 8px rgba(212, 168, 67, 0.2); }
 .hs-chip.add { border-style: dashed; opacity: 0.8; }
 .hs-chip.add:hover { border-color: var(--gold); opacity: 1; }
-.dept-lbl { font-size: 0.72em; color: var(--muted); letter-spacing: 0.06em; margin: 2px 0 6px; text-transform: uppercase; font-family: 'Cinzel', serif; }
+.dept-lbl { font-size: 0.82em; color: var(--muted); letter-spacing: 0.06em; margin: 2px 0 6px; text-transform: uppercase; font-family: 'Cinzel', serif; }
 .dept-lbl.add { color: var(--gold); margin-top: 6px; }
 .room-soon { text-align: center; padding: 32px 16px; }
 .room-soon-glyph { font-size: 3em; opacity: 0.5; margin-bottom: 6px; }
@@ -145,7 +145,7 @@
 .statbar span { display: block; height: 100%; border-radius: 3px; background: linear-gradient(90deg, var(--gold), #e8dff0); transition: width 0.4s ease; }
 
 .cond-row { margin-bottom: 8px; }
-.cond-row .lbl { display: flex; justify-content: space-between; font-size: 0.72em; color: var(--muted); margin-bottom: 3px; letter-spacing: 0.05em; }
+.cond-row .lbl { display: flex; justify-content: space-between; font-size: 0.8em; color: var(--muted); margin-bottom: 3px; letter-spacing: 0.05em; }
 .cond-track { height: 8px; border-radius: 5px; background: rgba(0, 0, 0, 0.45); overflow: hidden; }
 .cond-fill { height: 100%; border-radius: 5px; transition: width 0.4s ease; }
 
@@ -192,7 +192,7 @@
    assigned member animated inside (rooms.js). Side-view stage: a back WALL,
    a FLOOR plane, bottom-anchored PROPS from the art library, and one animated
    canvas per worker. Reuses each room's --sc-a/--sc-b tint. ═══ */
-.room-diorama { position: relative; max-width: 860px; height: 246px; margin: 0 auto 12px;
+.room-diorama { position: relative; max-width: 1060px; height: 246px; margin: 0 auto 12px;
   border: 1px solid var(--border); border-radius: 12px; overflow: hidden;
   background: linear-gradient(180deg, var(--sc-b, #100d14), var(--sc-a, #1c1824) 62%);
   box-shadow: inset 0 -40px 60px rgba(0, 0, 0, 0.45), 0 6px 20px rgba(0, 0, 0, 0.4); }
@@ -233,21 +233,28 @@
 .rdi-empty { position: absolute; left: 0; right: 0; bottom: 30%; text-align: center;
   color: var(--dim); font-style: italic; font-size: 0.8em; z-index: 100; }
 
-.plan-title { font-family: 'Cinzel', serif; color: var(--gold); font-size: 0.78em; letter-spacing: 0.14em; margin-bottom: 8px; text-transform: uppercase; }
+.plan-title { font-family: 'Cinzel', serif; color: var(--gold); font-size: 0.94em; letter-spacing: 0.12em; margin-bottom: 10px; text-transform: uppercase; }
+.plan-title .pt-cur { color: var(--text); text-transform: none; letter-spacing: 0; }
 .opt-list { display: flex; flex-direction: column; gap: 6px; margin-bottom: 18px; }
 .opt {
   position: relative; display: flex; justify-content: space-between; align-items: center; gap: 10px; text-align: left;
   border: 1px solid var(--border); border-left: 3px solid var(--border);
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.02), rgba(0, 0, 0, 0.26)); border-radius: 8px; padding: 11px 14px;
-  color: var(--text); font-size: 0.86em; transition: border-color 0.15s, background 0.15s, padding-left 0.15s;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.02), rgba(0, 0, 0, 0.26)); border-radius: 8px; padding: 12px 14px;
+  color: var(--text); font-size: 1em; transition: border-color 0.15s, background 0.15s, padding-left 0.15s;
 }
 /* EO menu feel: hover slides in a gold pointer and warms the accent bar */
 .opt:hover { border-color: var(--dim); border-left-color: var(--gold); padding-left: 22px; }
 .opt:hover::before { content: '▶'; position: absolute; left: 7px; color: var(--gold); font-size: 0.6em; }
 .opt.active { border-color: var(--gold); background: linear-gradient(135deg, #2a1a0a, #3a2a10); box-shadow: 0 0 12px rgba(212, 168, 67, 0.15); }
 .opt .o-name { font-weight: 600; }
-.opt .o-desc { font-size: 0.86em; color: var(--muted); font-style: italic; }
-.opt .o-cost { font-size: 0.74em; color: var(--gold); white-space: nowrap; }
+.opt .o-desc { font-size: 0.84em; color: var(--muted); font-style: italic; }
+.opt .o-cost { font-size: 0.82em; color: var(--gold); white-space: nowrap; }
+/* MR-style drill rows: the drill name left, its stat effect pinned right in gold. */
+.opt.drill { min-height: 46px; }
+.opt.drill .o-stat { font-family: 'Cinzel', serif; font-size: 0.82em; color: var(--gold); white-space: nowrap; letter-spacing: 0.04em; }
+.opt.drill.active .o-name::before { content: '▶ '; color: var(--gold); font-size: 0.8em; }
+/* The active drill already carries its own arrow — the EO hover arrow would double it. */
+.opt.drill.active:hover::before { content: none; }
 /* Arena bout rows — one row, two combat lenses (⚔ live / ♟ tactics) */
 .bout-btns { display: flex; gap: 6px; flex-shrink: 0; }
 .bout-btn { padding: 7px 12px; border: 1px solid var(--gold); background: rgba(212, 168, 67, 0.08); color: var(--gold);
@@ -372,17 +379,17 @@
   background: radial-gradient(circle at 50% 35%, #2a2018, #0c0c10); }
 .rr-portrait.sm { width: 26px; height: 26px; flex: 0 0 26px; font-size: 0.9em; border-radius: 6px; }
 .rr-main { display: flex; flex-direction: column; gap: 2px; flex: 1 1 auto; min-width: 0; }
-.rr-name { font-family: 'Cinzel', serif; font-size: 0.92em; color: #e8e0d0; }
-.rr-sub { font-size: 0.82em; color: var(--muted); font-style: italic; font-family: 'Cormorant Garamond', serif; }
-.rr-assign { font-size: 0.76em; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.rr-cond { display: flex; align-items: center; gap: 6px; font-size: 0.68em; color: var(--dim); }
-.rr-power { font-family: 'Cinzel', serif; font-size: 0.82em; color: var(--gold); white-space: nowrap; }
+.rr-name { font-family: 'Cinzel', serif; font-size: 1.02em; color: #e8e0d0; }
+.rr-sub { font-size: 0.86em; color: var(--muted); font-style: italic; font-family: 'Cormorant Garamond', serif; }
+.rr-assign { font-size: 0.86em; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rr-cond { display: flex; align-items: center; gap: 6px; font-size: 0.78em; color: var(--dim); }
+.rr-power { font-family: 'Cinzel', serif; font-size: 0.94em; color: var(--gold); white-space: nowrap; }
 .mini { display: inline-block; width: 42px; height: 5px; border-radius: 3px; background: rgba(0, 0, 0, 0.5); overflow: hidden; vertical-align: middle; }
 .mini-fill { display: block; height: 100%; border-radius: 3px; }
 
 .assign-head { display: flex; align-items: center; gap: 8px; font-size: 0.82em; color: var(--muted); margin-bottom: 12px; flex-wrap: wrap; }
 .assign-head b { color: var(--text); font-family: 'Cinzel', serif; }
-.hint { color: var(--dim); font-style: italic; text-align: center; padding: 10px; font-size: 0.86em; }
+.hint { color: var(--dim); font-style: italic; text-align: center; padding: 10px; font-size: 0.92em; }
 
 .recruit-list { display: flex; flex-direction: column; gap: 7px; }
 .recruit-card { display: flex; align-items: center; gap: 11px; border: 1px solid var(--border);
@@ -435,21 +442,15 @@
 .quest-opt .o-cost { color: var(--success); }
 
 .intensity-toggle { display: flex; gap: 6px; margin-bottom: 8px; }
-.intensity-toggle button { flex: 1; padding: 7px; border: 1px solid var(--border); background: rgba(0, 0, 0, 0.25);
-  color: var(--muted); border-radius: 8px; font-size: 0.76em; font-family: 'Cinzel', serif; letter-spacing: 0.04em; }
+.intensity-toggle button { flex: 1; padding: 10px 7px; font-size: 0.95em; border: 1px solid var(--border); background: rgba(0, 0, 0, 0.25);
+  color: var(--muted); border-radius: 8px; font-family: 'Cinzel', serif; letter-spacing: 0.04em; }
 .intensity-toggle button.on { border-color: var(--gold); color: var(--gold); background: linear-gradient(135deg, #2a1a0a, #3a2a10); }
 .injury-flag { border: 1px solid var(--danger); background: rgba(239, 68, 68, 0.1); color: var(--danger);
   border-radius: 8px; padding: 6px 10px; margin-bottom: 10px; font-size: 0.76em; text-align: center; }
 
-/* Plan-ahead training queue (Pillar B) */
-.sched-queue { display: flex; flex-wrap: wrap; gap: 5px; margin-bottom: 7px; min-height: 4px; }
-.sched-chip { display: inline-flex; align-items: center; gap: 5px; padding: 3px 4px 3px 9px; font-size: 0.72em;
-  color: #e8dfce; background: rgba(20, 16, 10, 0.6); border: 1px solid var(--dim); border-radius: 14px; }
-.sched-chip button { width: 17px; height: 17px; border-radius: 50%; border: 1px solid var(--border);
-  background: rgba(60, 20, 20, 0.6); color: #e8b0b0; font-size: 0.85em; line-height: 1; cursor: pointer; }
-.sched-chip button:hover { background: #7a1f1f; color: #fff; }
+/* Plan-ahead training queue (Pillar B) — the big week rows live in .sched-list below */
 .sched-add { display: flex; flex-wrap: wrap; gap: 5px; margin-bottom: 16px; }
-.sched-btn { padding: 4px 9px; font-size: 0.72em; font-family: 'Cinzel', serif; letter-spacing: 0.04em;
+.sched-btn { padding: 7px 12px; font-size: 0.85em; font-family: 'Cinzel', serif; letter-spacing: 0.04em;
   color: var(--silver); background: rgba(0, 0, 0, 0.28); border: 1px solid var(--border); border-radius: 8px; cursor: pointer; transition: all 0.12s; }
 .sched-btn:hover { border-color: var(--gold); color: var(--gold); }
 .sched-btn.clear { margin-left: auto; color: var(--muted); }
@@ -583,29 +584,17 @@
 .tourney-card { border-color: rgba(212, 168, 67, 0.35); }
 .tourney-card.imminent { border-color: var(--gold); box-shadow: 0 0 14px rgba(212, 168, 67, 0.14); }
 .tourney-head { display: flex; align-items: center; gap: 8px; margin-bottom: 7px; }
-.tourney-name { font-family: 'Cinzel', serif; color: var(--gold); font-size: 0.98em; flex: 1 1 auto; min-width: 0; }
+.tourney-name { font-family: 'Cinzel', serif; color: var(--gold); font-size: 1.18em; flex: 1 1 auto; min-width: 0; }
 .tourney-when {
   font-size: 0.72em; color: var(--gold); border: 1px solid var(--gold); border-radius: 6px;
   padding: 2px 8px; white-space: nowrap; background: rgba(212, 168, 67, 0.08);
 }
 .tourney-card.imminent .tourney-when { background: var(--gold); color: #1a1206; font-weight: 600; }
-.tourney-odds { font-size: 0.84em; color: var(--muted); margin: 8px 0 10px; }
+.tourney-odds { font-size: 0.96em; color: var(--muted); margin: 8px 0 10px; }
 .tourney-odds b { color: var(--text); font-family: 'Cinzel', serif; }
 .hs-chip.unfit { position: relative; border-color: var(--danger); opacity: 0.8; filter: grayscale(0.35); }
 /* .hs-chip clips overflow, so the badge sits INSIDE the box (top-right), legible via a shadow. */
 .hs-chip.unfit::after { content: '⚠'; position: absolute; top: 0; right: 1px; font-size: 0.62em; line-height: 1; text-shadow: 0 0 3px #000, 0 0 2px #000; }
-
-/* "Play this match yourself" opt-in on a tournament card. */
-/* Season strip — 12 chips, one per coming week; glyphs mark booked events */
-.cal-strip { display: flex; gap: 4px; margin: 4px 0 10px; overflow-x: auto; padding-bottom: 2px; }
-.cal-chip { flex: 1 0 30px; min-width: 30px; display: flex; flex-direction: column; align-items: center; gap: 1px;
-  border: 1px solid var(--border); border-radius: 8px; padding: 4px 2px; background: rgba(0, 0, 0, 0.22); }
-.cal-chip .cal-wk { font-size: 0.6em; color: var(--dim); }
-.cal-chip .cal-glyph { font-size: 0.8em; color: var(--dim); line-height: 1.2; }
-.cal-chip.now { border-color: var(--gold); box-shadow: 0 0 8px rgba(212, 168, 67, 0.2); }
-.cal-chip.now .cal-wk { color: var(--gold); }
-.cal-chip.has-ev .cal-glyph { color: var(--text); }
-.cal-chip.major { border-color: var(--gold); background: linear-gradient(135deg, #2a1a0a, #1c1410); }
 
 /* Seasonal majors — the tentpole cards read as such */
 .tourney-card.major { border-color: var(--gold); box-shadow: 0 0 14px rgba(212, 168, 67, 0.12); }
@@ -616,3 +605,59 @@
   font-family: 'Cinzel', serif; font-size: 0.76em; letter-spacing: 0.06em; transition: background 0.15s, box-shadow 0.15s; }
 .tourney-play:hover { background: rgba(212, 168, 67, 0.16); }
 .tourney-play.on { background: linear-gradient(135deg, #2a1a0a, #3a2a10); box-shadow: 0 0 12px rgba(212, 168, 67, 0.2); }
+
+/* ═══ Calendar — MR Comp.Schedule layout ═══
+   Left: the season GRID (columns = weeks, rows = rank circuits; booked cells are
+   buttons). Right: ONE detail panel for the selected event. */
+.cal-layout { display: grid; grid-template-columns: minmax(0, 11fr) minmax(0, 9fr); gap: 14px; align-items: start; }
+.cal-layout > .plan-card { margin-bottom: 0; }
+/* The breakpoint budgets for the ~224px room rail + stage padding: below it the grid's
+   twelve 1fr cells would squeeze into ovals, so stack to one column sooner (review fix). */
+@media (max-width: 1200px) { .cal-layout { grid-template-columns: 1fr; } }
+.cal-grid { margin: 4px 0 10px; }
+.cg-row { display: grid; grid-template-columns: 44px repeat(12, minmax(0, 1fr)); gap: 4px; margin-bottom: 4px; align-items: center; }
+.cg-corner { min-width: 0; }
+.cg-season { font-family: 'Cinzel', serif; font-size: 0.66em; color: var(--gold); letter-spacing: 0.08em; text-align: center; opacity: 0.85; }
+.cg-wk { font-family: 'Cinzel', serif; font-size: 0.82em; color: var(--muted); text-align: center; padding: 3px 0; border-radius: 6px; }
+.cg-wk.now { color: #1a1206; background: var(--gold); font-weight: 700; }
+.cg-rank { font-family: 'Cinzel', serif; font-size: 0.88em; color: var(--gold); text-align: center; letter-spacing: 0.06em; }
+.cg-cell { display: flex; align-items: center; justify-content: center; aspect-ratio: 1 / 1; max-height: 46px;
+  justify-self: center; width: 100%; max-width: 46px; border-radius: 50%;
+  border: 1px solid rgba(255, 255, 255, 0.07); background: rgba(0, 0, 0, 0.25); color: var(--dim); font-size: 0.8em; }
+.cg-cell.now { border-color: rgba(212, 168, 67, 0.45); }
+.cg-cell.booked { cursor: pointer; font-size: 1.25em; color: var(--text); border-color: var(--dim);
+  background: radial-gradient(circle at 50% 40%, #2a2018, #14100c); transition: box-shadow 0.15s, border-color 0.15s; }
+.cg-cell.booked:hover { border-color: var(--gold); }
+.cg-cell.booked.sel { border: 2px solid var(--gold); box-shadow: 0 0 12px rgba(212, 168, 67, 0.45); }
+.cg-cell.booked.major, .cg-cell.booked.worldcup { background: radial-gradient(circle at 50% 40%, #3a2a10, #1a1206); }
+.cg-cell.booked.worldcup { border-color: #c0504a; }
+.cal-note { font-size: 0.9em; color: var(--muted); font-style: italic; padding: 2px 2px 4px; }
+/* Events booked past the grid's 12 weeks (the World Cup looms years out) */
+.cal-far { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
+.cal-far-pill { display: inline-flex; align-items: center; gap: 6px; padding: 8px 12px; font-size: 0.92em;
+  border: 1px solid var(--dim); border-radius: 18px; background: rgba(0, 0, 0, 0.25); color: var(--text); cursor: pointer; }
+.cal-far-pill:hover { border-color: var(--gold); }
+.cal-far-pill.sel { border-color: var(--gold); box-shadow: 0 0 10px rgba(212, 168, 67, 0.35); }
+.cal-far-pill.worldcup { border-color: #c0504a; }
+.cal-far-pill .cfp-when { font-family: 'Cinzel', serif; font-size: 0.8em; color: var(--gold); }
+
+/* ═══ Training — MR two-panel layout: this week's menu | the week-by-week plan ═══ */
+.train-cols { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 14px; align-items: start; }
+.train-cols > .plan-card { margin-bottom: 14px; }
+@media (max-width: 900px) { .train-cols { grid-template-columns: 1fr; } .train-cols > .plan-card { margin-bottom: 14px; } }
+/* The plan: one BIG row per queued week (MR schedule list). */
+.sched-list { display: flex; flex-direction: column; gap: 6px; margin-bottom: 10px; }
+.sched-row { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border: 1px solid var(--border);
+  border-left: 3px solid var(--border); border-radius: 8px; background: linear-gradient(180deg, rgba(255, 255, 255, 0.02), rgba(0, 0, 0, 0.26)); }
+.sched-row.now { border-left-color: var(--gold); background: linear-gradient(135deg, #241708, #1c1410); }
+.sched-row .sr-wk { font-family: 'Cinzel', serif; font-size: 0.78em; color: var(--gold); letter-spacing: 0.05em;
+  border: 1px solid rgba(212, 168, 67, 0.4); border-radius: 6px; padding: 2px 7px; white-space: nowrap; }
+.sched-row .sr-name { flex: 1 1 auto; min-width: 0; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sched-row .sr-h { font-family: 'Cinzel', serif; font-size: 0.72em; color: #e08a3c; border: 1px solid #e08a3c;
+  border-radius: 6px; padding: 1px 6px; }
+.sched-row .sr-x { width: 24px; height: 24px; border-radius: 50%; border: 1px solid var(--border); background: transparent;
+  color: var(--muted); cursor: pointer; flex: 0 0 auto; }
+.sched-row .sr-x:hover { background: #7a1f1f; color: #fff; border-color: #7a1f1f; }
+/* Hero-card bar stack → two columns, halving the header's height. */
+.bar-grid { display: grid; grid-template-columns: 1fr 1fr; column-gap: 18px; }
+@media (max-width: 620px) { .bar-grid { grid-template-columns: 1fr; } }
