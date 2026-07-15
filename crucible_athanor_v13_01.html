@@ -51,9 +51,23 @@ button{cursor:pointer;font-family:'Cormorant Garamond',serif}
 .draft-top{display:flex;justify-content:center;align-items:center;gap:24px;margin:8px 0;flex-wrap:wrap}
 .draft-portrait{background:#08080d;border:1px solid var(--border);border-radius:10px;padding:8px;display:flex;align-items:center;justify-content:center}
 .draft-portrait canvas{image-rendering:pixelated;display:block}
+.face-rotate-stage{display:flex;align-items:center;justify-content:center;gap:8px}
+.face-rotate-btn{background:transparent;border:1px solid var(--border);color:var(--gold);width:42px;height:42px;border-radius:50%;cursor:pointer;font-size:1.5em;line-height:1;display:flex;align-items:center;justify-content:center;font-family:'Cinzel',serif;transition:all 0.15s;padding:0}
+.face-rotate-btn:hover{background:rgba(212,168,67,0.18);border-color:var(--gold);transform:scale(1.05)}
+.face-rotate-btn:active{transform:scale(0.95)}
 .draft-header h2{font-family:'Cinzel',serif;font-size:1em;letter-spacing:0.15em;color:#e8e0d0}
 .draft-header .round-info{font-size:0.8em;color:var(--gold);margin-top:2px}
-.equipped-slots{display:flex;gap:8px;justify-content:center;margin:8px 0;flex-wrap:wrap}
+/* 5-slot equipped layout: "+" pattern. Head top, Lower bottom, OFF / ARMOR /
+   MAIN in the middle row. Driven by .eq-slot-{head,lhand,body,rhand,lower}. */
+.equipped-slots{display:grid;grid-template-columns:repeat(3,minmax(110px,1fr));grid-template-rows:auto auto auto;gap:6px;justify-items:center;align-items:center;margin:8px auto;max-width:520px}
+.eq-slot-head { grid-column:2; grid-row:1 }
+.eq-slot-lhand{ grid-column:1; grid-row:2 }
+.eq-slot-body { grid-column:2; grid-row:2 }
+.eq-slot-rhand{ grid-column:3; grid-row:2 }
+.eq-slot-lower{ grid-column:2; grid-row:3 }
+.gear-card.dragging{opacity:0.5;transform:scale(0.96)}
+.eq-slot.drop-allowed{border-style:solid;border-color:rgba(212,168,67,0.55);background:rgba(212,168,67,0.05)}
+.eq-slot.drop-target{border-color:var(--gold)!important;background:rgba(212,168,67,0.18);box-shadow:0 0 12px rgba(212,168,67,0.35)}
 .eq-slot{background:var(--card);border:2px dashed var(--border);border-radius:10px;padding:10px;min-width:100px;text-align:center;transition:all 0.3s}
 .eq-slot.filled{border-style:solid;border-color:#444}
 .eq-slot .slot-label{font-size:0.65em;color:var(--muted);font-family:'Cinzel',serif;letter-spacing:0.1em;margin-bottom:4px}
@@ -69,11 +83,20 @@ button{cursor:pointer;font-family:'Cormorant Garamond',serif}
 .gear-card:hover{border-color:#555;transform:translateY(-1px)}
 .gear-card.disabled{opacity:0.35;pointer-events:none}
 .gear-card.selected{border-color:var(--gold);box-shadow:0 0 15px rgba(212,168,67,0.15)}
-.gear-card .gc-name{font-size:0.85em;font-weight:600;color:#e8e0d0}
-.gear-card .gc-pos{font-size:0.65em;color:var(--muted)}
+.gear-card .gc-name{font-size:0.95em;font-weight:600;color:#e8e0d0}
+.gear-card .gc-pos{font-size:0.7em;color:var(--muted)}
 .gear-card .gc-sockets{display:flex;align-items:center;gap:2px;margin-top:4px;flex-wrap:wrap}
 .gear-card .gc-links{font-size:0.65em;color:var(--dim);margin-top:2px}
+.gc-row{display:flex;align-items:center;gap:10px}
+.gc-icon-wrap{flex:0 0 auto;width:48px;height:48px;display:flex;align-items:center;justify-content:center}
+.gc-icon-wrap .gear-pixel-icon{margin-right:0 !important}
+.gc-text{flex:1 1 auto;min-width:0}
 .materia-orb{width:24px;height:20px;border-radius:10px;border:2px solid #444;display:inline-flex;align-items:center;justify-content:center;font-size:0.5em;background:rgba(15,15,20,0.9)}
+.materia-orb-wrap{position:relative;display:inline-flex;align-items:center;justify-content:center;vertical-align:middle;margin:0 1px}
+.materia-orb-wrap .materia-orb-pix{display:block}
+.materia-orb-wrap .materia-orb-lvl{position:absolute;bottom:-2px;right:-2px;font-size:0.65em;color:#fff;text-shadow:0 0 3px #000,0 0 3px #000,1px 1px 0 #000;line-height:1;font-weight:bold;pointer-events:none}
+.materia-orb-empty{width:28px;height:28px}
+.materia-orb-empty-dot{display:inline-block;border:2px dashed #2a2a34;border-radius:50%;background:transparent}
 .materia-link{width:8px;height:3px;display:inline-block;vertical-align:middle}
 .materia-link.active{background:linear-gradient(90deg,var(--gold),var(--mercury));height:3px;box-shadow:0 0 4px rgba(200,180,120,0.3)}
 .materia-gap{width:4px;display:inline-block;vertical-align:middle}
@@ -241,6 +264,23 @@ button{cursor:pointer;font-family:'Cormorant Garamond',serif}
 .lab-header .lab-qs{font-size:0.85em;color:var(--qs-col);margin-top:2px}
 .lab-section{max-width:500px;width:100%;margin-bottom:12px}
 .lab-section h3{font-family:'Cinzel',serif;font-size:0.8em;letter-spacing:0.1em;color:var(--muted);margin-bottom:6px;border-bottom:1px solid var(--border);padding-bottom:3px}
+.lab-stats-section{background:rgba(15,12,8,0.45);border:1px solid var(--border);border-radius:10px;padding:10px 12px;font-size:0.78em}
+.lab-stats-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:6px 14px;margin-top:4px}
+.lab-stat-row{display:flex;justify-content:space-between;align-items:baseline;gap:6px}
+.lab-stat-row .lab-stat-name{color:var(--muted);font-size:0.85em}
+.lab-stat-row .lab-stat-val{color:#e8e0d0;font-weight:600}
+.lab-stat-row .lab-stat-delta{font-size:0.85em;margin-left:4px}
+.lab-stat-row .lab-stat-delta.up{color:#7ad17a}
+.lab-stat-row .lab-stat-delta.down{color:#ef4444}
+.lab-stats-attacks{margin-top:8px;font-size:0.85em;color:var(--dim)}
+.lab-stats-attacks .lab-stats-atk-tag{display:inline-block;padding:1px 7px;margin:2px 3px 2px 0;border:1px solid var(--border);border-radius:10px;color:#e8e0d0;font-size:0.85em;background:rgba(255,255,255,0.02)}
+.lab-stats-attacks .lab-stats-atk-tag.added{border-color:#7ad17a;color:#7ad17a;background:rgba(120,200,120,0.06)}
+.lab-stats-attacks .lab-stats-atk-tag.removed{border-color:#ef4444;color:#ef4444;background:rgba(220,80,80,0.06);text-decoration:line-through}
+.lab-preview-banner{margin-top:8px;padding:6px 10px;border-radius:8px;background:rgba(212,168,67,0.08);border:1px solid rgba(212,168,67,0.4);font-size:0.85em;display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap}
+.lab-preview-banner .lab-preview-clear{cursor:pointer;color:var(--danger);font-size:0.85em;border:1px solid var(--danger);padding:2px 8px;border-radius:6px;background:transparent}
+.lab-preview-banner .lab-preview-clear:hover{background:rgba(220,80,80,0.12)}
+.lab-card-preview-target{outline:1px dashed rgba(212,168,67,0.5)}
+.lab-card-preview-active{outline:2px solid var(--gold);background:rgba(212,168,67,0.06)}
 .lab-gear{display:grid;grid-template-columns:1fr;gap:6px}
 .lab-gear-item{background:var(--card);border:1px solid var(--border);border-radius:8px;padding:8px 10px;display:flex;justify-content:space-between;align-items:center;gap:8px}
 .lab-gear-item.equipped{border-color:var(--gold);border-width:2px}
@@ -305,6 +345,26 @@ button{cursor:pointer;font-family:'Cormorant Garamond',serif}
 .craft-result.success{color:var(--success);border:1px solid rgba(74,222,128,0.3);background:rgba(74,222,128,0.05)}
 .craft-result.fail{color:var(--danger);border:1px solid rgba(239,68,68,0.3);background:rgba(239,68,68,0.05)}
 
+/* ═══ ACTION ARENA ═══ */
+#actionScreen{align-items:center;padding:12px;gap:8px}
+.action-hud{display:flex;flex-direction:column;gap:4px;width:min(720px,95vw)}
+.action-hp-row{display:flex;align-items:center;gap:8px}
+.action-hp-label{font-family:'Cinzel',serif;font-size:0.72em;letter-spacing:0.1em;color:#e8e0d0;min-width:130px}
+.action-arena{position:relative;width:720px;height:720px;max-width:95vw;max-height:95vw;background:#1a2418;border:1px solid var(--border);border-radius:6px;overflow:hidden;image-rendering:pixelated;background-size:100% 100%}
+.action-fighter{position:absolute;left:0;top:0;image-rendering:pixelated;pointer-events:none;transform:translate(0,0);transform-origin:top left}
+.action-help{font-size:0.75em;color:var(--muted);font-family:'Cinzel',serif;letter-spacing:0.08em;margin-top:6px}
+.action-attacks{display:flex;flex-wrap:wrap;gap:6px;justify-content:center;max-width:min(720px,95vw)}
+.action-attacks button{padding:8px 14px;background:var(--card);border:1px solid var(--gold);color:var(--gold);border-radius:6px;font-family:'Cinzel',serif;font-size:0.8em;letter-spacing:0.08em;cursor:pointer;transition:all 0.15s}
+.action-attacks button:hover{background:rgba(212,168,67,0.18)}
+.action-attacks button:disabled{opacity:0.4;cursor:default}
+.action-attacks button .atk-key{font-size:0.7em;opacity:0.7;margin-right:4px}
+.action-attacks button.cooling{opacity:0.45}
+.action-log{font-size:0.72em;color:var(--dim);max-width:min(720px,95vw);width:100%;height:78px;overflow-y:auto;background:var(--card);border:1px solid var(--border);border-radius:6px;padding:6px 10px;font-family:'Cormorant Garamond',serif}
+.action-log .log-entry{margin:2px 0}
+.action-log .log-entry.hit{color:var(--text)}
+.action-log .log-entry.crit{color:var(--gold);font-weight:600}
+.action-log .log-entry.miss{color:var(--muted);font-style:italic}
+
 /* ═══ FORGE CHOICE + CHARACTER BUILDER ═══ */
 #forgeChoiceScreen{align-items:center;justify-content:center;padding:20px;text-align:center}
 .forge-choice{max-width:420px;width:90vw}
@@ -349,8 +409,10 @@ button{cursor:pointer;font-family:'Cormorant Garamond',serif}
 <div class="screen active" id="titleScreen">
   <div class="title-logo">⚗ THE CRUCIBLE ⚗</div>
   <div class="title-sub">Athanor Mode — The Alchemical Furnace</div>
-  <button class="title-btn" onclick="showForgeChoice()">⚗ ENTER THE ATHANOR ⚗</button>
+  <button class="title-btn" onclick="startTurnFlow()">⚗ ENTER THE ATHANOR ⚗</button>
+  <button class="title-btn" onclick="startActionFlow()">⚡ ACTION ARENA ⚡</button>
   <button class="title-btn secondary" onclick="showPantheon()">☿ PANTHEON</button>
+  <button class="title-btn secondary" onclick="openDebug()">🔧 DEBUG ROOM</button>
   <div class="pantheon-preview" id="titlePantheonPreview"></div>
 </div>
 
@@ -398,6 +460,33 @@ button{cursor:pointer;font-family:'Cormorant Garamond',serif}
   <div class="stat-reveal" id="statReveal"></div>
 </div>
 
+<!-- ═══ DEBUG ROOM (frame inspector) ═══ -->
+<div class="screen" id="debugScreen">
+  <div class="builder-shell">
+    <div class="builder-header">
+      <h2>🔧 DEBUG ROOM</h2>
+      <div class="sub">Pin a pose &amp; frame; cycle parts to inspect layering.</div>
+    </div>
+    <div class="builder-grid">
+      <div class="builder-preview">
+        <canvas id="debugPreviewCanvas" width="320" height="320" style="width:320px;height:320px"></canvas>
+        <div class="face-tabs">
+          <div class="face-tab" data-face="0" onclick="setDebugFace(0)">South</div>
+          <div class="face-tab" data-face="2" onclick="setDebugFace(2)">East</div>
+          <div class="face-tab" data-face="1" onclick="setDebugFace(1)">West</div>
+          <div class="face-tab" data-face="3" onclick="setDebugFace(3)">North</div>
+        </div>
+        <div id="debugFrameLabel" style="font-size:0.7em;color:var(--dim);text-align:center;font-family:'Cinzel',serif;margin-top:6px;letter-spacing:0.05em"></div>
+      </div>
+      <div class="builder-controls" id="debugControls"></div>
+    </div>
+    <div class="builder-actions">
+      <button class="builder-back" onclick="returnToTitle()">↩ back to title</button>
+      <button class="builder-randomize" onclick="randomizeDebug()">↻ randomize parts</button>
+    </div>
+  </div>
+</div>
+
 <!-- ═══ DRAFT SCREEN ═══ -->
 <div class="screen" id="draftScreen">
   <div class="draft-header">
@@ -406,12 +495,10 @@ button{cursor:pointer;font-family:'Cormorant Garamond',serif}
   </div>
   <div class="draft-top">
     <div class="draft-portrait">
-      <canvas id="draftCharCanvas" width="220" height="220" style="width:220px;height:220px;image-rendering:pixelated"></canvas>
-      <div class="face-tabs" style="margin-top:8px">
-        <div class="face-tab active" data-face="0" onclick="setDraftFace(0)">South</div>
-        <div class="face-tab" data-face="2" onclick="setDraftFace(2)">East</div>
-        <div class="face-tab" data-face="1" onclick="setDraftFace(1)">West</div>
-        <div class="face-tab" data-face="3" onclick="setDraftFace(3)">North</div>
+      <div class="face-rotate-stage">
+        <button type="button" class="face-rotate-btn face-rotate-left" onclick="rotateDraftFace(-1)" aria-label="Rotate left">↺</button>
+        <canvas id="draftCharCanvas" width="220" height="220" style="width:220px;height:220px;image-rendering:pixelated"></canvas>
+        <button type="button" class="face-rotate-btn face-rotate-right" onclick="rotateDraftFace(1)" aria-label="Rotate right">↻</button>
       </div>
     </div>
     <div class="equipped-slots" id="equippedSlots"></div>
@@ -440,6 +527,28 @@ button{cursor:pointer;font-family:'Cormorant Garamond',serif}
     </div>
     <div class="vs-fog" id="vsFog"></div>
   </div>
+</div>
+
+<!-- ═══ ACTION ARENA (real-time mode) ═══ -->
+<div class="screen" id="actionScreen">
+  <div class="action-hud">
+    <div class="action-hp-row">
+      <div class="action-hp-label" id="actLblP1">⚗ ALCHEMIST</div>
+      <div class="hp-bar"><div class="hp-fill" id="actHpFillP1" style="background:#4ade80"></div></div>
+    </div>
+    <div class="action-hp-row">
+      <div class="action-hp-label" id="actLblP2">☠ OPPONENT</div>
+      <div class="hp-bar"><div class="hp-fill" id="actHpFillP2" style="background:#ef4444"></div></div>
+    </div>
+  </div>
+  <div class="action-arena" id="actionArena">
+    <canvas id="actionP1Cv" class="action-fighter" width="96" height="96"></canvas>
+    <canvas id="actionP2Cv" class="action-fighter" width="96" height="96"></canvas>
+  </div>
+  <div class="action-help">WASD / arrows to move · click an attack or press 1–4</div>
+  <div class="action-attacks" id="actionAttackBar"></div>
+  <div class="action-log" id="actionLog"></div>
+  <button class="reroll-btn" style="margin-top:6px" onclick="forfeitAction()">↩ Forfeit Run</button>
 </div>
 
 <!-- ═══ BATTLE SCREEN ═══ -->
@@ -498,10 +607,12 @@ button{cursor:pointer;font-family:'Cormorant Garamond',serif}
     <div id="labRoundInfo" style="font-size:0.75em;color:var(--gold);margin:2px 0"></div>
     <div class="lab-qs" id="labQs">☿ 0</div>
   </div>
+  <div class="lab-section lab-stats-section" id="labStatsPanel"></div>
   <div class="lab-section" id="labEquipped"></div>
   <div class="lab-section" id="labMerchant"></div>
   <div class="lab-section" id="labStored"></div>
   <div class="lab-section" id="labLooseMateria"></div>
+  <div class="lab-section" id="labMateriaDust"></div>
   <div class="lab-confirm-btn">
     <button class="title-btn" onclick="confirmLoadout()" id="labConfirmBtn">⚔ CONFIRM LOADOUT ⚔</button>
     <div style="margin-top:12px"><button class="title-btn secondary" style="display:inline-block;width:auto;padding:8px 24px;font-size:0.75em" onclick="forfeitRun()">☠ Abandon Run</button></div>
@@ -557,6 +668,7 @@ button{cursor:pointer;font-family:'Cormorant Garamond',serif}
 // ═══ CONSTANTS ═══
 var GS=9;
 var MATERIA_MAX_LVL=5;
+var MATERIA_DUST_COST=8;   // dust granules of a single planet required to reform a Lv1 orb
 var TOTAL_ROUNDS=7;
 
 // ═══ PLANETARY METALS ═══
@@ -606,22 +718,38 @@ var RANKS=[
 ];
 
 // ═══ GEAR DATA ═══
+// Every gear type below maps to a real Time Element pixel-art sprite. Types
+// without a sprite (Gauntlet, Tome, Ring, Amulet) were removed.
 var GEAR_TYPES=[
+  // Hand
   {type:'Sword',   pos:'Hand', sMin:1,sMax:3, icon:'⚔'},
   {type:'Dagger',  pos:'Hand', sMin:0,sMax:2, icon:'🗡'},
   {type:'Wand',    pos:'Hand', sMin:1,sMax:3, icon:'✧'},
-  {type:'Gauntlet',pos:'Hand', sMin:0,sMax:2, icon:'✊'},
-  {type:'Buckler', pos:'Hand', sMin:0,sMax:2, icon:'🛡'},
-  {type:'Tome',    pos:'Hand', sMin:1,sMax:3, icon:'📖'},
-  {type:'Ring',    pos:'Hand', sMin:0,sMax:1, icon:'💍'},
+  {type:'Bow',     pos:'Hand', sMin:1,sMax:3, icon:'🏹'},
+  {type:'Axe',     pos:'Hand', sMin:1,sMax:3, icon:'🪓'},
+  {type:'Hammer',  pos:'Hand', sMin:1,sMax:3, icon:'🔨'},
   {type:'Club',    pos:'Hand', sMin:0,sMax:1, icon:'⌇'},
+  {type:'Buckler', pos:'Hand', sMin:0,sMax:2, icon:'🛡'},
+  // Body
   {type:'Plate',   pos:'Body', sMin:1,sMax:4, icon:'🛡'},
   {type:'Mail',    pos:'Body', sMin:1,sMax:3, icon:'⛓'},
   {type:'Robes',   pos:'Body', sMin:1,sMax:3, icon:'👘'},
   {type:'Cloak',   pos:'Body', sMin:0,sMax:2, icon:'🧥'},
-  {type:'Amulet',  pos:'Body', sMin:0,sMax:2, icon:'📿'},
-  {type:'Vest',    pos:'Body', sMin:0,sMax:1, icon:'△'}
+  {type:'Vest',    pos:'Body', sMin:0,sMax:1, icon:'△'},
+  // Head
+  {type:'Helm',    pos:'Head', sMin:1,sMax:3, icon:'⛑'},
+  {type:'Crown',   pos:'Head', sMin:1,sMax:2, icon:'👑'},
+  {type:'Cap',     pos:'Head', sMin:0,sMax:1, icon:'🧢'},
+  {type:'Hood',    pos:'Head', sMin:0,sMax:2, icon:'🪖'},
+  // Lower
+  {type:'Trousers',pos:'Lower', sMin:0,sMax:2, icon:'👖'},
+  {type:'Leggings',pos:'Lower', sMin:1,sMax:2, icon:'🦵'},
+  {type:'Skirt',   pos:'Lower', sMin:0,sMax:2, icon:'👗'}
 ];
+
+// Canonical ordering of equip slots. Drives every loop that iterates the
+// player's gear (draft, materia, save, etc.).
+var EQUIP_SLOTS = ['Head','LHand','Body','RHand','Lower'];
 
 var GEAR_MATERIALS=[
   ['Bone','Crude','Tarnished','Scrap'],
@@ -1287,15 +1415,121 @@ var ELEMENTS_CELL   = 48;
 var ELEMENTS_COLS   = 23;
 var ELEMENTS_ROWS   = 4;
 
-// Default back-to-front compositing (south/east/west). Standard Time Element
-// order — top always over bottom.
-var ELEMENTS_LAYER_ORDER = [
-  'shadow','backextra','backhair','bottom','top','head','hair','frontextra','hat','weapon'
+// Per-facing back-to-front orders. The weapon slot is split: `weapon_back` is
+// drawn before the body so the far hand (in side views) is hidden by the
+// torso; `weapon_front` is drawn last so the near hand sits on top.
+// `weaponZForSlot(slot, row)` decides which bucket each weapon goes in.
+//
+// SOUTH (camera sees character's front):
+//   - cape/backpack/tail sit BEHIND the body (mostly hidden, only bottom edges
+//     visible past the silhouette).
+var ELEMENTS_LAYER_ORDER_SOUTH = [
+  'shadow','backextra','backhair','weapon_back','bottom','top','head','hair','frontextra','hat','weapon_front'
 ];
-// Reverse order (north / climb): weapon behind body, hat on top.
-var ELEMENTS_LAYER_ORDER_REV = [
-  'shadow','weapon','frontextra','bottom','top','head','hair','backextra','backhair','hat'
+// SIDE (E/W — camera sees a profile):
+//   - back accessory & backhair sit BEHIND the body, so the near arm/hand
+//     covers any tail/cape sprite that overlaps the silhouette. The portion
+//     of the back accessory that extends past the body (e.g. a cape edge or
+//     tail tip in empty space) is still visible because nothing else is
+//     drawn over those pixels.
+var ELEMENTS_LAYER_ORDER_SIDE = [
+  'shadow','backextra','backhair','weapon_back','bottom','top','head','hair','frontextra','hat','weapon_front'
 ];
+// NORTH (back view, also used by reverseDraw anims like Climb):
+//   - back accessory is the dominant element, drawn over hair AND hat.
+//   - backhair is drawn AFTER head AND after head-hair, so a ponytail / long
+//     hair reads over the back of the skull and over the front hairline.
+//   - frontextra (belts/sashes etc.) drops behind body — not visible from back.
+var ELEMENTS_LAYER_ORDER_NORTH = [
+  'shadow','weapon_back','frontextra','bottom','top','head','hair','backhair','hat','backextra','weapon_front'
+];
+
+// Legacy aliases (kept so existing references resolve; behavior is driven by
+// the per-facing lookup in compositeCharacter).
+var ELEMENTS_LAYER_ORDER = ELEMENTS_LAYER_ORDER_SOUTH;
+var ELEMENTS_LAYER_ORDER_REV = ELEMENTS_LAYER_ORDER_NORTH;
+
+// Anims where mirroring an off-hand non-slot-suffix weapon still reads
+// correctly. For attack-style anims the weapon is in an extended/forward pose
+// in the source sprite, so mirroring it would point the wrong direction —
+// during those we fall back to the un-mirrored sprite position.
+var WEAPON_MIRROR_OK_ANIMS = { idle:1, move:1, hurt:1, death:1, prone:1 };
+
+// ─── Weapon empty-cell fallback ──────────────────────────────
+// Many Time Element weapon sheets only paint certain anim columns (e.g.
+// wand1 is blank at the crouch col, pickaxe1 is blank everywhere except
+// the Attack/Tool block, bow1 is blank outside the Nock-and-Bow block).
+// We scan each weapon PNG on load to learn which (row,col) cells have
+// content, then at draw time fall back to a populated column when the
+// requested cell is empty — so the weapon stays visible across all anims.
+var _weaponNonEmpty = {};  // file → { 'row,col': 1 }
+function _scanWeaponEmpties(file, img){
+  if (_weaponNonEmpty[file]) return;
+  var w = img.naturalWidth || img.width;
+  var h = img.naturalHeight || img.height;
+  if (!w || !h) return;
+  var cv = document.createElement('canvas');
+  cv.width = w; cv.height = h;
+  var ctx = cv.getContext('2d');
+  ctx.drawImage(img, 0, 0);
+  var data;
+  try { data = ctx.getImageData(0, 0, w, h).data; }
+  catch(e){ return; }  // CORS taint — give up, weapon will use raw cells
+  var map = {};
+  for (var r = 0; r < ELEMENTS_ROWS; r++){
+    for (var c = 0; c < ELEMENTS_COLS; c++){
+      var found = false;
+      for (var x = c*ELEMENTS_CELL; x < (c+1)*ELEMENTS_CELL && !found; x++){
+        for (var y = r*ELEMENTS_CELL; y < (r+1)*ELEMENTS_CELL; y++){
+          if (data[(y*w + x)*4 + 3] > 0){ found = true; break; }
+        }
+      }
+      if (found) map[r + ',' + c] = 1;
+    }
+  }
+  _weaponNonEmpty[file] = map;
+}
+
+// Resolve the actual sheet column to draw for a weapon. Returns -1 to mean
+// "hide this weapon for this frame" (used when an active-only weapon like a
+// pickaxe or bow has no passive idle/walk cell painted — we'd rather not draw
+// it than slot in an attack pose). Death/prone keep the requested col so
+// dropped weapons naturally disappear.
+var _PASSIVE_ANIMS = { idle:1, move:1, hurt:1 };
+var _PASSIVE_FALLBACK_COLS = [1, 0, 2];           // walk-stand → walk-frames
+var _ACTIVE_FALLBACK_COLS  = [10, 11, 16, 15, 1, 0]; // attack → bow → idle
+function _resolveWeaponSrcCol(file, requestedCol, row, animName){
+  if (animName === 'death' || animName === 'prone') return requestedCol;
+  var map = _weaponNonEmpty[file];
+  if (!map) return requestedCol;
+  if (map[row + ',' + requestedCol]) return requestedCol;
+  var fallbacks = _PASSIVE_ANIMS[animName] ? _PASSIVE_FALLBACK_COLS : _ACTIVE_FALLBACK_COLS;
+  for (var i = 0; i < fallbacks.length; i++){
+    if (map[row + ',' + fallbacks[i]]) return fallbacks[i];
+  }
+  // No passive cell exists — better to hide the weapon than to paste an
+  // attack pose into an idle/move frame (looks like the character is mid-swing).
+  if (_PASSIVE_ANIMS[animName]) return -1;
+  // For active anims, last-resort scan any column with content.
+  for (var c = 0; c < ELEMENTS_COLS; c++){
+    if (map[row + ',' + c]) return c;
+  }
+  return -1;
+}
+
+// Decide whether this weapon slot renders IN FRONT of or BEHIND the body for
+// the given facing row.
+//   row 0 (south): both hands toward camera → both 'front'
+//   row 1 (west):  character's LEFT side faces camera → LHand 'front', RHand 'back'
+//   row 2 (east):  character's RIGHT side faces camera → RHand 'front', LHand 'back'
+//   row 3 (north): camera sees the back → both 'back'
+function weaponZForSlot(slot, facingRow){
+  if (facingRow === 0) return 'front';
+  if (facingRow === 3) return 'back';
+  if (facingRow === 1) return (slot === 'LHand') ? 'front' : 'back';
+  if (facingRow === 2) return (slot === 'RHand') ? 'front' : 'back';
+  return 'front';
+}
 
 // Animation slot → frame-column lookup. `cols` is the ordered list of columns
 // to step through. `reverseDraw` flips the layer z-order for that animation
@@ -1307,7 +1541,8 @@ var ELEMENTS_ANIMS = {
   hurt:   { cols: [6],          speed: 250, loop: false },          // Crouch (recoil)
   death:  { cols: [22],         speed: 600, loop: false, hold: true },  // Sleep/Dead — held until cleared
   prone:  { cols: [22],         speed: 600, loop: false, hold: true },  // Knocked prone — same pose, held while `_prone` set
-  parry:  { cols: [4],          speed: 150, loop: false },          // Arms Up stand
+  parry:  { cols: [4],          speed: 150, loop: false },          // Arms Up stand (defensive / shove)
+  cast:   { cols: [4,15,16,17,18], speed: 140, loop: false },       // Raise hands overhead → release like a bow shot
   hold:   { cols: [4,5,4,3],    speed: 140, loop: true },           // Arms Up walk
   jump:   { cols: [6,7,8,9],    speed: 90,  loop: false },
   nockBow:{ cols: [15,16,17,18],speed: 110, loop: false },
@@ -1558,6 +1793,215 @@ function _testSkinSwap(done){
   );
 }
 
+// ─── Cast Visual FX ────────────────────────────────────────────
+// 60-frame spell flourish from "Visual FX/Effects Pack 14(1)/1/N.png".
+// Plays above the character's head during the 'cast' anim. Frames are
+// 32×32 and scaled to ~70% of the character's draw size.
+var CAST_FX_COUNT = 60;
+var CAST_FX_FRAME_MS = 14;             // ≈ 71fps; total ≈ 840ms (matches 5-frame cast at 140ms)
+var _castFxFrames = new Array(CAST_FX_COUNT); // index → Image | 'loading' | null
+function getCastFxFrame(idx){
+  if (idx < 0 || idx >= CAST_FX_COUNT) return null;
+  if (_castFxFrames[idx] === undefined){
+    _castFxFrames[idx] = 'loading';
+    var url = encodeURI('Visual FX/Effects Pack 14(1)/1/' + (idx+1) + '.png');
+    _elementsLoadImage(url,
+      function(img){ _castFxFrames[idx] = img; _elementsFireRedraws(); },
+      function(){ _castFxFrames[idx] = null; }
+    );
+  }
+  var v = _castFxFrames[idx];
+  return (v && v !== 'loading') ? v : null;
+}
+
+// Paint one frame of the cast FX onto `canvas`. If `manualFrameIdx` is given
+// (debug room), uses that frame directly. Otherwise reads fighter._castFx
+// and times the frame by elapsed ms; clears the FX when the cycle completes.
+function drawCastFxOnCanvas(canvas, fighter, manualFrameIdx){
+  if (!canvas) return;
+  var idx;
+  if (typeof manualFrameIdx === 'number'){
+    idx = Math.max(0, Math.min(CAST_FX_COUNT - 1, manualFrameIdx|0));
+  } else if (fighter && fighter._castFx){
+    var elapsed = performance.now() - fighter._castFx.start;
+    var dur = CAST_FX_COUNT * CAST_FX_FRAME_MS;
+    if (elapsed >= dur){ delete fighter._castFx; return; }
+    idx = Math.floor(elapsed / CAST_FX_FRAME_MS);
+  } else return;
+  var img = getCastFxFrame(idx); if (!img) return;
+  var ctx = canvas.getContext('2d');
+  var w = canvas.width, h = canvas.height;
+  var drawSize = Math.min(w, h);
+  var dx = Math.round((w - drawSize) / 2);
+  var dy = Math.round((h - drawSize) / 2);
+  // Positioned overhead — horizontally centered, ~30% of its size above the
+  // character's nominal top so the bottom of the FX overlaps the head.
+  var fxSize = Math.round(drawSize * 0.7);
+  var fxX = dx + Math.round((drawSize - fxSize) / 2);
+  var fxY = dy - Math.round(fxSize * 0.3);
+  ctx.imageSmoothingEnabled = false;
+  ctx.drawImage(img, fxX, fxY, fxSize, fxSize);
+}
+
+// ─── Materia Orb Sprites ──────────────────────────────────────
+// "crystalorb_rm_1_*.png" sheets — 576×384 RPG Maker SV battler format, but
+// the artist used the canvas to lay out a few short animations + a static
+// dust pile, not a character. Cell size is 48×48 (12 cols × 8 rows); the
+// top 4 rows are shadowless and the bottom 4 rows are the same content with
+// a small drop shadow under each orb.
+//
+// Frame indices below are best guesses based on the user's annotated mockup;
+// adjust ORB_FRAMES if individual cells look off.
+var ORB_BASE_PATH = 'Materia/';
+var ORB_CELL = 48;
+var ORB_COLS = 12;
+var ORB_ROWS = 8;
+// Static frame used everywhere an orb is shown inline (gear sockets, draft,
+// stat sheet, lab). Animations interpolate through their own frame lists.
+var ORB_FRAMES = {
+  idle:    [[1,0],[0,1],[1,1],[2,1]],          // 4-frame pulse (top, l, c, r)
+  levelup: [[3,0],[3,1],[3,2],[3,3]],          // halo column (red-arrow path)
+  crumble: [[5,0],[5,1],[5,2],[5,3]],          // cracks progress (blue-arrow start)
+  dust:    [10,3]                              // single dust pile cell
+};
+// Planet → orb color. Sol/Mars/Mercury/Venus map directly; Luna/Jupiter/
+// Saturn reuse the closest match (Luna→blue, Jupiter→yellow, Saturn→green).
+// Order matches PLANETS: [Moon, Mercury, Venus, Sun, Mars, Jupiter, Saturn].
+var PLANET_TO_ORB_COLOR = ['blue','blue','green','yellow','red','yellow','green'];
+var ORB_COLORS = ['blue','red','green','yellow'];
+
+var _orbImgCache = {};   // color → Image | 'loading' | 'failed'
+function getOrbImage(color){
+  var v = _orbImgCache[color];
+  if (v && v !== 'loading' && v !== 'failed') return v;
+  if (v === 'loading' || v === 'failed') return null;
+  _orbImgCache[color] = 'loading';
+  _elementsLoadImage(ORB_BASE_PATH + 'crystalorb_rm_1_' + color + '.png',
+    function(img){ _orbImgCache[color] = img; _elementsFireRedraws(); },
+    function(){ _orbImgCache[color] = 'failed'; }
+  );
+  return null;
+}
+// Draw one orb cell to a destination canvas context. `frame` is either a
+// frame-key string ('idle'/'levelup'/'crumble') with optional sub-index, or a
+// concrete [col,row] tuple. Returns true if drawn, false if not yet loaded.
+function drawOrbCell(ctx, color, col, row, dx, dy, size){
+  var img = getOrbImage(color);
+  if (!img) return false;
+  ctx.imageSmoothingEnabled = false;
+  ctx.drawImage(img, col*ORB_CELL, row*ORB_CELL, ORB_CELL, ORB_CELL,
+                dx, dy, size, size);
+  return true;
+}
+
+// Render an orb canvas by its `data-orb-*` attributes. Used by the
+// MutationObserver path (see renderOrbIcons) and by direct calls when we
+// want to refresh a single orb in-place.
+function renderOneOrb(c){
+  if (!c) return;
+  var color = c.getAttribute('data-orb-color') || 'blue';
+  // One-shot flash: if data-orb-flash is set (e.g. "levelup") and we haven't
+  // started the animation yet, kick off the timer-driven sequence now.
+  var flash = c.getAttribute('data-orb-flash');
+  if (flash && !c._flashStarted){
+    // Need the image loaded before we can render frame 0. If it isn't,
+    // queue a redraw and try again then.
+    if (getOrbImage(color)){
+      c._flashStarted = true;
+      _runOrbFlash(c, flash);
+    } else {
+      elementsRegisterRedraw(c, function(){ renderOneOrb(c); });
+    }
+    return;
+  }
+  var animKey = c.getAttribute('data-orb-anim') || 'idle';
+  var frameIdx = parseInt(c.getAttribute('data-orb-frame'), 10) || 0;
+  var spec;
+  if (animKey === 'dust') spec = ORB_FRAMES.dust;
+  else {
+    var seq = ORB_FRAMES[animKey] || ORB_FRAMES.idle;
+    spec = seq[Math.max(0, Math.min(seq.length - 1, frameIdx))];
+  }
+  if (!spec) return;
+  var ctx = c.getContext('2d');
+  ctx.clearRect(0, 0, c.width, c.height);
+  if (!drawOrbCell(ctx, color, spec[0], spec[1], 0, 0, c.width)){
+    elementsRegisterRedraw(c, function(){ renderOneOrb(c); });
+  }
+}
+// Drive a one-shot animation on a single orb canvas. After the sequence
+// completes the canvas drops back to the idle frame so it doesn't keep
+// pulsing forever.
+function _runOrbFlash(c, animKey){
+  var seq = ORB_FRAMES[animKey] || ORB_FRAMES.idle;
+  var frame = 0;
+  c.setAttribute('data-orb-anim', animKey);
+  c.setAttribute('data-orb-frame', '0');
+  // First paint
+  var color = c.getAttribute('data-orb-color') || 'blue';
+  var ctx = c.getContext('2d');
+  ctx.clearRect(0, 0, c.width, c.height);
+  drawOrbCell(ctx, color, seq[0][0], seq[0][1], 0, 0, c.width);
+  var iv = setInterval(function(){
+    if (!c.isConnected){ clearInterval(iv); return; }
+    frame++;
+    if (frame >= seq.length){
+      clearInterval(iv);
+      c.removeAttribute('data-orb-flash');
+      c.setAttribute('data-orb-anim', 'idle');
+      c.setAttribute('data-orb-frame', '2');
+      // Repaint idle frame
+      var spec = ORB_FRAMES.idle[2];
+      ctx.clearRect(0, 0, c.width, c.height);
+      drawOrbCell(ctx, color, spec[0], spec[1], 0, 0, c.width);
+      return;
+    }
+    ctx.clearRect(0, 0, c.width, c.height);
+    drawOrbCell(ctx, color, seq[frame][0], seq[frame][1], 0, 0, c.width);
+  }, 180);
+}
+// Repaint every `.materia-orb-pix` canvas in the DOM. Called by the
+// MutationObserver and after any state change that introduces new orbs.
+function renderOrbIcons(){
+  var canvases = document.querySelectorAll('.materia-orb-pix');
+  if (!canvases.length) return;
+  canvases.forEach(renderOneOrb);
+}
+
+// Build the inline HTML for a single materia orb. Includes the planet/level
+// tooltip + click handler so the existing showMatDetail flow keeps working.
+//   planetIdx — index into PLANETS
+//   level     — materia level for the level-sub label
+//   opts.size — CSS px (default 28)
+//   opts.click — if false, omit the cursor:pointer + onclick
+//   opts.xp   — XP for tooltip
+function materiaOrbHTML(planetIdx, level, opts){
+  opts = opts || {};
+  var size = opts.size || 28;
+  var p = PLANETS[planetIdx];
+  if (!p) return '';
+  var color = PLANET_TO_ORB_COLOR[planetIdx] || 'blue';
+  var title = p.name + ' Lv' + level + (opts.click === false ? '' : ' — tap for details');
+  var clickAttr = (opts.click === false) ? '' :
+    ' onclick="event.stopPropagation();showMatDetail(' + planetIdx + ',' + level + ',' + (opts.xp || 0) + ')" style="cursor:pointer"';
+  var flashAttr = opts.levelupFlash ? ' data-orb-flash="levelup"' : '';
+  return '<span class="materia-orb-wrap" title="' + title + '"' + clickAttr + '>'
+    + '<canvas class="materia-orb-pix" width="48" height="48" '
+    +   'data-orb-color="' + color + '" data-orb-anim="idle" data-orb-frame="2"' + flashAttr + ' '
+    +   'style="width:' + size + 'px;height:' + size + 'px;image-rendering:pixelated;vertical-align:middle"></canvas>'
+    + '<sub class="materia-orb-lvl">' + level + '</sub>'
+    + '</span>';
+}
+// Empty-socket placeholder (matches the orb size). Used in place of the
+// previous "○" character so the layout doesn't reflow when slotting.
+function materiaEmptyOrbHTML(opts){
+  opts = opts || {};
+  var size = opts.size || 28;
+  return '<span class="materia-orb-wrap materia-orb-empty" title="Empty socket">'
+    + '<span class="materia-orb-empty-dot" style="width:' + Math.round(size*0.5) + 'px;height:' + Math.round(size*0.5) + 'px"></span>'
+    + '</span>';
+}
+
 // Continuous-redraw register for canvases that need per-frame updates outside
 // the battle anim loop (idle bob in builder/draft/VS/stat previews). Each
 // registered renderer runs only when its enclosing .screen is active, so the
@@ -1692,8 +2136,10 @@ function getElementsWeaponToned(file, c, toneIdx){
 function computeIdleBob(t, drawSize, excite, phase){
   var T_BASE = 1400;
   var e = Math.max(0, Math.min(1, excite || 0));
-  // excite=0 → 1400ms, excite=1 → ~560ms (2.5× faster).
-  var T = T_BASE / (1 + e * 1.5);
+  // excite=0 → 1400ms, excite=1 → 700ms (2× faster). Linear excite decay
+  // (driven by fighter._bobExciteEnd) makes the speed-up last ~1.5s, which
+  // covers roughly two excited bobs before settling back to baseline.
+  var T = T_BASE / (1 + e * 1.0);
   var scale = drawSize / ELEMENTS_CELL;
   var p = (((t + (phase || 0)) % T) + T) % T / T;
   var srcDy = (p >= 0.5) ? 1 : 0;
@@ -1703,6 +2149,43 @@ function computeIdleBob(t, drawSize, excite, phase){
 
 // Layers that do NOT participate in the idle bob (planted on the ground).
 var ELEMENTS_FIXED_LAYERS = { shadow: 1, bottom: 1 };
+
+// Hats that have an open top — hair tufts should be allowed to peek through
+// instead of being cropped at the hat's bounding-box top. Currently just the
+// two circlet-style crowns; everything else (hood/cap/helm) covers the crown
+// of the head, so any hair pixels above the hat's topmost pixel are
+// considered clipping artifacts and get clipped out.
+var ELEMENTS_HAT_OPEN_TOP = { crown1: 1, crown2: 1 };
+
+// Cache: per (hat layer/file/c, col, row) → top non-transparent Y in the
+// 48×48 cell, or -1 if the cell is empty (or CORS-tainted and unreadable).
+var _hatTopYCache = {};
+function getHatTopY(layer, partName, c, col, row){
+  var img = getElementsPart(layer, partName, c);
+  if (!img) return null;
+  var key = layer + '/' + partName + '_' + (c||0) + '|' + (row|0) + ',' + (col|0);
+  if (key in _hatTopYCache) return _hatTopYCache[key];
+  var iw = img.naturalWidth || img.width;
+  var ih = img.naturalHeight || img.height;
+  if (!iw || !ih) return null;
+  var cv = document.createElement('canvas');
+  cv.width = ELEMENTS_CELL; cv.height = ELEMENTS_CELL;
+  var ctx = cv.getContext('2d');
+  ctx.drawImage(img, (col|0)*ELEMENTS_CELL, (row|0)*ELEMENTS_CELL, ELEMENTS_CELL, ELEMENTS_CELL, 0, 0, ELEMENTS_CELL, ELEMENTS_CELL);
+  var data;
+  try { data = ctx.getImageData(0, 0, ELEMENTS_CELL, ELEMENTS_CELL).data; }
+  catch(e){ _hatTopYCache[key] = -1; return -1; }
+  for (var y = 0; y < ELEMENTS_CELL; y++){
+    for (var x = 0; x < ELEMENTS_CELL; x++){
+      if (data[(y*ELEMENTS_CELL + x)*4 + 3] > 0){
+        _hatTopYCache[key] = y;
+        return y;
+      }
+    }
+  }
+  _hatTopYCache[key] = -1;
+  return -1;
+}
 
 // Core compositor — paints one frame of a character onto an arbitrary canvas.
 // `weapons` is optional { lhand, rhand } from fighterWeaponLayers().
@@ -1727,14 +2210,20 @@ function compositeCharacter(canvas, appearance, animName, frame, facingRow, weap
   var dx = Math.round((w - drawSize) / 2);
   var dy = Math.round((h - drawSize) / 2);
 
-  // Per-facing layer order: row 3 (north / back-view) uses the reversed stack
-  // so weapons / cape sit BEHIND the body. Climb anim also flips.
-  var reversed = (facingRow === 3) || !!anim.reverseDraw;
-  var order = reversed ? ELEMENTS_LAYER_ORDER_REV : ELEMENTS_LAYER_ORDER;
+  // Per-facing layer order: south = front view, east/west = side profiles,
+  // north = back view. Animations flagged reverseDraw (Climb) also use the
+  // north stack so capes/weapons drop behind the body.
+  var fr0 = facingRow | 0;
+  var isBack = (fr0 === 3) || !!anim.reverseDraw;
+  var order;
+  if (isBack)                           order = ELEMENTS_LAYER_ORDER_NORTH;
+  else if (fr0 === 1 || fr0 === 2)      order = ELEMENTS_LAYER_ORDER_SIDE;
+  else                                   order = ELEMENTS_LAYER_ORDER_SOUTH;
 
   // Bob applies only during idle. Other anims drive their own per-frame motion.
+  // `bobOpts.disabled` lets the debug room pin a frame for inspection.
   var bob = null;
-  if (animName === 'idle' || !animName){
+  if (!(bobOpts && bobOpts.disabled) && (animName === 'idle' || !animName)){
     var bExcite = bobOpts ? bobOpts.excite : 0;
     var bPhase  = bobOpts ? bobOpts.phase  : 0;
     bob = computeIdleBob(performance.now(), drawSize, bExcite, bPhase);
@@ -1746,30 +2235,120 @@ function compositeCharacter(canvas, appearance, animName, frame, facingRow, weap
     return true;
   }
 
+  // Same as blit() but flips horizontally around the destination center —
+  // used for non-slot-suffix weapons in the LEFT hand so a single right-handed
+  // sprite can render on either side of the character.
+  function blitMirrored(img, extraDy){
+    if (!img) return false;
+    ctx.save();
+    ctx.translate(dx + drawSize/2, 0);
+    ctx.scale(-1, 1);
+    ctx.translate(-(dx + drawSize/2), 0);
+    ctx.drawImage(img, srcX, srcY, ELEMENTS_CELL, ELEMENTS_CELL, dx, dy + (extraDy||0), drawSize, drawSize);
+    ctx.restore();
+    return true;
+  }
+
   var tone = (appearance && appearance.skinTone) | 0;
+
+  // Pre-compute per-weapon z-bucket for this frame.
+  var lZ = (weapons && weapons.lhand) ? weaponZForSlot('LHand', facingRow|0) : null;
+  var rZ = (weapons && weapons.rhand) ? weaponZForSlot('RHand', facingRow|0) : null;
+
+  // Hat crop: if the equipped hat has a solid top (i.e. NOT one of the open
+  // circlet crowns), find its topmost source-pixel Y and use it as a clip line
+  // when rendering hair/backhair below — so long hair / ponytails can't poke
+  // above the hat. ELEMENTS_HAT_OPEN_TOP names the exceptions.
+  var hatTopYPx = -1;
+  var hatPartForCrop = appearance.hat;
+  if (hatPartForCrop) {
+    var hatNameForCrop = hatPartForCrop.name || (hatPartForCrop.n ? ('hat' + hatPartForCrop.n) : null);
+    if (hatNameForCrop && !ELEMENTS_HAT_OPEN_TOP[hatNameForCrop]) {
+      var ty = getHatTopY('hat', hatNameForCrop, hatPartForCrop.c, col, facingRow|0);
+      if (ty != null && ty >= 0) hatTopYPx = ty;
+    }
+  }
+
+  // Off-hand mirror is only safe in poses where both hands are at the sides
+  // (idle/move/hurt/death/prone). During attacks (slash/cast/parry/hold/jump/
+  // nockBow/climb) the source sprite's weapon is in an extended attack pose;
+  // mirroring puts the off-hand weapon facing the wrong direction. In those
+  // cases we suppress the mirror so the off-hand weapon falls back to the
+  // main-hand sprite position — visible, just slightly inconsistent.
+  //
+  // We also resolve the weapon's source column independently of the body:
+  // many weapon sheets don't paint certain animation columns (e.g. wand at
+  // crouch). _resolveWeaponSrcCol picks a populated cell for those cases
+  // so the weapon stays on-screen.
+  function drawWeapon(desc, extraDy){
+    var img = getElementsWeaponToned(desc.file, desc.c, tone);
+    if (!img) return false;
+    var wCol = _resolveWeaponSrcCol(desc.file, col, facingRow|0, animName);
+    if (wCol < 0) return false;  // weapon has no good cell for this pose — hide
+    var wSrcX = wCol * ELEMENTS_CELL;
+    var doMirror = desc.mirror && WEAPON_MIRROR_OK_ANIMS[animName || 'idle'];
+    var dyTotal = dy + (extraDy||0);
+    if (doMirror){
+      ctx.save();
+      ctx.translate(dx + drawSize/2, 0);
+      ctx.scale(-1, 1);
+      ctx.translate(-(dx + drawSize/2), 0);
+      ctx.drawImage(img, wSrcX, srcY, ELEMENTS_CELL, ELEMENTS_CELL, dx, dyTotal, drawSize, drawSize);
+      ctx.restore();
+    } else {
+      ctx.drawImage(img, wSrcX, srcY, ELEMENTS_CELL, ELEMENTS_CELL, dx, dyTotal, drawSize, drawSize);
+    }
+    return true;
+  }
 
   var anyDrawn = false;
   for (var i = 0; i < order.length; i++){
     var layer = order[i];
+    var isWeaponSlot = (layer === 'weapon_back' || layer === 'weapon_front');
     var off = 0;
     if (bob && !ELEMENTS_FIXED_LAYERS[layer]){
-      off = (layer === 'weapon') ? bob.weapon : bob.body;
+      off = isWeaponSlot ? bob.weapon : bob.body;
     }
     if (layer === 'shadow'){
-      // Shadow is pure black/transparent — palette swap is a no-op, skip cost.
       if (blit(getElementsPart('shadow', 1, 0), 0)) anyDrawn = true;
-    } else if (layer === 'weapon'){
-      // Off-hand under main hand so two-handed poses look right.
-      // Weapons get the skin-tone swap too (handles bow grip wood colors etc).
-      if (weapons && weapons.lhand && blit(getElementsWeaponToned(weapons.lhand.file, weapons.lhand.c, tone), off)) anyDrawn = true;
-      if (weapons && weapons.rhand && blit(getElementsWeaponToned(weapons.rhand.file, weapons.rhand.c, tone), off)) anyDrawn = true;
+    } else if (isWeaponSlot){
+      var want = (layer === 'weapon_back') ? 'back' : 'front';
+      // Far-side weapons get clipped at the feet/shadow line so blades don't
+      // poke below the body silhouette. Near-side weapons draw uncropped.
+      var clipped = (layer === 'weapon_back');
+      if (clipped){
+        ctx.save();
+        ctx.beginPath();
+        ctx.rect(dx, dy, drawSize, Math.round(drawSize * 0.88));
+        ctx.clip();
+      }
+      if (weapons && weapons.lhand && lZ === want && drawWeapon(weapons.lhand, off)) anyDrawn = true;
+      if (weapons && weapons.rhand && rZ === want && drawWeapon(weapons.rhand, off)) anyDrawn = true;
+      if (clipped) ctx.restore();
     } else {
       var p = appearance[layer];
       if (!p) continue;
       // Resolve part identity from either modern `name` or legacy numeric `n`.
       var partName = p.name || (p.n ? (layer + p.n) : null);
       if (!partName) continue;
-      if (blit(getElementsPartToned(layer, partName, p.c, tone), off)) anyDrawn = true;
+      var partImg = getElementsPartToned(layer, partName, p.c, tone);
+      // Crop hair / backhair to the brim of an opaque-top hat. Clip line is
+      // computed in destination pixels, including the same bob offset the hair
+      // will be drawn with (hair and hat bob together, so the clip rides with
+      // the head's apparent top each frame).
+      var needsHatCrop = (hatTopYPx >= 0) && (layer === 'hair' || layer === 'backhair');
+      if (needsHatCrop){
+        var scaleH = drawSize / ELEMENTS_CELL;
+        var clipTopY = dy + Math.round(hatTopYPx * scaleH) + off;
+        ctx.save();
+        ctx.beginPath();
+        ctx.rect(dx, clipTopY, drawSize, drawSize * 2);  // generous bottom — never crops below
+        ctx.clip();
+        if (blit(partImg, off)) anyDrawn = true;
+        ctx.restore();
+      } else {
+        if (blit(partImg, off)) anyDrawn = true;
+      }
     }
   }
   return anyDrawn;
@@ -1789,8 +2368,8 @@ var spritesLoaded = true;   // compositor loads parts on demand — never "wait"
 // the body for free — no per-frame hand-offset math needed.
 
 // Gear roles (kept for gameplay logic in draft/loadout/AI generation).
-var WEAPON_GEAR_TYPES = ['Sword','Dagger','Club','Wand','Gauntlet'];
-var SHIELD_GEAR_TYPES = ['Buckler','Tome','Ring'];
+var WEAPON_GEAR_TYPES = ['Sword','Dagger','Club','Wand','Bow','Axe','Hammer'];
+var SHIELD_GEAR_TYPES = ['Buckler'];
 
 // Gear type → ordered list of Time Element weapon stems by tier. Higher tier
 // indexes a later (fancier) weapon. Each entry carries its own maxC.
@@ -1801,18 +2380,17 @@ var GEAR_WEAPON_LADDER = {
     {stem:'sword4', maxC:3}, {stem:'sword5', maxC:4}
   ],
   Dagger: [ {stem:'dagger', maxC:3, slotSuffix:true} ],
-  Club:   [ {stem:'pickaxe1', maxC:2}, {stem:'pickaxe1', maxC:2}, {stem:'hammer', maxC:3}, {stem:'hammer', maxC:3} ],
-  Wand:   [ {stem:'wand1', maxC:8}, {stem:'spear1', maxC:2} ],
-  Gauntlet: [ {stem:'gun1', maxC:2} ],
-  Buckler: [ {stem:'shield1', maxC:0, slotSuffix:true}, {stem:'shield1', maxC:0, slotSuffix:true}, {stem:'shield2', maxC:6, slotSuffix:true}, {stem:'shield2', maxC:6, slotSuffix:true} ],
-  Tome: null,
-  Ring: null
+  Wand:   [ {stem:'wand1', maxC:8} ],
+  Bow:    [ {stem:'bow1', maxC:0}, {stem:'bow1', maxC:0}, {stem:'bow1arrow1', maxC:0} ],
+  Axe:    [ {stem:'axe1', maxC:3}, {stem:'axe1', maxC:3}, {stem:'axe2', maxC:3}, {stem:'axe2', maxC:3} ],
+  Hammer: [ {stem:'hammer', maxC:3} ],
+  Club:   [ {stem:'pickaxe1', maxC:2} ],
+  Buckler:[ {stem:'shield1', maxC:0, slotSuffix:true}, {stem:'shield1', maxC:0, slotSuffix:true}, {stem:'shield2', maxC:6, slotSuffix:true}, {stem:'shield2', maxC:6, slotSuffix:true} ]
 };
 
-// Body armor → top/backextra layer mapping. Lets gear cards (and potentially
-// the on-field sprite later) show real pixel art for Plate/Mail/Robes/etc.
-// Higher tier picks a later, fancier stem. Amulet has no good pixel-art
-// equivalent and stays as its emoji icon (jewelry exception).
+// Body / Head / Lower → layer override mapping. Lets gear cards AND the
+// on-field sprite show real pixel art for armor / hats / pants. Higher tier
+// indexes a later (fancier) stem.
 var GEAR_BODY_LADDER = {
   Plate: [
     {layer:'top', stem:'top9',  maxC:4}, {layer:'top', stem:'top10', maxC:4},
@@ -1835,8 +2413,34 @@ var GEAR_BODY_LADDER = {
   Vest: [
     {layer:'top', stem:'top1', maxC:4}, {layer:'top', stem:'top2', maxC:5},
     {layer:'top', stem:'top3', maxC:4}, {layer:'top', stem:'top19', maxC:5}
+  ]
+};
+var GEAR_HEAD_LADDER = {
+  Helm: [
+    {layer:'hat', stem:'hat1', maxC:4}, {layer:'hat', stem:'hat2', maxC:4},
+    {layer:'hat', stem:'hat3', maxC:2}, {layer:'hat', stem:'hat5', maxC:6}
   ],
-  Amulet: null  // jewelry — emoji only
+  Crown: [
+    {layer:'hat', stem:'crown1', maxC:5}, {layer:'hat', stem:'crown2', maxC:5}
+  ],
+  Cap: [
+    {layer:'hat', stem:'hat4', maxC:3}, {layer:'hat', stem:'hat7', maxC:5}, {layer:'hat', stem:'hat8', maxC:5}
+  ],
+  Hood: [
+    {layer:'hat', stem:'hat6', maxC:6}, {layer:'hat', stem:'hat9', maxC:6},
+    {layer:'hat', stem:'hat11', maxC:8}, {layer:'hat', stem:'hat13', maxC:4}
+  ]
+};
+var GEAR_LOWER_LADDER = {
+  Trousers: [
+    {layer:'bottom', stem:'bottom1', maxC:4}, {layer:'bottom', stem:'bottom4', maxC:4}, {layer:'bottom', stem:'bottom7', maxC:4}
+  ],
+  Leggings: [
+    {layer:'bottom', stem:'bottom2', maxC:4}, {layer:'bottom', stem:'bottom6', maxC:4}, {layer:'bottom', stem:'bottom9', maxC:6}
+  ],
+  Skirt: [
+    {layer:'bottom', stem:'bottom3', maxC:4}, {layer:'bottom', stem:'bottom8', maxC:5}, {layer:'bottom', stem:'bottom13', maxC:15}
+  ]
 };
 
 // Tier (0-6) → weapon color-variant index. Higher tier = fancier finish.
@@ -1849,6 +2453,9 @@ function weaponTierToColor(tier, maxC) {
 }
 
 // Resolve a gear piece + hand slot to a Time Element weapon descriptor, or null.
+// `mirror` is true for non-slot-suffix weapons (sword/wand/hammer/etc.) placed
+// in the LEFT hand — Time Element only ships a right-handed sprite so we flip
+// the canvas horizontally at draw time to put the weapon on the other side.
 function gearToWeaponDesc(gear, slot) {
   if (!gear) return null;
   var ladder = GEAR_WEAPON_LADDER[gear.type];
@@ -1857,9 +2464,14 @@ function gearToWeaponDesc(gear, slot) {
   var idx = Math.min(tier, ladder.length - 1);
   var spec = ladder[idx];
   var fname = spec.stem;
-  if (spec.slotSuffix) fname += (slot === 'LHand' ? 'L' : 'R');
+  var mirror = false;
+  if (spec.slotSuffix) {
+    fname += (slot === 'LHand' ? 'L' : 'R');
+  } else {
+    mirror = (slot === 'LHand');
+  }
   var c = weaponTierToColor(tier, spec.maxC);
-  return { file: fname, c: c };
+  return { file: fname, c: c, mirror: mirror };
 }
 
 // Return an appearance object with equipped body armor overlaid on top of the
@@ -1871,7 +2483,7 @@ function effectiveAppearance(appearance, gear){
   if (!gear) return appearance;
   var eff = {};
   for (var k in appearance) if (Object.prototype.hasOwnProperty.call(appearance, k)) eff[k] = appearance[k];
-  ['LHand','Body','RHand'].forEach(function(slot){
+  EQUIP_SLOTS.forEach(function(slot){
     var g = gear[slot]; if (!g) return;
     var bd = gearToBodyDesc(g); if (!bd) return;
     eff[bd.layer] = { name: bd.file, c: bd.c };
@@ -1879,10 +2491,15 @@ function effectiveAppearance(appearance, gear){
   return eff;
 }
 
-// Body-armor / cape → layer descriptor for the gear-card icon.
+// Body / Head / Lower gear → layer-override descriptor. Used by the card
+// icon renderer AND by effectiveAppearance to swap the corresponding cosmetic
+// layer when this piece is equipped.
 function gearToBodyDesc(gear) {
-  if (!gear || gear.pos !== 'Body') return null;
-  var ladder = GEAR_BODY_LADDER[gear.type];
+  if (!gear) return null;
+  var ladder = null;
+  if (gear.pos === 'Body')  ladder = GEAR_BODY_LADDER[gear.type];
+  else if (gear.pos === 'Head')  ladder = GEAR_HEAD_LADDER[gear.type];
+  else if (gear.pos === 'Lower') ladder = GEAR_LOWER_LADDER[gear.type];
   if (!ladder || !ladder.length) return null;
   var tier = gear.tier || 0;
   var idx = Math.min(tier, ladder.length - 1);
@@ -1927,7 +2544,13 @@ function getElementsWeapon(file, c){
   }
   _elementsImgCache[key] = 'loading';
   _tryLoadFromBases('weapon', fname,
-    function(img){ _elementsImgCache[key] = img; _elementsFireRedraws(); },
+    function(img){
+      _elementsImgCache[key] = img;
+      // Scan the base (non-toned) PNG once to learn which cells have content.
+      // Toned variants share the same alpha pattern so we don't re-scan them.
+      if (!c) _scanWeaponEmpties(file, img);
+      _elementsFireRedraws();
+    },
     function(){
       _elementsImgCache[key] = 'failed';
       if (c){ getElementsWeapon(file, 0); _elementsFireRedraws(); }
@@ -1960,14 +2583,24 @@ function initFighterAnim(fighter) {
 }
 
 // Anims that count as "active" and push the bob into excited mode.
-var BOB_EXCITE_ANIMS = { slash:1, move:1, hurt:1, parry:1, jump:1, hold:1 };
+var BOB_EXCITE_ANIMS = { slash:1, move:1, hurt:1, parry:1, cast:1, jump:1, hold:1 };
+var BOB_EXCITE_DURATION_MS = 1500; // ~two bobs at peak speed before fully settling
 function setFighterAnim(fighter, animName, onDone) {
   var ad = SPRITE_ANIMS[animName];
   if (!ad) return;
   fighter.anim = { name: animName, frame: 0, timer: performance.now(), onDone: onDone || null };
   // Bump excitement when the fighter takes an active action — the idle bob
-  // afterward runs faster for a few seconds while excite decays.
-  if (BOB_EXCITE_ANIMS[animName]) fighter._bobExcite = 1.0;
+  // afterward runs faster for ~1.5s while excite linearly decays back to 0.
+  if (BOB_EXCITE_ANIMS[animName]) fighter._bobExciteEnd = performance.now() + BOB_EXCITE_DURATION_MS;
+  // Casting kicks off the spell-FX overlay above the character.
+  if (animName === 'cast') fighter._castFx = { start: performance.now() };
+}
+// Linear excite: 1.0 at peak, drops to 0 over BOB_EXCITE_DURATION_MS.
+function getBobExcite(fighter){
+  if (!fighter || !fighter._bobExciteEnd) return 0;
+  var remaining = fighter._bobExciteEnd - performance.now();
+  if (remaining <= 0) return 0;
+  return Math.min(1, remaining / BOB_EXCITE_DURATION_MS);
 }
 
 // Animation tick — call from requestAnimationFrame
@@ -1984,12 +2617,8 @@ function _fighterIdleAnim(f){
 function tickAnimations(now) {
   [p1, p2].forEach(function(f) {
     if (!f) return;
-    // Bob excitement decays toward 0 every tick. Half-life ~1.5s at 60fps
-    // (60 frames * log(0.5)/log(0.992) ≈ 86 frames ≈ 1.4 s).
-    if (f._bobExcite > 0){
-      f._bobExcite *= 0.992;
-      if (f._bobExcite < 0.005) f._bobExcite = 0;
-    }
+    // Bob excitement is computed on demand from f._bobExciteEnd (see
+    // getBobExcite). Nothing to decay here.
     if (!f.anim) return;
     var ad = SPRITE_ANIMS[f.anim.name];
     if (!ad) return;
@@ -2058,8 +2687,9 @@ function renderSprite(canvas, prime, stage, angle, scale){
   if (frame >= ad.frames) frame = ad.frames - 1;
   var row = facingToRow(angle);
   var weapons = fighter ? fighterWeaponLayers(fighter) : null;
-  var bobOpts = fighter ? { excite: fighter._bobExcite||0, phase: fighter._bobPhase||0 } : null;
+  var bobOpts = fighter ? { excite: getBobExcite(fighter), phase: fighter._bobPhase||0 } : null;
   compositeCharacter(canvas, appearance, animName, frame, row, weapons, bobOpts);
+  if (fighter) drawCastFxOnCanvas(canvas, fighter);
   // Battle loop already re-renders every frame; no need to enqueue here.
 }
 
@@ -2078,11 +2708,12 @@ function renderSpriteStatic(canvas, prime, angle, animName, frame, fighter){
   // screen don't share an identical breath rhythm.
   var bobOpts;
   if (fighter){
-    bobOpts = { excite: fighter._bobExcite||0, phase: fighter._bobPhase||0 };
+    bobOpts = { excite: getBobExcite(fighter), phase: fighter._bobPhase||0 };
   } else {
     bobOpts = { excite: 0, phase: _bobPhaseForCanvas(canvas) };
   }
   compositeCharacter(canvas, appearance, animName || 'idle', fr, row, weapons, bobOpts);
+  if (fighter) drawCastFxOnCanvas(canvas, fighter);
   elementsRegisterRedraw(canvas, function(){ renderSpriteStatic(canvas, prime, angle, animName, frame, fighter); });
   // Idle anims need per-frame bob updates.
   if ((animName || 'idle') === 'idle'){
@@ -2238,17 +2869,20 @@ function generateGearPiece(round){
 }
 
 function generateDraftPool(round){
-  // Generate 8 pieces: guarantee at least 2 weapons, 2 shields, 2 body
+  // 12 pieces: guarantee at least 2 weapons, 1 shield, 2 body, 2 head, 2 lower
   var pool=[];
   var weaponTypes=GEAR_TYPES.filter(function(g){return g.pos==='Hand'&&WEAPON_GEAR_TYPES.indexOf(g.type)>=0});
   var shieldTypes=GEAR_TYPES.filter(function(g){return g.pos==='Hand'&&SHIELD_GEAR_TYPES.indexOf(g.type)>=0});
   var bodyTypes=GEAR_TYPES.filter(function(g){return g.pos==='Body'});
-  // Guarantee: 2 weapons, 2 shields, 2 body
+  var headTypes=GEAR_TYPES.filter(function(g){return g.pos==='Head'});
+  var lowerTypes=GEAR_TYPES.filter(function(g){return g.pos==='Lower'});
   for(var w=0;w<2;w++)pool.push(generateGearPieceOfType(pick(weaponTypes),round));
-  for(var s=0;s<2;s++)pool.push(generateGearPieceOfType(pick(shieldTypes),round));
+  for(var s=0;s<1;s++)pool.push(generateGearPieceOfType(pick(shieldTypes),round));
   for(var b=0;b<2;b++)pool.push(generateGearPieceOfType(pick(bodyTypes),round));
-  // Fill remaining 2 randomly
-  for(var i=0;i<2;i++)pool.push(generateGearPiece(round));
+  for(var h=0;h<2;h++)pool.push(generateGearPieceOfType(pick(headTypes),round));
+  for(var lo=0;lo<2;lo++)pool.push(generateGearPieceOfType(pick(lowerTypes),round));
+  // Fill remaining randomly
+  for(var i=0;i<3;i++)pool.push(generateGearPiece(round));
   // Shuffle
   for(var j=pool.length-1;j>0;j--){
     var k=Math.floor(Math.random()*(j+1));
@@ -2288,6 +2922,25 @@ function generateGearPieceOfType(gt,round){
 }
 
 // ═══ RENDER GEAR CARD ═══
+// Produces inline HTML for a small pixel-art gear icon. Use this anywhere
+// you'd previously have written `gear.icon` (the emoji). Falls back to the
+// emoji only if the gear type lacks a sprite mapping — which shouldn't
+// happen because GEAR_TYPES is curated to only include pieces with art.
+//   opts.size  — CSS px size for the icon (default 22)
+//   opts.slot  — for hand gear, picks the L vs R weapon variant (default RHand)
+function gearIconHTML(gear, opts){
+  if (!gear) return '';
+  opts = opts || {};
+  var size = opts.size || 22;
+  var slotForCard = opts.slot;
+  if (!slotForCard) slotForCard = (gear.pos === 'Hand') ? 'RHand' : 'Body';
+  var desc = gearToCardIconDesc(gear, slotForCard);
+  if (!desc) return gear.icon || '⚙';   // emoji fallback (sprite missing)
+  return '<canvas class="gear-pixel-icon" width="48" height="48" '
+    + 'data-glayer="' + desc.layer + '" data-gfile="' + desc.file + '" data-gc="' + desc.c + '" '
+    + 'style="width:' + size + 'px;height:' + size + 'px;vertical-align:middle;image-rendering:pixelated;margin-right:4px"></canvas>';
+}
+
 function gearCardHTML(gear){
   var socketsHTML='';
   var filled=gear.materia.length;
@@ -2301,33 +2954,32 @@ function gearCardHTML(gear){
         socketsHTML+='<span class="materia-gap"></span>';
       }
     }
-    var p=PLANETS[m.planetIdx];
     if(m.hidden){
       socketsHTML+='<span class="materia-orb" style="color:#333;border-color:#333" title="???">?</span>';
     } else {
-      socketsHTML+='<span class="materia-orb" style="color:'+p.col+';border-color:'+p.col+'60;cursor:pointer" onclick="event.stopPropagation();showMatDetail('+m.planetIdx+','+m.level+','+(m.xp||0)+')" title="'+p.name+' Lv'+m.level+' — tap for details">'+p.sym+'<sub style="font-size:0.65em;opacity:0.6">'+m.level+'</sub></span>';
+      var flashFlag=!!m._justLeveled;
+      socketsHTML+=materiaOrbHTML(m.planetIdx, m.level, {size:24, xp:m.xp||0, levelupFlash:flashFlag});
+      if(flashFlag) delete m._justLeveled;
     }
   });
   for(var e=0;e<empty;e++){
     if(filled+e>0)socketsHTML+='<span class="materia-gap"></span>';
-    socketsHTML+='<span class="materia-orb" style="color:#333;border-color:#222" title="Empty socket">○</span>';
+    socketsHTML+=materiaEmptyOrbHTML({size:24});
   }
   var posLabel=gear.pos==='Hand'?'Hand':'Body';
   var refStr=gear.refinement>0?'<span style="color:#d4a843">+'+gear.refinement+'</span> ':'';
   var stressStr=gear.stressed?'<span style="color:#ef4444;font-size:0.7em" title="Stressed — next failure destroys this gear"> ⚠ STRESSED</span>':'';
   var lvlStr=' <span style="color:#555;font-size:0.75em">Lv'+gearLevel(gear)+'</span>';
-  var iconHTML = gear.icon;
-  var slotForCard = (gear.pos === 'Hand') ? 'RHand' : 'Body';
-  var desc = gearToCardIconDesc(gear, slotForCard);
-  if (desc) {
-    iconHTML = '<canvas class="gear-pixel-icon" width="48" height="48" '
-      + 'data-glayer="' + desc.layer + '" data-gfile="' + desc.file + '" data-gc="' + desc.c + '" '
-      + 'style="width:24px;height:24px;vertical-align:middle;image-rendering:pixelated;margin-right:4px"></canvas>';
-  }
-  return '<div class="gc-name">'+iconHTML+' '+refStr+gear.name+lvlStr+stressStr+'</div>'+
-    '<div class="gc-pos">'+posLabel+' · '+gear.sockets+' socket'+(gear.sockets>1?'s':'')+(empty>0?' ('+empty+' empty)':'')+'</div>'+
-    '<div class="gc-sockets">'+socketsHTML+'</div>'+
-    (gear.links>0?'<div class="gc-links">'+gear.links+' link'+(gear.links>1?'s':'')+'</div>':'');
+  var iconHTML = gearIconHTML(gear, {size: 48});
+  return '<div class="gc-row">'+
+    '<div class="gc-icon-wrap">'+iconHTML+'</div>'+
+    '<div class="gc-text">'+
+      '<div class="gc-name">'+refStr+gear.name+lvlStr+stressStr+'</div>'+
+      '<div class="gc-pos">'+posLabel+' · '+gear.sockets+' socket'+(gear.sockets>1?'s':'')+(empty>0?' ('+empty+' empty)':'')+'</div>'+
+      '<div class="gc-sockets">'+socketsHTML+'</div>'+
+      (gear.links>0?'<div class="gc-links">'+gear.links+' link'+(gear.links>1?'s':'')+'</div>':'')+
+    '</div>'+
+  '</div>';
 }
 
 // Paint each gear-card thumbnail by drawing the south-facing idle frame
@@ -2355,7 +3007,7 @@ function renderGearIcons() {
   if (pendingForLater) elementsRegisterRedraw(document, renderGearIcons);
 }
 
-var _gearIconObserver = new MutationObserver(function(){ renderGearIcons(); });
+var _gearIconObserver = new MutationObserver(function(){ renderGearIcons(); renderOrbIcons(); });
 document.addEventListener('DOMContentLoaded', function() {
   _gearIconObserver.observe(document.documentElement, {childList: true, subtree: true});
 });
@@ -2372,13 +3024,15 @@ function startRun(overrides){
     quicksilver:0,
     stats:null,
     derived:null,
+    mode:_pendingRunMode||'turn',
     bodyType:bodyType,
     appearanceSeed:seed,
     appearance:appearance,
     dominantHand:dominant,
-    equipped:{LHand:null,Body:null,RHand:null},
+    equipped:{Head:null,LHand:null,Body:null,RHand:null,Lower:null},
     laboratory:[],
     looseMateria:[],
+    materiaDust:{},    // planetIdx → dust count; produced by failed socket attempts, spent by reformMateria
     totalDamage:0,
     killCount:0,
     draftPool:null,
@@ -2391,6 +3045,11 @@ function startRun(overrides){
   showStatScreen();
 }
 function startRunRandom(){ startRun(); }
+
+// ═══ MODE ENTRY ═══ (turn-based vs action — both share builder/draft)
+var _pendingRunMode = 'turn';
+function startTurnFlow(){ _pendingRunMode = 'turn'; showForgeChoice(); }
+function startActionFlow(){ _pendingRunMode = 'action'; showForgeChoice(); }
 
 // ═══ FORGE CHOICE / CHARACTER BUILDER ═══
 function showForgeChoice(){ showScreen('forgeChoiceScreen'); }
@@ -2540,8 +3199,10 @@ var BUILDER_HAND_CYCLE = [
   {type:'Sword', tier:0, pos:'Hand'}, {type:'Sword', tier:2, pos:'Hand'}, {type:'Sword', tier:4, pos:'Hand'},
   {type:'Dagger', tier:0, pos:'Hand'}, {type:'Dagger', tier:2, pos:'Hand'},
   {type:'Wand', tier:0, pos:'Hand'}, {type:'Wand', tier:3, pos:'Hand'},
-  {type:'Club', tier:0, pos:'Hand'}, {type:'Club', tier:3, pos:'Hand'},
-  {type:'Gauntlet', tier:0, pos:'Hand'},
+  {type:'Bow', tier:0, pos:'Hand'}, {type:'Bow', tier:2, pos:'Hand'},
+  {type:'Axe', tier:0, pos:'Hand'}, {type:'Axe', tier:2, pos:'Hand'},
+  {type:'Hammer', tier:0, pos:'Hand'}, {type:'Hammer', tier:2, pos:'Hand'},
+  {type:'Club', tier:0, pos:'Hand'},
   {type:'Buckler', tier:0, pos:'Hand'}, {type:'Buckler', tier:3, pos:'Hand'}
 ];
 var BUILDER_COSMETIC_CYCLES = {
@@ -2711,6 +3372,280 @@ function startBuilderAnim(){
 }
 function stopBuilderAnim(){ /* no-op (preview is static) */ }
 
+// ════════════════════════════════════════════════════════════
+//   DEBUG ROOM — character/frame inspector
+//   Reuses the builder's helpers (BUILDER_ROWS, _builderPartCycle,
+//   _builderPartLabel, BUILDER_COSMETIC_CYCLES, _cosmeticMatches) but
+//   keeps its own state so it can't bleed into a real run, and adds
+//   Anim + Frame spinners. Bob is disabled so the pose is pin-static.
+// ════════════════════════════════════════════════════════════
+var debugState = null;
+
+function openDebug(){
+  var seed = (Math.random()*1e9)|0;
+  var bodyType = pick(BODY_TYPES);
+  debugState = {
+    seed: seed,
+    bodyType: bodyType,
+    appearance: generateAppearance(seed, bodyType),
+    face: 0,
+    dominantHand: 'R',
+    cosmeticGear: { LHand:null, Body:null, RHand:null },
+    animName: 'idle',
+    frame: 0
+  };
+  showScreen('debugScreen');
+  renderDebugControls();
+  renderDebugPreview();
+  document.querySelectorAll('#debugScreen .face-tab').forEach(function(t){
+    t.classList.toggle('active', parseInt(t.getAttribute('data-face'),10) === 0);
+  });
+}
+
+function setDebugFace(f){
+  if (!debugState) return;
+  debugState.face = f|0;
+  document.querySelectorAll('#debugScreen .face-tab').forEach(function(t){
+    t.classList.toggle('active', parseInt(t.getAttribute('data-face'),10) === debugState.face);
+  });
+  renderDebugPreview();
+}
+
+function shiftDebugAnim(delta){
+  if (!debugState) return;
+  var anims = Object.keys(ELEMENTS_ANIMS);
+  var idx = anims.indexOf(debugState.animName);
+  if (idx < 0) idx = 0;
+  idx = (idx + delta + anims.length) % anims.length;
+  debugState.animName = anims[idx];
+  debugState.frame = 0;
+  renderDebugControls();
+  renderDebugPreview();
+}
+function shiftDebugFrame(delta){
+  if (!debugState) return;
+  var ad = ELEMENTS_ANIMS[debugState.animName] || ELEMENTS_ANIMS.idle;
+  var max = ad.frames || 1;
+  debugState.frame = ((debugState.frame + delta) % max + max) % max;
+  renderDebugControls();
+  renderDebugPreview();
+}
+function shiftDebugBody(delta){
+  if (!debugState) return;
+  var idx = BODY_TYPES.indexOf(debugState.bodyType);
+  if (idx < 0) idx = 0;
+  idx = (idx + delta + BODY_TYPES.length) % BODY_TYPES.length;
+  debugState.bodyType = BODY_TYPES[idx];
+  renderDebugControls();
+  renderDebugPreview();
+}
+function shiftDebugSkin(delta){
+  if (!debugState) return;
+  var cur = (debugState.appearance.skinTone | 0);
+  var n = ELEMENTS_SKIN_TONES.length;
+  debugState.appearance.skinTone = ((cur + delta) % n + n) % n;
+  renderDebugControls();
+  renderDebugPreview();
+}
+function shiftDebugHand(){
+  if (!debugState) return;
+  debugState.dominantHand = (debugState.dominantHand === 'L') ? 'R' : 'L';
+  var l = debugState.cosmeticGear.LHand;
+  var r = debugState.cosmeticGear.RHand;
+  debugState.cosmeticGear.LHand = r;
+  debugState.cosmeticGear.RHand = l;
+  renderDebugControls();
+  renderDebugPreview();
+}
+function shiftDebugPart(layer, delta){
+  if (!debugState) return;
+  var cycle = _builderPartCycle(layer);
+  if (!cycle.length) return;
+  var current = debugState.appearance[layer];
+  var currentName = current ? (current.name || (current.n ? (layer + current.n) : null)) : null;
+  var idx = cycle.findIndex(function(p){
+    return (p === null && !currentName) || (p && p.name === currentName);
+  });
+  if (idx < 0) idx = 0;
+  idx = (idx + delta + cycle.length) % cycle.length;
+  var picked = cycle[idx];
+  if (!picked){
+    debugState.appearance[layer] = null;
+  } else {
+    var c = (current && current.c) || 0;
+    var maxC = picked.maxC || 0;
+    if (c > maxC) c = 0;
+    debugState.appearance[layer] = { name: picked.name, c: c };
+  }
+  renderDebugControls();
+  renderDebugPreview();
+}
+function shiftDebugColor(layer, delta){
+  if (!debugState) return;
+  var p = debugState.appearance[layer];
+  if (!p) return;
+  var partName = p.name || (p.n ? (layer + p.n) : null);
+  if (!partName) return;
+  var m = ELEMENTS_MANIFEST[layer];
+  var spec = m.parts.find(function(x){ return x.name === partName; });
+  if (!spec) return;
+  var maxC = spec.maxC || 0;
+  if (maxC === 0) return;
+  var total = maxC + 1;
+  p.c = ((p.c || 0) + delta + total) % total;
+  if (!p.name) p.name = partName;
+  renderDebugControls();
+  renderDebugPreview();
+}
+function shiftDebugCosmetic(slot, delta){
+  if (!debugState) return;
+  var cycle = BUILDER_COSMETIC_CYCLES[slot];
+  if (!cycle) return;
+  var current = debugState.cosmeticGear[slot];
+  var idx = cycle.findIndex(function(g){ return _cosmeticMatches(g, current); });
+  if (idx < 0) idx = 0;
+  idx = (idx + delta + cycle.length) % cycle.length;
+  debugState.cosmeticGear[slot] = cycle[idx] ? Object.assign({}, cycle[idx]) : null;
+  renderDebugControls();
+  renderDebugPreview();
+}
+function randomizeDebug(){
+  if (!debugState) return;
+  debugState.seed = (Math.random()*1e9)|0;
+  debugState.appearance = generateAppearance(debugState.seed, debugState.bodyType);
+  renderDebugControls();
+  renderDebugPreview();
+}
+
+function renderDebugControls(){
+  var el = document.getElementById('debugControls');
+  if (!el || !debugState) return;
+  var html = '';
+
+  // ─── Anim + Frame ───
+  var ad = ELEMENTS_ANIMS[debugState.animName] || ELEMENTS_ANIMS.idle;
+  var maxFrame = (ad.frames || 1) - 1;
+  html += '<div class="builder-row">'
+    + '<div class="b-label">Anim</div>'
+    + '<div class="b-spinner">'
+    +   '<button class="b-arrow" onclick="shiftDebugAnim(-1)">◄</button>'
+    +   '<div class="b-val" style="min-width:90px">'+debugState.animName+'</div>'
+    +   '<button class="b-arrow" onclick="shiftDebugAnim(1)">►</button>'
+    + '</div>'
+    + '<div class="b-spinner right">'
+    +   '<span class="b-lbl">frame</span>'
+    +   '<button class="b-arrow" '+(maxFrame===0?'disabled':'')+' onclick="shiftDebugFrame(-1)">◄</button>'
+    +   '<div class="b-val">'+debugState.frame+' / '+maxFrame+'</div>'
+    +   '<button class="b-arrow" '+(maxFrame===0?'disabled':'')+' onclick="shiftDebugFrame(1)">►</button>'
+    + '</div>'
+    + '</div>';
+
+  // ─── Body + Skin ───
+  var bt = debugState.bodyType;
+  var toneIdx = (debugState.appearance.skinTone | 0);
+  var toneName = (ELEMENTS_SKIN_TONES[toneIdx] && ELEMENTS_SKIN_TONES[toneIdx].name) || 'Default';
+  html += '<div class="builder-row">'
+    + '<div class="b-label">Body</div>'
+    + '<div class="b-spinner">'
+    +   '<button class="b-arrow" onclick="shiftDebugBody(-1)">◄</button>'
+    +   '<div class="b-val">'+ (bt.charAt(0).toUpperCase() + bt.slice(1)) +'</div>'
+    +   '<button class="b-arrow" onclick="shiftDebugBody(1)">►</button>'
+    + '</div>'
+    + '<div class="b-spinner right">'
+    +   '<span class="b-lbl">skin</span>'
+    +   '<button class="b-arrow" onclick="shiftDebugSkin(-1)">◄</button>'
+    +   '<div class="b-val" style="min-width:54px">'+ toneName +'</div>'
+    +   '<button class="b-arrow" onclick="shiftDebugSkin(1)">►</button>'
+    + '</div>'
+    + '</div>';
+
+  // ─── Handed ───
+  var dom = debugState.dominantHand || 'R';
+  html += '<div class="builder-row">'
+    + '<div class="b-label">Handed</div>'
+    + '<div class="b-spinner">'
+    +   '<button class="b-arrow" onclick="shiftDebugHand()">◄</button>'
+    +   '<div class="b-val">'+ (dom === 'L' ? 'Left-handed' : 'Right-handed') +'</div>'
+    +   '<button class="b-arrow" onclick="shiftDebugHand()">►</button>'
+    + '</div>'
+    + '</div>';
+
+  // ─── Per-layer rows ───
+  BUILDER_ROWS.forEach(function(row){
+    var p = debugState.appearance[row.key];
+    var partName = p ? (p.name || (p.n ? (row.key + p.n) : null)) : null;
+    var manifest = ELEMENTS_MANIFEST[row.key];
+    var spec = (partName && manifest && manifest.parts) ? manifest.parts.find(function(x){ return x.name === partName; }) : null;
+    var maxC = (spec && spec.maxC) || 0;
+    var partLabel = partName ? _builderPartLabel(row.key, partName) : '—';
+    var partLabelClass = partName ? '' : 'dim';
+    var colorDisabled = !partName || maxC === 0;
+    html += '<div class="builder-row">'
+      + '<div class="b-label">'+row.label+'</div>'
+      + '<div class="b-spinner">'
+      +   '<button class="b-arrow" onclick="shiftDebugPart(\''+row.key+'\',-1)">◄</button>'
+      +   '<div class="b-val '+partLabelClass+'" style="min-width:64px">'+partLabel+'</div>'
+      +   '<button class="b-arrow" onclick="shiftDebugPart(\''+row.key+'\',1)">►</button>'
+      + '</div>'
+      + '<div class="b-spinner right">'
+      +   '<span class="b-lbl">color</span>'
+      +   '<button class="b-arrow" '+(colorDisabled?'disabled':'')+' onclick="shiftDebugColor(\''+row.key+'\',-1)">◄</button>'
+      +   '<div class="b-val">'+ (partName ? (p.c||0) : '—') +'</div>'
+      +   '<button class="b-arrow" '+(colorDisabled?'disabled':'')+' onclick="shiftDebugColor(\''+row.key+'\',1)">►</button>'
+      + '</div>'
+      + '</div>';
+  });
+
+  // ─── Cosmetic loadout ───
+  var bdom = debugState.dominantHand || 'R';
+  var mainSlot = (bdom === 'L') ? 'LHand' : 'RHand';
+  var offSlot  = (bdom === 'L') ? 'RHand' : 'LHand';
+  html += '<div style="font-size:0.7em;color:var(--muted);text-align:center;margin:6px 0 2px;letter-spacing:0.1em;font-family:\'Cinzel\',serif">~ cosmetic loadout ~</div>';
+  [[mainSlot,'Weapon'],[offSlot,'Off-Hand'],['Body','Armor']].forEach(function(pair){
+    var slot = pair[0], label = pair[1];
+    var item = debugState.cosmeticGear[slot];
+    var lbl = item ? (item.type + ' T' + (item.tier|0)) : '—';
+    var cls = item ? '' : 'dim';
+    html += '<div class="builder-row">'
+      + '<div class="b-label">'+label+'</div>'
+      + '<div class="b-spinner">'
+      +   '<button class="b-arrow" onclick="shiftDebugCosmetic(\''+slot+'\',-1)">◄</button>'
+      +   '<div class="b-val '+cls+'" style="min-width:96px">'+lbl+'</div>'
+      +   '<button class="b-arrow" onclick="shiftDebugCosmetic(\''+slot+'\',1)">►</button>'
+      + '</div>'
+      + '</div>';
+  });
+
+  el.innerHTML = html;
+}
+
+function renderDebugPreview(){
+  if (!debugState) return;
+  var cv = document.getElementById('debugPreviewCanvas');
+  if (!cv) return;
+  var eff = effectiveAppearance(debugState.appearance, debugState.cosmeticGear);
+  var weapons = fighterWeaponLayers({ gear: debugState.cosmeticGear });
+  // bobOpts.disabled — pin the exact frame for layer inspection.
+  compositeCharacter(cv, eff, debugState.animName, debugState.frame, debugState.face, weapons, { disabled: true });
+  // When inspecting Cast, also paint the matching VFX frame so the user can
+  // walk through the sequence and check overlay alignment.
+  if (debugState.animName === 'cast'){
+    var castAd = ELEMENTS_ANIMS.cast;
+    var maxFrame = (castAd.frames || 1) - 1;
+    var fxIdx = maxFrame > 0 ? Math.round((debugState.frame / maxFrame) * (CAST_FX_COUNT - 1)) : 0;
+    drawCastFxOnCanvas(cv, null, fxIdx);
+  }
+  elementsRegisterRedraw(cv, renderDebugPreview);
+  // Status line under the preview canvas.
+  var lbl = document.getElementById('debugFrameLabel');
+  if (lbl){
+    var ad = ELEMENTS_ANIMS[debugState.animName] || ELEMENTS_ANIMS.idle;
+    var col = ad.cols ? ad.cols[debugState.frame] : ((ad.startCol||0) + debugState.frame);
+    var facingName = ['South','West','East','North'][debugState.face];
+    lbl.textContent = debugState.animName + ' · frame ' + debugState.frame + ' · sheet col ' + col + ' · ' + facingName;
+  }
+}
+
 // ═══ STAT SCREEN ═══
 function showStatScreen(){
   showScreen('statScreen');
@@ -2749,7 +3684,7 @@ function rerollStats(){
 // ═══ DRAFT SCREEN ═══
 function goToDraft(){
   run.draftPool=generateDraftPool(run.round);
-  run.equipped={LHand:null,Body:null,RHand:null};
+  run.equipped={Head:null,LHand:null,Body:null,RHand:null,Lower:null};
   showScreen('draftScreen');
   document.getElementById('draftRoundInfo').textContent='Round '+run.round+' — '+ROUND_METALS[run.round-1].sym+' '+ROUND_METALS[run.round-1].name;
   renderDraft();
@@ -2761,26 +3696,49 @@ function renderDraft(){
   var totalSockets=0;
   var dom=run.dominantHand||'R';
   function handLabel(pos){ return pos==='Body' ? '' : (pos.charAt(0)===dom ? 'Main' : 'Off'); }
-  ['LHand','Body','RHand'].forEach(function(pos){
+  EQUIP_SLOTS.forEach(function(pos){
     var gear=run.equipped[pos];
     var slot=document.createElement('div');
-    slot.className='eq-slot'+(gear?' filled':'');
-    // Dynamic label: show gear role (weapon/shield/armor) plus main/off semantics
+    var slotClass = pos.toLowerCase();
+    slot.className='eq-slot eq-slot-'+slotClass+(gear?' filled':'');
+    slot.setAttribute('data-pos', pos);
+    // Drop target — accepts any gear whose pos matches this slot.
+    slot.addEventListener('dragover', function(e){
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'move';
+      slot.classList.add('drop-target');
+    });
+    slot.addEventListener('dragleave', function(){
+      slot.classList.remove('drop-target');
+    });
+    slot.addEventListener('drop', (function(targetPos){return function(e){
+      e.preventDefault();
+      slot.classList.remove('drop-target');
+      var gearId = e.dataTransfer.getData('text/plain');
+      var dropped = (run.draftPool||[]).find(function(g){return g && g.id === gearId;});
+      if (!dropped) return;
+      _equipDroppedGear(dropped, targetPos);
+    };})(pos));
+    // Dynamic label: show gear role (weapon/shield/armor/head/lower) plus main/off semantics
     var label;
     if(gear){
-      if(pos==='Body'){
-        label='🛡 ARMOR';
-      } else {
+      if(pos==='Body')  label='🛡 ARMOR';
+      else if(pos==='Head')  label='⛑ HEAD';
+      else if(pos==='Lower') label='👖 LOWER';
+      else {
         var isWeapon=WEAPON_GEAR_TYPES.indexOf(gear.type)>=0;
         label=(isWeapon?'⚔ WEAPON':'🛡 SHIELD')+' · '+handLabel(pos);
       }
     } else {
-      label = pos==='Body' ? 'ARMOR' : handLabel(pos).toUpperCase();
+      if (pos==='Body')  label='ARMOR';
+      else if (pos==='Head')  label='HEAD';
+      else if (pos==='Lower') label='LOWER';
+      else label=handLabel(pos).toUpperCase();
     }
     slot.innerHTML='<div class="slot-label">'+label+'</div>';
     if(gear){
       totalSockets+=gear.sockets;
-      slot.innerHTML+='<div class="slot-name">'+gear.icon+' '+gear.name+'</div>'+
+      slot.innerHTML+='<div class="slot-name">'+gearIconHTML(gear,{size:20,slot:pos})+gear.name+'</div>'+
         '<div class="slot-sockets">'+gear.sockets+' socket'+(gear.sockets>1?'s':'')+'</div>'+
         '<div class="slot-clear" onclick="clearSlot(\''+pos+'\')">✕ remove</div>';
     } else {
@@ -2797,7 +3755,7 @@ function renderDraft(){
     var pMain=(pdom==='L')?'LHand':'RHand';
     var pOff =(pdom==='L')?'RHand':'LHand';
     sc.innerHTML='<div style="background:rgba(212,168,67,0.08);border:1px solid rgba(212,168,67,0.4);border-radius:8px;padding:10px;margin:6px auto;max-width:440px;text-align:center">'
-      + '<div style="font-size:0.85em;color:#e8e0d0;margin-bottom:6px">Equip <span style="color:var(--gold)">'+pg.icon+' '+pg.name+'</span> to:</div>'
+      + '<div style="font-size:0.85em;color:#e8e0d0;margin-bottom:6px">Equip '+gearIconHTML(pg,{size:18})+'<span style="color:var(--gold)">'+pg.name+'</span> to:</div>'
       + '<button class="title-btn" style="display:inline-block;width:auto;padding:6px 18px;margin:2px 4px;font-size:0.8em" onclick="equipDraftGearTo(\''+pMain+'\')">Main Hand</button>'
       + '<button class="title-btn" style="display:inline-block;width:auto;padding:6px 18px;margin:2px 4px;font-size:0.8em" onclick="equipDraftGearTo(\''+pOff+'\')">Off-Hand</button>'
       + '<button class="reroll-btn" style="display:inline-block;margin:2px 4px;padding:6px 14px;font-size:0.8em" onclick="cancelDraftEquipPrompt()">cancel</button>'
@@ -2817,11 +3775,32 @@ function renderDraft(){
     else if(!canFit)card.className+=' disabled';
     card.innerHTML=gearCardHTML(gear);
     card.onclick=function(){if(canFit&&!isEquipped)equipDraftGear(gear)};
+    // Drag source — equipped/disabled cards aren't draggable.
+    if (!isEquipped){
+      card.draggable = true;
+      card.setAttribute('data-gear-id', gear.id);
+      card.addEventListener('dragstart', (function(g){return function(e){
+        e.dataTransfer.setData('text/plain', g.id);
+        e.dataTransfer.effectAllowed = 'move';
+        card.classList.add('dragging');
+        // Highlight valid drop targets while dragging.
+        document.querySelectorAll('#equippedSlots .eq-slot').forEach(function(s){
+          var pos = s.getAttribute('data-pos');
+          if (_canDropGearOn(g, pos)) s.classList.add('drop-allowed');
+        });
+      };})(gear));
+      card.addEventListener('dragend', function(){
+        card.classList.remove('dragging');
+        document.querySelectorAll('#equippedSlots .eq-slot').forEach(function(s){
+          s.classList.remove('drop-allowed','drop-target');
+        });
+      });
+    }
     pool.appendChild(card);
   });
   // Confirm button — just need all 3 slots filled
   var cf=document.getElementById('draftConfirm');
-  var allFilled=run.equipped.LHand&&run.equipped.Body&&run.equipped.RHand;
+  var allFilled = EQUIP_SLOTS.every(function(s){ return !!run.equipped[s]; });
   if(allFilled){
     cf.innerHTML='<button class="title-btn" onclick="confirmDraft()">⚔ ENTER BATTLE ⚔</button>';
   } else {
@@ -2834,10 +3813,19 @@ function renderDraft(){
 var _draftFace = 0;  // south by default; user can rotate via the face tabs
 function setDraftFace(f){
   _draftFace = f|0;
-  document.querySelectorAll('#draftScreen .face-tab').forEach(function(t){
-    t.classList.toggle('active', parseInt(t.getAttribute('data-face'),10) === _draftFace);
-  });
   renderDraftCharacter();
+}
+// Rotate the draft preview as if on a turntable. Visual order is the cardinal
+// compass cycle: S(0) → E(2) → N(3) → W(1) → S, and reverse for counter-clockwise.
+// (Row indices come from the Time Element spritesheet, not compass numbering.)
+var _DRAFT_ROTATION_CW  = [0, 2, 3, 1];
+function rotateDraftFace(dir){
+  var cur = _draftFace | 0;
+  var idx = _DRAFT_ROTATION_CW.indexOf(cur);
+  if (idx < 0) idx = 0;
+  var n = _DRAFT_ROTATION_CW.length;
+  idx = (idx + (dir > 0 ? 1 : -1) + n) % n;
+  setDraftFace(_DRAFT_ROTATION_CW[idx]);
 }
 function renderDraftCharacter(){
   var cv=document.getElementById('draftCharCanvas');
@@ -2866,7 +3854,42 @@ function canEquipGear(gear){
     }
     return true;
   }
+  // Body / Head / Lower: each is a single slot keyed by gear.pos.
   return !run.equipped[gear.pos];
+}
+
+// Drop-target validation — does this slot accept this gear's pos?
+function _canDropGearOn(gear, slotPos){
+  if (!gear || !slotPos) return false;
+  if (gear.pos === 'Hand') return slotPos === 'LHand' || slotPos === 'RHand';
+  return slotPos === gear.pos;
+}
+
+// Equip a gear piece into a specific slot (drag-and-drop path). Replaces any
+// gear already in that slot. For hand gear, also enforces "one weapon + one
+// shield" by clearing the OTHER hand if the player drops a same-category item.
+function _equipDroppedGear(gear, slotPos){
+  if (!_canDropGearOn(gear, slotPos)) return;
+  if (gear.pos === 'Hand'){
+    var otherHand = (slotPos === 'LHand') ? 'RHand' : 'LHand';
+    var existing  = run.equipped[otherHand];
+    if (existing){
+      var draggedIsWeapon = WEAPON_GEAR_TYPES.indexOf(gear.type) >= 0;
+      var existIsWeapon   = WEAPON_GEAR_TYPES.indexOf(existing.type) >= 0;
+      if (draggedIsWeapon === existIsWeapon){
+        // Dropping a weapon when other hand also has a weapon (or shield with shield):
+        // clear the other hand so the new one can fit the rules.
+        run.equipped[otherHand] = null;
+      }
+    }
+  }
+  // Also clear from any current slot if it was already equipped (drag-to-move).
+  EQUIP_SLOTS.forEach(function(s){
+    if (run.equipped[s] && run.equipped[s].id === gear.id) run.equipped[s] = null;
+  });
+  run.equipped[slotPos] = gear;
+  delete run._pendingEquip;
+  renderDraft();
 }
 
 function equipDraftGear(gear){
@@ -2908,7 +3931,303 @@ function clearSlot(pos){
   renderDraft();
 }
 function confirmDraft(){
-  startVS();
+  if (run.mode === 'action') startActionArena();
+  else startVS();
+}
+
+// ════════════════════════════════════════════════════════════
+//   ACTION ARENA — real-time variant
+//   Reuses builder + draft + attack data; replaces the turn-based
+//   grid combat with WASD movement and click/keyboard attacks.
+// ════════════════════════════════════════════════════════════
+var actionLoopRunning = false;
+var _actionKeys = {};
+var _actionKeyHandler = null;
+var _actionKeyUpHandler = null;
+var ACTION_TILE = 80;
+var ACTION_GS = 9;
+
+function startActionArena(){
+  // Build fighters the same way the VS / battle does, then layer on
+  // action-specific state (continuous tile coords, cooldown timers).
+  var opp;
+  if (run.round === TOTAL_ROUNDS){
+    var champs = loadPantheon();
+    opp = champs.length ? championToOpponent(pick(champs)) : generateOpponent(run.round);
+  } else {
+    opp = generateOpponent(run.round);
+  }
+  run.currentOpponent = opp;
+  p1 = buildPlayerFighter();
+  p2 = buildOpponentFighter(opp);
+  // Continuous tile coords (centered in tiles 1.5 / 7.5).
+  p1.ax = 1.5; p1.ay = 7.5;
+  p2.ax = 7.5; p2.ay = 1.5;
+  p1.facing = 0;            // face north toward opponent
+  p2.facing = Math.PI;      // face south toward player
+  p1._atkCD = 0; p2._atkCD = 0;
+  p1._aiAtkCD = 0; p2._aiAtkCD = 0;
+  gamePhase = 'action';
+
+  showScreen('actionScreen');
+  renderActionTiles();
+  buildActionAttackBar();
+  document.getElementById('actionLog').innerHTML = '';
+  actionLog('⚔ Round '+run.round+' — '+ROUND_METALS[run.round-1].name+' — Fight!', 'crit');
+  startActionLoop();
+}
+
+function actionLog(msg, cls){
+  var el = document.getElementById('actionLog'); if (!el) return;
+  var d = document.createElement('div');
+  d.className = 'log-entry' + (cls ? ' '+cls : '');
+  d.textContent = msg;
+  el.prepend(d);
+  while (el.children.length > 30) el.removeChild(el.lastChild);
+}
+
+// Paint a procedural grass background into the arena canvas/div.
+function renderActionTiles(){
+  var arena = document.getElementById('actionArena');
+  if (!arena) return;
+  var px = ACTION_TILE * ACTION_GS;
+  var cv = document.createElement('canvas');
+  cv.width = px; cv.height = px;
+  var ctx = cv.getContext('2d');
+  ctx.imageSmoothingEnabled = false;
+  for (var r=0; r<ACTION_GS; r++){
+    for (var c=0; c<ACTION_GS; c++){
+      var rng = tileRng(r*137 + c*311 + 9);
+      drawGrass(ctx, c*ACTION_TILE, r*ACTION_TILE, ACTION_TILE, rng);
+    }
+  }
+  arena.style.backgroundImage = 'url(' + cv.toDataURL() + ')';
+}
+
+function buildActionAttackBar(){
+  var bar = document.getElementById('actionAttackBar');
+  if (!bar) return;
+  bar.innerHTML = '';
+  (p1.attacks||[]).slice(0, 6).forEach(function(name, i){
+    var atk = ATTACKS[name]; if (!atk) return;
+    var btn = document.createElement('button');
+    btn.id = 'actAtk_' + i;
+    btn.innerHTML = '<span class="atk-key">'+(i+1)+'</span>'+name;
+    btn.onclick = function(){ tryActionAttack(p1, p2, name); };
+    bar.appendChild(btn);
+  });
+}
+
+function startActionLoop(){
+  if (actionLoopRunning) return;
+  actionLoopRunning = true;
+  _actionKeys = {};
+  var lastTime = performance.now();
+  _actionKeyHandler = function(e){
+    var scr = document.getElementById('actionScreen');
+    if (!scr || !scr.classList.contains('active')) return;
+    var k = e.key.toLowerCase();
+    if (k === 'w'||k === 'a'||k === 's'||k === 'd'||k === 'arrowup'||k === 'arrowdown'||k === 'arrowleft'||k === 'arrowright'){
+      _actionKeys[k] = true; e.preventDefault();
+    } else if (/^[1-9]$/.test(e.key)){
+      var idx = parseInt(e.key,10) - 1;
+      if (p1.attacks && p1.attacks[idx]) tryActionAttack(p1, p2, p1.attacks[idx]);
+      e.preventDefault();
+    }
+  };
+  _actionKeyUpHandler = function(e){ _actionKeys[e.key.toLowerCase()] = false; };
+  document.addEventListener('keydown', _actionKeyHandler);
+  document.addEventListener('keyup', _actionKeyUpHandler);
+
+  function loop(now){
+    if (!actionLoopRunning) return;
+    var scr = document.getElementById('actionScreen');
+    if (!scr || !scr.classList.contains('active')){ stopActionLoop(); return; }
+    var dt = Math.min(0.08, (now - lastTime) / 1000);
+    lastTime = now;
+    actionTick(dt);
+    actionRender();
+    if (actionLoopRunning) requestAnimationFrame(loop);
+  }
+  requestAnimationFrame(loop);
+}
+function stopActionLoop(){
+  actionLoopRunning = false;
+  if (_actionKeyHandler) document.removeEventListener('keydown', _actionKeyHandler);
+  if (_actionKeyUpHandler) document.removeEventListener('keyup', _actionKeyUpHandler);
+  _actionKeyHandler = _actionKeyUpHandler = null;
+}
+
+function actionTick(dt){
+  if (p1.hp <= 0 || p2.hp <= 0){
+    stopActionLoop();
+    setTimeout(endActionBattle, 500);
+    return;
+  }
+  // ─── Player movement (held keys) ─────────────────────────────
+  var sp1 = ((p1.speed||4) * 0.9);       // tiles/sec
+  var dx = 0, dy = 0;
+  if (_actionKeys.w || _actionKeys.arrowup) dy -= 1;
+  if (_actionKeys.s || _actionKeys.arrowdown) dy += 1;
+  if (_actionKeys.a || _actionKeys.arrowleft) dx -= 1;
+  if (_actionKeys.d || _actionKeys.arrowright) dx += 1;
+  if (dx || dy){
+    var L = Math.sqrt(dx*dx + dy*dy);
+    dx /= L; dy /= L;
+    var nx = p1.ax + dx * sp1 * dt;
+    var ny = p1.ay + dy * sp1 * dt;
+    // Bounds + simple body-collision with opponent (push gently)
+    p1.ax = Math.max(0.5, Math.min(ACTION_GS - 0.5, nx));
+    p1.ay = Math.max(0.5, Math.min(ACTION_GS - 0.5, ny));
+    p1.facing = Math.atan2(dx, -dy);  // same convention as facingToRow
+    if (!p1.anim || p1.anim.name !== 'move') setFighterAnim(p1, 'move');
+  } else if (p1.anim && p1.anim.name === 'move'){
+    setFighterAnim(p1, 'idle');
+  }
+  // ─── AI: opponent chases & swings ────────────────────────────
+  var oa = p1.ax - p2.ax, ob = p1.ay - p2.ay;
+  var od = Math.sqrt(oa*oa + ob*ob);
+  var sp2 = ((p2.speed||4) * 0.75);
+  if (od > 1.0){
+    var ux = oa/od, uy = ob/od;
+    p2.ax = Math.max(0.5, Math.min(ACTION_GS - 0.5, p2.ax + ux * sp2 * dt));
+    p2.ay = Math.max(0.5, Math.min(ACTION_GS - 0.5, p2.ay + uy * sp2 * dt));
+    p2.facing = Math.atan2(ux, -uy);
+    if (!p2.anim || p2.anim.name !== 'move') setFighterAnim(p2, 'move');
+  } else {
+    if (p2.anim && p2.anim.name === 'move') setFighterAnim(p2, 'idle');
+    p2.facing = Math.atan2(oa, -ob); // face player even when stationary
+  }
+  // Opponent auto-attacks on its own cooldown.
+  if (p2._aiAtkCD <= 0 && p2.attacks && p2.attacks.length && od < 5){
+    var pick2 = p2.attacks[Math.floor(Math.random() * p2.attacks.length)];
+    tryActionAttack(p2, p1, pick2);
+    p2._aiAtkCD = 1.6;
+  }
+  // ─── Cooldowns ───────────────────────────────────────────────
+  p1._atkCD   = Math.max(0, (p1._atkCD||0)   - dt);
+  p2._atkCD   = Math.max(0, (p2._atkCD||0)   - dt);
+  p2._aiAtkCD = Math.max(0, (p2._aiAtkCD||0) - dt);
+  // Advance per-fighter anim frame timers so slash/hurt etc. cycle through.
+  tickAnimations(performance.now());
+}
+
+function tryActionAttack(attacker, defender, atkName){
+  if (!atkName) return;
+  if ((attacker._atkCD||0) > 0) return;
+  if (attacker.hp <= 0 || defender.hp <= 0) return;
+  var atk = ATTACKS[atkName]; if (!atk) return;
+  var matB = getMateriaBonus(attacker, atk);
+  // Teleport / heal / buff specials — fire without range check.
+  if (atk.special === 'teleport'){
+    setFighterAnim(attacker, 'parry');
+    attacker._atkCD = 0.5;
+    // Step toward player facing direction by teleportRange tiles.
+    var tr = atk.teleportRange || 3;
+    var dx = Math.sin(attacker.facing), dy = -Math.cos(attacker.facing);
+    attacker.ax = Math.max(0.5, Math.min(ACTION_GS - 0.5, attacker.ax + dx * tr));
+    attacker.ay = Math.max(0.5, Math.min(ACTION_GS - 0.5, attacker.ay + dy * tr));
+    actionLog('☿ '+(attacker===p1?'You':'Opp')+' '+atk.name);
+    return;
+  }
+  if (atk.special === 'heal'){
+    setFighterAnim(attacker, 'parry');
+    attacker._atkCD = 0.8;
+    var healed = rollDice(atk.healDice || '2d6');
+    attacker.hp = Math.min(attacker.maxHp, attacker.hp + healed);
+    actionLog('☽ '+(attacker===p1?'You':'Opp')+' '+atk.name+' heal '+healed, 'hit');
+    return;
+  }
+  // Damaging attack — range check uses Euclidean dist + extraRange.
+  var ddx = defender.ax - attacker.ax, ddy = defender.ay - attacker.ay;
+  var dist = Math.sqrt(ddx*ddx + ddy*ddy);
+  var effRange = (atk.range || 1) + (atk.range > 0 ? matB.extraRange : 0);
+  if (dist > effRange + 0.3){
+    if (attacker === p1) actionLog('⚔ '+atk.name+' — out of range', 'miss');
+    return;
+  }
+  // Face the target as we swing.
+  attacker.facing = Math.atan2(ddx, -ddy);
+  setFighterAnim(attacker, 'slash');
+  attacker._atkCD = (atk.range > 1 ? 0.95 : 0.7);
+  // Roll-to-hit reuses the same stat → modifier → +prof + materia chain.
+  var sMod = Math.floor((attacker.stats[atk.stat] - 10) / 2);
+  var toHit = sMod + attacker.prof + (matB.toHit||0);
+  var roll = Math.floor(Math.random() * 20) + 1;
+  var total = roll + toHit;
+  var aName = attacker === p1 ? 'You' : 'Opp';
+  if (total >= defender.ac){
+    var crit = roll >= (matB.critRange || 20);
+    var diceRoll = rollDice(atk.dice||'1d6');
+    if (crit) diceRoll += rollDice(atk.dice||'1d6');
+    var dmg = diceRoll + sMod + (matB.bonusDmg||0);
+    if (dmg < 1) dmg = 1;
+    defender.hp -= dmg;
+    if (defender.hp < 0) defender.hp = 0;
+    if (attacker === p1) run.totalDamage += dmg;
+    setFighterAnim(defender, defender.hp <= 0 ? 'death' : 'hurt');
+    actionLog((crit?'✦ CRIT ':'⚔ ')+aName+' '+atk.name+' — '+dmg+(crit?' (critical)':''), crit?'crit':'hit');
+  } else {
+    actionLog('⚔ '+aName+' '+atk.name+' misses', 'miss');
+  }
+}
+
+function actionRender(){
+  // Position fighter canvases. (ax, ay) are tile-centered coordinates;
+  // each canvas is 96×96 so we offset half its size to center.
+  ['actionP1Cv','actionP2Cv'].forEach(function(id, i){
+    var cv = document.getElementById(id); if (!cv) return;
+    var f = (i === 0) ? p1 : p2;
+    var x = (f.ax * ACTION_TILE) - cv.width / 2;
+    var y = (f.ay * ACTION_TILE) - cv.height / 2 - 18; // slight upward bias so feet ≈ tile center
+    cv.style.transform = 'translate('+x+'px,'+y+'px)';
+    // Z-stack: whoever is lower on the field draws on top (basic painter sort).
+    cv.style.zIndex = String(2 + Math.round(f.ay * 10));
+    renderActionFighter(cv, f);
+  });
+  // HUD
+  var hp1 = document.getElementById('actHpFillP1');
+  var hp2 = document.getElementById('actHpFillP2');
+  if (hp1) hp1.style.width = Math.max(0, p1.hp/p1.maxHp*100) + '%';
+  if (hp2) hp2.style.width = Math.max(0, p2.hp/p2.maxHp*100) + '%';
+  document.getElementById('actLblP1').textContent = '⚗ You · HP '+p1.hp+'/'+p1.maxHp;
+  document.getElementById('actLblP2').textContent = '☠ Opponent · HP '+p2.hp+'/'+p2.maxHp;
+  // Cooldown dim on attack buttons.
+  (p1.attacks||[]).slice(0,6).forEach(function(n, i){
+    var btn = document.getElementById('actAtk_'+i);
+    if (btn) btn.classList.toggle('cooling', (p1._atkCD||0) > 0);
+  });
+}
+
+function renderActionFighter(cv, fighter){
+  var appearance = ensureAppearance(fighter);
+  if (fighter.gear) appearance = effectiveAppearance(appearance, fighter.gear);
+  var animName = (fighter.anim && fighter.anim.name) || 'idle';
+  var frame    = (fighter.anim && fighter.anim.frame) || 0;
+  var ad = ELEMENTS_ANIMS[animName] || ELEMENTS_ANIMS.idle;
+  if (frame >= ad.frames) frame = ad.frames - 1;
+  // Use typeof check — fighter.facing of 0 (north) would otherwise hit the
+  // falsy `|| Math.PI` branch and incorrectly render the south sprite.
+  var row = facingToRow(typeof fighter.facing === 'number' ? fighter.facing : Math.PI);
+  var weapons = fighterWeaponLayers(fighter);
+  var bobOpts = { excite: getBobExcite(fighter), phase: fighter._bobPhase||0 };
+  compositeCharacter(cv, appearance, animName, frame, row, weapons, bobOpts);
+  drawCastFxOnCanvas(cv, fighter);
+}
+
+function endActionBattle(){
+  // Reuse the same victory / game-over flow as turn-based.
+  if (p2.hp <= 0){
+    handleVictory();
+  } else if (p1.hp <= 0){
+    showGameOver();
+  }
+}
+
+function forfeitAction(){
+  if (!confirm('Abandon this run? All progress will be lost.')) return;
+  stopActionLoop();
+  showGameOver();
 }
 
 // ═══ OPPONENT GENERATION (§7) ═══
@@ -2942,16 +4261,20 @@ function generateOpponentGear(round){
   var weaponTypes=GEAR_TYPES.filter(function(g){return g.pos==='Hand'&&WEAPON_GEAR_TYPES.indexOf(g.type)>=0});
   var shieldTypes=GEAR_TYPES.filter(function(g){return g.pos==='Hand'&&SHIELD_GEAR_TYPES.indexOf(g.type)>=0});
   var bodyTypes=GEAR_TYPES.filter(function(g){return g.pos==='Body'});
+  var headTypes=GEAR_TYPES.filter(function(g){return g.pos==='Head'});
+  var lowerTypes=GEAR_TYPES.filter(function(g){return g.pos==='Lower'});
   // AI always: weapon in RHand, shield in LHand (default stance)
   var rhand=generateGearPieceOfType(pick(weaponTypes),round);
   var body=generateGearPieceOfType(pick(bodyTypes),round);
   var lhand=generateGearPieceOfType(pick(shieldTypes),round);
+  var head=generateGearPieceOfType(pick(headTypes),round);
+  var lower=generateGearPieceOfType(pick(lowerTypes),round);
   // Scale opponent refinement with round
-  [lhand,body,rhand].forEach(function(g){
+  [lhand,body,rhand,head,lower].forEach(function(g){
     if(round>=3)g.refinement=randInt(0,Math.min(round-1,5));
     if(round>=6)g.refinement=randInt(2,Math.min(round,8));
   });
-  return{equipped:{LHand:lhand,Body:body,RHand:rhand}};
+  return{equipped:{Head:head,LHand:lhand,Body:body,RHand:rhand,Lower:lower}};
 }
 
 // ═══ BUILD FIGHTER FROM RUN STATE ═══
@@ -3010,12 +4333,12 @@ function buildOpponentFighter(opp){
 function buildFighterMateria(equipped){
   // Flatten all materia from equipped gear into a flat array with slot info
   var result=[];
-  ['LHand','Body','RHand'].forEach(function(pos){
+  EQUIP_SLOTS.forEach(function(pos){
     var gear=equipped[pos];
     if(!gear)return;
     // Dynamic slot: weapon-type gear = 'w', shield-type = 's', body = 'a'
     var slot;
-    if(pos==='Body')slot='a';
+    if(pos==='Body'||pos==='Head'||pos==='Lower')slot='a';
     else if(WEAPON_GEAR_TYPES.indexOf(gear.type)>=0)slot='w';
     else slot='s';
     gear.materia.forEach(function(m){
@@ -3029,7 +4352,7 @@ function buildAttacksFromMateria(equipped){
   // Always have basic Strike
   var atkNames=['Strike'];
   var seen={Strike:true};
-  ['LHand','Body','RHand'].forEach(function(pos){
+  EQUIP_SLOTS.forEach(function(pos){
     var gear=equipped[pos];
     if(!gear)return;
     gear.materia.forEach(function(m){
@@ -3078,10 +4401,10 @@ function startVS(){
   // Build scouting report of opponent gear
   var scoutHTML='<div style="font-size:0.7em;color:var(--muted);margin-top:8px">'+fogReveal+'/7 materia revealed</div>';
   scoutHTML+='<div style="display:flex;gap:4px;justify-content:center;margin-top:4px;flex-wrap:wrap">';
-  ['LHand','Body','RHand'].forEach(function(pos){
+  EQUIP_SLOTS.forEach(function(pos){
     var gear=opp.equipped[pos];if(!gear)return;
     scoutHTML+='<div style="background:rgba(255,255,255,0.03);border:1px solid #222;border-radius:6px;padding:4px 6px;font-size:0.65em">';
-    scoutHTML+='<div style="color:#aaa">'+gear.icon+' '+gear.type+' ('+gear.sockets+'s)</div>';
+    scoutHTML+='<div style="color:#aaa">'+gearIconHTML(gear,{size:16,slot:pos})+gear.type+' ('+gear.sockets+'s)</div>';
     scoutHTML+='<div style="display:flex;gap:1px;justify-content:center;margin-top:2px">';
     // Show materia with fog
     var hiddenCount=0;
@@ -3272,7 +4595,7 @@ function updateHUD(){
 function getFighterLinkCount(f){
   if(!f.gear)return 0;
   var links=0;
-  ['LHand','Body','RHand'].forEach(function(pos){
+  EQUIP_SLOTS.forEach(function(pos){
     var g=f.gear[pos];if(g)links+=g.links;
   });
   return links;
@@ -3335,7 +4658,7 @@ function updateStatSheet(){
     var ssDom=(run&&run.dominantHand)||'R';
     var ssHand=function(pos){ return pos.charAt(0)===ssDom ? 'Main' : 'Off'; };
     var slotLabels={};
-    ['LHand','Body','RHand'].forEach(function(pos){
+    EQUIP_SLOTS.forEach(function(pos){
       if(pos==='Body'){slotLabels[pos]='Body';return}
       var g=f.gear[pos];
       if(g&&WEAPON_GEAR_TYPES.indexOf(g.type)>=0)slotLabels[pos]='⚔ Weapon · '+ssHand(pos);
@@ -3343,7 +4666,7 @@ function updateStatSheet(){
       else slotLabels[pos]=ssHand(pos)+' Hand';
     });
     var slotIcons={LHand:'⚔',Body:'🛡',RHand:'⚔'};
-    ['LHand','Body','RHand'].forEach(function(pos){
+    EQUIP_SLOTS.forEach(function(pos){
       var g=f.gear[pos];
       if(!g){
         gearHTML+='<div class="ss-gear-slot empty"><span class="ss-gear-pos">'+slotLabels[pos]+'</span><span class="ss-gear-name" style="color:var(--muted);font-style:italic">— empty —</span></div>';
@@ -3355,17 +4678,18 @@ function updateStatSheet(){
           var linked=i<=g.links;
           sockHTML+=linked?'<span class="materia-link active"></span>':'<span class="materia-gap"></span>';
         }
-        var p=PLANETS[m.planetIdx];
-        sockHTML+='<span class="materia-orb" style="color:'+p.col+';border-color:'+p.col+'60;cursor:pointer" onclick="event.stopPropagation();showMatDetail('+m.planetIdx+','+m.level+','+(m.xp||0)+')">'+p.sym+'<sub style="font-size:0.65em;opacity:0.6">'+m.level+'</sub></span>';
+        var flashFlag2=!!m._justLeveled;
+        sockHTML+=materiaOrbHTML(m.planetIdx, m.level, {size:22, xp:m.xp||0, levelupFlash:flashFlag2});
+        if(flashFlag2) delete m._justLeveled;
       });
       var emptyCount=g.sockets-g.materia.length;
       for(var e=0;e<emptyCount;e++){
         if(g.materia.length>0||e>0)sockHTML+='<span class="materia-gap"></span>';
-        sockHTML+='<span class="materia-orb" style="color:#333;border-color:#2a2a34">○</span>';
+        sockHTML+=materiaEmptyOrbHTML({size:22});
       }
       var refStr=g.refinement>0?' <span style="color:var(--gold)">+'+g.refinement+'</span>':'';
       gearHTML+='<div class="ss-gear-slot"><span class="ss-gear-pos">'+slotLabels[pos]+'</span>'+
-        '<span class="ss-gear-name">'+g.icon+' '+g.name+refStr+'</span>'+
+        '<span class="ss-gear-name">'+gearIconHTML(g,{size:16,slot:pos})+g.name+refStr+'</span>'+
         '<span class="ss-gear-sockets">'+sockHTML+'</span></div>';
     });
   }
@@ -3635,6 +4959,7 @@ function gainMateriaXP(fighter,slotType,amount){
     if(m.slot===slotType&&m.level<MATERIA_MAX_LVL){
       m.xp+=amount;var needed=matXpNeeded(m.level);
       if(m.xp>=needed){m.xp-=needed;m.level=Math.min(MATERIA_MAX_LVL,m.level+1);
+        m._justLeveled=true;   // surfaced post-combat to play levelup orb anim
         logMsg('Materia '+PLANETS[m.idx].name+' ascends to Lv'+m.level+'!','purity');
       }
     }
@@ -4472,11 +5797,11 @@ function buildRoundProgressHTML(completedUpTo,victory){
 function buildLoadoutSummaryHTML(){
   if(!run||!run.equipped)return '';
   var html='<div style="display:flex;gap:6px;justify-content:center;flex-wrap:wrap;margin-top:6px">';
-  ['LHand','Body','RHand'].forEach(function(pos){
+  EQUIP_SLOTS.forEach(function(pos){
     var gear=run.equipped[pos];
     if(!gear)return;
     html+='<div style="background:var(--card);border:1px solid var(--border);border-radius:8px;padding:6px 8px;font-size:0.72em;text-align:center;min-width:80px">';
-    html+='<div style="color:#e8e0d0">'+gear.icon+' '+gear.name+'</div>';
+    html+='<div style="color:#e8e0d0">'+gearIconHTML(gear,{size:18})+gear.name+'</div>';
     html+='<div style="display:flex;gap:2px;justify-content:center;margin-top:3px">';
     gear.materia.forEach(function(m,mi){
       if(mi>0){
@@ -4525,13 +5850,19 @@ function handleVictory(){
   showLootScreen(qs);
 }
 function syncMateriaToGear(){
-  // Sync p1's materia levels/xp back into run.equipped
+  // Sync p1's materia levels/xp back into run.equipped — and carry over the
+  // `_justLeveled` flag so the post-combat orb display can flash levelup.
   if(!p1||!p1.materia)return;
   var idx=0;
-  ['LHand','Body','RHand'].forEach(function(pos){
+  EQUIP_SLOTS.forEach(function(pos){
     var gear=run.equipped[pos];if(!gear)return;
     gear.materia.forEach(function(m,i){
-      if(idx<p1.materia.length){m.level=p1.materia[idx].level;m.xp=p1.materia[idx].xp;idx++}
+      if(idx<p1.materia.length){
+        m.level=p1.materia[idx].level;
+        m.xp=p1.materia[idx].xp;
+        if(p1.materia[idx]._justLeveled) m._justLeveled=true;
+        idx++;
+      }
     });
   });
 }
@@ -4546,7 +5877,7 @@ function showLootScreen(qsEarned){
   // Add opponent gear to laboratory
   var opp=run.currentOpponent;
   var items=document.getElementById('lootItems');items.innerHTML='';
-  ['LHand','Body','RHand'].forEach(function(pos){
+  EQUIP_SLOTS.forEach(function(pos){
     var gear=opp.equipped[pos];if(!gear)return;
     // Remove hidden flags from materia
     gear.materia.forEach(function(m){delete m.hidden});
@@ -4571,11 +5902,186 @@ function goToLab(){
     run.merchantStock=generateMerchantStock(run.round);
     run.merchantRound=run.round;
   }
+  run._labPreview = null;   // any preview from the last visit is stale
   showScreen('labScreen');
   renderLab();
 }
+// ── Lab Stats Panel ──────────────────────────────────────────────
+// Computes the same combat-relevant bonuses the engine would derive at
+// battle start from the supplied `equipped` map. Used both for the current
+// loadout and the hypothetical "what if I swapped to THIS piece" preview.
+function computeLabStats(equipped){
+  var d = deriveStats(run.stats);
+  var virt = {
+    materia: buildFighterMateria(equipped),
+    gear: equipped,
+    ac: d.ac,
+    ward: 0
+  };
+  var bonus = getMateriaBonus(virt, {range:0});
+  return {
+    hp: d.hp,
+    ac: getFighterAC(virt),
+    speed: d.speed,
+    toHit: bonus.toHit|0,
+    bonusDmg: bonus.bonusDmg|0,
+    critRange: bonus.critRange|0,         // best (lowest) crit-on number, 20 = no bonus
+    extraRange: bonus.extraRange|0,
+    lifesteal: !!bonus.lifesteal,
+    lifestealDice: bonus.lifestealDice || '1d4',
+    dotBonus: bonus.dotBonus|0,
+    attacks: buildAttacksFromMateria(equipped)
+  };
+}
+
+// Apply a single-slot swap on top of a clone of run.equipped, returning a
+// new equipped map. Used to compute preview stats.
+function _previewEquippedWith(slot, gear){
+  var copy = {};
+  EQUIP_SLOTS.forEach(function(p){ copy[p] = run.equipped[p]; });
+  copy[slot] = gear;
+  return copy;
+}
+
+// Resolve which slot a piece of gear should preview into. Hand gear goes
+// into the OFF hand if main is filled (so you compare against an empty
+// off-hand), otherwise into main. Body/Head/Lower are fixed.
+function _previewSlotForGear(gear){
+  if (gear.pos === 'Hand'){
+    var dom = (run && run.dominantHand) || 'R';
+    var main = dom + 'Hand';
+    if (!run.equipped[main]) return main;
+    var off = (dom === 'R' ? 'LHand' : 'RHand');
+    return off;
+  }
+  // Body slot is the canonical home for body gear; we also use it for any
+  // non-hand item whose ladder lives in GEAR_BODY_LADDER (Plate/Mail/Robes/
+  // Cloak/Vest). Head and Lower gear go to their own slots.
+  if (GEAR_HEAD_LADDER && gear.type in GEAR_HEAD_LADDER) return 'Head';
+  if (GEAR_LOWER_LADDER && gear.type in GEAR_LOWER_LADDER) return 'Lower';
+  return 'Body';
+}
+
+// Format a stat delta number with sign and color class. Returns HTML.
+function _statDeltaHTML(diff, opts){
+  opts = opts || {};
+  if (diff === 0) return '';
+  var sign = diff > 0 ? '+' : '';
+  var cls = diff > 0 ? 'up' : 'down';
+  if (opts.invert){ cls = diff > 0 ? 'down' : 'up'; }   // for crit-range, lower is better
+  var txt = sign + diff;
+  if (opts.suffix) txt += opts.suffix;
+  return '<span class="lab-stat-delta ' + cls + '">' + txt + '</span>';
+}
+
+// Render the stats panel. Reads the optional run._labPreview to compute the
+// delta column when the player has selected a piece of gear to inspect.
+function renderLabStatsPanel(){
+  var el = document.getElementById('labStatsPanel');
+  if (!el) return;
+  var cur = computeLabStats(run.equipped);
+  var prev = null;
+  var previewBanner = '';
+  if (run._labPreview){
+    var pg = run._labPreview.gear;
+    var pSlot = run._labPreview.slot;
+    if (pg && pSlot){
+      var hypEquipped = _previewEquippedWith(pSlot, pg);
+      prev = computeLabStats(hypEquipped);
+      previewBanner = '<div class="lab-preview-banner">'
+        + '<div>Preview: <strong>' + pg.name + '</strong> → ' + pSlot.replace('Hand',' Hand') + '</div>'
+        + '<button class="lab-preview-clear" onclick="clearLabPreview()">Clear</button>'
+        + '</div>';
+    }
+  }
+  function row(label, curVal, prevVal, opts){
+    opts = opts || {};
+    var diff = (prev && prevVal !== curVal) ? (prevVal - curVal) : 0;
+    var display = curVal;
+    if (opts.formatter) display = opts.formatter(curVal);
+    return '<div class="lab-stat-row"><span class="lab-stat-name">' + label + '</span>'
+      + '<span class="lab-stat-val">' + display + _statDeltaHTML(diff, opts) + '</span></div>';
+  }
+  var statsGrid = '<div class="lab-stats-grid">'
+    + row('HP',     cur.hp,         prev?prev.hp:null)
+    + row('AC',     cur.ac,         prev?prev.ac:null)
+    + row('Speed',  cur.speed,      prev?prev.speed:null)
+    + row('To-Hit', '+' + cur.toHit, prev?'+' + prev.toHit:null, {
+        formatter: function(v){ return v; }
+      })
+    + row('Bonus Dmg', '+' + cur.bonusDmg, prev?'+' + prev.bonusDmg:null, {
+        formatter: function(v){ return v; }
+      })
+    + row('Crit On', cur.critRange + '-20', prev?prev.critRange + '-20':null, {
+        invert: true,
+        formatter: function(v){ return v; }
+      })
+    + row('Range', '+' + cur.extraRange, prev?'+' + prev.extraRange:null, {
+        formatter: function(v){ return v; }
+      })
+    + row('Lifesteal', cur.lifesteal ? cur.lifestealDice : '—',
+                       prev?(prev.lifesteal ? prev.lifestealDice : '—'):null, {
+        formatter: function(v){ return v; }
+      })
+    + row('DOT', '+' + cur.dotBonus, prev?'+' + prev.dotBonus:null, {
+        formatter: function(v){ return v; }
+      })
+    + '</div>';
+  // Attack list — annotate adds/removes when previewing.
+  var atkHTML = '';
+  if (prev){
+    var curSet = {}, prevSet = {};
+    cur.attacks.forEach(function(a){ curSet[a]=1; });
+    prev.attacks.forEach(function(a){ prevSet[a]=1; });
+    var all = {};
+    cur.attacks.forEach(function(a){ all[a]=1; });
+    prev.attacks.forEach(function(a){ all[a]=1; });
+    Object.keys(all).forEach(function(a){
+      var inCur = !!curSet[a], inPrev = !!prevSet[a];
+      var cls = inCur && inPrev ? '' : (inPrev ? 'added' : 'removed');
+      atkHTML += '<span class="lab-stats-atk-tag ' + cls + '">' + a + '</span>';
+    });
+  } else {
+    cur.attacks.forEach(function(a){
+      atkHTML += '<span class="lab-stats-atk-tag">' + a + '</span>';
+    });
+  }
+  el.innerHTML = '<h3>✦ CURRENT STATS</h3>'
+    + statsGrid
+    + '<div class="lab-stats-attacks">' + atkHTML + '</div>'
+    + previewBanner;
+}
+
+// Public preview controls — wired to clicks on storage / merchant cards.
+function setLabPreview(source, idx){
+  var gear;
+  if (source === 'lab')      gear = run.laboratory[idx];
+  else if (source === 'shop') gear = (run.merchantStock && run.merchantStock[idx]) ? run.merchantStock[idx].gear : null;
+  if (!gear) return;
+  // Toggle off if user clicks the same gear again.
+  if (run._labPreview && run._labPreview.source === source && run._labPreview.idx === idx){
+    clearLabPreview();
+    return;
+  }
+  run._labPreview = { source: source, idx: idx, gear: gear, slot: _previewSlotForGear(gear) };
+  renderLab();
+}
+function clearLabPreview(){
+  run._labPreview = null;
+  renderLab();
+}
+
 function renderLab(){
   document.getElementById('labQs').textContent='☿ '+run.quicksilver;
+  // Validate the preview pointer; gear may have moved (sold/equipped) since
+  // it was selected. If the item is gone, drop the preview silently.
+  if (run._labPreview){
+    var pSrc = run._labPreview.source, pIdx = run._labPreview.idx;
+    var stillThere = false;
+    if (pSrc === 'lab'  && run.laboratory[pIdx]) stillThere = run.laboratory[pIdx] === run._labPreview.gear;
+    if (pSrc === 'shop' && run.merchantStock && run.merchantStock[pIdx] && run.merchantStock[pIdx].gear === run._labPreview.gear) stillThere = true;
+    if (!stillThere) run._labPreview = null;
+  }
   var rm=ROUND_METALS[run.round-1];
   var nextRm=run.round<TOTAL_ROUNDS?ROUND_METALS[run.round]:null;
   document.getElementById('labRoundInfo').innerHTML=
@@ -4583,11 +6089,14 @@ function renderLab(){
     (nextRm?'Next: <span style="color:'+nextRm.col+'">'+nextRm.sym+' '+nextRm.name+'</span> (Round '+(run.round+1)+')':'Final round complete!');
   var hasLoose=run.looseMateria.length>0;
 
+  // ── Stats panel ──
+  renderLabStatsPanel();
+
   // ── Equipped gear section ──
   var eqEl=document.getElementById('labEquipped');
   eqEl.innerHTML='<h3>⚔ EQUIPPED GEAR</h3><div class="lab-gear" id="labEquipGear"></div>';
   var eqGear=document.getElementById('labEquipGear');
-  ['LHand','Body','RHand'].forEach(function(pos){
+  EQUIP_SLOTS.forEach(function(pos){
     var gear=run.equipped[pos];
     var item=document.createElement('div');item.className='lab-gear-item equipped';
     var label;
@@ -4628,9 +6137,12 @@ function renderLab(){
     run.merchantStock.forEach(function(item,i){
       var card=document.createElement('div');
       card.className='shop-item'+(item.sold?' sold':'');
+      if(run._labPreview&&run._labPreview.source==='shop'&&run._labPreview.idx===i){
+        card.classList.add('lab-card-preview-active');
+      }
       var canAfford=run.quicksilver>=item.price;
       if(item.type==='gear'){
-        card.innerHTML=gearCardHTML(item.gear)+'<div class="shop-price">'+(canAfford?'':'⚠ ')+'Buy: '+item.price+'☿</div>';
+        card.innerHTML=gearCardHTML(item.gear)+'<div class="shop-price">'+(canAfford?'':'⚠ ')+'Buy: '+item.price+'☿</div><div class="lab-btn craft" style="margin-top:4px" onclick="event.stopPropagation();setLabPreview(\'shop\','+i+')">👁 Preview Stats</div>';
         card.onclick=function(){if(!item.sold&&canAfford)buyMerchantItem(i)};
       } else if(item.type==='materia'){
         var p=PLANETS[item.materia.planetIdx];
@@ -4655,6 +6167,9 @@ function renderLab(){
   }
   run.laboratory.forEach(function(gear,i){
     var item=document.createElement('div');item.className='lab-gear-item';
+    if(run._labPreview&&run._labPreview.source==='lab'&&run._labPreview.idx===i){
+      item.classList.add('lab-card-preview-active');
+    }
     var sellPrice=gear.sockets*3+gear.links*2+(gear.refinement||0)*2;
     var matVal=0;gear.materia.forEach(function(m){matVal+=m.level*2});
     var sellWithMat=sellPrice+Math.floor(matVal*0.5);
@@ -4671,7 +6186,8 @@ function renderLab(){
     if(canDrill)actionsHTML+='<button class="lab-btn craft" onclick="craftDrillSocket(\'lab\','+i+')">⛏ Drill ('+drillCost+'☿ · '+getDrillChance(gear)+'%)</button>';
     if(gear.materia.length>0)actionsHTML+='<button class="lab-btn craft" onclick="showUnslotPicker('+i+')">Unslot (5☿)</button>';
     if(hasEmptySockets&&hasLoose)actionsHTML+='<button class="lab-btn craft" onclick="showSlotPicker(\'lab\','+i+')">Slot (3☿)</button>';
-    item.innerHTML='<div class="lab-gear-info">'+gearCardHTML(gear)+'</div>'+
+    var infoHTML='<div class="lab-gear-info" onclick="setLabPreview(\'lab\','+i+')" style="cursor:pointer" title="Click to preview stats with this gear">'+gearCardHTML(gear)+'</div>';
+    item.innerHTML=infoHTML+
       '<div class="lab-gear-actions">'+actionsHTML+'</div>';
     stGear.appendChild(item);
   });
@@ -4688,7 +6204,7 @@ function renderLab(){
       var xpPct=canLevel?Math.round((m.xp/matXpNeeded(m.level))*100):100;
       var item=document.createElement('div');item.className='lab-mat-item';
       item.style.cursor='pointer';
-      item.innerHTML='<div class="mat-sym" style="color:'+p.col+'" onclick="showMatDetail('+m.planetIdx+','+m.level+','+(m.xp||0)+')">'+p.sym+'</div>'+
+      item.innerHTML='<div class="mat-sym">'+materiaOrbHTML(m.planetIdx, m.level, {size:36, xp:m.xp||0})+'</div>'+
         '<div class="mat-name" onclick="showMatDetail('+m.planetIdx+','+m.level+','+(m.xp||0)+')">'+p.name+' Lv'+m.level+'</div>'+
         '<div style="font-size:0.65em;color:#555">'+p.bonusDesc+'</div>'+
         (canLevel?'<div style="height:3px;background:#1a1a24;border-radius:2px;margin:2px 0"><div style="height:100%;width:'+xpPct+'%;background:'+p.col+';border-radius:2px"></div></div>':'')+
@@ -4700,12 +6216,50 @@ function renderLab(){
     matEl.innerHTML='';
   }
 
+  // ── Materia Dust section ──
+  // Failed slot attempts leave a pile of dust per planet. Spend dust to
+  // reform a fresh Lv1 materia of the matching planet — no Quicksilver cost
+  // (dust IS the material) and always succeeds.
+  var dustEl=document.getElementById('labMateriaDust');
+  if(dustEl){
+    var dustEntries=[];
+    if(run.materiaDust){
+      for(var pi=0;pi<PLANETS.length;pi++){
+        var n=run.materiaDust[pi]|0;
+        if(n>0) dustEntries.push({planetIdx:pi, count:n});
+      }
+    }
+    if(dustEntries.length>0){
+      var dustHTML='<h3>✦ MATERIA DUST</h3><div style="font-size:0.7em;color:var(--dim);margin-bottom:6px">Reform '+MATERIA_DUST_COST+' dust → fresh Lv1 materia of that planet.</div><div class="lab-materia" id="labDustList"></div>';
+      dustEl.innerHTML=dustHTML;
+      var dustList=document.getElementById('labDustList');
+      dustEntries.forEach(function(entry){
+        var p=PLANETS[entry.planetIdx];
+        var canReform=entry.count>=MATERIA_DUST_COST;
+        var color=PLANET_TO_ORB_COLOR[entry.planetIdx]||'blue';
+        var item=document.createElement('div');item.className='lab-mat-item';
+        // Use a "dust pile" frame as the visual.
+        item.innerHTML='<div class="mat-sym">'
+          +'<span class="materia-orb-wrap"><canvas class="materia-orb-pix" width="48" height="48" data-orb-color="'+color+'" data-orb-anim="dust" data-orb-frame="0" style="width:36px;height:36px;image-rendering:pixelated"></canvas></span>'
+          +'</div>'
+          +'<div class="mat-name">'+p.name+' Dust</div>'
+          +'<div style="font-size:0.7em;color:#aaa">'+entry.count+' / '+MATERIA_DUST_COST+'</div>'
+          +(canReform
+              ?'<div class="mat-sell" style="color:var(--gold)" onclick="reformMateria('+entry.planetIdx+')">Reform Lv1</div>'
+              :'<div class="mat-sell" style="color:var(--dim);cursor:default">Need '+(MATERIA_DUST_COST-entry.count)+' more</div>');
+        dustList.appendChild(item);
+      });
+    } else {
+      dustEl.innerHTML='';
+    }
+  }
+
   // ── Confirm button ──
   var totalS=0;var allFilled=true;var emptySlots=[];
-  ['LHand','Body','RHand'].forEach(function(pos){
+  EQUIP_SLOTS.forEach(function(pos){
     var g=run.equipped[pos];
     if(g)totalS+=g.sockets;
-    else{allFilled=false;emptySlots.push(pos==='LHand'?'Left':pos==='RHand'?'Right':'Body')}
+    else{allFilled=false;emptySlots.push(pos==='LHand'?'Left':pos==='RHand'?'Right':pos)}
   });
   var btn=document.getElementById('labConfirmBtn');
   var statusEl=document.querySelector('.lab-confirm-btn');
@@ -4959,18 +6513,67 @@ function craftSlot(source,idx,looseIdx){
   showCraftOverlay('Slot Materia','Inserting '+PLANETS[m.planetIdx].name+' Lv'+m.level+' into '+gear.name,'3☿',dc,function(){
     run.quicksilver-=3;
     var roll=Math.floor(Math.random()*20)+1;
-    if(roll===1){
-      // Crit fail: materia drops a level
-      m.level=Math.max(1,m.level-1);
-      return{success:false,crit:true,msg:'NAT 1! Rough handling — materia drops to Lv'+m.level+'. Still loose.'};
-    }
     if(roll>=dc){
       gear.materia.push({planetIdx:m.planetIdx,level:m.level,xp:m.xp});
       run.looseMateria.splice(looseIdx,1);
+      _playOrbAnimInResult('levelup', m.planetIdx);
       return{success:true,msg:'Roll: '+roll+' vs DC '+dc+' — '+PLANETS[m.planetIdx].name+' socketed!'};
     }
-    return{success:false,msg:'Roll: '+roll+' vs DC '+dc+' — Failed. Quicksilver wasted.'};
+    // Any failure crumbles the orb to dust. Dust granules = max(1, level).
+    var dustAmt=Math.max(1, m.level|0);
+    run.materiaDust[m.planetIdx]=(run.materiaDust[m.planetIdx]||0)+dustAmt;
+    run.looseMateria.splice(looseIdx,1);
+    _playOrbAnimInResult('crumble', m.planetIdx);
+    var critTag = (roll===1) ? 'NAT 1! ' : '';
+    return{success:false,crit:(roll===1),msg:critTag+'Roll: '+roll+' vs DC '+dc+' — '+PLANETS[m.planetIdx].name+' shattered into '+dustAmt+' dust.'};
   });
+}
+
+// Play a one-shot orb animation inside the craft result row. Used by the
+// slot/level paths to show what happened to the orb. Looks for a placeholder
+// `<div id="craftResultOrb"></div>` inside craftResult and replaces it.
+function _playOrbAnimInResult(animKey, planetIdx){
+  setTimeout(function(){
+    var holder=document.getElementById('craftResultOrb');
+    if(!holder)return;
+    var color=PLANET_TO_ORB_COLOR[planetIdx]||'blue';
+    var seq=ORB_FRAMES[animKey]||ORB_FRAMES.idle;
+    holder.innerHTML='<canvas class="materia-orb-pix" width="48" height="48" '
+      +'data-orb-color="'+color+'" data-orb-anim="'+animKey+'" data-orb-frame="0" '
+      +'style="width:64px;height:64px;image-rendering:pixelated"></canvas>';
+    var cv=holder.querySelector('canvas');
+    var frame=0;
+    var iv=setInterval(function(){
+      if(!cv.isConnected){clearInterval(iv);return}
+      frame++;
+      if(frame>=seq.length){
+        clearInterval(iv);
+        if(animKey==='crumble'){
+          // End on the dust pile, replacing the cracked-orb frame
+          cv.setAttribute('data-orb-anim','dust');
+        } else {
+          cv.setAttribute('data-orb-frame', String(seq.length-1));
+        }
+        renderOneOrb(cv);
+        return;
+      }
+      cv.setAttribute('data-orb-frame', String(frame));
+      renderOneOrb(cv);
+    }, 180);
+  },20);
+}
+
+// Reform Materia Dust → fresh Lv1 orb of the same planet. No d20 roll —
+// the dust IS the material, so the only gate is having MATERIA_DUST_COST
+// granules of the chosen planet.
+function reformMateria(planetIdx){
+  if(!run||!run.materiaDust)return;
+  var have=run.materiaDust[planetIdx]|0;
+  if(have<MATERIA_DUST_COST){alert('Not enough dust (need '+MATERIA_DUST_COST+').');return}
+  run.materiaDust[planetIdx]=have-MATERIA_DUST_COST;
+  if(run.materiaDust[planetIdx]<=0) delete run.materiaDust[planetIdx];
+  run.looseMateria.push({planetIdx:planetIdx, level:1, xp:0});
+  renderLab();
 }
 
 function craftLevel(looseIdx){
@@ -4986,12 +6589,15 @@ function craftLevel(looseIdx){
     var roll=Math.floor(Math.random()*20)+1;
     if(roll===1){
       m.level=Math.max(1,m.level-1);
+      _playOrbAnimInResult('crumble', m.planetIdx);
       return{success:false,crit:true,msg:'NAT 1! Purification reversed — dropped to Lv'+m.level+'.'};
     }
     if(roll>=dc){
       m.level=targetLvl;
+      _playOrbAnimInResult('levelup', m.planetIdx);
       return{success:true,msg:'Roll: '+roll+' vs DC '+dc+' — Ascended to Lv'+targetLvl+'!'};
     }
+    _playOrbAnimInResult('idle', m.planetIdx);
     return{success:false,msg:'Roll: '+roll+' vs DC '+dc+' — Transmutation didn\'t take. Quicksilver wasted.'};
   });
 }
@@ -5013,7 +6619,9 @@ function execCraft(){
   var result=window._craftFn();window._craftFn=null;
   var el=document.getElementById('craftResult');
   el.style.display='block';el.className='craft-result '+(result.success?'success':'fail');
-  el.textContent=result.msg;
+  // Render the message above an orb placeholder. _playOrbAnimInResult fills
+  // the placeholder via setTimeout so it picks up the just-mounted DOM node.
+  el.innerHTML='<div style="text-align:center"><div id="craftResultOrb" style="margin:6px auto 4px;height:64px;display:flex;align-items:center;justify-content:center"></div><div>'+result.msg+'</div></div>';
   // Replace buttons with close
   var btns=document.querySelector('.craft-btns');
   btns.innerHTML='<button onclick="closeCraft()" style="border-color:var(--gold);color:var(--gold)">Close</button>';
@@ -5030,7 +6638,7 @@ function showUnslotPicker(labIdx){
     var p=PLANETS[m.planetIdx];
     var dc=8+m.level*2;
     html+='<div style="text-align:center;cursor:pointer;padding:6px 8px;border:1px solid '+p.col+'40;border-radius:8px;background:rgba(255,255,255,0.02)" onclick="cancelCraft();craftUnslot(\'lab\','+labIdx+','+mi+')">';
-    html+='<div style="font-size:1.2em;color:'+p.col+'">'+p.sym+'</div>';
+    html+='<div>'+materiaOrbHTML(m.planetIdx, m.level, {size:32, click:false})+'</div>';
     html+='<div style="font-size:0.7em;color:var(--dim)">'+p.name+' Lv'+m.level+'</div>';
     html+='<div style="font-size:0.6em;color:var(--muted)">DC '+dc+'</div>';
     html+='</div>';
@@ -5054,7 +6662,7 @@ function showSlotPicker(source,idx){
   run.looseMateria.forEach(function(m,mi){
     var p=PLANETS[m.planetIdx];
     html+='<div style="text-align:center;cursor:pointer;padding:6px 8px;border:1px solid '+p.col+'40;border-radius:8px;background:rgba(255,255,255,0.02)" onclick="cancelCraft();craftSlot(\''+source+'\',\''+idx+'\','+mi+')">';
-    html+='<div style="font-size:1.2em;color:'+p.col+'">'+p.sym+'</div>';
+    html+='<div>'+materiaOrbHTML(m.planetIdx, m.level, {size:32, click:false})+'</div>';
     html+='<div style="font-size:0.7em;color:var(--dim)">'+p.name+' Lv'+m.level+'</div>';
     html+='</div>';
   });
@@ -5074,7 +6682,7 @@ function showEqUnslotPicker(pos){
     var p=PLANETS[m.planetIdx];
     var dc=8+m.level*2;
     html+='<div style="text-align:center;cursor:pointer;padding:6px 8px;border:1px solid '+p.col+'40;border-radius:8px;background:rgba(255,255,255,0.02)" onclick="cancelCraft();craftUnslot(\'eq\',\''+pos+'\','+mi+')">';
-    html+='<div style="font-size:1.2em;color:'+p.col+'">'+p.sym+'</div>';
+    html+='<div>'+materiaOrbHTML(m.planetIdx, m.level, {size:32, click:false})+'</div>';
     html+='<div style="font-size:0.7em;color:var(--dim)">'+p.name+' Lv'+m.level+'</div>';
     html+='<div style="font-size:0.6em;color:var(--muted)">DC '+dc+'</div>';
     html+='</div>';
@@ -5087,11 +6695,12 @@ function showEqUnslotPicker(pos){
 
 // ═══ CONFIRM LOADOUT ═══
 function confirmLoadout(){
-  var allFilled=run.equipped.LHand&&run.equipped.Body&&run.equipped.RHand;
+  var allFilled = EQUIP_SLOTS.every(function(s){ return !!run.equipped[s]; });
   if(!allFilled){alert('Fill all three gear slots before proceeding.');return}
   run.round++;
   if(run.round>TOTAL_ROUNDS){showVictoryScreen();return}
-  startVS();
+  if (run.mode === 'action') startActionArena();
+  else startVS();
 }
 function forfeitRun(){
   if(!confirm('Abandon this run? All progress will be lost.'))return;
@@ -5122,9 +6731,11 @@ function saveChampion(){
     appearanceSeed:run.appearanceSeed,
     appearance:run.appearance?JSON.parse(JSON.stringify(run.appearance)):null,
     gear:{
+      Head:run.equipped.Head?JSON.parse(JSON.stringify(run.equipped.Head)):null,
       LHand:run.equipped.LHand?JSON.parse(JSON.stringify(run.equipped.LHand)):null,
       Body:run.equipped.Body?JSON.parse(JSON.stringify(run.equipped.Body)):null,
-      RHand:run.equipped.RHand?JSON.parse(JSON.stringify(run.equipped.RHand)):null
+      RHand:run.equipped.RHand?JSON.parse(JSON.stringify(run.equipped.RHand)):null,
+      Lower:run.equipped.Lower?JSON.parse(JSON.stringify(run.equipped.Lower)):null
     },
     meta:{
       quicksilverEarned:run.quicksilver,
@@ -5153,10 +6764,10 @@ function showPantheon(){
     var cvId='panthCv_'+i;
     // Build gear socket display
     var gearHTML='';
-    ['LHand','Body','RHand'].forEach(function(pos){
+    EQUIP_SLOTS.forEach(function(pos){
       var g=c.gear[pos];if(!g)return;
       gearHTML+='<span style="display:inline-flex;align-items:center;gap:1px;margin-right:4px">';
-      gearHTML+='<span style="font-size:0.85em">'+g.icon+'</span>';
+      gearHTML+='<span style="font-size:0.85em">'+gearIconHTML(g,{size:16,slot:pos})+'</span>';
       g.materia.forEach(function(m,mi){
         if(mi>0&&mi<=g.links)gearHTML+='<span style="width:4px;height:2px;display:inline-block;background:var(--gold)"></span>';
         else if(mi>0)gearHTML+='<span style="width:4px;height:2px;display:inline-block;background:#2a2a34"></span>';
@@ -5251,7 +6862,7 @@ function showMatDetail(planetIdx,level,xp){
     'In <span style="color:#888">Body</span>: passive bonuses</div>';
 
   var panel=document.getElementById('matDetailPanel');
-  panel.innerHTML='<div class="md-sym" style="color:'+p.col+'">'+p.sym+'</div>'+
+  panel.innerHTML='<div class="md-sym">'+materiaOrbHTML(planetIdx, level, {size:64, click:false, xp:xp})+'</div>'+
     '<div class="md-name" style="color:'+p.col+'">'+p.name+'</div>'+
     '<div class="md-planet">'+p.planet+' — '+p.desc+'</div>'+
     '<div class="md-level">Level <strong>'+level+'</strong>'+(level>=MATERIA_MAX_LVL?' (MAX)':' / '+MATERIA_MAX_LVL)+'</div>'+

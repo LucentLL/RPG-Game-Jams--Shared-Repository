@@ -1,0 +1,17 @@
+/* ═══ STAT ROLL SCREEN ═══ */
+#statScreen{align-items:center;justify-content:center;padding:20px;text-align:center}
+.stat-reveal{max-width:400px;width:90vw}
+.stat-reveal h2{font-family:'Cinzel',serif;font-size:1.2em;letter-spacing:0.2em;color:#e8e0d0;margin-bottom:16px}
+.roll-grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:16px}
+.roll-item{background:var(--card);border:1px solid var(--border);border-radius:8px;padding:12px 8px;text-align:center;transition:all 0.5s;opacity:0;transform:translateY(10px)}
+.roll-item.revealed{opacity:1;transform:translateY(0)}
+.roll-item .roll-val{font-size:1.6em;font-weight:700;color:#e8e0d0;font-family:'Cinzel',serif}
+.roll-item .roll-lbl{font-size:0.75em;color:var(--muted);margin-top:2px}
+.roll-item .roll-mod{font-size:0.8em;color:var(--gold)}
+.derived-stats{display:flex;gap:10px;justify-content:center;flex-wrap:wrap;margin:12px 0;font-size:0.85em}
+.derived-stats span{background:rgba(212,168,67,0.08);border:1px solid rgba(212,168,67,0.2);padding:4px 12px;border-radius:6px;color:var(--gold)}
+.sprite-preview{margin:12px 0}
+.sprite-preview canvas{image-rendering:pixelated;border-radius:8px;background:#08080d}
+.reroll-btn{padding:10px 28px;background:transparent;border:1px solid var(--dim);color:var(--dim);border-radius:8px;font-size:0.85em;margin-right:8px}
+.reroll-btn:hover{border-color:var(--text);color:var(--text)}
+

@@ -1,0 +1,11 @@
+/* ═══ TITLE SCREEN ═══ */
+#titleScreen{align-items:center;justify-content:center;padding:20px;text-align:center}
+.title-logo{font-family:'Cinzel',serif;font-size:2em;letter-spacing:0.3em;color:#e8e0d0;margin-bottom:4px;text-shadow:0 0 40px rgba(212,168,67,0.3)}
+.title-sub{font-size:0.85em;color:var(--muted);letter-spacing:0.15em;margin-bottom:30px;font-style:italic}
+.title-btn{padding:16px 48px;background:linear-gradient(135deg,#2a1a0a,#3a2a10);border:2px solid var(--gold);color:var(--gold);font-family:'Cinzel',serif;font-size:1.1em;letter-spacing:0.2em;border-radius:10px;transition:all 0.3s;margin:6px;display:block;width:min(320px,85vw)}
+.title-btn:hover{background:linear-gradient(135deg,#3a2a10,#4a3a18);transform:scale(1.03);box-shadow:0 0 25px rgba(212,168,67,0.25)}
+.title-btn.secondary{border-color:var(--dim);color:var(--dim);font-size:0.9em;padding:12px 36px}
+.title-btn.secondary:hover{border-color:var(--silver);color:var(--silver)}
+.pantheon-preview{margin-top:30px;font-size:0.8em;color:var(--dim)}
+.pantheon-preview .champ{background:var(--card);border:1px solid var(--border);border-radius:8px;padding:8px 14px;margin:4px 0;text-align:left;max-width:320px;display:inline-block}
+

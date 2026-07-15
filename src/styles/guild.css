@@ -1,0 +1,618 @@
+/* ═══ HEROES GUILD (management) ═══ */
+/* Landscape frame: a fixed-height hall that never scrolls as a whole — only the
+   right-hand room stage scrolls. Rail on the left, room content on the right. */
+#guildScreen { align-items: stretch; padding: 0; overflow: hidden; height: 100vh; height: 100dvh; }
+/* render() writes the room-hub into this child host (sibling of the ranch view);
+   display:contents keeps .guild-hall behaving as a direct child of #guildScreen. */
+.guild-hall-host { display: contents; }
+.guild-hall-host[hidden] { display: none; }
+.guild-hall { display: flex; flex-direction: row; width: 100%; height: 100vh; height: 100dvh; overflow: hidden; }
+/* Dark backdrop when the app goes fullscreen. toggleFullscreen() promotes <html>,
+   so match #guildScreen as a descendant of the fullscreen root (not itself). */
+:fullscreen #guildScreen, :-webkit-full-screen #guildScreen { height: 100vh; background: var(--bg); }
+
+/* --- left rail (persistent room nav) --- */
+.room-rail {
+  flex: 0 0 clamp(140px, 21vw, 224px); min-width: 0;
+  display: flex; flex-direction: column; gap: 5px;
+  overflow-y: auto; padding: 8px 7px; border-right: 1px solid var(--border);
+  background: rgba(0, 0, 0, 0.28);
+}
+.rail-top { border: 1px solid var(--border); background: var(--card); border-radius: 9px; padding: 8px 9px; margin-bottom: 3px; }
+.rail-title { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
+.rail-title .guild-name { font-size: 0.9em; line-height: 1.15; overflow: hidden; text-overflow: ellipsis; }
+.rail-topbtns { display: flex; gap: 4px; flex: 0 0 auto; }
+.rail-topbtns .guild-back { padding: 4px 7px; font-size: 0.82em; }
+.rail-top .guild-meta { gap: 8px; margin-top: 6px; flex-wrap: wrap; font-size: 0.76em; }
+
+.rail-rooms { display: flex; flex-direction: column; gap: 4px; }
+.room-chip {
+  display: flex; align-items: center; gap: 8px; text-align: left; width: 100%;
+  border: 1px solid var(--border); background: rgba(0, 0, 0, 0.22); border-radius: 8px;
+  padding: 7px 9px; color: var(--text); transition: border-color 0.15s, background 0.15s;
+}
+.room-chip:hover { border-color: var(--dim); }
+.room-chip.on { border-color: var(--gold); background: linear-gradient(135deg, #2a1a0a, #3a2a10); }
+.room-chip.locked { opacity: 0.6; }
+.hub-chip { margin-bottom: 2px; }
+.rc-glyph { font-size: 1.1em; flex: 0 0 auto; width: 20px; text-align: center; }
+.rc-body { display: flex; flex-direction: column; min-width: 0; }
+.rc-name { font-family: 'Cinzel', serif; font-size: 0.86em; color: #e8e0d0; }
+.rail-status { font-size: 0.68em; color: var(--dim); font-style: italic; }
+.rail-advance {
+  margin-top: auto; width: 100%; padding: 11px 6px; font-size: 0.78em; letter-spacing: 0.08em;
+  display: flex; flex-direction: column; align-items: center; gap: 1px;
+}
+.rail-advance .ra-cost { font-size: 0.82em; color: var(--danger); letter-spacing: 0; }
+
+/* --- right stage (the one scroll region) --- */
+/* Density pass (owner feedback): the management screens read too small/sparse —
+   bump the stage's base size so every em-based card, list, and label scales up,
+   and cap line length so wide monitors don't stretch cards into ribbons. */
+.room-stage { flex: 1 1 auto; min-width: 0; overflow-y: auto; padding: 14px 16px 32px; font-size: 1.14em; }
+.room-stage > * { max-width: 880px; margin-left: auto; margin-right: auto; }
+.room-rail { font-size: 1.06em; }
+
+/* --- hub (room grid) --- */
+.hub-head { font-family: 'Cinzel', serif; color: var(--gold); font-size: 0.9em; letter-spacing: 0.06em; margin: 4px 2px 12px; text-align: center; }
+.room-hub { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.room-tile {
+  display: flex; flex-direction: column; align-items: center; gap: 3px; text-align: center;
+  border: 1px solid var(--border); background: linear-gradient(160deg, rgba(25, 20, 12, 0.6), rgba(0, 0, 0, 0.3));
+  border-radius: 12px; padding: 16px 8px; color: var(--text); transition: transform 0.15s, border-color 0.15s, box-shadow 0.15s;
+}
+.room-tile:hover { border-color: var(--gold); transform: translateY(-2px); box-shadow: 0 4px 16px rgba(212, 168, 67, 0.14); }
+.room-tile.locked { opacity: 0.55; }
+.room-tile.locked:hover { border-color: var(--border); transform: none; box-shadow: none; }
+.rt-glyph { font-size: 1.9em; line-height: 1.1; }
+.rt-name { font-family: 'Cinzel', serif; font-size: 0.94em; color: #e8e0d0; }
+.rt-tag { font-size: 0.56em; letter-spacing: 0.16em; color: var(--gold); opacity: 0.75; }
+.rt-status { font-size: 0.68em; color: var(--dim); font-style: italic; }
+
+/* --- room content --- */
+.room-jobline { font-size: 0.82em; color: var(--muted); margin: 4px 0 12px; }
+.room-jobline b { color: var(--text); }
+.room-cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 270px), 1fr)); gap: 12px; align-items: start; }
+.room-cols .plan-card { margin-bottom: 0; }
+.hero-switch { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
+.hs-chip {
+  width: 48px; height: 48px; flex: 0 0 48px; border: 1px solid var(--border); border-radius: 9px;
+  background: radial-gradient(circle at 50% 35%, #2a2018, #0c0c10); color: var(--text); font-size: 1.05em;
+  display: flex; align-items: center; justify-content: center; transition: border-color 0.15s;
+}
+.hs-chip.sel { border-color: var(--gold); box-shadow: 0 0 8px rgba(212, 168, 67, 0.2); }
+.hs-chip.add { border-style: dashed; opacity: 0.8; }
+.hs-chip.add:hover { border-color: var(--gold); opacity: 1; }
+.dept-lbl { font-size: 0.72em; color: var(--muted); letter-spacing: 0.06em; margin: 2px 0 6px; text-transform: uppercase; font-family: 'Cinzel', serif; }
+.dept-lbl.add { color: var(--gold); margin-top: 6px; }
+.room-soon { text-align: center; padding: 32px 16px; }
+.room-soon-glyph { font-size: 3em; opacity: 0.5; margin-bottom: 6px; }
+
+/* --- character sprites (Elements engine) --- */
+.hero-sprite { width: 100%; height: 100%; display: block; image-rendering: pixelated; image-rendering: crisp-edges; }
+.rr-portrait, .hs-chip, .rc-portrait, .rr-portrait.sm { overflow: hidden; padding: 0; }
+.rc-portrait { width: 78px; height: 78px; flex: 0 0 78px; border: 1px solid var(--gold); border-radius: 10px;
+  background: radial-gradient(circle at 50% 30%, #2a2018, #0c0c10); }
+.recruit-card { align-items: center; }
+
+/* --- role banner (per-room job identity) --- */
+.role-banner { font-size: 0.8em; color: var(--muted); margin: 0 2px 12px; padding: 6px 11px;
+  border-left: 2px solid var(--gold); background: rgba(212, 168, 67, 0.05); border-radius: 0 7px 7px 0; }
+.role-name { font-family: 'Cinzel', serif; color: var(--gold); letter-spacing: 0.03em; }
+
+/* --- landscape tuning --- */
+/* Narrow stage (phone landscape ~500px stage): hub drops to 2 columns. */
+@media (max-width: 680px) { .room-hub { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px; } .room-tile { padding: 13px 6px; } .rt-name { font-size: 0.84em; } }
+/* Short viewport (phone landscape ~375px tall): collapse chip subtitles so all rooms fit. */
+@media (max-height: 430px) {
+  .rail-status { display: none; }
+  .room-rail { flex-basis: clamp(120px, 18vw, 180px); }
+  .rt-glyph { font-size: 1.5em; }
+  .room-tile { padding: 10px 5px; }
+  .rail-advance { padding: 8px 5px; }
+}
+
+.guild-topbar {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap;
+  border: 1px solid var(--border); background: var(--card); border-radius: 10px; padding: 10px 14px; margin-bottom: 14px;
+}
+.guild-name { font-family: 'Cinzel', serif; color: var(--gold); letter-spacing: 0.08em; font-size: 1.02em; }
+.guild-meta { display: flex; gap: 14px; font-size: 0.82em; color: var(--muted); }
+.guild-meta b { color: var(--text); }
+.guild-back { border: 1px solid var(--dim); color: var(--dim); background: transparent; border-radius: 8px; padding: 6px 12px; font-size: 0.78em; }
+.guild-back:hover { border-color: var(--silver); color: var(--silver); }
+
+.hero-card, .plan-card { border: 1px solid var(--border); background: var(--card); border-radius: 12px; padding: 16px; margin-bottom: 14px; }
+
+.hero-top { display: flex; align-items: center; gap: 14px; margin-bottom: 14px; }
+.hero-portrait {
+  width: 72px; height: 72px; flex: 0 0 72px; border: 2px solid var(--gold); border-radius: 12px;
+  display: flex; align-items: center; justify-content: center; font-size: 2em;
+  background: radial-gradient(circle at 50% 35%, #2a2018, #0c0c10);
+  box-shadow: inset 0 0 18px rgba(212, 168, 67, 0.15);
+}
+.hero-name { font-family: 'Cinzel', serif; font-size: 1.15em; color: #e8e0d0; }
+.hero-sub { font-size: 0.78em; color: var(--muted); font-style: italic; margin: 2px 0 4px; }
+.hero-power { font-size: 0.82em; color: var(--gold); font-family: 'Cinzel', serif; }
+
+.stat-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 14px; }
+.stat-cell { border: 1px solid var(--border); border-radius: 8px; padding: 8px 4px; text-align: center; background: rgba(0, 0, 0, 0.22); }
+.stat-cell .k { font-size: 0.66em; color: var(--muted); letter-spacing: 0.12em; }
+.stat-cell .v { font-family: 'Cinzel', serif; font-size: 1.3em; color: var(--text); line-height: 1.3; }
+.stat-cell .d { font-size: 0.72em; color: var(--success); height: 1em; }
+.stat-cell .cap { font-size: 0.5em; color: var(--dim); font-family: 'Cormorant Garamond', serif; }
+.statbar { height: 4px; border-radius: 3px; background: rgba(0, 0, 0, 0.45); overflow: hidden; margin: 3px 0 1px; }
+.statbar span { display: block; height: 100%; border-radius: 3px; background: linear-gradient(90deg, var(--gold), #e8dff0); transition: width 0.4s ease; }
+
+.cond-row { margin-bottom: 8px; }
+.cond-row .lbl { display: flex; justify-content: space-between; font-size: 0.72em; color: var(--muted); margin-bottom: 3px; letter-spacing: 0.05em; }
+.cond-track { height: 8px; border-radius: 5px; background: rgba(0, 0, 0, 0.45); overflow: hidden; }
+.cond-fill { height: 100%; border-radius: 5px; transition: width 0.4s ease; }
+
+/* ── EO-style room scene banners ─────────────────────────────────────────────
+   Each room opens on an illustrated strip (Etrian Odyssey town-facility style):
+   a mood-gradient interior, a giant watermark glyph, this week's workers standing
+   at the counter, and one line of flavor. */
+.room-scene { position: relative; height: 118px; border: 1px solid var(--border); border-radius: 12px;
+  overflow: hidden; margin-bottom: 10px; background: linear-gradient(165deg, var(--sc-a, #1c1824), var(--sc-b, #100d14));
+  box-shadow: inset 0 -30px 40px rgba(0, 0, 0, 0.4); }
+.rs-glyph { position: absolute; right: -6px; bottom: -18px; font-size: 6.2em; opacity: 0.14;
+  filter: saturate(0.6); pointer-events: none; line-height: 1; }
+.rs-text { position: absolute; top: 10px; left: 14px; right: 90px; }
+.rs-name { font-family: 'Cinzel', serif; color: var(--gold); letter-spacing: 0.12em; font-size: 0.92em; text-transform: uppercase;
+  text-shadow: 0 2px 6px rgba(0, 0, 0, 0.7); }
+.rs-flavor { font-style: italic; color: var(--muted); font-size: 0.8em; margin-top: 3px;
+  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.8); }
+.rs-floor { position: absolute; left: 0; right: 0; bottom: 0; height: 26px;
+  background: linear-gradient(180deg, rgba(0, 0, 0, 0.14), rgba(0, 0, 0, 0.5)); border-top: 1px solid rgba(255, 255, 255, 0.05); }
+/* Cropped-sheet pixel art (src/guild/art.js) — sized by width OR height + aspect-ratio. */
+.px-art { display: block; background-repeat: no-repeat; image-rendering: pixelated; }
+/* Real furniture standing in the scene banner (right side, behind the workers). */
+.rs-artrow { position: absolute; right: 12px; bottom: 26px; height: 74px;
+  display: flex; align-items: flex-end; gap: 10px; pointer-events: none;
+  filter: drop-shadow(0 3px 4px rgba(0, 0, 0, 0.55)); }
+.rs-workers { position: absolute; left: 12px; bottom: 2px; display: flex; align-items: flex-end; gap: 2px; }
+.rs-worker canvas { display: block; width: 52px; height: 52px; image-rendering: pixelated;
+  filter: drop-shadow(0 3px 3px rgba(0, 0, 0, 0.55)); }
+.rs-empty { color: var(--dim); font-style: italic; font-size: 0.75em; padding-bottom: 8px; }
+/* per-room interiors */
+.scene-forge      { --sc-a: #3a1f12; --sc-b: #16090a; } .scene-forge .rs-floor { box-shadow: 0 -6px 24px rgba(255, 120, 30, 0.18); }
+.scene-library    { --sc-a: #33261a; --sc-b: #171009; }
+.scene-apothecary { --sc-a: #16301f; --sc-b: #0a140e; }
+.scene-laboratory { --sc-a: #241a38; --sc-b: #0f0a18; }
+.scene-kitchen    { --sc-a: #382a14; --sc-b: #170f08; }
+.scene-armory     { --sc-a: #1e2632; --sc-b: #0c1016; }
+.scene-arena      { --sc-a: #383014; --sc-b: #16120a; }
+.scene-calendar   { --sc-a: #1a2038; --sc-b: #0a0c16; }
+.scene-roster     { --sc-a: #301a20; --sc-b: #140a0e; }
+.scene-quarters   { --sc-a: #322416; --sc-b: #140e08; }
+.scene-grounds    { --sc-a: #14282e; --sc-b: #0a1114; }
+
+/* ═══ Living room INTERIORS (dioramas) — a full illustrated room with the
+   assigned member animated inside (rooms.js). Side-view stage: a back WALL,
+   a FLOOR plane, bottom-anchored PROPS from the art library, and one animated
+   canvas per worker. Reuses each room's --sc-a/--sc-b tint. ═══ */
+.room-diorama { position: relative; max-width: 860px; height: 246px; margin: 0 auto 12px;
+  border: 1px solid var(--border); border-radius: 12px; overflow: hidden;
+  background: linear-gradient(180deg, var(--sc-b, #100d14), var(--sc-a, #1c1824) 62%);
+  box-shadow: inset 0 -40px 60px rgba(0, 0, 0, 0.45), 0 6px 20px rgba(0, 0, 0, 0.4); }
+/* Back wall: a slightly lighter panel with a faint brick/plaster wash. */
+.rdi-wall { position: absolute; left: 0; right: 0; top: 0; height: 60%;
+  background:
+    repeating-linear-gradient(90deg, transparent 0 46px, rgba(0,0,0,0.14) 46px 48px),
+    linear-gradient(180deg, rgba(255,255,255,0.05), rgba(0,0,0,0.12));
+  border-bottom: 2px solid rgba(0, 0, 0, 0.35); }
+/* Floor plane: a warm receding gradient with a plank/tile wash + a highlight
+   line where it meets the wall (the baseboard). */
+.rdi-floor { position: absolute; left: 0; right: 0; bottom: 0; height: 40%;
+  background:
+    repeating-linear-gradient(90deg, rgba(0,0,0,0.10) 0 1px, transparent 1px 54px),
+    linear-gradient(180deg, color-mix(in srgb, var(--sc-a, #1c1824) 70%, #3a2c1c) 0%, rgba(0,0,0,0.5) 100%);
+  box-shadow: inset 0 3px 0 rgba(255, 220, 170, 0.06); }
+.rdi-caption { position: absolute; top: 9px; left: 13px; right: 13px; z-index: 200; pointer-events: none; }
+.rdi-title { font-family: 'Cinzel', serif; color: var(--gold); letter-spacing: 0.12em; font-size: 0.9em;
+  text-transform: uppercase; text-shadow: 0 2px 6px rgba(0, 0, 0, 0.8); }
+.rdi-flavor { display: block; font-style: italic; color: var(--muted); font-size: 0.78em; margin-top: 2px;
+  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.9); }
+.rdi-stage { position: absolute; inset: 0; }
+/* Props: bottom-anchored, centered on their x. .rdi-art is the px-art sprite. */
+.rdi-prop { position: absolute; transform: translateX(-50%); pointer-events: none;
+  filter: drop-shadow(0 3px 3px rgba(0, 0, 0, 0.5)); }
+.rdi-prop .rdi-art { display: block; width: 100%; }
+/* Workers: a scaled 96px canvas standing on the floor, a soft contact shadow,
+   and a name that fades in on hover. */
+.rdi-actor { position: absolute; transform: translateX(-50%);
+  display: flex; flex-direction: column; align-items: center; }
+.rdi-actor::after { content: ''; position: absolute; bottom: 4px; left: 50%; transform: translateX(-50%);
+  width: 46px; height: 12px; border-radius: 50%;
+  background: radial-gradient(ellipse, rgba(0, 0, 0, 0.5), transparent 70%); z-index: -1; }
+.rdi-cv { display: block; width: 98px; height: 98px; image-rendering: pixelated; }
+.rdi-name { font-family: 'Cinzel', serif; font-size: 0.62em; color: #e8e0d0; white-space: nowrap;
+  margin-top: -10px; text-shadow: 0 1px 3px #000, 0 0 4px #000; opacity: 0; transition: opacity 0.15s; }
+.rdi-actor:hover .rdi-name { opacity: 1; }
+.rdi-empty { position: absolute; left: 0; right: 0; bottom: 30%; text-align: center;
+  color: var(--dim); font-style: italic; font-size: 0.8em; z-index: 100; }
+
+.plan-title { font-family: 'Cinzel', serif; color: var(--gold); font-size: 0.78em; letter-spacing: 0.14em; margin-bottom: 8px; text-transform: uppercase; }
+.opt-list { display: flex; flex-direction: column; gap: 6px; margin-bottom: 18px; }
+.opt {
+  position: relative; display: flex; justify-content: space-between; align-items: center; gap: 10px; text-align: left;
+  border: 1px solid var(--border); border-left: 3px solid var(--border);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.02), rgba(0, 0, 0, 0.26)); border-radius: 8px; padding: 11px 14px;
+  color: var(--text); font-size: 0.86em; transition: border-color 0.15s, background 0.15s, padding-left 0.15s;
+}
+/* EO menu feel: hover slides in a gold pointer and warms the accent bar */
+.opt:hover { border-color: var(--dim); border-left-color: var(--gold); padding-left: 22px; }
+.opt:hover::before { content: '▶'; position: absolute; left: 7px; color: var(--gold); font-size: 0.6em; }
+.opt.active { border-color: var(--gold); background: linear-gradient(135deg, #2a1a0a, #3a2a10); box-shadow: 0 0 12px rgba(212, 168, 67, 0.15); }
+.opt .o-name { font-weight: 600; }
+.opt .o-desc { font-size: 0.86em; color: var(--muted); font-style: italic; }
+.opt .o-cost { font-size: 0.74em; color: var(--gold); white-space: nowrap; }
+/* Arena bout rows — one row, two combat lenses (⚔ live / ♟ tactics) */
+.bout-btns { display: flex; gap: 6px; flex-shrink: 0; }
+.bout-btn { padding: 7px 12px; border: 1px solid var(--gold); background: rgba(212, 168, 67, 0.08); color: var(--gold);
+  border-radius: 8px; font-size: 0.82em; font-family: 'Cinzel', serif; letter-spacing: 0.04em; white-space: nowrap;
+  transition: background 0.15s; }
+.bout-btn:hover { background: rgba(212, 168, 67, 0.16); }
+.bout-btn.on { background: linear-gradient(135deg, #2a1a0a, #3a2a10); box-shadow: 0 0 10px rgba(212, 168, 67, 0.2); }
+.hof-row .o-desc { display: block; }
+/* Personality trait chips (K5) */
+.trait-row { display: flex; gap: 5px; flex-wrap: wrap; margin: -2px 0 8px; }
+.trait-chip { font-size: 0.68em; border: 1px solid var(--border); border-radius: 10px; padding: 2px 8px;
+  color: var(--muted); background: rgba(0, 0, 0, 0.25); letter-spacing: 0.04em; cursor: help; }
+.trait-line { display: flex; gap: 4px; margin-top: 2px; }
+/* Tournament card — the two play-lens opt-in buttons sit side by side */
+.tourney-lens { display: flex; gap: 6px; }
+.tourney-lens .tourney-play { flex: 1; }
+.tourney-lens.quest-lens { margin-top: -8px; }
+.tourney-lens.quest-lens .tourney-play { margin-bottom: 6px; }
+
+/* The due-match lens chooser — a modal that pauses Advance Week mid-resolution
+   ("your fight is up — play it or simulate it?"). Sits above every screen. */
+.lens-overlay { position: fixed; inset: 0; z-index: 500; background: rgba(8, 8, 12, 0.78);
+  display: flex; align-items: center; justify-content: center; padding: 18px; }
+.lens-card { width: min(440px, 94vw); background: linear-gradient(160deg, #17131c, #100d14);
+  border: 1px solid var(--gold); border-radius: 14px; padding: 18px 18px 14px;
+  box-shadow: 0 12px 48px rgba(0, 0, 0, 0.6); display: flex; flex-direction: column; gap: 8px; }
+.lens-title { font-family: 'Cinzel', serif; color: var(--gold); font-size: 1.02em; letter-spacing: 0.08em; }
+.lens-sub { color: var(--text); font-size: 0.86em; margin-bottom: 4px; }
+.lens-btn { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; text-align: left;
+  padding: 10px 14px; border: 1px solid var(--gold); background: rgba(212, 168, 67, 0.08);
+  color: var(--gold); border-radius: 10px; font-family: 'Cinzel', serif; font-size: 0.88em;
+  letter-spacing: 0.05em; transition: background 0.15s, box-shadow 0.15s; }
+.lens-btn span { font-family: 'Cormorant Garamond', serif; font-size: 0.82em; color: var(--muted);
+  letter-spacing: 0; font-style: italic; }
+.lens-btn:hover { background: rgba(212, 168, 67, 0.16); box-shadow: 0 0 12px rgba(212, 168, 67, 0.15); }
+.lens-btn.sim { border-color: var(--border); color: var(--text); }
+.lens-remember { display: flex; align-items: center; gap: 7px; color: var(--muted); font-size: 0.76em;
+  margin-top: 4px; cursor: pointer; }
+.lens-remember .dim { color: var(--dim); }
+
+/* --- Tourney Board: the drawn ladder of named rivals (pre-match modal + calendar card) --- */
+.tb-card { width: min(520px, 96vw); max-height: 92dvh; overflow-y: auto; }
+.tb-ladder { display: flex; flex-direction: column; gap: 4px; margin: 4px 0 8px; }
+.tb-row { display: flex; align-items: center; gap: 9px; padding: 5px 8px;
+  background: rgba(255, 255, 255, 0.03); border: 1px solid var(--border); border-radius: 9px; }
+.tb-row.final { border-color: var(--gold); background: rgba(212, 168, 67, 0.07); }
+.tb-row.you { border-color: #8ab4d8; background: rgba(138, 180, 216, 0.08); margin-top: 6px; }
+.tb-round { flex: 0 0 64px; font-family: 'Cinzel', serif; font-size: 0.68em; color: var(--muted);
+  letter-spacing: 0.06em; text-align: right; }
+.tb-row.final .tb-round { color: var(--gold); }
+.tb-row.you .tb-round { color: #8ab4d8; }
+.tb-row .rr-portrait { flex: 0 0 auto; width: 44px; height: 44px; }
+.tb-main { display: flex; flex-direction: column; gap: 1px; min-width: 0; font-size: 0.86em; }
+.tb-main b { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tb-toggle { display: block; width: 100%; text-align: left; padding: 7px 10px; margin: 2px 0 6px;
+  background: rgba(255, 255, 255, 0.03); border: 1px dashed var(--border); border-radius: 9px;
+  color: var(--muted); font-size: 0.78em; letter-spacing: 0.04em; }
+.tb-toggle:hover { color: var(--gold); border-color: var(--gold); }
+
+/* --- The Weekly Assembly: the roster's week on one screen, praise/scold in hand --- */
+.assembly-overlay { position: fixed; inset: 0; z-index: 490; background: rgba(8, 8, 12, 0.82);
+  display: flex; align-items: flex-start; justify-content: center; padding: 18px; overflow-y: auto; }
+.assembly-card { width: min(860px, 96vw); margin: auto; background: linear-gradient(160deg, #17131c, #100d14);
+  border: 1px solid var(--gold); border-radius: 14px; padding: 18px;
+  box-shadow: 0 12px 48px rgba(0, 0, 0, 0.6); display: flex; flex-direction: column; gap: 8px; }
+.as-title { font-family: 'Cinzel', serif; color: var(--gold); font-size: 1.05em; letter-spacing: 0.08em; }
+.as-sub { color: var(--muted); font-size: 0.82em; font-style: italic; font-family: 'Cormorant Garamond', serif; }
+.as-event { font-size: 0.84em; color: var(--text); padding: 2px 0; }
+.as-event.dim, .as-event .dim { color: var(--dim); }
+.as-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 9px; margin: 6px 0; }
+.as-member { border: 1px solid var(--border); border-radius: 10px; padding: 9px 10px;
+  background: rgba(255, 255, 255, 0.025); display: flex; flex-direction: column; gap: 6px; }
+.as-member.as-retire { border-color: var(--gold); }
+.as-head { display: flex; align-items: center; gap: 8px; font-size: 0.92em; }
+.as-head .rr-portrait { width: 40px; height: 40px; flex: 0 0 40px; }
+.as-outcome { font-size: 0.8em; color: var(--muted); line-height: 1.35; }
+.as-badge { font-size: 0.72em; letter-spacing: 0.04em; padding: 3px 8px; border-radius: 9px;
+  border: 1px solid var(--border); align-self: flex-start; }
+.as-badge.exceeded { color: var(--gold); border-color: var(--gold); background: rgba(212, 168, 67, 0.1); }
+.as-badge.solid { color: var(--success); border-color: rgba(111, 191, 115, 0.5); }
+.as-badge.cheated { color: #e08a3c; border-color: #e08a3c; background: rgba(224, 138, 60, 0.08); }
+.as-badge.failed { color: var(--danger); border-color: rgba(200, 90, 90, 0.5); }
+.as-badge.dim { color: var(--dim); }
+.as-actions { display: flex; gap: 6px; margin-top: auto; }
+.as-actions button { flex: 1; padding: 7px 4px; border-radius: 8px; font-size: 0.76em;
+  font-family: 'Cinzel', serif; letter-spacing: 0.03em; border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.03); color: var(--muted); transition: background 0.15s; }
+.as-actions button:not([disabled]):hover { color: var(--gold); border-color: var(--gold);
+  background: rgba(212, 168, 67, 0.1); }
+.as-actions button[disabled] { opacity: 0.45; }
+.as-actions button.on { opacity: 1; color: var(--gold); border-color: var(--gold);
+  background: rgba(212, 168, 67, 0.12); }
+.as-note { font-size: 0.74em; color: var(--dim); font-style: italic; font-family: 'Cormorant Garamond', serif; }
+.as-close { margin-top: 4px; }
+
+.advance-btn {
+  width: 100%; padding: 14px; margin-top: 2px; background: linear-gradient(135deg, #2a1a0a, #3a2a10);
+  border: 2px solid var(--gold); color: var(--gold); font-family: 'Cinzel', serif; font-size: 1em;
+  letter-spacing: 0.15em; border-radius: 10px; transition: transform 0.2s, box-shadow 0.2s;
+}
+.advance-btn:hover { transform: scale(1.02); box-shadow: 0 0 20px rgba(212, 168, 67, 0.25); }
+
+.week-report { border: 1px solid var(--border); background: rgba(0, 0, 0, 0.28); border-radius: 10px; padding: 12px 14px; font-size: 0.82em; }
+.week-report h4 { font-family: 'Cinzel', serif; color: var(--gold); font-size: 0.82em; letter-spacing: 0.1em; margin-bottom: 6px; }
+.week-report .r-line { margin: 3px 0; color: var(--muted); }
+.week-report .up { color: var(--success); }
+.week-report .down { color: var(--danger); }
+.week-report .dim { color: var(--dim); }
+
+/* --- roster (multi-hero) --- */
+.notice { border: 1px solid var(--gold); background: rgba(212, 168, 67, 0.08); color: var(--gold);
+  border-radius: 8px; padding: 8px 12px; margin-bottom: 12px; font-size: 0.82em; text-align: center; }
+
+.roster-list { display: flex; flex-direction: column; gap: 7px; }
+.roster-row { display: flex; align-items: center; gap: 11px; text-align: left; width: 100%;
+  border: 1px solid var(--border); background: rgba(0, 0, 0, 0.22); border-radius: 10px; padding: 9px 12px;
+  color: var(--text); transition: border-color 0.15s, background 0.15s; }
+.roster-row:hover { border-color: var(--dim); }
+.roster-row.sel { border-color: var(--gold); background: linear-gradient(135deg, #241708, #33260e); }
+.rr-portrait { width: 58px; height: 58px; flex: 0 0 58px; border: 1px solid var(--gold); border-radius: 9px;
+  display: flex; align-items: center; justify-content: center; font-size: 1.2em;
+  background: radial-gradient(circle at 50% 35%, #2a2018, #0c0c10); }
+.rr-portrait.sm { width: 26px; height: 26px; flex: 0 0 26px; font-size: 0.9em; border-radius: 6px; }
+.rr-main { display: flex; flex-direction: column; gap: 2px; flex: 1 1 auto; min-width: 0; }
+.rr-name { font-family: 'Cinzel', serif; font-size: 0.92em; color: #e8e0d0; }
+.rr-sub { font-size: 0.82em; color: var(--muted); font-style: italic; font-family: 'Cormorant Garamond', serif; }
+.rr-assign { font-size: 0.76em; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rr-cond { display: flex; align-items: center; gap: 6px; font-size: 0.68em; color: var(--dim); }
+.rr-power { font-family: 'Cinzel', serif; font-size: 0.82em; color: var(--gold); white-space: nowrap; }
+.mini { display: inline-block; width: 42px; height: 5px; border-radius: 3px; background: rgba(0, 0, 0, 0.5); overflow: hidden; vertical-align: middle; }
+.mini-fill { display: block; height: 100%; border-radius: 3px; }
+
+.assign-head { display: flex; align-items: center; gap: 8px; font-size: 0.82em; color: var(--muted); margin-bottom: 12px; flex-wrap: wrap; }
+.assign-head b { color: var(--text); font-family: 'Cinzel', serif; }
+.hint { color: var(--dim); font-style: italic; text-align: center; padding: 10px; font-size: 0.86em; }
+
+.recruit-list { display: flex; flex-direction: column; gap: 7px; }
+.recruit-card { display: flex; align-items: center; gap: 11px; border: 1px solid var(--border);
+  background: rgba(0, 0, 0, 0.22); border-radius: 10px; padding: 8px 12px; }
+.rc-info { display: flex; flex-direction: column; gap: 1px; flex: 1 1 auto; min-width: 0; }
+.rc-info b { font-family: 'Cinzel', serif; font-size: 0.9em; color: #e8e0d0; }
+.rc-hire { border: 1px solid var(--gold); color: var(--gold); background: transparent; border-radius: 8px;
+  padding: 7px 12px; font-size: 0.78em; white-space: nowrap; transition: background 0.15s; }
+.rc-hire:hover { background: rgba(212, 168, 67, 0.12); }
+.rc-hire.disabled { border-color: var(--border); color: var(--dim); pointer-events: none; opacity: 0.55; }
+
+/* --- forge / armory / equip --- */
+.activity-toggle { display: flex; gap: 6px; margin: 4px 0 14px; }
+.activity-toggle button { flex: 1; padding: 9px; border: 1px solid var(--border); background: rgba(0, 0, 0, 0.25);
+  color: var(--muted); border-radius: 8px; font-family: 'Cinzel', serif; font-size: 0.82em; letter-spacing: 0.08em; transition: all 0.15s; }
+.activity-toggle button.on { border-color: var(--gold); color: var(--gold); background: linear-gradient(135deg, #2a1a0a, #3a2a10); }
+
+.opt.lack { opacity: 0.5; }
+.opt.lack .o-cost { color: var(--danger); }
+
+.equipped { display: flex; flex-direction: column; gap: 5px; margin: 4px 0 12px; font-size: 0.82em; color: var(--text); }
+.equipped.none { color: var(--dim); font-style: italic; font-size: 0.78em; }
+.equipped .eq-q { color: var(--muted); font-size: 0.9em; }
+.eq-x { border: none; background: transparent; color: var(--dim); cursor: pointer; font-size: 0.9em; padding: 0 4px; }
+.eq-x:hover { color: var(--danger); }
+
+.materials { display: flex; flex-wrap: wrap; gap: 14px; font-size: 0.82em; color: var(--muted); margin-bottom: 12px; }
+.materials .mat b { font-family: 'Cinzel', serif; }
+.armory-shelf { display: flex; flex-direction: column; gap: 6px; }
+.armory-item { display: flex; align-items: center; gap: 10px; border: 1px solid var(--border); background: rgba(0, 0, 0, 0.22); border-radius: 8px; padding: 7px 11px; }
+.ai-icon { width: 26px; height: 26px; flex: 0 0 26px; border: 1px solid var(--border); border-radius: 6px; display: flex; align-items: center; justify-content: center; }
+.ai-main { display: flex; flex-direction: column; flex: 1 1 auto; min-width: 0; }
+.ai-main b { font-family: 'Cinzel', serif; font-size: 0.88em; color: #e8e0d0; }
+.ai-actions { display: flex; gap: 6px; flex: 0 0 auto; }
+.rc-hire.sell { border-color: var(--dim); color: var(--silver); }
+.rc-hire.sell:hover { border-color: var(--silver); background: rgba(184, 196, 208, 0.1); }
+
+.market-list { display: flex; flex-direction: column; gap: 6px; }
+.market-row { display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  border: 1px solid var(--border); background: rgba(0, 0, 0, 0.22); border-radius: 8px; padding: 8px 12px; }
+.mk-name { font-size: 0.88em; }
+.mk-name b { font-family: 'Cinzel', serif; }
+
+.skill-shape { font-size: 0.82em; color: var(--muted); margin-bottom: 10px; letter-spacing: 0.02em; }
+.skill-shape b { color: var(--gold); font-family: 'Cinzel', serif; }
+.activity-toggle { flex-wrap: wrap; }
+.activity-toggle button { min-width: 66px; }
+.activity-toggle button:disabled { opacity: 0.5; }
+.q-rank { font-size: 0.72em; color: var(--gold); border: 1px solid var(--border); border-radius: 4px; padding: 0 4px; }
+.quest-opt .o-cost { color: var(--success); }
+
+.intensity-toggle { display: flex; gap: 6px; margin-bottom: 8px; }
+.intensity-toggle button { flex: 1; padding: 7px; border: 1px solid var(--border); background: rgba(0, 0, 0, 0.25);
+  color: var(--muted); border-radius: 8px; font-size: 0.76em; font-family: 'Cinzel', serif; letter-spacing: 0.04em; }
+.intensity-toggle button.on { border-color: var(--gold); color: var(--gold); background: linear-gradient(135deg, #2a1a0a, #3a2a10); }
+.injury-flag { border: 1px solid var(--danger); background: rgba(239, 68, 68, 0.1); color: var(--danger);
+  border-radius: 8px; padding: 6px 10px; margin-bottom: 10px; font-size: 0.76em; text-align: center; }
+
+/* Plan-ahead training queue (Pillar B) */
+.sched-queue { display: flex; flex-wrap: wrap; gap: 5px; margin-bottom: 7px; min-height: 4px; }
+.sched-chip { display: inline-flex; align-items: center; gap: 5px; padding: 3px 4px 3px 9px; font-size: 0.72em;
+  color: #e8dfce; background: rgba(20, 16, 10, 0.6); border: 1px solid var(--dim); border-radius: 14px; }
+.sched-chip button { width: 17px; height: 17px; border-radius: 50%; border: 1px solid var(--border);
+  background: rgba(60, 20, 20, 0.6); color: #e8b0b0; font-size: 0.85em; line-height: 1; cursor: pointer; }
+.sched-chip button:hover { background: #7a1f1f; color: #fff; }
+.sched-add { display: flex; flex-wrap: wrap; gap: 5px; margin-bottom: 16px; }
+.sched-btn { padding: 4px 9px; font-size: 0.72em; font-family: 'Cinzel', serif; letter-spacing: 0.04em;
+  color: var(--silver); background: rgba(0, 0, 0, 0.28); border: 1px solid var(--border); border-radius: 8px; cursor: pointer; transition: all 0.12s; }
+.sched-btn:hover { border-color: var(--gold); color: var(--gold); }
+.sched-btn.clear { margin-left: auto; color: var(--muted); }
+.sched-btn.clear:hover { border-color: var(--danger); color: var(--danger); }
+
+/* Academy — the apprentice / farm-system pool */
+.app-take { display: block; width: 100%; padding: 9px; margin-bottom: 12px; font-family: 'Cinzel', serif; letter-spacing: 0.04em;
+  color: var(--gold); background: linear-gradient(135deg, #2a1a0a, #3a2a10); border: 1px solid var(--gold); border-radius: 8px; cursor: pointer; }
+.app-take:disabled { opacity: 0.5; cursor: not-allowed; color: var(--muted); border-color: var(--border); background: rgba(0, 0, 0, 0.25); }
+.app-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(220px, 100%), 1fr)); gap: 10px; }
+.app-card { border: 1px solid var(--border); border-radius: 10px; padding: 10px; background: rgba(0, 0, 0, 0.22); }
+.app-card.ready { border-color: var(--gold); box-shadow: inset 0 0 0 1px rgba(212, 168, 67, 0.25); }
+.app-head { display: flex; justify-content: space-between; align-items: center; gap: 6px; margin-bottom: 6px; }
+.app-lean { font-size: 0.82em; color: var(--text); }
+.app-stars { font-size: 0.78em; color: var(--gold); letter-spacing: 1px; white-space: nowrap; }
+.app-bar { height: 7px; border-radius: 4px; background: rgba(255, 255, 255, 0.08); overflow: hidden; margin-bottom: 5px; }
+.app-bar span { display: block; height: 100%; background: linear-gradient(90deg, #6b8f3a, #a8c84f); }
+.app-card.ready .app-bar span { background: linear-gradient(90deg, #b8902f, #e8c860); }
+.app-meta { font-size: 0.72em; color: var(--muted); margin-bottom: 8px; }
+.app-card.ready .app-meta b { color: var(--gold); }
+.app-actions { display: flex; gap: 6px; }
+.app-grad { flex: 1; padding: 7px; font-size: 0.74em; font-family: 'Cinzel', serif; letter-spacing: 0.03em;
+  color: var(--silver); background: rgba(0, 0, 0, 0.3); border: 1px solid var(--border); border-radius: 8px; cursor: pointer; }
+.app-card.ready .app-grad:not(:disabled) { color: var(--gold); border-color: var(--gold); background: linear-gradient(135deg, #2a1a0a, #3a2a10); }
+.app-grad:disabled { opacity: 0.55; cursor: not-allowed; }
+.app-drop { width: 30px; border: 1px solid var(--border); border-radius: 8px; background: rgba(40, 16, 16, 0.4); color: #d09090; cursor: pointer; }
+.app-drop:hover { background: #7a1f1f; color: #fff; }
+
+/* World Cup + the event stakes gradient */
+.tourney-card.worldcup { border-color: #c0504a; box-shadow: 0 0 0 1px rgba(226, 75, 74, 0.22), 0 6px 18px rgba(0, 0, 0, 0.4); }
+.worldcup-tag { color: #f0b8b0 !important; }
+.stakes-line { font-size: 0.72em; }
+.stakes-tournament { color: #8fc48f; }
+.stakes-major { color: #e0b060; }
+.stakes-worldcup { color: #e8908a; }
+
+/* ═══ THE GROUNDS (outdoors / compound view) ═══ */
+/* The illustrated compound: a sky+ground banner with stylized buildings sitting on
+   the ground line. 100% CSS/DOM — no canvas, no RAF, so it costs nothing on battery.
+   Each building is a button that enters its room; the Bunkhouse grows with tier. */
+.compound {
+  position: relative; width: 100%; height: clamp(150px, 30vh, 230px);
+  margin-bottom: 14px; border: 1px solid var(--border); border-radius: 12px; overflow: hidden;
+  background: linear-gradient(180deg, #0e1524 0%, #172033 42%, #3a3320 43%, #241d12 100%);
+}
+.compound::before { /* a faint moon/sun */
+  content: ''; position: absolute; top: 14px; right: 18px; width: 26px; height: 26px; border-radius: 50%;
+  background: radial-gradient(circle, rgba(230, 216, 170, 0.9), rgba(230, 216, 170, 0)); pointer-events: none;
+}
+.compound::after { /* the ground band */
+  content: ''; position: absolute; left: 0; right: 0; bottom: 0; height: 20%;
+  background: linear-gradient(180deg, #2b2416, #171009); border-top: 1px solid rgba(0, 0, 0, 0.5);
+}
+.compound-row {
+  position: absolute; left: 0; right: 0; bottom: 18%; height: 78%; z-index: 1; /* above the ::after ground band so labels show */
+  display: flex; align-items: flex-end; justify-content: center; gap: 3%; padding: 0 4%;
+}
+.building {
+  position: relative; flex: 1 1 0; min-width: 0; max-width: 15%;
+  display: flex; flex-direction: column; align-items: center; justify-content: flex-end;
+  background: transparent; border: none; padding: 0; cursor: pointer;
+  transition: transform 0.15s, filter 0.15s;
+}
+.building.wide { flex-grow: 1.7; max-width: 24%; }
+.building:hover, .building:focus-visible { transform: translateY(-3px); filter: brightness(1.18); outline: none; }
+.bld-roof {
+  width: 82%; height: 12px; flex: 0 0 auto; background: var(--roof, #6b4a2a);
+  clip-path: polygon(12% 100%, 0 100%, 50% 0, 100% 100%, 88% 100%); margin-bottom: -1px;
+}
+.bld-wall {
+  width: 100%; flex: 1 1 auto; min-height: 8px;
+  background: linear-gradient(180deg, var(--wall, #3a2e1f), var(--wall2, #241b12));
+  border: 1px solid rgba(0, 0, 0, 0.55); border-bottom: none; border-radius: 2px 2px 0 0;
+  display: flex; flex-direction: column; align-items: center; gap: 3px; padding: 5px 2px 0;
+  overflow: hidden; image-rendering: pixelated;
+}
+.bld-glyph { font-size: clamp(0.85em, 2.3vw, 1.35em); line-height: 1; filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.6)); }
+.bld-wins { display: flex; flex-wrap: wrap; gap: 3px; justify-content: center; }
+.bld-win { width: 5px; height: 6px; border-radius: 1px; background: rgba(240, 200, 90, 0.75); box-shadow: 0 0 4px rgba(240, 200, 90, 0.45); }
+.bld-label {
+  position: absolute; bottom: -15px; left: 50%; transform: translateX(-50%); white-space: nowrap;
+  font-size: 0.58em; color: var(--muted); font-family: 'Cinzel', serif; letter-spacing: 0.02em;
+}
+.bld-quarters { --roof: #7a5230; --wall: #4a3826; --wall2: #2c2013; }
+.bld-library  { --roof: #3f5170; --wall: #2c3346; --wall2: #1a1f2c; }
+.bld-hall     { --roof: #9a7326; --wall: #4a3a1c; --wall2: #2a2010; }
+.bld-forge    { --roof: #8a3a24; --wall: #4a2a1e; --wall2: #2a1712; }
+.bld-armory   { --roof: #4a4a5c; --wall: #2e2e3a; --wall2: #1c1c24; }
+.bld-kitchen  { --roof: #5a6a34; --wall: #333a22; --wall2: #1e2214; }
+
+/* capacity dashboard */
+.fac-note { font-size: 0.74em; color: var(--dim); margin: -4px 0 12px; font-style: italic; }
+.headcount { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.hc-cell { display: flex; flex-direction: column; align-items: center; gap: 2px; border: 1px solid var(--border);
+  border-radius: 8px; padding: 10px 4px; background: rgba(0, 0, 0, 0.22); text-align: center; }
+.hc-cell b { font-family: 'Cinzel', serif; font-size: 1.25em; color: var(--gold); line-height: 1.1; }
+.hc-cell span { font-size: 0.62em; color: var(--muted); letter-spacing: 0.05em; text-transform: uppercase; }
+.hs-more { display: inline-flex; align-items: center; padding: 0 6px; font-size: 0.8em; color: var(--dim); font-family: 'Cinzel', serif; }
+
+/* facility upgrade grid — 2-up on phones, more on desktop */
+.fac-hub { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 200px), 1fr)); gap: 12px; align-items: start; }
+.fac-hub .plan-card { margin-bottom: 0; }
+.fac-card { display: flex; flex-direction: column; }
+.fac-head { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+.fac-glyph { font-size: 1.3em; flex: 0 0 auto; }
+.fac-name { font-family: 'Cinzel', serif; color: #e8e0d0; font-size: 0.9em; flex: 1 1 auto; min-width: 0; }
+.fac-tier { font-size: 0.66em; color: var(--gold); border: 1px solid var(--border); border-radius: 5px; padding: 1px 6px; white-space: nowrap; }
+.fac-desc { font-size: 0.78em; color: var(--muted); font-style: italic; margin-bottom: 8px; line-height: 1.35; }
+.fac-now { font-size: 0.8em; color: var(--text); margin-bottom: 10px; }
+.fac-now b { color: var(--gold); font-family: 'Cinzel', serif; font-size: 0.92em; }
+.fac-action { margin-top: auto; }
+.fac-action .rc-hire { width: 100%; text-align: center; }
+.fac-max { display: block; text-align: center; font-size: 0.76em; color: var(--gold);
+  padding: 7px; border: 1px dashed var(--border); border-radius: 8px; }
+
+/* short viewport (phone landscape): shrink the scene so the dashboard stays reachable */
+@media (max-height: 430px) { .compound { height: clamp(120px, 26vh, 170px); } .bld-label { font-size: 0.52em; } }
+
+/* ═══ CALENDAR / TOURNAMENTS (the season) ═══ */
+.hub-tourney {
+  display: flex; align-items: center; gap: 8px; width: 100%; text-align: left; flex-wrap: wrap;
+  border: 1px solid var(--gold); border-radius: 9px; padding: 8px 12px; margin: 0 0 12px;
+  background: linear-gradient(135deg, rgba(42, 26, 10, 0.7), rgba(58, 42, 16, 0.5)); color: var(--text);
+  font-size: 0.86em; transition: box-shadow 0.15s;
+}
+.hub-tourney:hover { box-shadow: 0 0 12px rgba(212, 168, 67, 0.2); }
+.hub-tourney b { font-family: 'Cinzel', serif; color: #e8e0d0; flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hub-tourney .q-rank { flex: 0 0 auto; }
+.hub-tourney-when { margin-left: auto; color: var(--gold); font-size: 0.9em; white-space: nowrap; flex: 0 0 auto; }
+
+.tourney-card { border-color: rgba(212, 168, 67, 0.35); }
+.tourney-card.imminent { border-color: var(--gold); box-shadow: 0 0 14px rgba(212, 168, 67, 0.14); }
+.tourney-head { display: flex; align-items: center; gap: 8px; margin-bottom: 7px; }
+.tourney-name { font-family: 'Cinzel', serif; color: var(--gold); font-size: 0.98em; flex: 1 1 auto; min-width: 0; }
+.tourney-when {
+  font-size: 0.72em; color: var(--gold); border: 1px solid var(--gold); border-radius: 6px;
+  padding: 2px 8px; white-space: nowrap; background: rgba(212, 168, 67, 0.08);
+}
+.tourney-card.imminent .tourney-when { background: var(--gold); color: #1a1206; font-weight: 600; }
+.tourney-odds { font-size: 0.84em; color: var(--muted); margin: 8px 0 10px; }
+.tourney-odds b { color: var(--text); font-family: 'Cinzel', serif; }
+.hs-chip.unfit { position: relative; border-color: var(--danger); opacity: 0.8; filter: grayscale(0.35); }
+/* .hs-chip clips overflow, so the badge sits INSIDE the box (top-right), legible via a shadow. */
+.hs-chip.unfit::after { content: '⚠'; position: absolute; top: 0; right: 1px; font-size: 0.62em; line-height: 1; text-shadow: 0 0 3px #000, 0 0 2px #000; }
+
+/* "Play this match yourself" opt-in on a tournament card. */
+/* Season strip — 12 chips, one per coming week; glyphs mark booked events */
+.cal-strip { display: flex; gap: 4px; margin: 4px 0 10px; overflow-x: auto; padding-bottom: 2px; }
+.cal-chip { flex: 1 0 30px; min-width: 30px; display: flex; flex-direction: column; align-items: center; gap: 1px;
+  border: 1px solid var(--border); border-radius: 8px; padding: 4px 2px; background: rgba(0, 0, 0, 0.22); }
+.cal-chip .cal-wk { font-size: 0.6em; color: var(--dim); }
+.cal-chip .cal-glyph { font-size: 0.8em; color: var(--dim); line-height: 1.2; }
+.cal-chip.now { border-color: var(--gold); box-shadow: 0 0 8px rgba(212, 168, 67, 0.2); }
+.cal-chip.now .cal-wk { color: var(--gold); }
+.cal-chip.has-ev .cal-glyph { color: var(--text); }
+.cal-chip.major { border-color: var(--gold); background: linear-gradient(135deg, #2a1a0a, #1c1410); }
+
+/* Seasonal majors — the tentpole cards read as such */
+.tourney-card.major { border-color: var(--gold); box-shadow: 0 0 14px rgba(212, 168, 67, 0.12); }
+.tourney-card .major-tag { color: var(--gold); padding: 0 2px 6px; }
+
+.tourney-play { width: 100%; margin: 2px 0 10px; padding: 8px; border: 1px solid var(--gold);
+  background: rgba(212, 168, 67, 0.08); color: var(--gold); border-radius: 8px;
+  font-family: 'Cinzel', serif; font-size: 0.76em; letter-spacing: 0.06em; transition: background 0.15s, box-shadow 0.15s; }
+.tourney-play:hover { background: rgba(212, 168, 67, 0.16); }
+.tourney-play.on { background: linear-gradient(135deg, #2a1a0a, #3a2a10); box-shadow: 0 0 12px rgba(212, 168, 67, 0.2); }

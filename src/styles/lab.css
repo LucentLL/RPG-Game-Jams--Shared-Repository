@@ -1,0 +1,53 @@
+/* ═══ LABORATORY SCREEN ═══ */
+#labScreen{padding:12px;align-items:center}
+.lab-header{text-align:center;margin-bottom:8px}
+.lab-header h2{font-family:'Cinzel',serif;font-size:1em;letter-spacing:0.15em;color:#e8e0d0}
+.lab-header .lab-qs{font-size:0.85em;color:var(--qs-col);margin-top:2px}
+.lab-section{max-width:500px;width:100%;margin-bottom:12px}
+.lab-section h3{font-family:'Cinzel',serif;font-size:0.8em;letter-spacing:0.1em;color:var(--muted);margin-bottom:6px;border-bottom:1px solid var(--border);padding-bottom:3px}
+.lab-stats-section{background:rgba(15,12,8,0.45);border:1px solid var(--border);border-radius:10px;padding:10px 12px;font-size:0.78em}
+.lab-stats-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:6px 14px;margin-top:4px}
+.lab-stat-row{display:flex;justify-content:space-between;align-items:baseline;gap:6px}
+.lab-stat-row .lab-stat-name{color:var(--muted);font-size:0.85em}
+.lab-stat-row .lab-stat-val{color:#e8e0d0;font-weight:600}
+.lab-stat-row .lab-stat-delta{font-size:0.85em;margin-left:4px}
+.lab-stat-row .lab-stat-delta.up{color:#7ad17a}
+.lab-stat-row .lab-stat-delta.down{color:#ef4444}
+.lab-stats-attacks{margin-top:8px;font-size:0.85em;color:var(--dim)}
+.lab-stats-attacks .lab-stats-atk-tag{display:inline-block;padding:1px 7px;margin:2px 3px 2px 0;border:1px solid var(--border);border-radius:10px;color:#e8e0d0;font-size:0.85em;background:rgba(255,255,255,0.02)}
+.lab-stats-attacks .lab-stats-atk-tag.added{border-color:#7ad17a;color:#7ad17a;background:rgba(120,200,120,0.06)}
+.lab-stats-attacks .lab-stats-atk-tag.removed{border-color:#ef4444;color:#ef4444;background:rgba(220,80,80,0.06);text-decoration:line-through}
+.lab-preview-banner{margin-top:8px;padding:6px 10px;border-radius:8px;background:rgba(212,168,67,0.08);border:1px solid rgba(212,168,67,0.4);font-size:0.85em;display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap}
+.lab-preview-banner .lab-preview-clear{cursor:pointer;color:var(--danger);font-size:0.85em;border:1px solid var(--danger);padding:2px 8px;border-radius:6px;background:transparent}
+.lab-preview-banner .lab-preview-clear:hover{background:rgba(220,80,80,0.12)}
+.lab-card-preview-target{outline:1px dashed rgba(212,168,67,0.5)}
+.lab-card-preview-active{outline:2px solid var(--gold);background:rgba(212,168,67,0.06)}
+.lab-gear{display:grid;grid-template-columns:1fr;gap:6px}
+.lab-gear-item{background:var(--card);border:1px solid var(--border);border-radius:8px;padding:8px 10px;display:flex;justify-content:space-between;align-items:center;gap:8px}
+.lab-gear-item.equipped{border-color:var(--gold);border-width:2px}
+.lab-gear-info{flex:1}
+.lab-gear-info .gc-name{font-size:0.8em;font-weight:600;color:#e8e0d0}
+.lab-gear-info .gc-pos{font-size:0.65em;color:var(--muted)}
+.lab-gear-info .gc-sockets{display:flex;align-items:center;gap:2px;margin-top:3px;flex-wrap:wrap}
+.lab-gear-info .gc-links{font-size:0.6em;color:var(--dim)}
+.lab-gear-actions{display:flex;gap:4px;flex-direction:column;align-items:flex-end}
+.lab-btn{padding:4px 10px;font-size:0.68em;border-radius:5px;border:1px solid;background:transparent;transition:all 0.2s}
+.lab-btn.equip{border-color:var(--gold);color:var(--gold)}
+.lab-btn.equip:hover{background:rgba(212,168,67,0.1)}
+.lab-btn.sell{border-color:var(--danger);color:var(--danger)}
+.lab-btn.sell:hover{background:rgba(239,68,68,0.1)}
+.lab-btn.craft{border-color:var(--qs-col);color:var(--qs-col)}
+.lab-btn.craft:hover{background:rgba(168,144,240,0.1)}
+.lab-btn:disabled{opacity:0.3;cursor:default}
+.lab-materia{display:flex;gap:6px;flex-wrap:wrap}
+.lab-mat-item{background:var(--card);border:1px solid var(--border);border-radius:8px;padding:6px 10px;font-size:0.75em;text-align:center}
+.lab-mat-item .mat-sym{font-size:1.2em}
+.lab-mat-item .mat-name{color:var(--dim);font-size:0.85em}
+.lab-mat-item .mat-sell{font-size:0.7em;color:var(--danger);cursor:pointer;text-decoration:underline;margin-top:2px}
+.lab-confirm-btn{margin-top:16px}
+.shop-items{display:grid;grid-template-columns:1fr 1fr;gap:6px}
+.shop-item{background:var(--card);border:1px solid var(--border);border-radius:8px;padding:8px;cursor:pointer;transition:all 0.2s}
+.shop-item:hover{border-color:#555;transform:translateY(-1px)}
+.shop-item.sold{opacity:0.3;pointer-events:none}
+.shop-price{font-size:0.7em;color:var(--qs-col);margin-top:3px;font-weight:600}
+
