@@ -994,8 +994,10 @@ function heroHeader(h) {
       ${chips ? `<div class="trait-row">${chips}</div>` : ''}
       <div class="stat-grid">${stats}</div>
       ${bar('Life', lifeFrac(h) * 100, stage.col, `${h.age}/${h.lifespan} wks — ${stage.desc}`)}
+      <div class="bar-grid">
       ${bar('Stamina', h.condition.stamina, 'var(--success)')}${bar('Fatigue', h.condition.fatigue, '#e08a3c')}${bar('Stress', h.condition.stress || 0, '#c05a8a')}${bar('Morale', h.condition.morale, '#8ab4d8')}
       ${bar('Bond', h.condition.loyalty ?? 60, '#c9a0e8')}${bar('Discipline', h.condition.discipline ?? 40, '#9fb8a8')}
+      </div>
       ${h.condition.injury ? `<div class="injury-flag">⚠ ${injuryLabel(h.condition.injury)} — recovers (rest) until healed; a potent draught cures it</div>` : ''}
       ${equippedLine(h)}`;
 }
@@ -1005,47 +1007,66 @@ function skillShapeOf(h) {
   return `<div class="skill-shape">🔨 Blacksmithing — <b>Theory ${prof.theory}</b> · <b>Practice ${prof.practice}</b> · <span class="dim">Field ${prof.field}</span></div>`;
 }
 
-/** Training drills + Light/Heavy intensity toggle. Picking a drill sets the member to Train. */
-function trainBody(h) {
+/** THIS WEEK's drill menu (MR schedule style: big rows, the chosen one lit).
+ *  Picking a drill sets the member to Train; spar rows pair two members up. */
+function trainThisWeek(h) {
   const at = h.assignment.type;
   const heavy = (h.assignment.intensity || 'light') === 'heavy';
-  const drillItems = DRILLS.map((d) => {
-    const desc = heavy ? `${d.main}+ ${d.sec}+ <span class="down">${d.pen}−</span>` : `${d.main}+`;
-    return `<button class="opt ${at === 'train' && d.id === h.assignment.trainingId ? 'active' : ''}" onclick="__guild.setTraining('${d.id}')">
-      <span><span class="o-name">${d.name}</span> <span class="o-desc">${desc}</span></span></button>`;
-  }).join('');
-  const restItem = `<button class="opt ${at === 'train' && h.assignment.trainingId === 'rest' ? 'active' : ''}" onclick="__guild.setTraining('rest')">
-      <span><span class="o-name">💤 ${REST.name}</span> <span class="o-desc">shed fatigue &amp; stress</span></span></button>`;
-  const sparring = at === 'train' && h.assignment.trainingId === 'spar';
-  const others = guild.roster.filter((x) => x.id !== h.id);
-  const sparList = others.length
-    ? others.map((p) => `<button class="opt ${sparring && h.assignment.sparWith === p.id ? 'active' : ''}" onclick="__guild.setSpar('${p.id}')">
-        <span><span class="o-name">🤺 vs ${p.name}</span> <span class="o-desc">both sharpen SKL &amp; SPD · Lv${p.level}</span></span></button>`).join('')
-    : '<div class="hint">Recruit another member to spar with.</div>';
   // The HONEST injury odds for each intensity — the exact roll applyTraining makes
   // after this week's wear lands (previewInjuryChance shares the math).
   const diet = getDietPlan(h.assignment.dietId);
   const riskPct = (i) => Math.round(previewInjuryChance(h, i, ringOpts(diet)) * 100);
   const rl = riskPct('light'), rh = riskPct('heavy');
-  // Plan-ahead queue (Pillar B): coming weeks, each a drill captured at the intensity
-  // that was set when it was added. Advance Week shifts the front into this week.
+  const drillItems = DRILLS.map((d) => {
+    const desc = heavy ? `${d.main}+ ${d.sec}+ <span class="down">${d.pen}−</span>` : `${d.main}+`;
+    return `<button class="opt drill ${at === 'train' && d.id === h.assignment.trainingId ? 'active' : ''}" onclick="__guild.setTraining('${d.id}')">
+      <span class="o-name">${d.name}</span><span class="o-stat">${desc}</span></button>`;
+  }).join('');
+  const restItem = `<button class="opt drill ${at === 'train' && h.assignment.trainingId === 'rest' ? 'active' : ''}" onclick="__guild.setTraining('rest')">
+      <span class="o-name">💤 ${REST.name}</span><span class="o-stat">fatigue− stress−</span></button>`;
+  const sparring = at === 'train' && h.assignment.trainingId === 'spar';
+  const others = guild.roster.filter((x) => x.id !== h.id);
+  const sparList = others.length
+    ? others.map((p) => `<button class="opt drill ${sparring && h.assignment.sparWith === p.id ? 'active' : ''}" onclick="__guild.setSpar('${p.id}')">
+        <span class="o-name">🤺 vs ${p.name}</span><span class="o-stat">SKL+ SPD+ · Lv${p.level}</span></button>`).join('')
+    : '<div class="hint">Recruit another member to spar with.</div>';
+  return `<div class="plan-title">⚔ This Week — <span class="pt-cur">${jobLabel(h)}</span></div>
+    <div class="intensity-toggle">
+      <button class="${heavy ? '' : 'on'}" onclick="__guild.setIntensity('light')">Light${rl ? ` · <span class="down">⚠${rl}%</span>` : ''}</button>
+      <button class="${heavy ? 'on' : ''}" onclick="__guild.setIntensity('heavy')">Heavy · +sec${rh ? ` · <span class="down">⚠${rh}%</span>` : ''}</button>
+    </div>
+    <div class="opt-list">${drillItems}${restItem}</div>
+    <div class="dept-lbl">🤺 Spar — both train</div>
+    <div class="opt-list">${sparList}</div>`;
+}
+
+/** THE PLAN — the coming weeks as an MR-style schedule list: one big row per week,
+ *  queued at the intensity that was set when added. Advance Week runs the front row. */
+function trainPlan(h) {
+  const heavy = (h.assignment.intensity || 'light') === 'heavy';
   const sched = Array.isArray(h.schedule) ? h.schedule : [];
-  const chips = sched.length
-    ? sched.map((p, i) => `<span class="sched-chip">${i + 1}. ${(getDrill(p.trainingId) || REST).name}${p.intensity === 'heavy' ? ' ·H' : ''}<button onclick="__guild.scheduleRemoveAt(${i})" title="Remove from plan">✕</button></span>`).join('')
-    : '<span class="dim" style="font-size:0.75em">No plan — next week repeats this one.</span>';
+  // Rows are labeled ORDINALLY (next, 2nd, 3rd…), not with calendar dates: the queue
+  // only advances on weeks the member actually trains (a quest/forge week doesn't
+  // consume it), so absolute week numbers would drift (review fix).
+  const ord = (i) => {
+    if (i === 0) return 'next';
+    const n = i + 1, t = n % 10, h = n % 100;
+    return n + (t === 1 && h !== 11 ? 'st' : t === 2 && h !== 12 ? 'nd' : t === 3 && h !== 13 ? 'rd' : 'th');
+  };
+  const nowRow = `<div class="sched-row now"><span class="sr-wk">now</span><span class="sr-name">${jobLabel(h)}</span></div>`;
+  const rows = sched.length
+    ? sched.map((p, i) => `<div class="sched-row"><span class="sr-wk">${ord(i)}</span>
+        <span class="sr-name">${(getDrill(p.trainingId) || REST).name}</span>
+        ${p.intensity === 'heavy' ? '<span class="sr-h" title="heavy">H</span>' : ''}
+        <button class="sr-x" onclick="__guild.scheduleRemoveAt(${i})" title="Remove from plan">✕</button></div>`).join('')
+    : '<div class="hint" style="text-align:left;padding:6px 2px">No plan — each week repeats the last drill. Queue weeks below.</div>';
   const addBtns = DRILLS.map((d) => `<button class="sched-btn" onclick="__guild.scheduleAdd('${d.id}')" title="Queue ${d.name} (${heavy ? 'heavy' : 'light'})">+ ${d.main}</button>`).join('')
     + `<button class="sched-btn" onclick="__guild.scheduleAdd('rest')" title="Queue Rest">+ 💤</button>`
     + (sched.length ? `<button class="sched-btn clear" onclick="__guild.scheduleClear()">clear</button>` : '');
-  const schedHTML = `<div class="plan-title" style="font-size:0.72em;margin-top:10px">📅 Plan ahead <span class="dim" style="font-weight:400">— each Advance Week runs the next drill (adds as ${heavy ? 'heavy' : 'light'})</span></div>
-    <div class="sched-queue">${chips}</div>
-    <div class="sched-add">${addBtns}</div>`;
-  return `<div class="intensity-toggle">
-      <button class="${heavy ? '' : 'on'}" onclick="__guild.setIntensity('light')">Light${rl ? ` · <span class="down">⚠${rl}%</span>` : ''}</button>
-      <button class="${heavy ? 'on' : ''}" onclick="__guild.setIntensity('heavy')">Heavy · +sec −paired${rh ? ` · <span class="down">⚠${rh}%</span>` : ''}</button>
-    </div><div class="opt-list">${drillItems}${restItem}</div>
-    ${schedHTML}
-    <div class="plan-title" style="font-size:0.72em;margin-top:10px">🤺 Spar a partner <span class="dim" style="font-weight:400">— both train, pairs up automatically</span></div>
-    <div class="opt-list">${sparList}</div>`;
+  return `<div class="plan-title">📅 The Plan <span class="dim" style="font-weight:400;text-transform:none">— queues as ${heavy ? 'heavy' : 'light'}</span></div>
+    <div class="sched-list">${nowRow}${rows}</div>
+    <div class="sched-add">${addBtns}</div>
+    <div class="cal-note">Each <b>training</b> week runs the next row — quest or workshop weeks don't consume the plan.</div>`;
 }
 
 /** Quest board scoped to member h, with party-projected odds. Picking one dispatches h. */
@@ -1574,11 +1595,15 @@ function rosterRoom() {
   const list = `<div class="plan-card"><div class="plan-title">🛡 Roster · ${guild.roster.length}/${maxRoster(guild)}</div>
       <div class="roster-list">${guild.roster.map(rosterRow).join('')}</div></div>`;
   if (!h) return list;
+  // MR-style: the member card up top, then two columns — this week's drill menu
+  // beside the week-by-week plan — then the quest board. Less scroll, bigger rows.
   return `${list}
+    <div class="plan-card">${heroHeader(h)}</div>
+    <div class="train-cols">
+      <div class="plan-card">${trainThisWeek(h)}</div>
+      <div class="plan-card">${trainPlan(h)}</div>
+    </div>
     <div class="plan-card">
-      ${heroHeader(h)}
-      <div class="room-jobline">This week: <b>${jobLabel(h)}</b></div>
-      <div class="plan-title">⚔ Train</div>${trainBody(h)}
       <div class="plan-title">🗺 Dispatch on a Quest</div>${questBody(h)}
     </div>`;
 }
@@ -1923,6 +1948,10 @@ function setPlayQuest(qId, mode) {
 /** Which tournament card has its draw ladder open (UI-only, never saved). */
 let drawOpenId = null;
 function toggleDraw(tId) { drawOpenId = drawOpenId === tId ? null : tId; render(); }
+// Which calendar event the detail panel shows (MR Comp.Schedule style — the grid
+// selects, the panel reads). Falls back to the nearest upcoming event.
+let calSelId = null;
+function selectCalEvent(tId) { calSelId = tId; drawOpenId = null; render(); }
 /** Calendar toggle: ask how to resolve each due match, or always simulate quietly. */
 function setAskTournaments() {
   guild.battlePrefs.tournament = guild.battlePrefs.tournament === 'ask' ? 'sim' : 'ask';
@@ -1973,27 +2002,63 @@ function tournamentCard(t) {
 function calendarRoom() {
   const cur = guild.calendar.week;
   const upcoming = (guild.schedule || []).filter((t) => !t.resolved && t.week >= cur).sort((a, b) => a.week - b.week);
-  const cards = upcoming.length ? upcoming.map(tournamentCard).join('') : '<div class="plan-card"><div class="hint">No tournaments scheduled — advance a week to refresh the season.</div></div>';
-  // The 12-week season strip: one chip per coming week; glyphs mark booked events.
-  const byWeek = new Map((guild.schedule || []).filter((t) => !t.resolved).map((t) => [t.week, t]));
-  let strip = '';
-  for (let w = cur; w < cur + 12; w++) {
+  if (!upcoming.length) return '<div class="plan-card"><div class="hint">No tournaments scheduled — advance a week to refresh the season.</div></div>';
+  // ONE selected event drives the detail panel (MR Comp.Schedule style) — the
+  // grid is the season at a glance; the panel is where you read and act.
+  const sel = upcoming.find((t) => t.id === calSelId) || upcoming[0];
+  // ── The season grid: columns = the next 12 weeks, rows = rank circuits ──
+  const HORIZON = 12;
+  const byWeek = new Map(upcoming.map((t) => [t.week, t]));
+  const ranks = [...new Set(upcoming.filter((t) => t.week < cur + HORIZON).map((t) => t.rank))].sort((a, b) => b - a);
+  if (!ranks.length) ranks.push(upcoming[0].rank);
+  // Header rows: season name (marked where it changes) + week-of-year numbers.
+  let seasonRow = '<span class="cg-corner"></span>', weekRow = '<span class="cg-corner"></span>';
+  let prevSeason = null;
+  for (let w = cur; w < cur + HORIZON; w++) {
     const wy = ((guild.calendar.weekOfYear - 1 + (w - cur)) % 48) + 1;
-    const ev = byWeek.get(w);
-    strip += `<span class="cal-chip ${w === cur ? 'now' : ''} ${ev ? 'has-ev' : ''} ${ev && ev.type === 'major' ? 'major' : ''}"
-        title="${ev ? `${ev.name} (R${ev.rank}) — ${seasonOf(wy)}, week ${wy}` : `${seasonOf(wy)}, week ${wy}`}">
-        <span class="cal-wk">${wy}</span><span class="cal-glyph">${ev ? (EVENT_TYPES[ev.type] || {}).glyph || '🏆' : '·'}</span></span>`;
+    const s = seasonOf(wy);
+    seasonRow += `<span class="cg-season">${s !== prevSeason ? s.slice(0, 3).toUpperCase() : ''}</span>`;
+    prevSeason = s;
+    weekRow += `<span class="cg-wk ${w === cur ? 'now' : ''}">${wy}</span>`;
   }
+  // Rank rows: a booked cell is a button that selects its event.
+  const rows = ranks.map((r) => {
+    let cells = `<span class="cg-rank">R${r}</span>`;
+    for (let w = cur; w < cur + HORIZON; w++) {
+      const ev = byWeek.get(w);
+      if (ev && ev.rank === r) {
+        const g = (EVENT_TYPES[ev.type] || {}).glyph || '🏆';
+        cells += `<button class="cg-cell booked ${ev.id === sel.id ? 'sel' : ''} ${w === cur ? 'now' : ''} ${ev.type}"
+            title="${ev.name} (R${ev.rank})" onclick="__guild.selectCalEvent('${ev.id}')">${g}</button>`;
+      } else {
+        cells += `<span class="cg-cell ${w === cur ? 'now' : ''}">·</span>`;
+      }
+    }
+    return `<div class="cg-row">${cells}</div>`;
+  }).join('');
   const ask = guild.battlePrefs.tournament === 'ask';
-  return `<div class="plan-card">
+  // Events past the grid (the World Cup books YEARS out) stay visible & selectable
+  // as pills beneath it — the looming date you breed a successor for.
+  const far = upcoming.filter((t) => t.week >= cur + HORIZON);
+  const farRow = far.length
+    ? `<div class="dept-lbl" style="margin-top:10px">🔭 Further out</div><div class="cal-far">${far.map((t) =>
+        `<button class="cal-far-pill ${t.id === sel.id ? 'sel' : ''} ${t.type}" onclick="__guild.selectCalEvent('${t.id}')">
+          ${(EVENT_TYPES[t.type] || {}).glyph || '🏆'} ${t.name} <span class="cfp-when">in ${t.week - cur} wks</span></button>`).join('')}</div>`
+    : '';
+  const gridCard = `<div class="plan-card cal-grid-card">
       <div class="plan-title">📅 ${seasonOf(guild.calendar.weekOfYear)} · ${formatDate(guild.calendar)}</div>
-      <div class="cal-strip">${strip}</div>
-      <div class="hint" style="text-align:left;padding:2px 2px 4px">Tournaments are set weeks in advance — <b>nominate one champion and train them toward the date</b>. Each resolves automatically on its week as a bracket fought on your champion's ⚡; an injured champion can't compete, so peak them <em>and</em> keep them healthy.</div>
-      <button class="opt" onclick="__guild.setAskTournaments()" style="margin-top:6px;width:100%">
-        <span><span class="o-name">${ask ? '🔔' : '🔕'} Due-match chooser</span> <span class="o-desc">${ask ? 'each due match asks: fight it live, command it, or simulate' : 'due matches simulate quietly (no prompt)'}</span></span>
+      <div class="cal-grid">
+        <div class="cg-row head">${seasonRow}</div>
+        <div class="cg-row head">${weekRow}</div>
+        ${rows}
+      </div>
+      ${farRow}
+      <div class="cal-note">Pick an event on the grid to read it — <b>nominate one champion and train them toward the date</b>. Each resolves on its week; an injured champion can't compete.</div>
+      <button class="opt" onclick="__guild.setAskTournaments()" style="margin-top:8px;width:100%">
+        <span><span class="o-name">${ask ? '🔔' : '🔕'} Due-match chooser</span> <span class="o-desc">${ask ? 'each due match asks: fight, command, or simulate' : 'due matches simulate quietly'}</span></span>
         <span class="o-cost">${ask ? 'ON' : 'OFF'}</span></button>
-    </div>
-    ${cards}`;
+    </div>`;
+  return `<div class="cal-layout">${gridCard}${tournamentCard(sel)}</div>`;
 }
 
 // --- Arena (always-open live combat) ----------------------------------------
@@ -2280,7 +2345,7 @@ export function openGuild() {
 // Every handler no-ops while a week is advancing (a played battle can be mid-flight;
 // rail buttons still render behind the battle screen and would corrupt the in-flight
 // week). practiceBout/advanceAll keep their own internal checks as a second belt.
-const __guildApi = { selectHero, setActivity, setTraining, setIntensity, scheduleAdd, scheduleRemoveAt, scheduleClear, setRecipe, setForgeMode, setRefineItem, setPotion, setDiscipline, usePotion, setDiet, setQuest, assignTo, setSpar, equipItem, unequipSlot, setPolicy, provision, buyMaterial, sellItem, buyBook, hire, takeApprentice, promoteApprentice, dismissApprentice, advanceAll, back, openRoom, toggleFullscreen, upgradeFacility, enterTournament, leaveTournament, setPlayNext, setPlayQuest, setAskTournaments, toggleDraw, praiseHero, scoldHero, openAssembly, closeAssembly, appointTrainer, practiceBout, openRanch, enterRoomFromRanch, manageMemberFromRanch, ranchBuild: toggleBuild, ranchPick: pickStation, ranchPlace: placeStationAt, ranchRemoveStation: removeStationById, ranchZoomIn, ranchZoomOut, ranchZoomFit };
+const __guildApi = { selectHero, setActivity, setTraining, setIntensity, scheduleAdd, scheduleRemoveAt, scheduleClear, setRecipe, setForgeMode, setRefineItem, setPotion, setDiscipline, usePotion, setDiet, setQuest, assignTo, setSpar, equipItem, unequipSlot, setPolicy, provision, buyMaterial, sellItem, buyBook, hire, takeApprentice, promoteApprentice, dismissApprentice, advanceAll, back, openRoom, toggleFullscreen, upgradeFacility, enterTournament, leaveTournament, setPlayNext, setPlayQuest, setAskTournaments, toggleDraw, selectCalEvent, praiseHero, scoldHero, openAssembly, closeAssembly, appointTrainer, practiceBout, openRanch, enterRoomFromRanch, manageMemberFromRanch, ranchBuild: toggleBuild, ranchPick: pickStation, ranchPlace: placeStationAt, ranchRemoveStation: removeStationById, ranchZoomIn, ranchZoomOut, ranchZoomFit };
 window.__guild = {};
 for (const k in __guildApi) {
   window.__guild[k] = (...args) => {
