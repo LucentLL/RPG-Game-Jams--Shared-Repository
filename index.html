@@ -12,8 +12,8 @@
   <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;600;700&family=Cormorant+Garamond:ital,wght@0,400;0,600;1,400&display=swap" rel="stylesheet" />
 
   <!-- Vite entry. Module scripts defer, so this runs after the DOM is parsed. -->
-  <script type="module" crossorigin src="./assets/index-C0pAND6G.js"></script>
-  <link rel="stylesheet" crossorigin href="./assets/index-BmuxUs5L.css">
+  <script type="module" crossorigin src="./assets/index-CUD7QpGy.js"></script>
+  <link rel="stylesheet" crossorigin href="./assets/index-CQ16lKMm.css">
 </head>
 <body>
 
@@ -161,6 +161,11 @@
     </div>
   </div>
   <div class="action-help">Move: WASD / arrows / drag the stick · Attack: tap a button or 1–4</div>
+  <div class="cam-controls" id="actCam">
+    <button class="cam-btn" onclick="actZoom(1.2)" title="Zoom in">＋</button>
+    <button class="cam-btn" onclick="actZoom(0.83)" title="Zoom out">－</button>
+    <button class="cam-btn cam-fit" onclick="actZoomReset()" title="Reset zoom">⊡</button>
+  </div>
   <div class="action-attacks" id="actionAttackBar"></div>
   <div class="action-log" id="actionLog"></div>
   <button class="reroll-btn" id="actForfeitBtn" style="margin-top:6px" onclick="forfeitAction()">↩ Forfeit Run</button>
@@ -186,6 +191,11 @@
     <div class="stat-sheet-body" id="ssBody"></div>
   </div>
   <div class="grid-wrap"><div class="grid" id="grid"></div></div>
+  <div class="cam-controls" id="tacCam">
+    <button class="cam-btn" onclick="tacZoom(1.25)" title="Zoom in">＋</button>
+    <button class="cam-btn" onclick="tacZoom(0.8)" title="Zoom out">－</button>
+    <button class="cam-btn cam-fit" onclick="tacFit()" title="Frame the fighters">⊡</button>
+  </div>
   <div class="controls" id="ctrlPanel">
     <div class="section-label">MOVEMENT</div>
     <div class="move-controls">
