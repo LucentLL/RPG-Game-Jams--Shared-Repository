@@ -31,6 +31,11 @@ export const DIET_PLANS = [
     weeklyCost: 12, statBias: { DEF: 1.35, VIT: 1.2, SPD: 0.9 }, staminaRecovery: 30, fatigueRelief: 25, injuryRiskMod: -0.04, food: 'grain' },
   { id: 'feast', name: 'Lavish Feast', description: 'Morale soars, waistlines too.',
     weeklyCost: 20, statBias: { POW: 1.05, DEF: 1.05 }, staminaRecovery: 45, fatigueRelief: 35, injuryRiskMod: 0.01, food: 'salted_meat' },
+  // Fed from the hunt: cheap in gold, but eats one Game Meat/week from the pantry
+  // (short pantry → plain rations). Bulks POW & VIT like the Protein Feast — the
+  // payoff for a guild that hunts its own larder (see locales.js / the Wilds).
+  { id: 'wildgame', name: "Hunter's Table", description: 'Wild game bulks POW & VIT; costs meat, not gold.',
+    weeklyCost: 4, statBias: { POW: 1.3, VIT: 1.25, INT: 0.85 }, staminaRecovery: 30, fatigueRelief: 20, injuryRiskMod: -0.03, food: 'game_meat' },
 ];
 
 /** @param {string} id @returns {?DietPlan} */

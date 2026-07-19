@@ -155,6 +155,7 @@ function taskGlyph(h) {
   if (a.type === 'brew') return '⚗';
   if (a.type === 'study') return '📖';
   if (a.type === 'quest') return '🗺';
+  if (a.type === 'hunt') return '🏹';
   if (a.trainingId === 'spar') return '🤺';
   if (a.trainingId === 'rest' || !a.trainingId) return '💤';
   return '⚔';
@@ -213,7 +214,7 @@ function dutyFor(h) {
   if (a.type === 'forge') return workDuty('forge', hh, { anims: ['slash'], gap: [900, 1700] }); // hammer swings at the anvil
   if (a.type === 'brew') return workDuty('laboratory', hh, { anims: ['cast'], gap: [1800, 3200] }); // stirring something volatile
   if (a.type === 'study') return workDuty('library', hh, null);
-  if (a.type === 'quest') return { kind: 'muster', key: 'muster', tx: GATE.x - 0.9 + (hh % 4) * 0.6, ty: GATE.y - 0.4 + ((hh >> 2) % 2) * 0.6 };
+  if (a.type === 'quest' || a.type === 'hunt') return { kind: 'muster', key: 'muster', tx: GATE.x - 0.9 + (hh % 4) * 0.6, ty: GATE.y - 0.4 + ((hh >> 2) % 2) * 0.6 }; // gather at the south gate to set out
   return { kind: 'stroll', key: 'stroll' };
 }
 function workDuty(room, hh, act) {

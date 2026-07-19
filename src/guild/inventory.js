@@ -16,10 +16,15 @@ export const MATERIALS = {
   nightcap: { id: 'nightcap', name: 'Nightcap', kind: 'herb', tier: 3, col: '#9a7bd0' },
   grain: { id: 'grain', name: 'Grain', kind: 'food', tier: 1, col: '#d8c268' },
   salted_meat: { id: 'salted_meat', name: 'Salted Meat', kind: 'food', tier: 2, col: '#c0705a' },
+  // Wilds spoils — brought home from a hunt (see locales.js). Game meat feeds the
+  // Kitchen pantry (a Hunter's Table diet); pelts are a hide shelved in the Armory
+  // and sold for gold at the Market. Neither is buyable — you hunt them.
+  game_meat: { id: 'game_meat', name: 'Game Meat', kind: 'food', tier: 2, col: '#a85a4a' },
+  pelt: { id: 'pelt', name: 'Pelt', kind: 'hide', tier: 1, col: '#b8895a' },
 };
 
 /** Which room a material kind is stored in (its working inventory). */
-export const ROOM_OF_KIND = { ore: 'forge', herb: 'laboratory', food: 'kitchen' };
+export const ROOM_OF_KIND = { ore: 'forge', herb: 'laboratory', food: 'kitchen', hide: 'armory' };
 /** The material ids shelved in a given room's store. */
 export function roomMaterialIds(roomId) {
   return Object.keys(MATERIALS).filter((k) => ROOM_OF_KIND[MATERIALS[k].kind] === roomId);

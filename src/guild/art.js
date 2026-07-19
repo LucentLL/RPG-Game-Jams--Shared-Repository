@@ -29,6 +29,15 @@ const SHEETS = {
   beds_3x: { w: 432, h: 384 },
   floppyfish: { w: 48, h: 128 },
   kitchenC: { w: 256, h: 256 },
+  // Wilds creatures — RPG-Maker 3×4 walk sheets; the crop is the front-idle frame
+  // (col 1, row 0), alpha-trimmed by the scratchpad probe so each standee is tight.
+  opossum: { w: 243, h: 432 },
+  squirrel: { w: 243, h: 432 },
+  badger: { w: 378, h: 432 },
+  beetle: { w: 279, h: 432 },
+  slime: { w: 414, h: 576 },
+  wolf: { w: 468, h: 636 },
+  bear: { w: 432, h: 384 },
 };
 
 /** Named crops: { sheet, x, y, w, h } in sheet pixels. Crops tagged `MEASURE`
@@ -51,6 +60,14 @@ export const ART = {
   breadPile: { sheet: 'bakery_1x', x: 16, y: 2, w: 48, h: 14 },       // a row of loaves
   tools:     { sheet: 'bakery_1x', x: 0, y: 19, w: 50, h: 14 },       // rolling pin
   sacks:     { sheet: 'bakery_1x', x: 80, y: 16, w: 32, h: 48 },      // stacked sacks / baskets
+  // Wilds prey — front-idle standees (probe-measured alpha boxes).
+  opossum:  { sheet: 'opossum',  x: 96,  y: 57, w: 54, h: 45 },
+  squirrel: { sheet: 'squirrel', x: 99,  y: 39, w: 42, h: 63 },
+  badger:   { sheet: 'badger',   x: 159, y: 57, w: 60, h: 45 },
+  beetle:   { sheet: 'beetle',   x: 110, y: 48, w: 57, h: 51 },
+  slime:    { sheet: 'slime',    x: 174, y: 87, w: 66, h: 54 },
+  wolf:     { sheet: 'wolf',     x: 201, y: 51, w: 63, h: 99 },
+  bear:     { sheet: 'bear',     x: 177, y: 3,  w: 78, h: 90 },
 };
 
 /**
