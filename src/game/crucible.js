@@ -1688,6 +1688,9 @@ function startAnimLoop() {
         var cv = document.getElementById('cs_' + f.y + '_' + f.x);
         if (cv) renderSprite(cv, f.prime, getRank(getFighterLinkCount(f)).key, f.facing, 0);
       });
+      // Self-healing camera: frame the fighters once layout is ready (the sync setup
+      // call can run before the freshly-shown screen has been measured).
+      if (_tacFitPending && tacFitFighters()) _tacFitPending = false;
     }
     requestAnimationFrame(loop);
   }
@@ -2882,6 +2885,7 @@ function startActionArena(){
   gamePhase = 'action';
 
   showScreen('actionScreen');
+  actZoomReset();
   renderActionTiles();
   buildActionAttackBar();
   var fb0 = document.getElementById('actForfeitBtn'); if (fb0) fb0.textContent = '↩ Forfeit Run';
@@ -3528,6 +3532,7 @@ function startGuildBattle(p1Spec, p2Spec, config){
     _guildItemsUsed = null;
     gamePhase = 'action';
     showScreen('actionScreen');
+    actZoomReset();
     renderActionTiles();
     buildActionAttackBar();
     var fb = document.getElementById('actForfeitBtn'); if (fb) fb.textContent = '↩ Forfeit Match';
@@ -3564,7 +3569,9 @@ function startGuildTacticalBattle(p1Spec, p2Spec, label, opts){
     var ab=document.getElementById('tacAutoBtn');
     if(ab){ab.style.display='';ab.classList.toggle('on',_tacAuto);ab.textContent=_tacAuto?'🤖 Watching — tap to take control':'🤖 Watch';}
     var eb=document.getElementById('execBtn');if(eb)eb.disabled=false;
+    _tacFitPending=true;
     initTiles();faceBothFighters();buildGrid();buildControls();renderAll();
+    tacFitFighters(); requestAnimationFrame(function(){ if(_tacFitPending) tacFitFighters(); }); // frame the fighters once layout settles
     startAnimLoop();
     logMsg(_tacAuto
       ? '👁 '+p1.name+' vs '+p2.name+' — spectating; take control any turn.'
@@ -3951,7 +3958,9 @@ function startBattle(){
   // Battles end mid-execution (checkWin), which leaves the exec button disabled —
   // re-arm it for the new battle (finishTurn only re-enables on turns nobody died).
   document.getElementById('execBtn').disabled=false;
+  _tacFitPending=true;
   initTiles();faceBothFighters();buildGrid();buildControls();renderAll();
+  tacFitFighters(); requestAnimationFrame(function(){ if(_tacFitPending) tacFitFighters(); });
   startAnimLoop();
   logMsg('⚗ Round '+run.round+': '+ROUND_METALS[run.round-1].name+' — Fight!','phase');
 }
@@ -4016,6 +4025,100 @@ function buildGrid(){
   }}
 }
 
+// ═══ PAN/ZOOM CAMERA (mobile combat) ═══════════════════════════════════════
+// A transform-based camera for a flat CONTENT element inside a clipping VIEWPORT.
+// Pinch (2 fingers) / drag (1 finger past a threshold) / wheel to look around;
+// fitTo() frames a content-space box and centres it. Single taps pass straight
+// through to the content (grid cells keep their onclick) — only a drag/pinch past
+// the threshold suppresses the trailing click. Attached ONCE per viewport.
+function makePanZoom(viewport, content, opts){
+  opts = opts || {};
+  var cam = { zoom:1, panX:0, panY:0, min:opts.min||0.35, max:opts.max||2.6 };
+  content.style.transformOrigin = '0 0';
+  function apply(){ content.style.transform = 'translate('+cam.panX+'px,'+cam.panY+'px) scale('+cam.zoom+')'; }
+  function clampZ(z){ return Math.max(cam.min, Math.min(cam.max, z)); }
+  // Frame a content-space box (centre cx,cy; size spanW×spanH) inside the viewport's
+  // CLEAR region — the full viewport minus any overlay insets (top HUD, bottom
+  // controls) so the fighters never hide behind a floating panel.
+  function fitTo(cx, cy, spanW, spanH, margin, inset){
+    var vw=viewport.clientWidth, vh=viewport.clientHeight;
+    if(!vw||!vh) return false;
+    inset = inset||{}; var it=inset.top||0, ib=inset.bottom||0, il=inset.left||0, ir=inset.right||0;
+    var aw=Math.max(40, vw-il-ir), ah=Math.max(40, vh-it-ib);
+    margin = margin==null?1.1:margin;
+    cam.zoom = clampZ(Math.min(aw/(spanW*margin), ah/(spanH*margin)));
+    cam.panX = il + aw/2 - cx*cam.zoom;
+    cam.panY = it + ah/2 - cy*cam.zoom;
+    apply(); return true;
+  }
+  function zoomAround(factor, ox, oy){
+    var vw=viewport.clientWidth, vh=viewport.clientHeight;
+    if(ox==null)ox=vw/2; if(oy==null)oy=vh/2;
+    var z2=clampZ(cam.zoom*factor);
+    cam.panX = ox - (ox-cam.panX)*(z2/cam.zoom);
+    cam.panY = oy - (oy-cam.panY)*(z2/cam.zoom);
+    cam.zoom = z2; apply();
+  }
+  var active=new Map(), panning=false, moved=0, lastX=0, lastY=0, startDist=0, suppressUntil=0;
+  viewport.addEventListener('pointerdown', function(e){
+    active.set(e.pointerId, {x:e.clientX,y:e.clientY});
+    if(active.size===1){ panning=false; moved=0; lastX=e.clientX; lastY=e.clientY; }
+    else if(active.size===2){ var a=[...active.values()]; startDist=Math.hypot(a[0].x-a[1].x,a[0].y-a[1].y)||1; }
+  });
+  viewport.addEventListener('pointermove', function(e){
+    if(!active.has(e.pointerId)) return;
+    active.set(e.pointerId, {x:e.clientX,y:e.clientY});
+    var a=[...active.values()], rect=viewport.getBoundingClientRect();
+    if(a.length>=2){
+      var dist=Math.hypot(a[0].x-a[1].x,a[0].y-a[1].y);
+      var mx=(a[0].x+a[1].x)/2-rect.left, my=(a[0].y+a[1].y)/2-rect.top;
+      if(startDist>0) zoomAround(dist/startDist, mx, my);
+      startDist=dist; suppressUntil=performance.now()+450; e.preventDefault();
+    } else if(a.length===1){
+      var dx=e.clientX-lastX, dy=e.clientY-lastY; moved+=Math.abs(dx)+Math.abs(dy);
+      if(moved>8) panning=true;
+      if(panning){ cam.panX+=dx; cam.panY+=dy; apply(); suppressUntil=performance.now()+450; e.preventDefault(); }
+      lastX=e.clientX; lastY=e.clientY;
+    }
+  });
+  function up(e){ active.delete(e.pointerId); if(active.size<2)startDist=0; if(active.size===0)panning=false; }
+  viewport.addEventListener('pointerup', up);
+  viewport.addEventListener('pointercancel', up);
+  // A drag/pinch ends in a click — swallow it (capture phase) so it doesn't also move a fighter.
+  viewport.addEventListener('click', function(e){ if(performance.now()<suppressUntil){ e.stopPropagation(); e.preventDefault(); } }, true);
+  viewport.addEventListener('wheel', function(e){ e.preventDefault(); var rect=viewport.getBoundingClientRect(); zoomAround(e.deltaY<0?1.12:1/1.12, e.clientX-rect.left, e.clientY-rect.top); }, {passive:false});
+  apply();
+  return { cam:cam, apply:apply, fitTo:fitTo, zoomBy:function(f){ zoomAround(f); } };
+}
+// The tactical grid's camera (lazily attached; the grid-wrap + #grid persist across matches).
+var _tacCam=null, _tacFitPending=false;
+function tacCamera(){
+  var gw=document.querySelector('#battleScreen .grid-wrap'), g=document.getElementById('grid');
+  if(!gw||!g) return null;
+  if(!gw._panzoom) gw._panzoom=makePanZoom(gw, g, {min:0.35,max:2.6});
+  _tacCam=gw._panzoom; return _tacCam;
+}
+// Frame both fighters (+context) into the clear band between the floating HUD and
+// controls. Cells are 80px on an 81px pitch.
+function tacFitFighters(){
+  var cam=tacCamera(); if(!cam||!p1||!p2) return false;
+  var C=81, x1=p1.x*C+40, y1=p1.y*C+40, x2=p2.x*C+40, y2=p2.y*C+40;
+  var spanW=Math.max(C*4.5, Math.abs(x1-x2)+C*3.5), spanH=Math.max(C*4.5, Math.abs(y1-y2)+C*3.5);
+  // Reserve the overlay bands so no fighter hides behind a panel.
+  var ctrl=document.querySelector('#battleScreen .controls');
+  var inset={ top:150, bottom:(ctrl?ctrl.offsetHeight:250)+8 };
+  return cam.fitTo((x1+x2)/2, (y1+y2)/2, spanW, spanH, 1.04, inset);
+}
+function tacZoom(f){ var cam=tacCamera(); if(cam) cam.zoomBy(f); }
+function tacFit(){ _tacFitPending=true; tacFitFighters(); }
+
+// Action arena zoom — scales the tilted plane via a CSS var (fighters ride the
+// plane, so they scale with it). Kept simpler than the tactical camera because the
+// action field already frames both fighters; this just lets the player look closer.
+var _actZoom=1;
+function actZoom(f){ _actZoom=Math.max(0.6, Math.min(2.4, _actZoom*(f||1))); var a=document.getElementById('actionArena'); if(a) a.style.setProperty('--azoom', _actZoom.toFixed(3)); }
+function actZoomReset(){ _actZoom=1; var a=document.getElementById('actionArena'); if(a) a.style.setProperty('--azoom','1'); }
+
 function renderGrid(){
   for(var r=0;r<GS;r++){for(var c=0;c<GS;c++){
     var cv=document.getElementById('cs_'+r+'_'+c);
@@ -4072,14 +4175,10 @@ function renderGrid(){
       }
     }}
   }
-  // Auto-scroll grid to center between fighters
-  var gridWrap=document.querySelector('.grid-wrap');
-  if(gridWrap&&p1&&p2){
-    var midX=(p1.x+p2.x)/2;
-    var cellW=81; // 80px + 1px gap
-    var targetScroll=midX*cellW+cellW/2-gridWrap.clientWidth/2;
-    gridWrap.scrollLeft=Math.max(0,targetScroll);
-  }
+  // Camera: on a battle start / new turn, re-frame both fighters (unless the player
+  // has taken the camera themselves this turn). The transform-based camera replaces
+  // the old horizontal-only scroll so the battlefield reads on a phone.
+  if(_tacFitPending){ if(tacFitFighters()) _tacFitPending=false; }
 }
 
 // ═══ HUD ═══
@@ -4622,6 +4721,7 @@ function finishTurn(){
   gainMateriaXP(p1,'a',1);gainMateriaXP(p2,'a',1);
   if(checkWin())return;
   turnNum++;gamePhase='plan';moveQueue=[];lastMoveType=null;selectedAttack=null;executing=false;
+  _tacFitPending=true; // re-frame the fighters at their new positions (unless the player re-aims the camera)
   // Clear per-turn flags
   delete p1._dashing;delete p2._dashing;
   delete p1._disengaging;delete p2._disengaging;
@@ -6450,7 +6550,7 @@ Object.assign(window, {
   closeMatDetail, confirmBuilder, confirmDraft, confirmLoadout, craftDrillSocket,
   craftFuseLink, craftLevel, craftRefine, craftSlot, craftUnslot, deleteChampion,
   equipDraftGearTo, equipFromLab, execCraft, executeTurn, forfeitAction, forfeitRun,
-  forfeitTactical, toggleTacticalAuto,
+  forfeitTactical, toggleTacticalAuto, tacZoom, tacFit, actZoom, actZoomReset,
   goToDraft, goToLab, openBuilder, openDebug, pickReadyAttack, randomizeBuilder,
   randomizeDebug, reformMateria, rerollStats, returnToTitle, rotateDraftFace,
   saveChampion, sellGear, sellMateria, setBuilderFace, setDebugFace, setLabPreview,
