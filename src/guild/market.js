@@ -11,7 +11,12 @@ import { rollBookStock } from './books.js';
 
 /** Buy price per material unit (sell-back is half). Ores feed the Forge, herbs the
  *  Lab, foodstuffs the Kitchen pantry — each delivered to its room's store. */
-export const MATERIAL_PRICE = { iron_ore: 8, steel_ore: 20, mithril_ore: 55, sunleaf: 6, emberroot: 16, nightcap: 42, grain: 3, salted_meat: 9 };
+export const MATERIAL_PRICE = { iron_ore: 8, steel_ore: 20, mithril_ore: 55, sunleaf: 6, emberroot: 16, nightcap: 42, grain: 3, salted_meat: 9, game_meat: 7, pelt: 14 };
+
+/** Wilds spoils — carried by MATERIAL_PRICE for their SELL value, but never stocked
+ *  for purchase (you hunt them, you don't buy them). The Market shows these as a
+ *  "sell your haul" section rather than buy rows. */
+export const HUNT_MATERIALS = ['game_meat', 'pelt'];
 
 // Item value = recoup the ore (floor) + a skill premium for quality above the
 // material's unskilled base — so an unskilled smith barely breaks even and PROFIT

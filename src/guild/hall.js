@@ -22,14 +22,15 @@ import { POTION_RECIPES, getPotionRecipe, previewPotency, brew, potionUnlocked, 
 import { MATERIALS, createInventory, armoryItems, findItem, addMaterial, gearBonus, EQUIP_SLOTS, findPotion, consumePotion, potionCount, roomMaterialIds } from './inventory.js';
 import { BOOK_SUBJECTS, mintBook, addBook, bestBook, bookStudyMult, bookPrice } from './books.js';
 import { generateQuestBoard, resolveQuest, resolveQuestPlayed } from './quests.js';
+import { PREY, LOCALES, preyById, localeById, ensureWilds, isDiscovered, discoveredLocales, undiscoveredLocales, scoutCost, discoverNextLocale, resolveHunt, resolveHuntPlayed, huntSpoils, huntOdds } from './locales.js';
 import { nextTournament, resolveTournament, placement, championOdds, stakesOf, competitionHarm, roundOpponentPower } from './tournaments.js';
 import { generateSeason, EVENT_TYPES, seasonOf, ensureWorldCup } from './events.js';
 import { rivalById, ensureField, recordFieldOutcome, pruneRivals } from './rivals.js';
 import { roleFor } from './roles.js';
 import { qualityTier } from './item.js';
-import { MATERIAL_PRICE, buyPrice, itemSellValue, createMarket, refreshMarket } from './market.js';
+import { MATERIAL_PRICE, buyPrice, sellPriceMat, itemSellValue, createMarket, refreshMarket, HUNT_MATERIALS } from './market.js';
 import { saveGame, loadGame } from '../platform/storage.js';
-import { playTournamentMatch, playQuestBout, battleEngineReady } from './battle-bridge.js';
+import { playTournamentMatch, playQuestBout, playHuntBout, battleEngineReady } from './battle-bridge.js';
 import { renderRanch, stopRanchLoop, toggleBuild, pickStation, placeStationAt, removeStationById, ranchZoomIn, ranchZoomOut, ranchZoomFit } from './ranch.js';
 import { artSprite } from './art.js';
 import { hasDiorama, roomSceneHTML, bindRoomScene, stopRoomLoop } from './rooms.js';
@@ -53,6 +54,7 @@ let currentRoom = 'hub'; // UI-only: which room the stage shows. Never saved —
 // survives reload and can arm quests as well as tournaments. `planFor` reads it.
 let advancing = false; // re-entrancy guard — a played battle makes advanceAll async & minutes-long.
 let ranchView = true; // UI-only: the guild opens on the RANCH (home view); rooms are drill-in detail.
+let wildsSelId = null; // UI-only: the Wilds locale whose prey are open for dispatch (defaults to nearest).
 
 // The guild hall's rooms, in the sketch's row-major order. `tag` = work vs storage vs
 // living; `locked` rooms are stubbed until their system (the Alchemist) is built.
@@ -60,6 +62,7 @@ const ROOMS = [
   { id: 'grounds', glyph: '🏕', name: 'Grounds', tag: 'COMPOUND' },
   { id: 'calendar', glyph: '📅', name: 'Calendar', tag: 'SEASON' },
   { id: 'roster', glyph: '🛡', name: 'Roster', tag: 'MEMBERS' },
+  { id: 'wilds', glyph: '🗺', name: 'Wilds', tag: 'EXPLORE' },
   { id: 'arena', glyph: '⚔', name: 'Arena', tag: 'COMBAT' },
   { id: 'forge', glyph: '🔨', name: 'Forge', tag: 'WORK' },
   { id: 'kitchen', glyph: '🍲', name: 'Kitchen', tag: 'WORK' },
@@ -279,7 +282,7 @@ function armHeroes(candidates) {
 function ensureAssignment(h) {
   const a = h.assignment || {};
   h.assignment = {
-    type: ['forge', 'study', 'quest', 'brew'].includes(a.type) ? a.type : 'train',
+    type: ['forge', 'study', 'quest', 'brew', 'hunt'].includes(a.type) ? a.type : 'train',
     trainingId: (a.trainingId === 'spar' || getDrill(a.trainingId)) ? a.trainingId : (DRILL_MIGRATE[a.trainingId] || 'pow'),
     intensity: a.intensity === 'heavy' ? 'heavy' : 'light',
     sparWith: a.sparWith || null,
@@ -289,6 +292,10 @@ function ensureAssignment(h) {
     potionId: getPotionRecipe(a.potionId) ? a.potionId : 'minor_heal',
     discipline: a.discipline === 'alchemy' ? 'alchemy' : 'blacksmithing',
     questId: a.questId || null,
+    // Wilds hunt dispatch — the chosen area + prey. Persist beside questId (both
+    // are cleared when the dispatch is spent) and sanitize against the registries.
+    localeId: LOCALES[a.localeId] ? a.localeId : null,
+    huntId: PREY[a.huntId] ? a.huntId : null,
     dietId: getDietPlan(a.dietId) ? a.dietId : (getDietPlan(h.dietPlanId) ? h.dietPlanId : 'balanced'),
   };
   if (!h.dietPlanId) h.dietPlanId = h.assignment.dietId;
@@ -378,6 +385,7 @@ function load() {
   for (const t of guild.schedule) ensureField(guild, t);
   pruneRivals(guild);
   if (!Array.isArray(guild.questBoard) || !guild.questBoard.length) guild.questBoard = generateQuestBoard(guild, 3);
+  ensureWilds(guild); // the Wilds discovery map (Ferncreek Hollow known from the start)
   guild.roster.forEach((h) => { migrateHero(h); ensureAssignment(h); });
   const staleRecruits = guild.recruits && guild.recruits[0] && guild.recruits[0].stats && guild.recruits[0].stats.POW === undefined;
   if (!Array.isArray(guild.recruits) || !guild.recruits.length || staleRecruits) guild.recruits = rollRecruitPool(3);
@@ -388,8 +396,49 @@ function load() {
 
 // --- interactions -----------------------------------------------------------
 function selectHero(id) { selectedId = id; notice = ''; render(); }
-function setActivity(type) { const h = heroById(selectedId); if (h) { h.assignment.type = ['forge', 'study', 'quest', 'brew'].includes(type) ? type : 'train'; if (h.assignment.type !== 'quest') h.assignment.questId = null; save(); render(); } }
-function setQuest(questId) { const h = heroById(selectedId); if (h) { h.assignment.type = 'quest'; h.assignment.questId = questId; save(); render(); } }
+function setActivity(type) { const h = heroById(selectedId); if (h) { h.assignment.type = ['forge', 'study', 'quest', 'brew', 'hunt'].includes(type) ? type : 'train'; if (h.assignment.type !== 'quest') h.assignment.questId = null; if (h.assignment.type !== 'hunt') { h.assignment.huntId = null; h.assignment.localeId = null; } save(); render(); } }
+function setQuest(questId) { const h = heroById(selectedId); if (h) { h.assignment.type = 'quest'; h.assignment.questId = questId; h.assignment.huntId = null; h.assignment.localeId = null; save(); render(); } }
+/** Dispatch the selected member to hunt `preyId` in discovered area `localeId`. */
+function setHunt(localeId, preyId) {
+  const h = heroById(selectedId); if (!h) return;
+  if (!isDiscovered(guild, localeId) || !preyById(preyId)) return;
+  h.assignment.type = 'hunt'; h.assignment.localeId = localeId; h.assignment.huntId = preyId;
+  h.assignment.questId = null;
+  wildsSelId = localeId;
+  save(); render();
+}
+/** Open a discovered area's prey list (UI selection only). */
+function selectWildsLocale(localeId) { if (isDiscovered(guild, localeId)) { wildsSelId = localeId; render(); } }
+/** Commission a scout to map the next-nearest area (costs gold). */
+function scoutRegion() {
+  const cost = scoutCost(guild);
+  if (undiscoveredLocales(guild).length === 0) { notice = 'The whole near country is mapped — no new ground to scout.'; render(); return; }
+  if (guild.gold < cost) { notice = `A scout wants ${cost}g to map the next area — the coffers are short.`; render(); return; }
+  addGold(guild, -cost);
+  const found = discoverNextLocale(guild);
+  if (found) { wildsSelId = found.id; notice = `🗺 Scout returns: ${found.glyph} ${found.name} is on the map.`; }
+  save(); render();
+}
+/** Arm (or disarm) the play lens for a hunt. The plan id is the PARTY key
+ *  (localeId|preyId) — the same key the advanceAll pre-pass groups on — so two hunts
+ *  of the same species in different areas don't collide on one play slot (review fix). */
+function setPlayHunt(localeId, preyId, mode) {
+  const id = localeId + '|' + preyId;
+  const m = mode === 'tactical' ? 'tactical' : mode === 'spectate' ? 'spectate' : 'action';
+  guild.playPlan = planFor('hunt', id) === m ? null : { kind: 'hunt', id, mode: m };
+  notice = guild.playPlan ? 'The hunt will be played live on Advance Week.' : '';
+  save(); render();
+}
+/** Sell one unit of a hunted good (pelt / surplus game meat) at the Market. */
+function sellMaterial(matId) {
+  if (!HUNT_MATERIALS.includes(matId)) return;
+  if ((guild.inventory.materials[matId] || 0) <= 0) return;
+  guild.inventory.materials[matId] -= 1;
+  const g = sellPriceMat(matId);
+  addGold(guild, g);
+  notice = `Sold 1 ${MATERIALS[matId].name} · +${g}g`;
+  save(); render();
+}
 function setTraining(id) { const h = heroById(selectedId); if (h) { h.assignment.trainingId = id; h.assignment.type = 'train'; h.assignment.sparWith = null; h.assignment.questId = null; save(); render(); } }
 function assignTo(heroId, jobType) {
   const h = heroById(heroId); if (!h) return;
@@ -526,11 +575,12 @@ async function advanceAll() {
   const week = guild.calendar.week;
   const weekLabel = formatDate(guild.calendar); // the week being RESOLVED (advanceWeek moves the clock below)
   const results = [];
+  const wildsFound = []; // local areas a returning quest party mapped this week (Wilds discovery)
 
   // --- Quartermaster: auto-issue gear BEFORE quests resolve so it counts in the field. ---
   let issued = 0;
   if (guild.quartermaster === 'all') issued = armHeroes(guild.roster);
-  else if (guild.quartermaster === 'party') issued = armHeroes(guild.roster.filter((h) => h.assignment.type === 'quest' && h.assignment.questId && canMarch(h)));
+  else if (guild.quartermaster === 'party') issued = armHeroes(guild.roster.filter((h) => ((h.assignment.type === 'quest' && h.assignment.questId) || (h.assignment.type === 'hunt' && h.assignment.huntId)) && canMarch(h)));
 
   // --- Quest pre-pass: heroes assigned to the SAME quest form a PARTY; the quest
   // resolves ONCE on the party's combined power, and guild rewards are paid ONCE. ---
@@ -566,6 +616,12 @@ async function advanceAll() {
       guild.reputation += quest.rewards.reputation;
       if (quest.loot) addMaterial(guild.inventory, quest.loot, 1);
       if (quest.book) bookGained = addBook(guild.inventory, mintBook(quest.book.subject, quest.book.tier, 'quest', week)).title; // a recovered volume, shelved in the Library
+      // A returning party sometimes MAPS new ground — the second way the Wilds open
+      // (besides commissioning a scout). Deeper jobs are likelier to range far.
+      if (undiscoveredLocales(guild).length && Math.random() < 0.18 + 0.05 * (quest.rank || 1)) {
+        const found = discoverNextLocale(guild);
+        if (found) wildsFound.push(found);
+      }
     }
     party.forEach((h) => {
       questPlan[h.id] = { quest, outcome, marched: marchers.includes(h), isLead: marchers[0] === h, partySize: marchers.length, bookGained };
@@ -576,6 +632,53 @@ async function advanceAll() {
   // The quest board regenerates weekly, so any quest opt-in not consumed above is
   // dead — clear it or it lingers in the save forever (review fix).
   if (guild.playPlan && guild.playPlan.kind === 'quest') guild.playPlan = null;
+
+  // --- Hunt pre-pass: heroes sent to the SAME prey in the SAME area form a hunting
+  // PARTY; the hunt resolves ONCE on combined power and the spoils are paid ONCE.
+  // Mirrors the quest pre-pass, incl. the optional played bout (playHuntBout). ---
+  const huntParties = {};
+  for (const h of guild.roster) {
+    if (h.assignment.type === 'hunt' && h.assignment.huntId && h.assignment.localeId) {
+      const key = h.assignment.localeId + '|' + h.assignment.huntId;
+      (huntParties[key] = huntParties[key] || []).push(h);
+    }
+  }
+  const huntPlan = {}; // heroId -> { prey, locale, outcome, marched, isLead, partySize, spoils }
+  for (const key in huntParties) {
+    const party = huntParties[key];
+    const sep = key.indexOf('|');
+    const prey = preyById(key.slice(sep + 1));
+    const locale = localeById(key.slice(0, sep));
+    const marchers = prey ? party.filter(canMarch) : [];
+    let outcome = null;
+    if (prey && marchers.length) {
+      const hLens = planFor('hunt', key); // key = localeId|preyId — one play slot per party
+      if (hLens && battleEngineReady()) {
+        guild.playPlan = null; // consume the opt-in
+        const champion = marchers.reduce((a, b) => (combatPower(a) >= combatPower(b) ? a : b));
+        const bout = await playHuntBout(champion, prey, marchers.length, { mode: hLens, items: withdrawPotions() });
+        if (bout && bout.itemsUsed) spendPotions(bout.itemsUsed);
+        outcome = bout ? resolveHuntPlayed(prey, marchers, combatPower, bout.won) : resolveHunt(prey, marchers, combatPower);
+      } else {
+        if (hLens) guild.playPlan = null; // armed but engine missing — consumed either way
+        outcome = resolveHunt(prey, marchers, combatPower);
+      }
+    }
+    let spoils = null;
+    if (outcome && outcome.success) { // spoils, once for the whole party
+      spoils = huntSpoils(prey, outcome.score);
+      addGold(guild, spoils.gold);
+      guild.reputation += spoils.rep;
+      if (spoils.meat > 0) addMaterial(guild.inventory, 'game_meat', spoils.meat);
+      if (spoils.pelt > 0) addMaterial(guild.inventory, 'pelt', spoils.pelt);
+      if (spoils.loot) addMaterial(guild.inventory, spoils.loot, 1);
+    }
+    party.forEach((h) => {
+      huntPlan[h.id] = { prey, locale, outcome, marched: marchers.includes(h), isLead: marchers[0] === h, partySize: marchers.length, spoils };
+      h.assignment.huntId = null; h.assignment.localeId = null; // dispatch spent — pick anew next week
+    });
+  }
+  if (guild.playPlan && guild.playPlan.kind === 'hunt') guild.playPlan = null;
 
   // --- Tournament pre-pass: any scheduled tournament DUE this week resolves now on the
   // entered lineup (uninjured entrants only), as a small bracket vs an escalating field.
@@ -767,6 +870,42 @@ async function advanceAll() {
           questMorale = -12;
         }
       }
+    } else if (a.type === 'hunt') {
+      // The Wilds: same shape as a quest — march, resolve, teach Field Insight — but the
+      // spoils are meat + pelt, not a job's flat loot. @see the hunt pre-pass above.
+      const plan = huntPlan[h.id];
+      if (!plan || !plan.prey) {
+        entry.hunt = { noPrey: true };
+        entry.conduct = 'failed';
+      } else if (!plan.marched) {
+        entry.hunt = { tooTired: true };
+        entry.conduct = 'failed';
+      } else {
+        onExpedition = true;
+        const success = plan.outcome.success;
+        h.condition.stamina = Math.max(0, h.condition.stamina - QUEST_STAMINA);
+        h.condition.fatigue = Math.min(100, h.condition.fatigue + (success ? 20 : 35));
+        if (!h.condition.injury) { // cornered game bites — the prey's risk, halved on a clean hunt
+          const wound = (plan.prey.risk || 0) * (success ? 0.5 : 1) * ((diet.injuryRiskMod) ?? 1);
+          if (Math.random() < wound) {
+            const r = Math.random();
+            const inj = inflictInjury(h, r < 0.45 ? 'bruised' : rollInjurySeverity(30), 'VIT');
+            entry.wounded = injuryLabel(inj);
+          }
+        }
+        entry.hunt = { prey: plan.prey.name, glyph: plan.prey.glyph, locale: plan.locale ? plan.locale.name : '', success, party: plan.partySize, played: !!plan.outcome.played, won: !!plan.outcome.won };
+        entry.conduct = success ? ((plan.outcome.score || 1) >= 1.3 ? 'exceeded' : 'solid') : 'failed';
+        if (success) {
+          const fieldGain = plan.prey.field;
+          for (const k in h.professions) h.professions[k].field = Math.min(100, (h.professions[k].field || 0) + fieldGain);
+          entry.field = fieldGain;
+          if (plan.isLead && plan.spoils) entry.reward = { gold: plan.spoils.gold, rep: plan.spoils.rep, meat: plan.spoils.meat, pelt: plan.spoils.pelt, loot: plan.spoils.loot };
+          questMorale = 8;
+        } else {
+          entry.field = 0;
+          questMorale = -10;
+        }
+      }
     } else if (a.trainingId === 'spar') {
       const partner = heroById(a.sparWith);
       // Partner must ACTUALLY be sparring back this week (not forging/questing on a stale link)
@@ -878,7 +1017,7 @@ async function advanceAll() {
   ensureWorldCup(guild); // re-book the next World Cup once one resolves
   for (const t of guild.schedule) ensureField(guild, t); // freshly booked events draw their rival fields now
   pruneRivals(guild);
-  report = { weekLabel, income, upkeep, shortfall, results, issued, tournaments: tournamentResults };
+  report = { weekLabel, income, upkeep, shortfall, results, issued, tournaments: tournamentResults, wildsFound: wildsFound.map((l) => ({ glyph: l.glyph, name: l.name })) };
   guild.lastReport = report; // persist the recap — it used to vanish on reload
   notice = '';
   currentRoom = 'hub'; // land on the hub so the weekly recap is always seen
@@ -946,6 +1085,7 @@ function rosterRow(h) {
     : a.type === 'brew' ? `⚗ ${(getPotionRecipe(a.potionId) || {}).name || 'Brew'}`
     : a.type === 'study' ? `📖 Study ${a.discipline === 'alchemy' ? 'Alchemy' : 'Smithing'}`
     : a.type === 'quest' ? `🗺 ${a.questId ? (questTitle(a.questId) || 'On Quest') : '(choose quest)'}`
+    : a.type === 'hunt' ? `🏹 ${a.huntId ? `Hunt ${(preyById(a.huntId) || {}).name || ''}` : '(choose prey)'}`
     : a.trainingId === 'spar' ? `🤺 Spar ${((heroById(a.sparWith) || {}).name || '?').split(' ')[0]}`
     : `⚔ ${(getDrill(a.trainingId) || REST).name}${a.intensity === 'heavy' ? ' (H)' : ''}`;
   return `<button class="roster-row ${h.id === selectedId ? 'sel' : ''}" onclick="__guild.selectHero('${h.id}')">
@@ -1202,6 +1342,7 @@ function jobLabel(h) {
     : a.type === 'brew' ? `⚗ Brewing ${(getPotionRecipe(a.potionId) || {}).name || ''}`
     : a.type === 'study' ? `📖 Studying ${a.discipline === 'alchemy' ? 'alchemy' : 'metallurgy'}`
     : a.type === 'quest' ? `🗺 ${a.questId ? (questTitle(a.questId) || 'On a quest') : 'Quest (pick one)'}`
+    : a.type === 'hunt' ? `🏹 ${a.huntId ? `Hunting ${(preyById(a.huntId) || {}).name || ''}` : 'Hunt (pick prey)'}`
     : a.trainingId === 'spar' ? `🤺 Sparring ${((heroById(a.sparWith) || {}).name || '?').split(' ')[0]}`
     : `⚔ ${(getDrill(a.trainingId) || REST).name}${a.intensity === 'heavy' ? ' (Heavy)' : ''}`;
 }
@@ -1294,7 +1435,7 @@ function quartermasterPanel() {
 
 function marketPanel() {
   const m = guild.market;
-  const rows = Object.keys(MATERIAL_PRICE).map((id) => {
+  const rows = Object.keys(MATERIAL_PRICE).filter((id) => !HUNT_MATERIALS.includes(id)).map((id) => {
     const price = buyPrice(id);
     const stock = m.stock[id] || 0;
     const afford = guild.gold >= price && stock > 0;
@@ -1303,6 +1444,12 @@ function marketPanel() {
         <button class="rc-hire ${afford ? '' : 'disabled'}" onclick="__guild.buyMaterial('${id}')">Buy · ${price}g</button>
       </div>`;
   }).join('');
+  // Sell your haul — hunted goods (pelts, surplus game meat) the guild can liquidate.
+  const haul = HUNT_MATERIALS.filter((id) => (guild.inventory.materials[id] || 0) > 0);
+  const haulRows = haul.map((id) => `<div class="market-row">
+        <span class="mk-name"><b style="color:${MATERIALS[id].col}">${MATERIALS[id].name}</b> <span class="rr-sub">have ${guild.inventory.materials[id]}</span></span>
+        <button class="rc-hire" onclick="__guild.sellMaterial('${id}')">Sell · ${sellPriceMat(id)}g</button>
+      </div>`).join('');
   const bookRows = (m.bookStock || []).map((b) => {
     const sub = BOOK_SUBJECTS[b.subject] || { glyph: '📖', label: b.subject };
     const price = bookPrice(b);
@@ -1312,12 +1459,16 @@ function marketPanel() {
         <button class="rc-hire ${afford ? '' : 'disabled'}" onclick="__guild.buyBook('${b.id}')">Buy · ${price}g</button>
       </div>`;
   }).join('');
+  const haulSection = haulRows
+    ? `<div class="dept-lbl" style="margin-top:8px">🏹 Sell your haul</div><div class="market-list">${haulRows}</div>`
+    : '';
   return `<div class="plan-card">
       <div class="plan-title">⚖ Market · Buy Materials</div>
       <div class="market-list">${rows}</div>
+      ${haulSection}
       <div class="dept-lbl" style="margin-top:8px">📚 The bookseller's shelf</div>
       <div class="market-list">${bookRows || '<div class="hint">Sold out this week — the shelf turns over each Advance Week.</div>'}</div>
-      <div class="hint" style="text-align:left;padding:6px 0 0">Materials deliver to their room's store (ore → Forge, herbs → Laboratory, food → Kitchen); books shelve in the 📖 Library. Sell forged goods from the Armory above. Stock refreshes each week.</div>
+      <div class="hint" style="text-align:left;padding:6px 0 0">Materials deliver to their room's store (ore → Forge, herbs → Laboratory, food → Kitchen); books shelve in the 📖 Library. Pelts &amp; surplus meat from the Wilds sell here. Stock refreshes each week.</div>
     </div>`;
 }
 
@@ -1366,6 +1517,21 @@ function recapPanel() {
       }
       return `<div class="r-line"><b>${r.name}</b> <span class="down">failed ${r.quest ? r.quest.title : 'a quest'}</span>${led}${wound}</div>`;
     }
+    if (r.type === 'hunt') {
+      const wound = r.wounded ? ` <span class="down">· ⚠ ${r.wounded}</span>` : '';
+      const led = r.hunt && r.hunt.played ? ` <span class="dim">· ${r.hunt.won ? 'brought down by hand' : 'the played bout was lost'}</span>` : '';
+      if (r.hunt && r.hunt.noPrey) return `<div class="r-line"><b>${r.name}</b> <span class="down">chose no quarry</span></div>`;
+      if (r.hunt && r.hunt.tooTired) return `<div class="r-line"><b>${r.name}</b> <span class="down">too exhausted to set out — rest first</span></div>`;
+      if (r.hunt && r.hunt.success) {
+        const party = r.hunt.party > 1 ? ` <span class="dim">(party of ${r.hunt.party})</span>` : '';
+        if (r.reward) {
+          const haul = [r.reward.meat > 0 ? `🥩${r.reward.meat}` : '', r.reward.pelt > 0 ? `🟫${r.reward.pelt}` : '', r.reward.loot ? `+1 ${MATERIALS[r.reward.loot].name}` : ''].filter(Boolean).join(' ');
+          return `<div class="r-line"><b>${r.name}</b> hunted the <span class="up">${r.hunt.glyph || '🏹'} ${r.hunt.prey}</span> — <span class="up">+${r.reward.gold}g${haul ? ' · ' + haul : ''}</span> <span class="dim">· Field +${r.field}</span>${party}${led}${wound}</div>`;
+        }
+        return `<div class="r-line"><b>${r.name}</b> joined the hunt for the <span class="up">${r.hunt.prey}</span> <span class="dim">· Field +${r.field}</span>${party}${led}${wound}</div>`;
+      }
+      return `<div class="r-line"><b>${r.name}</b> <span class="down">lost the ${r.hunt ? r.hunt.prey : 'quarry'}</span>${led}${wound}</div>`;
+    }
     if (r.rested) return `<div class="r-line"><b>${r.name}</b> rested <span class="dim">— fat ${fmtDelta(r.fat)}${r.injury ? ', still hurt' : ''}</span></div>`;
     if (r.injured) return `<div class="r-line"><b>${r.name}</b> <span class="down">injured — recovering</span> <span class="dim">(fat ${fmtDelta(r.fat)})</span></div>`;
     const ups = HERO_STATS.filter((s) => r.gains && r.gains[s]).map((s) => `<span class="up">${s}+${r.gains[s]}</span>`);
@@ -1388,7 +1554,8 @@ function recapPanel() {
     const hurtTxt = (t.hurt && t.hurt.length) ? ` <span class="down">⚠ ${t.hurt.join(', ')} hurt</span>` : '';
     return `<div class="r-line">${glyph} <b>${t.name}</b> · <span class="${t.champion ? 'up' : ''}">${t.placement}</span>${pay}${team}${played}${hurtTxt}</div>`;
   }).join('');
-  return `<div class="week-report"><h4>Last week</h4>${tLines}${lines}${qm}${pantryLine}<div class="r-line">income <span class="up">+${rep.income}g</span> · upkeep <span class="down">−${rep.upkeep}g</span>${rep.shortfall ? ' · <span class="down">insolvent — morale −8 all</span>' : ''}</div>
+  const wildsLines = (rep.wildsFound || []).map((l) => `<div class="r-line"><span class="up">🗺 A returning party mapped new ground — ${l.glyph} <b>${l.name}</b> is open in the Wilds.</span></div>`).join('');
+  return `<div class="week-report"><h4>Last week</h4>${tLines}${lines}${wildsLines}${qm}${pantryLine}<div class="r-line">income <span class="up">+${rep.income}g</span> · upkeep <span class="down">−${rep.upkeep}g</span>${rep.shortfall ? ' · <span class="down">insolvent — morale −8 all</span>' : ''}</div>
     <button class="tb-toggle" style="margin:8px 0 0" onclick="__guild.openAssembly()">📋 Reopen the weekly assembly — praise &amp; scold</button></div>`;
 }
 
@@ -1428,6 +1595,11 @@ function assemblyOutcome(r) {
     if (r.quest.noQuest) return '<span class="down">had no quest assigned</span>';
     if (r.quest.tooTired) return '<span class="down">too exhausted to march</span>';
     return `${r.quest.success ? `<span class="up">completed</span>` : `<span class="down">failed</span>`} ${r.quest.title}${r.wounded ? ` <span class="down">· ⚠ ${r.wounded}</span>` : ''}`;
+  }
+  if (r.type === 'hunt') {
+    if (r.hunt.noPrey) return '<span class="down">chose no quarry</span>';
+    if (r.hunt.tooTired) return '<span class="down">too exhausted to march</span>';
+    return `${r.hunt.success ? `<span class="up">hunted</span>` : `<span class="down">lost</span>`} the ${r.hunt.prey}${r.wounded ? ` <span class="down">· ⚠ ${r.wounded}</span>` : ''}`;
   }
   if (r.rested) return `rested <span class="dim">— fat ${fmtDelta(r.fat)}${r.injury ? ', still hurt' : ''}</span>`;
   if (r.injured) return '<span class="down">recovering from injury</span>';
@@ -1578,9 +1750,10 @@ function roomStatus(id) {
     case 'arena': return r.length ? 'fight now' : 'no fighters';
     case 'calendar': { const t = nextTournament(guild); if (!t) return 'no events'; const w = Math.max(0, t.week - guild.calendar.week); return `${w === 0 ? 'this week' : w + 'w'} · R${t.rank}`; }
     case 'roster': return `${r.length} member${r.length === 1 ? '' : 's'}`;
+    case 'wilds': { const d = discoveredLocales(guild).length, tot = Object.keys(LOCALES).length; const n = r.filter((h) => h.assignment.type === 'hunt' && h.assignment.huntId).length; return n ? `${n} hunting` : `${d}/${tot} area${tot === 1 ? '' : 's'}`; }
     case 'forge': { const n = r.filter((h) => h.assignment.type === 'forge').length; return n ? `${n} forging` : 'idle'; }
     case 'library': { const n = r.filter((h) => h.assignment.type === 'study').length; const b = (guild.inventory.books || []).length; return n ? `${n} studying` : `${b} book${b === 1 ? '' : 's'}`; }
-    case 'kitchen': { const p = (guild.inventory.materials.grain || 0) + (guild.inventory.materials.salted_meat || 0); return `${p} ration${p === 1 ? '' : 's'}`; }
+    case 'kitchen': { const m = guild.inventory.materials; const p = (m.grain || 0) + (m.salted_meat || 0) + (m.game_meat || 0); return `${p} ration${p === 1 ? '' : 's'}`; }
     case 'armory': { const n = guild.inventory.items.length; return `${n} item${n === 1 ? '' : 's'}`; }
     case 'quarters': return `${guild.recruits.length} for hire`;
     case 'academy': { const a = guild.apprentices || []; const ready = a.filter((x) => x.readiness >= 1).length; return ready ? `${a.length} · ${ready} ready` : `${a.length}/${dormCapacity(guild)} bunks`; }
@@ -1606,6 +1779,87 @@ function rosterRoom() {
     <div class="plan-card">
       <div class="plan-title">🗺 Dispatch on a Quest</div>${questBody(h)}
     </div>`;
+}
+
+/**
+ * The Wilds — a discoverable map of local areas you hunt (see locales.js). Pick WHO
+ * hunts (any member), open a discovered area, choose a quarry, and dispatch — off
+ * screen (auto-resolve), watched, or played by hand. Undiscovered ground is fog you
+ * commission a scout to map. Mirrors the quest board's dispatch + play-lens shape.
+ */
+function wildsRoom() {
+  ensureWilds(guild);
+  const subject = heroById(selectedId) || guild.roster[0];
+  const disc = discoveredLocales(guild);
+  const openId = (wildsSelId && isDiscovered(guild, wildsSelId)) ? wildsSelId
+    : (subject && subject.assignment.type === 'hunt' && subject.assignment.localeId && isDiscovered(guild, subject.assignment.localeId)) ? subject.assignment.localeId
+    : (disc[0] ? disc[0].id : null);
+
+  // Who's hunting — pick any member (benched = injured / too tired to march).
+  const hunterChips = guild.roster.map((h) => `<button class="hs-chip ${subject && h.id === subject.id ? 'sel' : ''} ${canMarch(h) ? '' : 'benched'}" title="${h.name}${canMarch(h) ? '' : ' — too tired or hurt to march'}" onclick="__guild.selectHero('${h.id}')">${personSprite(h, 46)}</button>`).join('');
+
+  // The map — discovered areas + a fog card that commissions the next scout.
+  const areaCards = disc.map((l) => {
+    const glyphs = l.prey.map((pid) => (preyById(pid) || {}).glyph || '').join(' ');
+    return `<button class="wild-area ${l.id === openId ? 'sel' : ''}" onclick="__guild.selectWildsLocale('${l.id}')">
+        <span class="wa-glyph">${l.glyph}</span>
+        <span class="wa-main"><span class="wa-name">${l.name}</span><span class="wa-biome">${l.biome} · ${glyphs}</span></span>
+      </button>`;
+  }).join('');
+  const nextFog = undiscoveredLocales(guild)[0];
+  const cost = scoutCost(guild);
+  const scoutRow = nextFog
+    ? `<button class="wild-area fog ${guild.gold >= cost ? '' : 'lack'}" onclick="__guild.scoutRegion()">
+        <span class="wa-glyph">❔</span>
+        <span class="wa-main"><span class="wa-name">Unmapped ground</span><span class="wa-biome">commission a scout · ${cost}g</span></span></button>`
+    : '';
+
+  // The opened area's prey, scoped to the chosen hunter's party (as questBody).
+  const open = openId ? localeById(openId) : null;
+  let preyPanel = '';
+  if (open && subject) {
+    const hp = combatPower(subject);
+    const hCanMarch = canMarch(subject);
+    const rows = open.prey.map((pid) => {
+      const p = preyById(pid); if (!p) return '';
+      const others = guild.roster.filter((x) => x.id !== subject.id && x.assignment.type === 'hunt' && x.assignment.huntId === pid && x.assignment.localeId === open.id && canMarch(x));
+      const marchPower = others.reduce((s, x) => s + combatPower(x), 0) + (hCanMarch ? hp : 0);
+      const odds = huntOdds(marchPower, p);
+      const chosen = subject.assignment.type === 'hunt' && subject.assignment.huntId === pid && subject.assignment.localeId === open.id;
+      const n = others.length + (hCanMarch ? 1 : 0);
+      const partyTag = n > 1 ? ` · <span class="dim">party of ${n}</span>` : '';
+      const rangeTxt = (r, glyph) => r[1] > 0 ? ` · ${glyph}${r[0] === r[1] ? r[1] : r[0] + '–' + r[1]}` : '';
+      return `<button class="opt hunt-opt ${chosen ? 'active' : ''}" onclick="__guild.setHunt('${open.id}','${pid}')">
+          <span class="hunt-art">${artSprite(p.art, 'wild-standee')}</span>
+          <span class="ho-body"><span class="o-name">${p.name} <span class="q-rank">R${p.rank}</span></span>
+            <span class="o-desc"><span class="${odds.cls}">${odds.txt} ~${odds.pct}%</span>${partyTag}</span></span>
+          <span class="o-cost">${p.gold}g${rangeTxt(p.meat, '🥩')}${rangeTxt(p.pelt, '🟫')}</span></button>`;
+    }).join('');
+    const cur = (subject.assignment.type === 'hunt' && subject.assignment.huntId) ? preyById(subject.assignment.huntId) : null;
+    const curLoc = cur ? subject.assignment.localeId : null;
+    const curKey = cur ? curLoc + '|' + cur.id : null;
+    const lensBar = cur ? `<div class="tourney-lens quest-lens">
+        <button class="tourney-play ${planFor('hunt', curKey) === 'action' ? 'on' : ''}" onclick="__guild.setPlayHunt('${curLoc}','${cur.id}','action')">${planFor('hunt', curKey) === 'action' ? '⚔ Leading the hunt live' : '⚔ Lead the hunt live'}</button>
+        <button class="tourney-play ${planFor('hunt', curKey) === 'spectate' ? 'on' : ''}" onclick="__guild.setPlayHunt('${curLoc}','${cur.id}','spectate')">${planFor('hunt', curKey) === 'spectate' ? '👁 Watching' : '👁 Watch'}</button>
+        <button class="tourney-play ${planFor('hunt', curKey) === 'tactical' ? 'on' : ''}" onclick="__guild.setPlayHunt('${curLoc}','${cur.id}','tactical')">${planFor('hunt', curKey) === 'tactical' ? '♟ Commanding' : '♟ Command'}</button>
+      </div>
+      <div class="hint" style="text-align:left;padding:0 2px 6px">On Advance Week the party's strongest marcher closes with <b>${cur.name}</b> — off screen, watched, or played by hand. Winning swings the luck; the party's ⚡ still decides.</div>`
+      : `<div class="hint" style="text-align:left;padding:4px 2px">Pick a quarry above to dispatch <b>${subject.name.split(' ')[0]}</b>.</div>`;
+    preyPanel = `<div class="plan-title">${open.glyph} ${open.name} <span class="dim" style="font-weight:400;text-transform:none">— ${open.biome}</span></div>
+      <div class="opt-list">${rows}</div>${lensBar}`;
+  }
+
+  return `<div class="plan-card">
+      <div class="plan-title">🏹 Who's hunting?</div>
+      <div class="hero-switch">${hunterChips}</div>
+      <div class="rr-sub" style="margin:4px 2px 0">Dispatching <b>${subject ? subject.name : '—'}</b> · marching a hunt costs ${QUEST_STAMINA} stamina.</div>
+    </div>
+    <div class="plan-card">
+      <div class="plan-title">🗺 The Wilds · ${disc.length}/${Object.keys(LOCALES).length} mapped</div>
+      <div class="wild-map">${areaCards}${scoutRow}</div>
+    </div>
+    <div class="plan-card">${preyPanel || '<div class="hint">Scout an area to open the hunt.</div>'}</div>
+    <div class="hint" style="text-align:left;padding:2px 4px 0">A kill brings home 🥩 game meat (Kitchen pantry → the Hunter's Table diet), a 🟫 pelt (sold at the Market), gold, reputation, and field insight.</div>`;
 }
 
 /** A work department: shows ONLY the members assigned to this job, plus an "Assign a
@@ -2209,6 +2463,7 @@ function renderRoom(id) {
     case 'grounds': return hdr + groundsRoom();
     case 'calendar': return hdr + calendarRoom();
     case 'roster': return hdr + rosterRoom();
+    case 'wilds': return hdr + wildsRoom();
     case 'arena': return hdr + arenaRoom();
     case 'forge': return hdr + forgeRoom();
     case 'kitchen': return hdr + kitchenRoom();
@@ -2345,7 +2600,7 @@ export function openGuild() {
 // Every handler no-ops while a week is advancing (a played battle can be mid-flight;
 // rail buttons still render behind the battle screen and would corrupt the in-flight
 // week). practiceBout/advanceAll keep their own internal checks as a second belt.
-const __guildApi = { selectHero, setActivity, setTraining, setIntensity, scheduleAdd, scheduleRemoveAt, scheduleClear, setRecipe, setForgeMode, setRefineItem, setPotion, setDiscipline, usePotion, setDiet, setQuest, assignTo, setSpar, equipItem, unequipSlot, setPolicy, provision, buyMaterial, sellItem, buyBook, hire, takeApprentice, promoteApprentice, dismissApprentice, advanceAll, back, openRoom, toggleFullscreen, upgradeFacility, enterTournament, leaveTournament, setPlayNext, setPlayQuest, setAskTournaments, toggleDraw, selectCalEvent, praiseHero, scoldHero, openAssembly, closeAssembly, appointTrainer, practiceBout, openRanch, enterRoomFromRanch, manageMemberFromRanch, ranchBuild: toggleBuild, ranchPick: pickStation, ranchPlace: placeStationAt, ranchRemoveStation: removeStationById, ranchZoomIn, ranchZoomOut, ranchZoomFit };
+const __guildApi = { selectHero, setActivity, setTraining, setIntensity, scheduleAdd, scheduleRemoveAt, scheduleClear, setRecipe, setForgeMode, setRefineItem, setPotion, setDiscipline, usePotion, setDiet, setQuest, setHunt, selectWildsLocale, scoutRegion, setPlayHunt, sellMaterial, assignTo, setSpar, equipItem, unequipSlot, setPolicy, provision, buyMaterial, sellItem, buyBook, hire, takeApprentice, promoteApprentice, dismissApprentice, advanceAll, back, openRoom, toggleFullscreen, upgradeFacility, enterTournament, leaveTournament, setPlayNext, setPlayQuest, setAskTournaments, toggleDraw, selectCalEvent, praiseHero, scoldHero, openAssembly, closeAssembly, appointTrainer, practiceBout, openRanch, enterRoomFromRanch, manageMemberFromRanch, ranchBuild: toggleBuild, ranchPick: pickStation, ranchPlace: placeStationAt, ranchRemoveStation: removeStationById, ranchZoomIn, ranchZoomOut, ranchZoomFit };
 window.__guild = {};
 for (const k in __guildApi) {
   window.__guild[k] = (...args) => {

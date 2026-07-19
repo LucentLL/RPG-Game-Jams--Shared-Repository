@@ -69,6 +69,44 @@ function roundOpponent(t, i, rival) {
   };
 }
 
+/**
+ * Play a hunt's CLIMACTIC BOUT: the party's strongest marcher (whatever their
+ * archetype and gear — a Knight swings, a Ranger looses) vs the prey, scaled to
+ * this party's share of the recommended power. Mirrors playQuestBout exactly; the
+ * caller maps the outcome through resolveHuntPlayed. Returns null if the engine
+ * isn't loaded (caller falls back to auto-resolve).
+ *
+ * NOTE: window.playGuildBattle composites EVERY fighter as a humanoid, so the prey
+ * currently renders as a human-shaped foe named for the creature. A true creature
+ * sprite in the arena is a separate crucible task (see the Wilds roadmap) — the
+ * auto-resolve path shows the real creature art and carries the MVP.
+ * @param {import('./hero.js').Hero} hero  the strongest marcher (leads the hunt)
+ * @param {{name:string, power:number, archetype?:string}} prey  a locales.js Prey (power = recommended)
+ * @param {number} partySize
+ * @param {{mode?:'action'|'tactical'|'spectate', items?:?Array}} [opts]
+ * @returns {Promise<?{won:boolean, forfeit:boolean, itemsUsed:?Object}>}
+ */
+export async function playHuntBout(hero, prey, partySize, opts = {}) {
+  if (!battleEngineReady()) return null;
+  const foe = {
+    name: prey.name,
+    archetype: prey.archetype || ARCHES[Math.floor(Math.random() * ARCHES.length)],
+    stats: foeStats((prey.power || 120) / Math.max(1, partySize)),
+    appearanceSeed: (Math.random() * 1e9) | 0,
+  };
+  const result = await window.playGuildBattle({
+    player: heroSpec(hero), opponent: foe,
+    mode: opts.mode === 'tactical' || opts.mode === 'spectate' ? opts.mode : 'action',
+    label: 'The Hunt — ' + prey.name,
+    items: opts.items || null,
+  });
+  return {
+    won: !!(result && result.winner === 'player'),
+    forfeit: !!(result && result.forfeit),
+    itemsUsed: (result && result.itemsUsed) || null,
+  };
+}
+
 /** Named boss standing at the heart of each quest flavor (fallback: The Quarry). */
 const QUEST_BOSSES = {
   'Clear the Warrens': 'The Warren Alpha',
