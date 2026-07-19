@@ -13,7 +13,26 @@
   margin-top:calc(-0.3*(100dvh - 260px));
   background:#1a2418;border:2px solid rgba(60,46,32,0.9);border-radius:10px;image-rendering:pixelated;background-size:100% 100%;
   box-shadow:inset 0 0 80px rgba(0,0,0,0.5),0 24px 60px rgba(0,0,0,0.55);
-  transform:rotateX(50deg) translateZ(-120px);transform-style:preserve-3d}
+  transform:scale(var(--azoom,1)) rotateX(50deg) translateZ(-120px);transform-style:preserve-3d;transition:transform 0.18s ease-out}
+
+/* ═══ MOBILE ACTION OVERLAY — HP + attacks float over a larger battlefield ═══ */
+#actionScreen{position:relative;min-height:100dvh;height:100dvh;padding:0;gap:0;overflow:hidden}
+#actionScreen .action-hud{position:absolute;top:0;left:0;right:0;z-index:20;width:auto;padding:6px 10px 16px;
+  background:linear-gradient(180deg,rgba(7,9,13,0.9),rgba(7,9,13,0));pointer-events:none}
+#actionScreen .action-hp-label{min-width:0;flex:0 0 auto;font-size:0.82em;text-shadow:0 1px 3px #000}
+#actionScreen .action-hp-row .hp-bar{flex:1}
+/* Stage fills the screen; more of the field reads, HP/attacks float on top. */
+#actionScreen .action-stage{position:absolute;inset:0;width:100%;height:100%;align-items:center}
+#actionScreen .action-arena{width:min(150vw,calc(1.18*(100dvh - 96px)));margin-top:calc(-0.24*(100dvh - 96px))}
+#actionScreen .action-help{display:none}
+#actionScreen .action-attacks{position:absolute;left:0;right:0;bottom:0;z-index:20;max-width:none;
+  padding:8px 8px calc(10px + env(safe-area-inset-bottom,0));
+  background:linear-gradient(0deg,rgba(7,9,13,0.95),rgba(7,9,13,0.6) 74%,rgba(7,9,13,0))}
+#actionScreen .action-log{position:absolute;top:58px;left:6px;right:6px;z-index:16;max-width:none;width:auto;height:42px;
+  background:rgba(7,9,13,0.4);border:none;font-size:0.72em}
+#actionScreen #actForfeitBtn{position:absolute;top:8px;right:56px;z-index:22;margin:0}
+/* Lift the movement stick clear of the bottom attacks overlay */
+#actionScreen .action-joystick{bottom:calc(104px + env(safe-area-inset-bottom,0))}
 
 /* Fighter standees: flat wrapper on the plane (shadow lives here), upright inner
    cutout, oversized sprite (96/720 tile cell, sprite drawn 165% of it). */
