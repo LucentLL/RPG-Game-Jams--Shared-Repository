@@ -15,6 +15,10 @@ import { makeApprentice, normalizeApprentice, dormCapacity, academyBoard, develo
 import { DRILLS, REST, getDrill, applyTraining, applySpar, injuryLabel, previewInjuryChance, inflictInjury, rollInjurySeverity, rollConduct } from './training.js';
 import { stationBonusFor } from './stations.js';
 import { DIET_PLANS, getDietPlan, applyDiet, consumeDietFood } from './diet.js';
+import { DISCIPLINES, ELECTIVES, ELECTIVE_IDS, DISCIPLINE_IDS, disciplineById, electiveById, majorForArchetype, discLevel, discProgress, techniquesFor, disciplineForDrill, ensureCurriculum, activeDisciplines, memberElective, canWorkAssign } from './curriculum.js';
+import { RATION_RECIPES, getRation, rationUnlocked, previewYield, cook } from './cooking.js';
+import { orbCost, orbReqTheory, orbUnlocked, previewOrbLevel, craftMateria, slotMateria, itemSockets, orbLabel } from './enchanting.js';
+import { PLANETS } from '../game/data/progression.js';
 import { advanceWeek, formatDate } from './calendar.js';
 import { weeklyUpkeep, addGold, guildIncome } from './economy.js';
 import { RECIPES, getRecipe, previewQuality, forge, study, recipeUnlocked, refine, recipeForItem, previewRefine, REFINE_COST } from './smithing.js';
@@ -282,7 +286,7 @@ function armHeroes(candidates) {
 function ensureAssignment(h) {
   const a = h.assignment || {};
   h.assignment = {
-    type: ['forge', 'study', 'quest', 'brew', 'hunt'].includes(a.type) ? a.type : 'train',
+    type: ['forge', 'study', 'quest', 'brew', 'hunt', 'cook', 'enchant'].includes(a.type) ? a.type : 'train',
     trainingId: (a.trainingId === 'spar' || getDrill(a.trainingId)) ? a.trainingId : (DRILL_MIGRATE[a.trainingId] || 'pow'),
     intensity: a.intensity === 'heavy' ? 'heavy' : 'light',
     sparWith: a.sparWith || null,
@@ -296,6 +300,8 @@ function ensureAssignment(h) {
     // are cleared when the dispatch is spent) and sanitize against the registries.
     localeId: LOCALES[a.localeId] ? a.localeId : null,
     huntId: PREY[a.huntId] ? a.huntId : null,
+    cookRecipeId: getRation(a.cookRecipeId) ? a.cookRecipeId : 'daily_bread', // Cooking elective
+    enchantPlanet: (typeof a.enchantPlanet === 'number' && a.enchantPlanet >= 0 && a.enchantPlanet < PLANETS.length) ? a.enchantPlanet : 4, // Enchanting elective (default Iron)
     dietId: getDietPlan(a.dietId) ? a.dietId : (getDietPlan(h.dietPlanId) ? h.dietPlanId : 'balanced'),
   };
   if (!h.dietPlanId) h.dietPlanId = h.assignment.dietId;
@@ -348,6 +354,11 @@ function migrateHero(h) {
   if (typeof h.condition.injury === 'string') {
     h.condition.injury = { kind: h.condition.injury === 'bruised' ? 'bruised' : 'strained', weeksLeft: h.condition.injury === 'bruised' ? 1 : 2, statHit: null };
   }
+  // Academy electives + combat disciplines.
+  if (!h.professions.historian) h.professions.historian = { theory: 0, practice: 0, field: 0 };
+  if (!h.professions.cooking) h.professions.cooking = { theory: 0, practice: 0, field: 0 };
+  if (!h.professions.enchanting) h.professions.enchanting = { theory: 0, practice: 0, field: 0 };
+  ensureCurriculum(h); // major (from archetype) + combat disciplines + elective/double-major track
 }
 
 function load() {
@@ -411,7 +422,46 @@ function load() {
 
 // --- interactions -----------------------------------------------------------
 function selectHero(id) { selectedId = id; notice = ''; render(); }
-function setActivity(type) { const h = heroById(selectedId); if (h) { h.assignment.type = ['forge', 'study', 'quest', 'brew', 'hunt'].includes(type) ? type : 'train'; if (h.assignment.type !== 'quest') h.assignment.questId = null; if (h.assignment.type !== 'hunt') { h.assignment.huntId = null; h.assignment.localeId = null; } save(); render(); } }
+const TRADE_ASSIGNS = ['forge', 'study', 'brew', 'cook', 'enchant'];
+function setActivity(type) {
+  const h = heroById(selectedId); if (!h) return;
+  // Trade jobs are gated by the member's elective; combat/dispatch never are.
+  if (TRADE_ASSIGNS.includes(type) && !canWorkAssign(h, type)) {
+    const e = ELECTIVE_IDS.map((k) => ELECTIVES[k]).find((x) => x.assign === type);
+    notice = `${h.name.split(' ')[0]} would need the ${e ? e.name : 'right'} elective to work here — set it in their Curriculum.`;
+    render(); return;
+  }
+  h.assignment.type = ['forge', 'study', 'quest', 'brew', 'hunt', 'cook', 'enchant'].includes(type) ? type : 'train';
+  if (h.assignment.type !== 'quest') h.assignment.questId = null;
+  if (h.assignment.type !== 'hunt') { h.assignment.huntId = null; h.assignment.localeId = null; }
+  save(); render();
+}
+/** If the member can no longer work their current trade assignment (elective changed),
+ *  drop them back to combat training. */
+function reconcileTrade(h) { if (TRADE_ASSIGNS.includes(h.assignment.type) && !canWorkAssign(h, h.assignment.type)) h.assignment.type = 'train'; }
+/** Curriculum — pick the member's Elective trade. */
+function setElective(id) {
+  const h = heroById(selectedId); if (!h || !electiveById(id)) return;
+  h.track = { kind: 'elective', electiveId: id, second: null };
+  reconcileTrade(h); save(); render();
+}
+/** Curriculum — switch between the Elective track and Double Major. */
+function setTrackKind(kind) {
+  const h = heroById(selectedId); if (!h) return;
+  if (kind === 'double') {
+    const second = (h.track && h.track.second && h.track.second !== h.major) ? h.track.second : DISCIPLINE_IDS.find((d) => d !== h.major);
+    h.track = { kind: 'double', electiveId: null, second };
+  } else {
+    h.track = { kind: 'elective', electiveId: (h.track && h.track.electiveId) || null, second: null };
+  }
+  reconcileTrade(h); save(); render();
+}
+/** Curriculum — pick the Double Major's second combat discipline. */
+function setSecondDiscipline(id) {
+  const h = heroById(selectedId); if (!h || !disciplineById(id) || id === h.major) return;
+  h.track = { kind: 'double', electiveId: null, second: id };
+  reconcileTrade(h); save(); render();
+}
 function setQuest(questId) { const h = heroById(selectedId); if (h) { h.assignment.type = 'quest'; h.assignment.questId = questId; h.assignment.huntId = null; h.assignment.localeId = null; save(); render(); } }
 /** Dispatch the selected member to hunt `preyId` in discovered area `localeId`. */
 function setHunt(localeId, preyId) {
@@ -457,9 +507,22 @@ function sellMaterial(matId) {
 function setTraining(id) { const h = heroById(selectedId); if (h) { h.assignment.trainingId = id; h.assignment.type = 'train'; h.assignment.sparWith = null; h.assignment.questId = null; save(); render(); } }
 function assignTo(heroId, jobType) {
   const h = heroById(heroId); if (!h) return;
-  h.assignment.type = ['forge', 'study', 'brew'].includes(jobType) ? jobType : 'train';
+  if (!['forge', 'study', 'brew', 'cook', 'enchant'].includes(jobType) || !canWorkAssign(h, jobType)) { notice = `${h.name.split(' ')[0]} can't work that trade — check their Curriculum.`; render(); return; }
+  h.assignment.type = jobType;
   h.assignment.questId = null;
   selectedId = heroId; notice = `${h.name} assigned.`;
+  save(); render();
+}
+/** Curriculum work setters — set the member's trade recipe (also sets them to that job). */
+function setCookRecipe(id) { const h = heroById(selectedId); if (h && getRation(id) && canWorkAssign(h, 'cook')) { h.assignment.type = 'cook'; h.assignment.cookRecipeId = id; save(); render(); } }
+function setEnchantPlanet(i) { const h = heroById(selectedId); if (h && PLANETS[i] && canWorkAssign(h, 'enchant')) { h.assignment.type = 'enchant'; h.assignment.enchantPlanet = i; save(); render(); } }
+/** Slot a stored orb (by index) into the first armoury weapon with a free socket. */
+function slotOrb(orbIdx) {
+  const weapons = armoryItems(guild.inventory).filter((it) => it.kind === 'sword' || it.kind === 'bow');
+  const target = weapons.find((w) => (w.materia || []).length < itemSockets(w));
+  if (!target) { notice = 'No armoury weapon has a free socket.'; render(); return; }
+  const res = slotMateria(target, guild.inventory, orbIdx);
+  notice = res.ok ? `Slotted ${orbLabel(res.orb).name} into ${target.name}.` : 'Could not slot the orb.';
   save(); render();
 }
 /** Pair two members to spar — a MUTUAL assignment, so both spend the week sparring. */
@@ -854,6 +917,15 @@ async function advanceAll() {
       entry.brew = brew(h, recipe, guild.inventory, week);
       entry.recipeName = recipe.name;
       entry.conduct = entry.brew.ok ? (entry.brew.potency >= (recipe.ceil || 100) - 4 ? 'exceeded' : 'solid') : 'failed';
+    } else if (a.type === 'cook') {
+      const recipe = getRation(a.cookRecipeId) || RATION_RECIPES[0];
+      entry.cook = cook(h, recipe, guild.inventory, week);
+      entry.recipeName = recipe.name;
+      entry.conduct = entry.cook.ok ? (entry.cook.qty >= recipe.ceil - 1 ? 'exceeded' : 'solid') : 'failed';
+    } else if (a.type === 'enchant') {
+      entry.enchant = craftMateria(h, a.enchantPlanet, guild.inventory, week);
+      entry.recipeName = entry.enchant.planet ? entry.enchant.planet.name + ' orb' : 'materia';
+      entry.conduct = entry.enchant.ok ? (entry.enchant.level >= 3 ? 'exceeded' : 'solid') : 'failed';
     } else if (a.type === 'study') {
       const disc = a.discipline === 'alchemy' ? 'alchemy' : 'blacksmithing';
       const bk = bestBook(guild.inventory, disc); // the Library's shelf at work — the best volume guides the week
@@ -975,11 +1047,21 @@ async function advanceAll() {
         : entry.slacked ? 'cheated'
         : entry.breakthrough ? 'exceeded'
         : entry.trained ? 'solid' : 'failed';
+      // Combat disciplines are a LENS over the drills: training a drill in one of the
+      // member's active disciplines (their major, or a double-major's 2nd) levels it,
+      // unlocking techniques. Off-discipline drills still grow the stats, just not the craft.
+      const dDisc = disciplineForDrill(a.trainingId);
+      if (dDisc && res.trained && !res.rested && !res.injured && activeDisciplines(h).indexOf(dDisc) >= 0) {
+        const before = discLevel(h.disc[dDisc]);
+        h.disc[dDisc] = (h.disc[dDisc] || 0) + (res.slacked ? 3 : a.intensity === 'heavy' ? 12 : 7);
+        const after = discLevel(h.disc[dDisc]);
+        if (after > before) entry.discUp = { disc: dDisc, lvl: after, tech: (techniquesFor(dDisc, after).slice(-1)[0] || {}).name || null };
+      }
     }
 
     if (!onExpedition) applyDiet(h, diet); // only heroes who actually marched out skip guild rest
     // Training/rest morale is applied inside applyTraining; forge/study take a small dip; quests set questMorale.
-    let dm = questMorale != null ? questMorale : (a.type === 'forge' || a.type === 'study' || a.type === 'brew' ? -1 : 0);
+    let dm = questMorale != null ? questMorale : (a.type === 'forge' || a.type === 'study' || a.type === 'brew' || a.type === 'cook' || a.type === 'enchant' ? -1 : 0);
     if (diet.id === 'feast') dm += 4;
     if (entry.hungry) dm -= 2; // plain rations when they wanted better — grumbling
     h.condition.morale = clamp(h.condition.morale + dm);
@@ -1111,6 +1193,8 @@ function rosterRow(h) {
   const a = h.assignment;
   const plan = a.type === 'forge' ? (a.forgeMode === 'refine' ? `♻ Refine ${refineItemName(a)}` : `🔨 ${getRecipe(a.recipeId).name}`)
     : a.type === 'brew' ? `⚗ ${(getPotionRecipe(a.potionId) || {}).name || 'Brew'}`
+    : a.type === 'cook' ? `🍳 ${(getRation(a.cookRecipeId) || {}).name || 'Cook'}`
+    : a.type === 'enchant' ? `✨ ${(PLANETS[a.enchantPlanet] || {}).name || ''} orb`
     : a.type === 'study' ? `📖 Study ${a.discipline === 'alchemy' ? 'Alchemy' : 'Smithing'}`
     : a.type === 'quest' ? `🗺 ${a.questId ? (questTitle(a.questId) || 'On Quest') : '(choose quest)'}`
     : a.type === 'hunt' ? `🏹 ${a.huntId ? `Hunt ${(preyById(a.huntId) || {}).name || ''}` : '(choose prey)'}`
@@ -1144,6 +1228,55 @@ function heroSwitcher() {
   return `<div class="hero-switch">${guild.roster.map((h) => `<button class="hs-chip ${h.id === selectedId ? 'sel' : ''}" title="${h.name}" onclick="__guild.selectHero('${h.id}')">${personSprite(h, 48)}</button>`).join('')}</div>`;
 }
 
+/** The member's academic identity, one line: "⚔ Melee · 🔨 Blacksmithing" or
+ *  "⚔ Melee + 🏹 Ranged · Double Major". */
+function curriculumLabel(h) {
+  const maj = disciplineById(h.major) || DISCIPLINES.melee;
+  if (h.track && h.track.kind === 'double' && h.track.second) {
+    const s = disciplineById(h.track.second);
+    return `<span style="color:${maj.col}">${maj.glyph} ${maj.name}</span> + <span style="color:${s.col}">${s.glyph} ${s.name}</span> <span class="dim">· Double Major</span>`;
+  }
+  const e = memberElective(h);
+  return `<span style="color:${maj.col}">${maj.glyph} ${maj.name}</span> · ${e ? `${e.glyph} ${e.name}` : '<span class="dim">Elective undeclared</span>'}`;
+}
+
+/** The Curriculum panel — the member's combat disciplines (levels + techniques) and
+ *  the Track selector: an Elective trade, or a Double Major (a 2nd combat discipline). */
+function curriculumPanel(h) {
+  const maj = disciplineById(h.major) || DISCIPLINES.melee;
+  const isDouble = h.track && h.track.kind === 'double';
+  const discRows = activeDisciplines(h).map((id) => {
+    const d = disciplineById(id); const pr = discProgress(h.disc[id]);
+    const techs = techniquesFor(id, pr.lvl);
+    return `<div class="disc-row">
+        <span class="disc-name" style="color:${d.col}">${d.glyph} ${d.name} <span class="dim">Lv${pr.lvl}</span>${id === h.major ? '' : ' <span class="dim">· 2nd</span>'}</span>
+        <span class="disc-bar"><span class="disc-fill" style="width:${Math.round(pr.frac * 100)}%;background:${d.col}"></span></span>
+        ${techs.length ? `<span class="disc-techs">${techs.map((t) => `<span class="tech-chip" style="border-color:${d.col}55">${t.name}</span>`).join('')}</span>` : '<span class="disc-techs dim">— no techniques yet —</span>'}
+      </div>`;
+  }).join('');
+  const trackToggle = `<div class="intensity-toggle">
+      <button class="${!isDouble ? 'on' : ''}" onclick="__guild.setTrackKind('elective')">🎓 Take an Elective</button>
+      <button class="${isDouble ? 'on' : ''}" onclick="__guild.setTrackKind('double')">⚔ Double Major</button>
+    </div>`;
+  let trackBody;
+  if (isDouble) {
+    const seconds = DISCIPLINE_IDS.filter((d) => d !== h.major);
+    trackBody = `<div class="opt-list">${seconds.map((id) => { const d = disciplineById(id);
+      return `<button class="opt ${h.track.second === id ? 'active' : ''}" onclick="__guild.setSecondDiscipline('${id}')">
+        <span><span class="o-name">${d.glyph} ${d.name}</span> <span class="o-desc">${d.blurb}</span></span></button>`; }).join('')}</div>
+      <div class="hint" style="text-align:left;padding:4px 2px">A Double Major gives up a trade to train two combat disciplines — a pure fighter. Train either in the drill menu.</div>`;
+  } else {
+    const cur = memberElective(h);
+    trackBody = `<div class="opt-list">${ELECTIVE_IDS.map((id) => { const e = ELECTIVES[id];
+      return `<button class="opt ${cur && cur.id === id ? 'active' : ''}" onclick="__guild.setElective('${id}')">
+        <span><span class="o-name">${e.glyph} ${e.name}</span> <span class="o-desc">${e.blurb}</span></span></button>`; }).join('')}</div>
+      <div class="hint" style="text-align:left;padding:4px 2px">An Elective is the member's trade — they work its room (${cur ? `the ${cur.room}` : 'once chosen'}). Every member still trains combat besides.</div>`;
+  }
+  return `<div class="plan-title">🎓 Curriculum — <span class="pt-cur">${maj.glyph} ${maj.name}</span> <span class="dim" style="font-weight:400;text-transform:none">major · their nature</span></div>
+    <div class="disc-list">${discRows}</div>
+    ${trackToggle}${trackBody}`;
+}
+
 /** The member's stat / condition / gear card — the shared header used in the Roster room. */
 function heroHeader(h) {
   const rep = report && report.results ? report.results.find((r) => r.id === h.id) : null;
@@ -1164,6 +1297,7 @@ function heroHeader(h) {
         <div class="hero-ident">
           <div class="hero-name">${h.name}</div>
           <div class="hero-sub">${h.archetype} · Lv${h.level} · <span style="color:${stage.col}">${stage.name}</span></div>
+          <div class="hero-track">${curriculumLabel(h)}</div>
           <div class="hero-power">⚡ ${combatPower(h)}${record}</div>
           ${chips ? `<div class="trait-row">${chips}</div>` : ''}
         </div>
@@ -1344,6 +1478,60 @@ function brewBody(h) {
   return `${alchemyShapeOf(h)}<div class="opt-list">${list}</div>`;
 }
 
+function cookingShapeOf(h) {
+  const p = h.professions.cooking || { theory: 0, practice: 0, field: 0 };
+  return `<div class="skill-shape">🍳 Cooking — <b>Theory ${p.theory}</b> · <b>Practice ${p.practice}</b> · <span class="dim">Field ${p.field}</span></div>`;
+}
+/** Kitchen work body for a Cook: pick a ration recipe. Picking one sets them to Cook. */
+function cookBody(h) {
+  const isCook = h.assignment.type === 'cook';
+  const prof = h.professions.cooking || { theory: 0, practice: 0, field: 0 };
+  const list = RATION_RECIPES.map((r) => {
+    const costTxt = Object.keys(r.cost).length ? Object.keys(r.cost).map((k) => `${MATERIALS[k].name} ×${r.cost[k]}`).join(', ') : 'pure labour';
+    const enough = Object.keys(r.cost).every((k) => (guild.inventory.materials[k] || 0) >= r.cost[k]);
+    if (!rationUnlocked(h, r)) {
+      return `<button class="opt lack" disabled><span><span class="o-name">🔒 ${r.name}</span> <span class="o-desc">a more seasoned hand</span></span><span class="o-cost">Theory ${r.reqTheory}</span></button>`;
+    }
+    return `<button class="opt ${isCook && r.id === h.assignment.cookRecipeId ? 'active' : ''} ${enough ? '' : 'lack'}" onclick="__guild.setCookRecipe('${r.id}')">
+      <span><span class="o-name">${r.glyph} ${r.name}</span> <span class="o-desc">${costTxt} → ${MATERIALS[r.food].name}</span></span>
+      <span class="o-cost">~×${previewYield(r, prof.practice, prof.field)}</span></button>`;
+  }).join('');
+  return `${cookingShapeOf(h)}<div class="opt-list">${list}</div>
+    <div class="hint" style="text-align:left;padding:4px 0">A Cook turns labour and raw stock into pantry rations — the guild feeds itself instead of buying at market.</div>`;
+}
+
+function enchantingShapeOf(h) {
+  const p = h.professions.enchanting || { theory: 0, practice: 0, field: 0 };
+  return `<div class="skill-shape">✨ Enchanting — <b>Theory ${p.theory}</b> · <b>Practice ${p.practice}</b> · <span class="dim">Field ${p.field} · forges Lv${previewOrbLevel(p.practice, p.field)} orbs</span></div>`;
+}
+/** Enchanter's bench: pick a planet to craft, and slot crafted orbs into weapons. */
+function enchantBody(h) {
+  const isEnch = h.assignment.type === 'enchant';
+  const prof = h.professions.enchanting || { theory: 0, practice: 0, field: 0 };
+  const list = PLANETS.map((pl, i) => {
+    const cost = orbCost(i);
+    const costTxt = Object.keys(cost).map((k) => `${MATERIALS[k].name} ×${cost[k]}`).join(', ');
+    const enough = Object.keys(cost).every((k) => (guild.inventory.materials[k] || 0) >= cost[k]);
+    if (!orbUnlocked(h, i)) {
+      return `<button class="opt lack" disabled><span><span class="o-name" style="color:${pl.col}">🔒 ${pl.sym} ${pl.name}</span> <span class="o-desc">${pl.bonusDesc} · deeper lore needed</span></span><span class="o-cost">Theory ${orbReqTheory(i)}</span></button>`;
+    }
+    return `<button class="opt ${isEnch && h.assignment.enchantPlanet === i ? 'active' : ''} ${enough ? '' : 'lack'}" onclick="__guild.setEnchantPlanet(${i})">
+      <span><span class="o-name" style="color:${pl.col}">${pl.sym} ${pl.name}</span> <span class="o-desc">${pl.bonusDesc} · ${costTxt}</span></span>
+      <span class="o-cost">Lv${previewOrbLevel(prof.practice, prof.field)}</span></button>`;
+  }).join('');
+  const store = guild.inventory.materia || [];
+  const weapons = armoryItems(guild.inventory).filter((it) => it.kind === 'sword' || it.kind === 'bow');
+  const freeWeapon = weapons.find((w) => (w.materia || []).length < itemSockets(w));
+  const storeHTML = store.length ? store.map((orb, i) => { const L = orbLabel(orb);
+    return `<div class="market-row"><span class="mk-name"><b style="color:${L.col}">${L.sym} ${L.name} Lv${L.lvl}</b></span>
+      <button class="rc-hire ${freeWeapon ? '' : 'disabled'}" onclick="__guild.slotOrb(${i})">${freeWeapon ? `↳ Slot into ${freeWeapon.name}` : 'no free socket'}</button></div>`; }).join('')
+    : '<div class="hint">No orbs yet — the Enchanter crafts one each week they work.</div>';
+  return `${enchantingShapeOf(h)}<div class="opt-list">${list}</div>
+    <div class="dept-lbl" style="margin-top:8px">✨ Materia store · ${store.length}</div>
+    <div class="market-list">${storeHTML}</div>
+    <div class="hint" style="text-align:left;padding:4px 0">Crafted orbs slot into armoury weapons. <span class="dim">A slotted orb doesn't change a played fight yet — the arena bridge comes later.</span></div>`;
+}
+
 /** Library/Study body: pick a discipline; the Scholar raises its Theory this week. */
 function studyBody(h) {
   const a = h.assignment;
@@ -1376,6 +1564,8 @@ function jobLabel(h) {
   const a = h.assignment;
   return a.type === 'forge' ? (a.forgeMode === 'refine' ? `♻ Refining ${refineItemName(a)}` : `🔨 Forging ${(getRecipe(a.recipeId) || {}).name || ''}`)
     : a.type === 'brew' ? `⚗ Brewing ${(getPotionRecipe(a.potionId) || {}).name || ''}`
+    : a.type === 'cook' ? `🍳 Cooking ${(getRation(a.cookRecipeId) || {}).name || ''}`
+    : a.type === 'enchant' ? `✨ Enchanting ${(PLANETS[a.enchantPlanet] || {}).name || ''}`
     : a.type === 'study' ? `📖 Studying ${a.discipline === 'alchemy' ? 'alchemy' : 'metallurgy'}`
     : a.type === 'quest' ? `🗺 ${a.questId ? (questTitle(a.questId) || 'On a quest') : 'Quest (pick one)'}`
     : a.type === 'hunt' ? `🏹 ${a.huntId ? `Hunting ${(preyById(a.huntId) || {}).name || ''}` : 'Hunt (pick prey)'}`
@@ -1531,6 +1721,18 @@ function recapPanel() {
       const why = b.reason === 'materials' ? 'out of herbs' : (b.reason === 'locked' ? 'recipe not yet unlocked' : 'too tired to brew');
       return `<div class="r-line"><b>${r.name}</b> <span class="down">couldn't brew — ${why}</span></div>`;
     }
+    if (r.type === 'cook') {
+      const ck = r.cook;
+      if (ck && ck.ok) return `<div class="r-line"><b>${r.name}</b> cooked <span class="up">${ck.glyph} ${ck.qty}× ${MATERIALS[ck.food].name}</span> <span class="dim">· +${ck.practiceGain} practice</span></div>`;
+      const why = ck && ck.reason === 'materials' ? 'out of ingredients' : (ck && ck.reason === 'locked' ? 'recipe not yet learned' : 'too tired to cook');
+      return `<div class="r-line"><b>${r.name}</b> <span class="down">couldn't cook — ${why}</span></div>`;
+    }
+    if (r.type === 'enchant') {
+      const en = r.enchant;
+      if (en && en.ok) return `<div class="r-line"><b>${r.name}</b> enchanted <span class="up" style="color:${en.planet.col}">${en.planet.sym} ${en.planet.name} orb Lv${en.level}</span> <span class="dim">· +${en.practiceGain} practice</span></div>`;
+      const why = en && en.reason === 'materials' ? 'out of ore' : (en && en.reason === 'locked' ? 'lore not yet deep enough' : 'too tired to enchant');
+      return `<div class="r-line"><b>${r.name}</b> <span class="down">couldn't enchant — ${why}</span></div>`;
+    }
     if (r.type === 'study') return `<div class="r-line"><b>${r.name}</b> studied ${r.discipline === 'alchemy' ? 'alchemy' : 'metallurgy'} — <span class="up">Theory +${r.study.theoryGain}</span>${r.book ? ` <span class="dim">· guided by “${r.book}”</span>` : ''}</div>`;
     if (r.type === 'retire') {
       const cr = r.career || {};
@@ -1574,7 +1776,8 @@ function recapPanel() {
     const downs = HERO_STATS.filter((s) => r.drops && r.drops[s]).map((s) => `<span class="down">${s}−${r.drops[s]}</span>`);
     const body = ups.concat(downs).join(' ') || '<span class="down">no gain — too worn down</span>';
     const bt = r.breakthrough ? ' <span class="up">✨ breakthrough!</span>' : '';
-    return `<div class="r-line"><b>${r.name}</b> · ${body}${bt}${r.injury ? ` <span class="down">⚠ ${injuryLabel(r.injury)}!</span>` : ''} <span class="dim">(fat ${fmtDelta(r.fat)})</span></div>`;
+    const du = r.discUp ? ` <span class="up">${(disciplineById(r.discUp.disc) || {}).glyph || '⚔'} ${(disciplineById(r.discUp.disc) || {}).name} Lv${r.discUp.lvl}${r.discUp.tech ? ` — ${r.discUp.tech}!` : ''}</span>` : '';
+    return `<div class="r-line"><b>${r.name}</b> · ${body}${bt}${du}${r.injury ? ` <span class="down">⚠ ${injuryLabel(r.injury)}!</span>` : ''} <span class="dim">(fat ${fmtDelta(r.fat)})</span></div>`;
   }).join('');
   const qm = rep.issued ? `<div class="r-line dim">🎽 quartermaster issued ${rep.issued} item(s) from stores</div>` : '';
   const hungryN = rep.results.filter((r) => r.hungry).length;
@@ -1625,6 +1828,16 @@ function assemblyOutcome(r) {
     const b = r.brew;
     return b.ok ? `brewed <span class="up">${b.qty}× ${b.batch.name} (p${b.potency})</span>`
       : `<span class="down">couldn't brew — ${b.reason === 'materials' ? 'out of herbs' : b.reason === 'locked' ? 'recipe locked' : 'too tired'}</span>`;
+  }
+  if (r.type === 'cook') {
+    const ck = r.cook;
+    return ck && ck.ok ? `cooked <span class="up">${ck.qty}× ${MATERIALS[ck.food].name}</span>`
+      : `<span class="down">couldn't cook — ${ck && ck.reason === 'materials' ? 'no ingredients' : ck && ck.reason === 'locked' ? 'recipe locked' : 'too tired'}</span>`;
+  }
+  if (r.type === 'enchant') {
+    const en = r.enchant;
+    return en && en.ok ? `enchanted <span class="up" style="color:${en.planet.col}">${en.planet.sym} ${en.planet.name} Lv${en.level}</span>`
+      : `<span class="down">couldn't enchant — ${en && en.reason === 'materials' ? 'no ore' : en && en.reason === 'locked' ? 'lore too shallow' : 'too tired'}</span>`;
   }
   if (r.type === 'study') return `studied ${r.discipline === 'alchemy' ? 'alchemy' : 'metallurgy'} — <span class="up">Theory +${r.study.theoryGain}</span>${r.book ? ` <span class="dim">· ${r.book}</span>` : ''}`;
   if (r.type === 'quest') {
@@ -1834,6 +2047,7 @@ function rosterRoom() {
   // beside the week-by-week plan — then the quest board. Less scroll, bigger rows.
   return `${list}
     <div class="plan-card">${heroHeader(h)}</div>
+    <div class="plan-card">${curriculumPanel(h)}</div>
     <div class="train-cols">
       <div class="plan-card">${trainThisWeek(h)}</div>
       <div class="plan-card">${trainPlan(h)}</div>
@@ -1933,12 +2147,16 @@ function deptRoom(jobType, roleGlyph, roleName, bodyFn) {
   // so the selected member is a worker here whenever one exists.
   const subject = (heroById(selectedId) && heroById(selectedId).assignment.type === jobType) ? heroById(selectedId) : (workers[0] || null);
   const chips = workers.map((h) => `<button class="hs-chip ${subject && h.id === subject.id ? 'sel' : ''}" title="${h.name}" onclick="__guild.selectHero('${h.id}')">${personSprite(h, 48)}</button>`).join('');
-  const available = guild.roster.filter((h) => h.assignment.type !== jobType);
+  // A trade room only admits members whose ELECTIVE is this trade (the academy model).
+  const available = guild.roster.filter((h) => h.assignment.type !== jobType && canWorkAssign(h, jobType));
   const addChips = available.map((h) => `<button class="hs-chip add" title="Assign ${h.name}" onclick="__guild.assignTo('${h.id}','${jobType}')">${personSprite(h, 42)}</button>`).join('');
   const workerRow = workers.length
     ? `<div class="dept-lbl">${roleGlyph} Working here · ${workers.length}</div><div class="hero-switch">${chips}</div>`
     : `<div class="room-jobline">No one works the ${roleName.toLowerCase()} this week.</div>`;
-  const addRow = available.length ? `<div class="dept-lbl add">➕ Assign a member</div><div class="hero-switch">${addChips}</div>` : '';
+  const trade = ELECTIVE_IDS.map((k) => ELECTIVES[k]).find((x) => x.assign === jobType);
+  const addRow = available.length
+    ? `<div class="dept-lbl add">➕ Assign a member</div><div class="hero-switch">${addChips}</div>`
+    : (!workers.length && trade ? `<div class="hint" style="text-align:left;padding:4px 2px">No member has the ${trade.glyph} ${trade.name} elective — enroll one in their Roster → 🎓 Curriculum.</div>` : '');
   return `<div class="plan-card">
       ${workerRow}
       ${addRow}
@@ -1968,9 +2186,10 @@ function kitchenRoom() {
           <span class="rr-main"><span class="rr-name">${m.name}</span><span class="rr-assign">🍖 ${getDietPlan(m.assignment.dietId).name}</span></span>
         </button>`).join('')}</div>
       <div class="hint" style="text-align:left;padding:6px 2px 0">Every diet draws its food from the pantry each week — plain tables eat grain, the rich ones salted meat. A short pantry means plain rations and grumbling.</div></div>`;
-  const pantry = storesPanel('🍞 The Pantry · provisions', 'kitchen', 'Restock at the ⚖ Market (Armory room). One unit feeds one member for a week.');
-  if (!h) return menu + pantry;
-  return `${menu}<div class="plan-card"><div class="plan-title">🍖 ${h.name}'s Diet</div>${dietBody(h)}</div>${pantry}`;
+  const pantry = storesPanel('🍞 The Pantry · provisions', 'kitchen', 'Restock at the ⚖ Market (Armory room), or set a Cook to work below. One unit feeds one member for a week.');
+  const cooks = deptRoom('cook', '🍳', 'Kitchen', cookBody); // Cooks (Cooking elective) produce rations here
+  if (!h) return cooks + menu + pantry;
+  return `${cooks}${menu}<div class="plan-card"><div class="plan-title">🍖 ${h.name}'s Diet</div>${dietBody(h)}</div>${pantry}`;
 }
 function apothecaryRoom() {
   const inv = guild.inventory;
@@ -2005,7 +2224,8 @@ function armoryRoom() {
       ${equippedLine(h)}
       <div class="room-jobline">Pick a member, then <b>Equip</b> items from the armory below onto them.</div>
     </div>` : '';
-  return `${ctx}<div class="room-cols">${armoryPanel()}${quartermasterPanel()}${marketPanel()}</div>`;
+  const bench = deptRoom('enchant', '✨', "Enchanter's Bench", enchantBody); // Enchanters (Enchanting elective) craft & slot materia
+  return `${ctx}${bench}<div class="room-cols">${armoryPanel()}${quartermasterPanel()}${marketPanel()}</div>`;
 }
 /** Appoint a Hall-of-Famer as the guild trainer (+15% training gains, one slot). */
 function appointTrainer(hofId) {
@@ -2613,7 +2833,7 @@ function enterRoomFromRanch(roomId) { stopRanchLoop(); ranchView = false; applyV
 function manageMemberFromRanch(id) { stopRanchLoop(); ranchView = false; selectedId = id; applyViewToggle(); openRoom('roster'); }
 
 // --- room / fullscreen controls ---------------------------------------------
-const ROOM_JOB = { forge: 'forge', library: 'study', laboratory: 'brew' };
+const ROOM_JOB = { forge: 'forge', library: 'study', laboratory: 'brew', kitchen: 'cook', armory: 'enchant' };
 function openRoom(id) {
   currentRoom = id;
   notice = '';
@@ -2662,7 +2882,7 @@ export function openGuild() {
 // Every handler no-ops while a week is advancing (a played battle can be mid-flight;
 // rail buttons still render behind the battle screen and would corrupt the in-flight
 // week). practiceBout/advanceAll keep their own internal checks as a second belt.
-const __guildApi = { selectHero, setActivity, setTraining, setIntensity, scheduleAdd, scheduleRemoveAt, scheduleClear, setRecipe, setForgeMode, setRefineItem, setPotion, setDiscipline, usePotion, setDiet, setQuest, setHunt, selectWildsLocale, scoutRegion, setPlayHunt, sellMaterial, assignTo, setSpar, equipItem, unequipSlot, setPolicy, provision, buyMaterial, sellItem, buyBook, hire, takeApprentice, promoteApprentice, dismissApprentice, advanceAll, back, openRoom, toggleFullscreen, upgradeFacility, enterTournament, leaveTournament, setPlayNext, setPlayQuest, setAskTournaments, toggleDraw, selectCalEvent, praiseHero, scoldHero, openAssembly, closeAssembly, appointTrainer, practiceBout, openRanch, enterRoomFromRanch, manageMemberFromRanch, ranchBuild: toggleBuild, ranchPick: pickStation, ranchPlace: placeStationAt, ranchRemoveStation: removeStationById, ranchZoomIn, ranchZoomOut, ranchZoomFit };
+const __guildApi = { selectHero, setActivity, setTraining, setIntensity, scheduleAdd, scheduleRemoveAt, scheduleClear, setRecipe, setForgeMode, setRefineItem, setPotion, setDiscipline, usePotion, setDiet, setQuest, setHunt, selectWildsLocale, scoutRegion, setPlayHunt, sellMaterial, setElective, setTrackKind, setSecondDiscipline, setCookRecipe, setEnchantPlanet, slotOrb, assignTo, setSpar, equipItem, unequipSlot, setPolicy, provision, buyMaterial, sellItem, buyBook, hire, takeApprentice, promoteApprentice, dismissApprentice, advanceAll, back, openRoom, toggleFullscreen, upgradeFacility, enterTournament, leaveTournament, setPlayNext, setPlayQuest, setAskTournaments, toggleDraw, selectCalEvent, praiseHero, scoldHero, openAssembly, closeAssembly, appointTrainer, practiceBout, openRanch, enterRoomFromRanch, manageMemberFromRanch, ranchBuild: toggleBuild, ranchPick: pickStation, ranchPlace: placeStationAt, ranchRemoveStation: removeStationById, ranchZoomIn, ranchZoomOut, ranchZoomFit };
 window.__guild = {};
 for (const k in __guildApi) {
   window.__guild[k] = (...args) => {

@@ -404,6 +404,18 @@
 .hero-power { font-family: 'Cinzel', serif; color: var(--gold); font-size: 1.02em; }
 .hero-power .dim { font-family: 'Cormorant Garamond', serif; }
 .hero-ident .trait-row { margin: 4px 0 0; }
+.hero-track { font-size: 0.9em; color: var(--muted); }
+.hero-track b { color: var(--text); }
+
+/* Curriculum panel — combat disciplines (levels + techniques) + the Track selector. */
+.disc-list { display: flex; flex-direction: column; gap: 8px; margin-bottom: 12px; }
+.disc-row { display: grid; grid-template-columns: minmax(120px, 0.9fr) minmax(60px, 1.1fr); grid-template-rows: auto auto; gap: 2px 10px; align-items: center;
+  border: 1px solid var(--border); border-radius: 8px; padding: 7px 10px; background: rgba(0, 0, 0, 0.22); }
+.disc-name { font-family: 'Cinzel', serif; font-size: 0.94em; }
+.disc-bar { height: 7px; border-radius: 4px; background: rgba(255, 255, 255, 0.06); overflow: hidden; }
+.disc-fill { display: block; height: 100%; border-radius: 4px; }
+.disc-techs { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 4px; font-size: 0.78em; }
+.tech-chip { border: 1px solid var(--border); border-radius: 4px; padding: 1px 6px; color: var(--text); background: rgba(255, 255, 255, 0.03); }
 .hint { color: var(--dim); font-style: italic; text-align: center; padding: 10px; font-size: 0.92em; }
 
 .recruit-list { display: flex; flex-direction: column; gap: 7px; }

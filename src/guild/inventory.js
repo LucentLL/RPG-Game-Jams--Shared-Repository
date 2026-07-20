@@ -45,8 +45,14 @@ export function createInventory(init = {}) {
     materials: init.materials || { iron_ore: 20, steel_ore: 8, mithril_ore: 2, sunleaf: 6, emberroot: 2, nightcap: 1, grain: 12, salted_meat: 4 }, // starter stock
     potions: init.potions || [],
     books: init.books || [],
+    materia: init.materia || [], // orbs crafted by the guild's Enchanters (run-shape: {planetIdx,level,xp})
   };
 }
+
+// --- materia (orbs crafted by Enchanters; same shape the combat run uses) ---
+export function addMateria(inv, orb) { (inv.materia || (inv.materia = [])).push(orb); return orb; }
+export function materiaCount(inv) { return (inv.materia || []).length; }
+export function removeMateriaAt(inv, i) { return (inv.materia || []).splice(i, 1)[0] || null; }
 
 export function materialCount(inv, id) { return inv.materials[id] || 0; }
 export function hasMaterials(inv, cost) { return Object.keys(cost).every((k) => (inv.materials[k] || 0) >= cost[k]); }
