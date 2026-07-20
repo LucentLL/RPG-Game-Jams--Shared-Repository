@@ -15,6 +15,7 @@ import { makeApprentice, normalizeApprentice, dormCapacity, academyBoard, develo
 import { DRILLS, REST, getDrill, applyTraining, applySpar, injuryLabel, previewInjuryChance, inflictInjury, rollInjurySeverity, rollConduct } from './training.js';
 import { stationBonusFor } from './stations.js';
 import { DIET_PLANS, getDietPlan, applyDiet, consumeDietFood } from './diet.js';
+import { DISCIPLINES, ELECTIVES, ELECTIVE_IDS, DISCIPLINE_IDS, disciplineById, electiveById, majorForArchetype, discLevel, discProgress, techniquesFor, disciplineForDrill, ensureCurriculum, activeDisciplines, memberElective, canWorkAssign } from './curriculum.js';
 import { advanceWeek, formatDate } from './calendar.js';
 import { weeklyUpkeep, addGold, guildIncome } from './economy.js';
 import { RECIPES, getRecipe, previewQuality, forge, study, recipeUnlocked, refine, recipeForItem, previewRefine, REFINE_COST } from './smithing.js';
@@ -348,6 +349,11 @@ function migrateHero(h) {
   if (typeof h.condition.injury === 'string') {
     h.condition.injury = { kind: h.condition.injury === 'bruised' ? 'bruised' : 'strained', weeksLeft: h.condition.injury === 'bruised' ? 1 : 2, statHit: null };
   }
+  // Academy electives + combat disciplines.
+  if (!h.professions.historian) h.professions.historian = { theory: 0, practice: 0, field: 0 };
+  if (!h.professions.cooking) h.professions.cooking = { theory: 0, practice: 0, field: 0 };
+  if (!h.professions.enchanting) h.professions.enchanting = { theory: 0, practice: 0, field: 0 };
+  ensureCurriculum(h); // major (from archetype) + combat disciplines + elective/double-major track
 }
 
 function load() {
@@ -411,7 +417,46 @@ function load() {
 
 // --- interactions -----------------------------------------------------------
 function selectHero(id) { selectedId = id; notice = ''; render(); }
-function setActivity(type) { const h = heroById(selectedId); if (h) { h.assignment.type = ['forge', 'study', 'quest', 'brew', 'hunt'].includes(type) ? type : 'train'; if (h.assignment.type !== 'quest') h.assignment.questId = null; if (h.assignment.type !== 'hunt') { h.assignment.huntId = null; h.assignment.localeId = null; } save(); render(); } }
+const TRADE_ASSIGNS = ['forge', 'study', 'brew', 'cook', 'enchant'];
+function setActivity(type) {
+  const h = heroById(selectedId); if (!h) return;
+  // Trade jobs are gated by the member's elective; combat/dispatch never are.
+  if (TRADE_ASSIGNS.includes(type) && !canWorkAssign(h, type)) {
+    const e = ELECTIVE_IDS.map((k) => ELECTIVES[k]).find((x) => x.assign === type);
+    notice = `${h.name.split(' ')[0]} would need the ${e ? e.name : 'right'} elective to work here — set it in their Curriculum.`;
+    render(); return;
+  }
+  h.assignment.type = ['forge', 'study', 'quest', 'brew', 'hunt', 'cook', 'enchant'].includes(type) ? type : 'train';
+  if (h.assignment.type !== 'quest') h.assignment.questId = null;
+  if (h.assignment.type !== 'hunt') { h.assignment.huntId = null; h.assignment.localeId = null; }
+  save(); render();
+}
+/** If the member can no longer work their current trade assignment (elective changed),
+ *  drop them back to combat training. */
+function reconcileTrade(h) { if (TRADE_ASSIGNS.includes(h.assignment.type) && !canWorkAssign(h, h.assignment.type)) h.assignment.type = 'train'; }
+/** Curriculum — pick the member's Elective trade. */
+function setElective(id) {
+  const h = heroById(selectedId); if (!h || !electiveById(id)) return;
+  h.track = { kind: 'elective', electiveId: id, second: null };
+  reconcileTrade(h); save(); render();
+}
+/** Curriculum — switch between the Elective track and Double Major. */
+function setTrackKind(kind) {
+  const h = heroById(selectedId); if (!h) return;
+  if (kind === 'double') {
+    const second = (h.track && h.track.second && h.track.second !== h.major) ? h.track.second : DISCIPLINE_IDS.find((d) => d !== h.major);
+    h.track = { kind: 'double', electiveId: null, second };
+  } else {
+    h.track = { kind: 'elective', electiveId: (h.track && h.track.electiveId) || null, second: null };
+  }
+  reconcileTrade(h); save(); render();
+}
+/** Curriculum — pick the Double Major's second combat discipline. */
+function setSecondDiscipline(id) {
+  const h = heroById(selectedId); if (!h || !disciplineById(id) || id === h.major) return;
+  h.track = { kind: 'double', electiveId: null, second: id };
+  reconcileTrade(h); save(); render();
+}
 function setQuest(questId) { const h = heroById(selectedId); if (h) { h.assignment.type = 'quest'; h.assignment.questId = questId; h.assignment.huntId = null; h.assignment.localeId = null; save(); render(); } }
 /** Dispatch the selected member to hunt `preyId` in discovered area `localeId`. */
 function setHunt(localeId, preyId) {
@@ -975,6 +1020,16 @@ async function advanceAll() {
         : entry.slacked ? 'cheated'
         : entry.breakthrough ? 'exceeded'
         : entry.trained ? 'solid' : 'failed';
+      // Combat disciplines are a LENS over the drills: training a drill in one of the
+      // member's active disciplines (their major, or a double-major's 2nd) levels it,
+      // unlocking techniques. Off-discipline drills still grow the stats, just not the craft.
+      const dDisc = disciplineForDrill(a.trainingId);
+      if (dDisc && res.trained && !res.rested && !res.injured && activeDisciplines(h).indexOf(dDisc) >= 0) {
+        const before = discLevel(h.disc[dDisc]);
+        h.disc[dDisc] = (h.disc[dDisc] || 0) + (res.slacked ? 3 : a.intensity === 'heavy' ? 12 : 7);
+        const after = discLevel(h.disc[dDisc]);
+        if (after > before) entry.discUp = { disc: dDisc, lvl: after, tech: (techniquesFor(dDisc, after).slice(-1)[0] || {}).name || null };
+      }
     }
 
     if (!onExpedition) applyDiet(h, diet); // only heroes who actually marched out skip guild rest
@@ -1144,6 +1199,55 @@ function heroSwitcher() {
   return `<div class="hero-switch">${guild.roster.map((h) => `<button class="hs-chip ${h.id === selectedId ? 'sel' : ''}" title="${h.name}" onclick="__guild.selectHero('${h.id}')">${personSprite(h, 48)}</button>`).join('')}</div>`;
 }
 
+/** The member's academic identity, one line: "⚔ Melee · 🔨 Blacksmithing" or
+ *  "⚔ Melee + 🏹 Ranged · Double Major". */
+function curriculumLabel(h) {
+  const maj = disciplineById(h.major) || DISCIPLINES.melee;
+  if (h.track && h.track.kind === 'double' && h.track.second) {
+    const s = disciplineById(h.track.second);
+    return `<span style="color:${maj.col}">${maj.glyph} ${maj.name}</span> + <span style="color:${s.col}">${s.glyph} ${s.name}</span> <span class="dim">· Double Major</span>`;
+  }
+  const e = memberElective(h);
+  return `<span style="color:${maj.col}">${maj.glyph} ${maj.name}</span> · ${e ? `${e.glyph} ${e.name}` : '<span class="dim">Elective undeclared</span>'}`;
+}
+
+/** The Curriculum panel — the member's combat disciplines (levels + techniques) and
+ *  the Track selector: an Elective trade, or a Double Major (a 2nd combat discipline). */
+function curriculumPanel(h) {
+  const maj = disciplineById(h.major) || DISCIPLINES.melee;
+  const isDouble = h.track && h.track.kind === 'double';
+  const discRows = activeDisciplines(h).map((id) => {
+    const d = disciplineById(id); const pr = discProgress(h.disc[id]);
+    const techs = techniquesFor(id, pr.lvl);
+    return `<div class="disc-row">
+        <span class="disc-name" style="color:${d.col}">${d.glyph} ${d.name} <span class="dim">Lv${pr.lvl}</span>${id === h.major ? '' : ' <span class="dim">· 2nd</span>'}</span>
+        <span class="disc-bar"><span class="disc-fill" style="width:${Math.round(pr.frac * 100)}%;background:${d.col}"></span></span>
+        ${techs.length ? `<span class="disc-techs">${techs.map((t) => `<span class="tech-chip" style="border-color:${d.col}55">${t.name}</span>`).join('')}</span>` : '<span class="disc-techs dim">— no techniques yet —</span>'}
+      </div>`;
+  }).join('');
+  const trackToggle = `<div class="intensity-toggle">
+      <button class="${!isDouble ? 'on' : ''}" onclick="__guild.setTrackKind('elective')">🎓 Take an Elective</button>
+      <button class="${isDouble ? 'on' : ''}" onclick="__guild.setTrackKind('double')">⚔ Double Major</button>
+    </div>`;
+  let trackBody;
+  if (isDouble) {
+    const seconds = DISCIPLINE_IDS.filter((d) => d !== h.major);
+    trackBody = `<div class="opt-list">${seconds.map((id) => { const d = disciplineById(id);
+      return `<button class="opt ${h.track.second === id ? 'active' : ''}" onclick="__guild.setSecondDiscipline('${id}')">
+        <span><span class="o-name">${d.glyph} ${d.name}</span> <span class="o-desc">${d.blurb}</span></span></button>`; }).join('')}</div>
+      <div class="hint" style="text-align:left;padding:4px 2px">A Double Major gives up a trade to train two combat disciplines — a pure fighter. Train either in the drill menu.</div>`;
+  } else {
+    const cur = memberElective(h);
+    trackBody = `<div class="opt-list">${ELECTIVE_IDS.map((id) => { const e = ELECTIVES[id];
+      return `<button class="opt ${cur && cur.id === id ? 'active' : ''}" onclick="__guild.setElective('${id}')">
+        <span><span class="o-name">${e.glyph} ${e.name}</span> <span class="o-desc">${e.blurb}</span></span></button>`; }).join('')}</div>
+      <div class="hint" style="text-align:left;padding:4px 2px">An Elective is the member's trade — they work its room (${cur ? `the ${cur.room}` : 'once chosen'}). Every member still trains combat besides.</div>`;
+  }
+  return `<div class="plan-title">🎓 Curriculum — <span class="pt-cur">${maj.glyph} ${maj.name}</span> <span class="dim" style="font-weight:400;text-transform:none">major · their nature</span></div>
+    <div class="disc-list">${discRows}</div>
+    ${trackToggle}${trackBody}`;
+}
+
 /** The member's stat / condition / gear card — the shared header used in the Roster room. */
 function heroHeader(h) {
   const rep = report && report.results ? report.results.find((r) => r.id === h.id) : null;
@@ -1164,6 +1268,7 @@ function heroHeader(h) {
         <div class="hero-ident">
           <div class="hero-name">${h.name}</div>
           <div class="hero-sub">${h.archetype} · Lv${h.level} · <span style="color:${stage.col}">${stage.name}</span></div>
+          <div class="hero-track">${curriculumLabel(h)}</div>
           <div class="hero-power">⚡ ${combatPower(h)}${record}</div>
           ${chips ? `<div class="trait-row">${chips}</div>` : ''}
         </div>
@@ -1574,7 +1679,8 @@ function recapPanel() {
     const downs = HERO_STATS.filter((s) => r.drops && r.drops[s]).map((s) => `<span class="down">${s}−${r.drops[s]}</span>`);
     const body = ups.concat(downs).join(' ') || '<span class="down">no gain — too worn down</span>';
     const bt = r.breakthrough ? ' <span class="up">✨ breakthrough!</span>' : '';
-    return `<div class="r-line"><b>${r.name}</b> · ${body}${bt}${r.injury ? ` <span class="down">⚠ ${injuryLabel(r.injury)}!</span>` : ''} <span class="dim">(fat ${fmtDelta(r.fat)})</span></div>`;
+    const du = r.discUp ? ` <span class="up">${(disciplineById(r.discUp.disc) || {}).glyph || '⚔'} ${(disciplineById(r.discUp.disc) || {}).name} Lv${r.discUp.lvl}${r.discUp.tech ? ` — ${r.discUp.tech}!` : ''}</span>` : '';
+    return `<div class="r-line"><b>${r.name}</b> · ${body}${bt}${du}${r.injury ? ` <span class="down">⚠ ${injuryLabel(r.injury)}!</span>` : ''} <span class="dim">(fat ${fmtDelta(r.fat)})</span></div>`;
   }).join('');
   const qm = rep.issued ? `<div class="r-line dim">🎽 quartermaster issued ${rep.issued} item(s) from stores</div>` : '';
   const hungryN = rep.results.filter((r) => r.hungry).length;
@@ -1834,6 +1940,7 @@ function rosterRoom() {
   // beside the week-by-week plan — then the quest board. Less scroll, bigger rows.
   return `${list}
     <div class="plan-card">${heroHeader(h)}</div>
+    <div class="plan-card">${curriculumPanel(h)}</div>
     <div class="train-cols">
       <div class="plan-card">${trainThisWeek(h)}</div>
       <div class="plan-card">${trainPlan(h)}</div>
@@ -2662,7 +2769,7 @@ export function openGuild() {
 // Every handler no-ops while a week is advancing (a played battle can be mid-flight;
 // rail buttons still render behind the battle screen and would corrupt the in-flight
 // week). practiceBout/advanceAll keep their own internal checks as a second belt.
-const __guildApi = { selectHero, setActivity, setTraining, setIntensity, scheduleAdd, scheduleRemoveAt, scheduleClear, setRecipe, setForgeMode, setRefineItem, setPotion, setDiscipline, usePotion, setDiet, setQuest, setHunt, selectWildsLocale, scoutRegion, setPlayHunt, sellMaterial, assignTo, setSpar, equipItem, unequipSlot, setPolicy, provision, buyMaterial, sellItem, buyBook, hire, takeApprentice, promoteApprentice, dismissApprentice, advanceAll, back, openRoom, toggleFullscreen, upgradeFacility, enterTournament, leaveTournament, setPlayNext, setPlayQuest, setAskTournaments, toggleDraw, selectCalEvent, praiseHero, scoldHero, openAssembly, closeAssembly, appointTrainer, practiceBout, openRanch, enterRoomFromRanch, manageMemberFromRanch, ranchBuild: toggleBuild, ranchPick: pickStation, ranchPlace: placeStationAt, ranchRemoveStation: removeStationById, ranchZoomIn, ranchZoomOut, ranchZoomFit };
+const __guildApi = { selectHero, setActivity, setTraining, setIntensity, scheduleAdd, scheduleRemoveAt, scheduleClear, setRecipe, setForgeMode, setRefineItem, setPotion, setDiscipline, usePotion, setDiet, setQuest, setHunt, selectWildsLocale, scoutRegion, setPlayHunt, sellMaterial, setElective, setTrackKind, setSecondDiscipline, assignTo, setSpar, equipItem, unequipSlot, setPolicy, provision, buyMaterial, sellItem, buyBook, hire, takeApprentice, promoteApprentice, dismissApprentice, advanceAll, back, openRoom, toggleFullscreen, upgradeFacility, enterTournament, leaveTournament, setPlayNext, setPlayQuest, setAskTournaments, toggleDraw, selectCalEvent, praiseHero, scoldHero, openAssembly, closeAssembly, appointTrainer, practiceBout, openRanch, enterRoomFromRanch, manageMemberFromRanch, ranchBuild: toggleBuild, ranchPick: pickStation, ranchPlace: placeStationAt, ranchRemoveStation: removeStationById, ranchZoomIn, ranchZoomOut, ranchZoomFit };
 window.__guild = {};
 for (const k in __guildApi) {
   window.__guild[k] = (...args) => {
