@@ -304,6 +304,20 @@ function ensureAssignment(h) {
 }
 
 // Migrate old saves: D&D stats -> MR stats, and add professions/equipped/inventory.
+// Hidden temperament (Monster-Rancher style): a member privately favours one food and a
+// way of being handled after a strong or poor week. NEVER shown — the attentive player
+// reads it from how their Stress/Morale/Bond/Discipline move, and from small tells in the
+// recap. Rolled once at creation (or first migrate) and persisted.
+const PREF_FOODS = ['protein', 'scholar', 'lean', 'hearty', 'feast', 'wildgame'];
+function generatePrefs() {
+  const pick = (a) => a[Math.floor(Math.random() * a.length)];
+  return {
+    food: pick(PREF_FOODS),
+    onWin: Math.random() < 0.66 ? 'praise' : 'scold',  // most bloom on praise; some want to be pushed harder
+    onLoss: Math.random() < 0.5 ? 'praise' : 'scold',  // split — some need comfort after a stumble, some a firm hand
+  };
+}
+
 function migrateHero(h) {
   if (h && h.stats && h.stats.POW === undefined) {
     const o = h.stats;
@@ -330,6 +344,7 @@ function migrateHero(h) {
   // (they're "known quantities"); recruits arrive with two. Discipline starts middling.
   if (!Array.isArray(h.traits)) h.traits = [];
   if (h.condition.discipline == null) h.condition.discipline = 40;
+  if (!h.prefs || !h.prefs.food) h.prefs = generatePrefs(); // hidden food + praise/scold temperament
   if (typeof h.condition.injury === 'string') {
     h.condition.injury = { kind: h.condition.injury === 'bruised' ? 'bruised' : 'strained', weeksLeft: h.condition.injury === 'bruised' ? 1 : 2, statHit: null };
   }
@@ -791,6 +806,19 @@ async function advanceAll() {
     const cb = { stamina: h.condition.stamina, fatigue: h.condition.fatigue };
     let entry = { name: h.name, id: h.id, type: a.type };
     if (!fed) entry.hungry = wanted.name;
+    // Hidden food preference: the one meal they privately crave settles them (even if it
+    // isn't the best for their growth — the player's quiet trade-off); a diet they don't
+    // care for gnaws a little. Never announced — only their mood, and a small tell, show it.
+    if (fed && h.prefs && h.prefs.food) {
+      if (diet.id === h.prefs.food) {
+        h.condition.stress = Math.max(0, (h.condition.stress || 0) - 4);
+        h.condition.morale = clamp(h.condition.morale + 3);
+        h.condition.loyalty = clamp((h.condition.loyalty ?? 60) + 1);
+        entry.mealReaction = 'loved';
+      } else {
+        h.condition.stress = Math.min(100, (h.condition.stress || 0) + 1);
+      }
+    }
     let questMorale = null;
     let onExpedition = false; // true only if the hero actually marched out this week
 
@@ -1130,8 +1158,16 @@ function heroHeader(h) {
   const record = (cr.wins || cr.losses || cr.draws || (cr.titles || []).length)
     ? ` · <span class="dim">${recordStr(cr)}${(cr.titles || []).length ? ' · 👑' + cr.titles.length : ''}</span>` : '';
   const chips = (h.traits || []).map((t) => `<span class="trait-chip" title="${(TRAITS[t] || {}).desc || ''}">${t}</span>`).join('');
-  return `<div class="assign-head"><span class="rr-portrait">${personSprite(h, 64)}</span> <b>${h.name}</b> · ${h.archetype} Lv${h.level} · <span style="color:${stage.col}">${stage.name}</span>${record} · ⚡${combatPower(h)}</div>
-      ${chips ? `<div class="trait-row">${chips}</div>` : ''}
+  // The Roster is the MEMBER's own screen: a large, featured portrait leads their card.
+  return `<div class="hero-banner">
+        <span class="hero-portrait-lg">${personSprite(h, 150)}</span>
+        <div class="hero-ident">
+          <div class="hero-name">${h.name}</div>
+          <div class="hero-sub">${h.archetype} · Lv${h.level} · <span style="color:${stage.col}">${stage.name}</span></div>
+          <div class="hero-power">⚡ ${combatPower(h)}${record}</div>
+          ${chips ? `<div class="trait-row">${chips}</div>` : ''}
+        </div>
+      </div>
       <div class="stat-grid">${stats}</div>
       ${bar('Life', lifeFrac(h) * 100, stage.col, `${h.age}/${h.lifespan} wks — ${stage.desc}`)}
       <div class="bar-grid">
@@ -1193,20 +1229,20 @@ function trainPlan(h) {
     const n = i + 1, t = n % 10, h = n % 100;
     return n + (t === 1 && h !== 11 ? 'st' : t === 2 && h !== 12 ? 'nd' : t === 3 && h !== 13 ? 'rd' : 'th');
   };
-  const nowRow = `<div class="sched-row now"><span class="sr-wk">now</span><span class="sr-name">${jobLabel(h)}</span></div>`;
+  const nowRow = `<div class="sched-row now"><span class="sr-wk">this wk</span><span class="sr-name">${jobLabel(h)}</span></div>`;
   const rows = sched.length
     ? sched.map((p, i) => `<div class="sched-row"><span class="sr-wk">${ord(i)}</span>
         <span class="sr-name">${(getDrill(p.trainingId) || REST).name}</span>
         ${p.intensity === 'heavy' ? '<span class="sr-h" title="heavy">H</span>' : ''}
         <button class="sr-x" onclick="__guild.scheduleRemoveAt(${i})" title="Remove from plan">✕</button></div>`).join('')
-    : '<div class="hint" style="text-align:left;padding:6px 2px">No plan — each week repeats the last drill. Queue weeks below.</div>';
+    : '<div class="hint" style="text-align:left;padding:6px 2px">No weeks queued — the member repeats this week’s drill until you plan ahead. Queue upcoming weeks below.</div>';
   const addBtns = DRILLS.map((d) => `<button class="sched-btn" onclick="__guild.scheduleAdd('${d.id}')" title="Queue ${d.name} (${heavy ? 'heavy' : 'light'})">+ ${d.main}</button>`).join('')
     + `<button class="sched-btn" onclick="__guild.scheduleAdd('rest')" title="Queue Rest">+ 💤</button>`
     + (sched.length ? `<button class="sched-btn clear" onclick="__guild.scheduleClear()">clear</button>` : '');
-  return `<div class="plan-title">📅 The Plan <span class="dim" style="font-weight:400;text-transform:none">— queues as ${heavy ? 'heavy' : 'light'}</span></div>
+  return `<div class="plan-title">📅 Upcoming Weeks <span class="dim" style="font-weight:400;text-transform:none">— training plan · queues as ${heavy ? 'heavy' : 'light'}</span></div>
     <div class="sched-list">${nowRow}${rows}</div>
     <div class="sched-add">${addBtns}</div>
-    <div class="cal-note">Each <b>training</b> week runs the next row — quest or workshop weeks don't consume the plan.</div>`;
+    <div class="cal-note">Plan ahead: each row is a future <b>training</b> week, run in order. Quest, hunt, or workshop weeks don’t consume the plan — it waits.</div>`;
 }
 
 /** Quest board scoped to member h, with party-projected odds. Picking one dispatches h. */
@@ -1624,7 +1660,7 @@ function assemblyCard(r) {
     </div>${r.feedbackNote ? `<div class="as-note">${r.feedbackNote}</div>` : ''}` : '';
   return `<div class="as-member">
       <div class="as-head"><span class="rr-portrait">${h ? personSprite(h, 40) : ''}</span><b>${r.name}</b></div>
-      <div class="as-outcome">${assemblyOutcome(r)}${r.hungry ? ` <span class="down">· 🍞 wanted ${r.hungry} — pantry bare</span>` : ''}</div>
+      <div class="as-outcome">${assemblyOutcome(r)}${r.hungry ? ` <span class="down">· 🍞 wanted ${r.hungry} — pantry bare</span>` : ''}${r.mealReaction === 'loved' ? ` <span class="dim">· 🍽 cleaned the plate</span>` : ''}</div>
       ${badge ? `<div class="as-badge ${badge.cls}">${badge.txt}</div>` : '<div class="as-badge dim">— recovering —</div>'}
       ${actions}
     </div>`;
@@ -1667,6 +1703,30 @@ function closeAssembly() { const ov = document.querySelector('.assembly-overlay'
 function openAssembly() { showAssembly(); }
 
 /** Praise a member's week. One reaction per member per week; the note says how it landed. */
+// Hidden temperament layer: beyond whether the feedback FIT the conduct, each member
+// privately wants praise OR a firm hand after a strong / poor week. Reading them right
+// knits Bond & Discipline and eases Stress; misreading gnaws. The preference is never
+// shown — only the reaction (appended to the feedback note) hints at it.
+function applyTemperament(h, r, action) {
+  const p = h.prefs; if (!p) return;
+  const good = r.conduct === 'exceeded' || r.conduct === 'solid';
+  const bad = r.conduct === 'failed' || r.conduct === 'cheated';
+  const wanted = good ? p.onWin : bad ? p.onLoss : null; // rested/injured weeks have no temperament read
+  if (!wanted) return;
+  const c = h.condition, fn = h.name.split(' ')[0];
+  if (action === wanted) {
+    c.loyalty = clamp((c.loyalty ?? 60) + 3);
+    c.discipline = clamp((c.discipline ?? 40) + 2);
+    c.stress = Math.max(0, (c.stress || 0) - 3);
+    r.feedbackNote = (r.feedbackNote || '') + ` <span class="up">Something in ${fn} settles — you read them right.</span>`;
+  } else {
+    c.stress = Math.min(100, (c.stress || 0) + 4);
+    c.morale = clamp(c.morale - 3);
+    c.loyalty = clamp((c.loyalty ?? 60) - 2);
+    r.feedbackNote = (r.feedbackNote || '') + ` <span class="down">…though it doesn't sit right with ${fn}.</span>`;
+  }
+}
+
 function praiseHero(id) {
   const rep = report || guild.lastReport;
   const r = rep && rep.results ? rep.results.find((x) => x.id === id) : null;
@@ -1695,6 +1755,7 @@ function praiseHero(id) {
     c.loyalty = clamp((c.loyalty ?? 60) + 2 * traitMult(h, 'bond'));
     r.feedbackNote = `${h.name.split(' ')[0]} nods, quietly pleased.`;
   }
+  applyTemperament(h, r, 'praise');
   save(); render(); showAssembly();
 }
 /** Scold a member's week. Deserved, it builds Discipline; unjust, it frays the Bond. */
@@ -1728,6 +1789,7 @@ function scoldHero(id) {
     c.loyalty = clamp((c.loyalty ?? 60) - 3);
     r.feedbackNote = `Scolded for honest work — ${h.name.split(' ')[0]} won't forget it.`;
   }
+  applyTemperament(h, r, 'scold');
   save(); render(); showAssembly();
 }
 
