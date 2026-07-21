@@ -78,6 +78,48 @@ export const DISC_TECHNIQUES = {
 /** Techniques a member has earned in a discipline at the given level. */
 export function techniquesFor(discId, lvl) { return (DISC_TECHNIQUES[discId] || []).filter((t) => t.lvl <= lvl); }
 
+// ─── Specializations — the major's second declaration ────────────────────────
+// At discipline level SPEC_UNLOCK_LVL a member may DECLARE a specialization inside
+// that discipline (Melee → Swords, Magic → Offensive…). Phase 1: +15% discipline XP
+// in that discipline + a gear AFFINITY (an equipped piece whose kind the spec covers
+// contributes ×1.15 power — see inventory.js itemPower). Phase 2 wires them into the
+// arena kit alongside techniques.
+export const SPEC_UNLOCK_LVL = 2;
+export const SPECIALIZATIONS = {
+  melee: [
+    { id: 'swords',    name: 'Swordsmanship',  glyph: '🗡', kinds: ['sword'],                  blurb: 'the blade — precise, versatile steel' },
+    { id: 'crushers',  name: 'Axes & Maces',   glyph: '🪓', kinds: ['axe', 'mace', 'hammer'],  blurb: 'weight and wrath — armor means nothing' },
+    { id: 'wards',     name: 'Shield & Guard', glyph: '🛡', kinds: ['armor', 'shield'],        blurb: 'the wall — protect and outlast' },
+  ],
+  ranged: [
+    { id: 'bows',      name: 'Bows',           glyph: '🏹', kinds: ['bow'],                    blurb: 'the long shot — patience rewarded' },
+    { id: 'crossbows', name: 'Crossbows',      glyph: '🎯', kinds: ['crossbow'],               blurb: 'the bolt — mechanical certainty' },
+    { id: 'thrown',    name: 'Thrown Blades',  glyph: '🔪', kinds: ['dagger', 'thrown'],       blurb: 'steel that leaves the hand' },
+  ],
+  magic: [
+    { id: 'offensive',   name: 'Offensive Magic',   glyph: '🔥', kinds: [], blurb: 'the aether as a weapon' },
+    { id: 'restorative', name: 'Restorative Magic', glyph: '💫', kinds: [], blurb: 'mend flesh, steady hearts' },
+    { id: 'warding',     name: 'Warding Magic',     glyph: '🌀', kinds: [], blurb: 'the unseen shield' },
+  ],
+};
+/** @param {string} discId @param {string} specId */
+export function specById(discId, specId) {
+  return (SPECIALIZATIONS[discId] || []).find((s) => s.id === specId) || null;
+}
+/** The member's declared specialization in a discipline, or null. */
+export function specFor(h, discId) {
+  return h.spec && h.spec[discId] ? specById(discId, h.spec[discId]) : null;
+}
+/** Item kinds the member's declared specs (across active disciplines) get affinity with. */
+export function specAffinityKinds(h) {
+  const kinds = new Set();
+  for (const d of activeDisciplines(h)) {
+    const s = specFor(h, d);
+    if (s) for (const k of s.kinds) kinds.add(k);
+  }
+  return kinds;
+}
+
 /**
  * Ensure a hero's academy fields exist (new heroes + old saves). Major is fixed from
  * archetype; disciplines start empty; the Track defaults to an elective inferred from
@@ -96,6 +138,9 @@ export function ensureCurriculum(h) {
   if (h.track.kind === 'double' && (!DISCIPLINES[h.track.second] || h.track.second === h.major)) {
     h.track.second = DISCIPLINE_IDS.find((d) => d !== h.major);
   }
+  // Specializations: a map of discipline → declared spec id (sparse; declared at Lv2+).
+  if (!h.spec || typeof h.spec !== 'object') h.spec = {};
+  for (const d in h.spec) if (!specById(d, h.spec[d])) delete h.spec[d];
 }
 
 /** The member's active combat disciplines (major, plus a double-major's second). */

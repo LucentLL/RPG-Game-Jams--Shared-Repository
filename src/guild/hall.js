@@ -15,23 +15,23 @@ import { makeApprentice, normalizeApprentice, dormCapacity, academyBoard, develo
 import { DRILLS, REST, getDrill, applyTraining, applySpar, injuryLabel, previewInjuryChance, inflictInjury, rollInjurySeverity, rollConduct } from './training.js';
 import { stationBonusFor } from './stations.js';
 import { DIET_PLANS, getDietPlan, applyDiet, consumeDietFood } from './diet.js';
-import { DISCIPLINES, ELECTIVES, ELECTIVE_IDS, DISCIPLINE_IDS, disciplineById, electiveById, majorForArchetype, discLevel, discProgress, techniquesFor, disciplineForDrill, ensureCurriculum, activeDisciplines, memberElective, canWorkAssign } from './curriculum.js';
+import { DISCIPLINES, ELECTIVES, ELECTIVE_IDS, DISCIPLINE_IDS, disciplineById, electiveById, majorForArchetype, discLevel, discProgress, techniquesFor, disciplineForDrill, ensureCurriculum, activeDisciplines, memberElective, canWorkAssign, SPECIALIZATIONS, SPEC_UNLOCK_LVL, specById, specFor } from './curriculum.js';
 import { RATION_RECIPES, getRation, rationUnlocked, previewYield, cook } from './cooking.js';
-import { orbCost, orbReqTheory, orbUnlocked, previewOrbLevel, craftMateria, slotMateria, itemSockets, orbLabel } from './enchanting.js';
+import { orbCost, orbReqTheory, orbUnlocked, previewOrbLevel, craftMateria, slotMateria, itemSockets, orbLabel, craftBlessing, blessingUnlocked, BLESSING_REQ_THEORY, BLESSING_COST } from './enchanting.js';
 import { PLANETS } from '../game/data/progression.js';
 import { advanceWeek, formatDate } from './calendar.js';
 import { weeklyUpkeep, addGold, guildIncome } from './economy.js';
-import { RECIPES, getRecipe, previewQuality, forge, study, recipeUnlocked, refine, recipeForItem, previewRefine, REFINE_COST } from './smithing.js';
-import { POTION_RECIPES, getPotionRecipe, previewPotency, brew, potionUnlocked, applyPotion } from './alchemy.js';
-import { MATERIALS, createInventory, armoryItems, findItem, addMaterial, gearBonus, EQUIP_SLOTS, findPotion, consumePotion, potionCount, roomMaterialIds } from './inventory.js';
-import { BOOK_SUBJECTS, mintBook, addBook, bestBook, bookStudyMult, bookPrice } from './books.js';
+import { RECIPES, getRecipe, previewQuality, forge, study, recipeUnlocked, rework, previewRework, refine, refineChance, recipeForItem, materialOreCost, MATERIAL_META, MAX_PLUS, REFINE_GUARDS } from './smithing.js';
+import { POTION_RECIPES, getPotionRecipe, previewPotency, previewBrewYield, brew, potionUnlocked, applyPotion } from './alchemy.js';
+import { MATERIALS, createInventory, armoryItems, findItem, addMaterial, gearBonus, itemPower, EQUIP_SLOTS, findPotion, consumePotion, potionCount, roomMaterialIds, materialCount } from './inventory.js';
+import { BOOK_SUBJECTS, BOOK_SUBJECT_IDS, mintBook, addBook, bestBook, bookStudyMult, bookPrice, writeBook, previewBookTier, learnOnTheJob, WRITE_MIN_THEORY } from './books.js';
 import { generateQuestBoard, resolveQuest, resolveQuestPlayed } from './quests.js';
 import { PREY, LOCALES, preyById, localeById, ensureWilds, isDiscovered, discoveredLocales, undiscoveredLocales, scoutCost, discoverNextLocale, resolveHunt, resolveHuntPlayed, huntSpoils, huntOdds } from './locales.js';
 import { nextTournament, resolveTournament, placement, championOdds, stakesOf, competitionHarm, roundOpponentPower } from './tournaments.js';
 import { generateSeason, EVENT_TYPES, seasonOf, ensureWorldCup } from './events.js';
 import { rivalById, ensureField, recordFieldOutcome, pruneRivals } from './rivals.js';
 import { roleFor } from './roles.js';
-import { qualityTier } from './item.js';
+import { qualityTier, itemLabel } from './item.js';
 import { MATERIAL_PRICE, buyPrice, sellPriceMat, itemSellValue, createMarket, refreshMarket, HUNT_MATERIALS } from './market.js';
 import { saveGame, loadGame } from '../platform/storage.js';
 import { playTournamentMatch, playQuestBout, playHuntBout, battleEngineReady } from './battle-bridge.js';
@@ -47,7 +47,7 @@ const QUEST_STAMINA = 40; // dispatching on a quest costs stamina — questing c
 const canMarch = (h) => !h.condition.injury && h.condition.stamina >= QUEST_STAMINA;
 const DRILL_MIGRATE = { drill_pow: 'pow', guard_def: 'def', forms_skl: 'skl', sprint_spd: 'spd', study_int: 'int', march_vit: 'vit', spar: 'pow' };
 const ARCH_GLYPH = { Knight: '⚔', Mage: '✦', Ranger: '🏹', Cleric: '☩', Rogue: '🗡', Berserker: '🪓', Adventurer: '☉' };
-const KIND_GLYPH = { sword: '⚔', armor: '🛡', bow: '🏹' };
+const KIND_GLYPH = { sword: '⚔', armor: '🛡', bow: '🏹', axe: '🪓', dagger: '🔪' };
 
 let guild = null;
 let selectedId = null;
@@ -245,7 +245,9 @@ function fellInGlory(h, t, week) {
 }
 
 // --- Quartermaster: hand armory gear out by policy ---------------------------
-const itemScore = (it) => (it.quality || 0) * (it.durability ? it.durability.current / (it.durability.max || 100) : 1);
+// Uses the same per-item math the ⚡ uses (quality + refine level; no wearer
+// affinity here — allocation ranks the ITEM, the affinity follows the wearer).
+const itemScore = (it) => itemPower(it, null);
 
 /** Close the open wielder-history entry of an item being set down. */
 function closeWielder(item) {
@@ -270,10 +272,16 @@ function doEquip(h, item) {
 function armHeroes(candidates) {
   const inv = guild.inventory;
   const order = [...candidates].sort((a, b) => heroPower(b) - heroPower(a)); // rank by trained stats (stable during allocation)
+  // A piece a smith is mid-rework/refine on stays on the bench — the quartermaster
+  // must not steal the +N project out from under them (its plus-boosted itemScore
+  // would otherwise make it the FIRST pick).
+  const reserved = new Set(guild.roster
+    .filter((x) => x.assignment && x.assignment.type === 'forge' && x.assignment.forgeMode !== 'new' && x.assignment.refineItemId)
+    .map((x) => x.assignment.refineItemId));
   let issued = 0;
   for (const slot of EQUIP_SLOTS) {
     for (const h of order) {
-      const pool = armoryItems(inv).filter((it) => it.slot === slot).sort((a, b) => itemScore(b) - itemScore(a));
+      const pool = armoryItems(inv).filter((it) => it.slot === slot && !reserved.has(it.id)).sort((a, b) => itemScore(b) - itemScore(a));
       if (!pool.length) break; // nothing of this slot left to hand out
       const best = pool[0];
       const cur = h.equipped[slot] ? findItem(inv, h.equipped[slot]) : null;
@@ -291,10 +299,15 @@ function ensureAssignment(h) {
     intensity: a.intensity === 'heavy' ? 'heavy' : 'light',
     sparWith: a.sparWith || null,
     recipeId: getRecipe(a.recipeId) ? a.recipeId : 'iron_sword',
-    forgeMode: a.forgeMode === 'refine' ? 'refine' : 'new', // the Forge's two jobs: forge fresh, or refine from the Armory
+    // The Forge's three jobs: forge fresh, REWORK quality, or REFINE +N. (load()'s
+    // rev-2 migration maps legacy 'refine' — which meant the rework — to 'rework'.)
+    forgeMode: ['new', 'rework', 'refine'].includes(a.forgeMode) ? a.forgeMode : 'new',
     refineItemId: a.refineItemId || null,
+    refineGuard: REFINE_GUARDS[a.refineGuard] ? a.refineGuard : 'none', // reagent guarding the refine attempt
     potionId: getPotionRecipe(a.potionId) ? a.potionId : 'minor_heal',
-    discipline: a.discipline === 'alchemy' ? 'alchemy' : 'blacksmithing',
+    discipline: BOOK_SUBJECTS[a.discipline] ? a.discipline : 'blacksmithing', // study subject — all four trades
+    studyMode: a.studyMode === 'write' ? 'write' : 'read', // the Library's two jobs: study, or PEN a volume
+    enchantMode: a.enchantMode === 'blessing' ? 'blessing' : 'materia', // the bench's two jobs
     questId: a.questId || null,
     // Wilds hunt dispatch — the chosen area + prey. Persist beside questId (both
     // are cleared when the dispatch is spent) and sanitize against the registries.
@@ -412,6 +425,13 @@ function load() {
   pruneRivals(guild);
   if (!Array.isArray(guild.questBoard) || !guild.questBoard.length) guild.questBoard = generateQuestBoard(guild, 3);
   ensureWilds(guild); // the Wilds discovery map (Ferncreek Hollow known from the start)
+  // Save rev 2 (the Refinement System): the smith's old 'refine' mode meant the
+  // quality REWORK — rename it so 'refine' can mean the +N system from here on.
+  if (!guild.rev || guild.rev < 2) {
+    guild.roster.forEach((h) => { if (h.assignment && h.assignment.forgeMode === 'refine') h.assignment.forgeMode = 'rework'; });
+    guild.rev = 2;
+  }
+  guild.inventory.items.forEach((it) => { if (typeof it.plus !== 'number') it.plus = 0; }); // items grow a refine level
   guild.roster.forEach((h) => { migrateHero(h); ensureAssignment(h); });
   const staleRecruits = guild.recruits && guild.recruits[0] && guild.recruits[0].stats && guild.recruits[0].stats.POW === undefined;
   if (!Array.isArray(guild.recruits) || !guild.recruits.length || staleRecruits) guild.recruits = rollRecruitPool(3);
@@ -518,7 +538,7 @@ function setCookRecipe(id) { const h = heroById(selectedId); if (h && getRation(
 function setEnchantPlanet(i) { const h = heroById(selectedId); if (h && PLANETS[i] && canWorkAssign(h, 'enchant')) { h.assignment.type = 'enchant'; h.assignment.enchantPlanet = i; save(); render(); } }
 /** Slot a stored orb (by index) into the first armoury weapon with a free socket. */
 function slotOrb(orbIdx) {
-  const weapons = armoryItems(guild.inventory).filter((it) => it.kind === 'sword' || it.kind === 'bow');
+  const weapons = armoryItems(guild.inventory).filter((it) => it.slot === 'weapon');
   const target = weapons.find((w) => (w.materia || []).length < itemSockets(w));
   if (!target) { notice = 'No armoury weapon has a free socket.'; render(); return; }
   const res = slotMateria(target, guild.inventory, orbIdx);
@@ -547,13 +567,26 @@ function scheduleAdd(drillId) {
 function scheduleRemoveAt(i) { const h = heroById(selectedId); if (h && Array.isArray(h.schedule)) { h.schedule.splice(i, 1); save(); render(); } }
 function scheduleClear() { const h = heroById(selectedId); if (h) { h.schedule = []; save(); render(); } }
 function setRecipe(id) { const h = heroById(selectedId); if (h) { h.assignment.recipeId = id; h.assignment.type = 'forge'; h.assignment.forgeMode = 'new'; h.assignment.questId = null; save(); render(); } }
-/** Switch the smith's week between forging fresh and refining from the Armory. */
-function setForgeMode(mode) { const h = heroById(selectedId); if (h) { h.assignment.forgeMode = mode === 'refine' ? 'refine' : 'new'; h.assignment.type = 'forge'; h.assignment.questId = null; save(); render(); } }
-/** Pick which armory piece the smith reworks this week. */
+/** Switch the smith's week: forge fresh · rework quality · refine +N. */
+function setForgeMode(mode) { const h = heroById(selectedId); if (h) { h.assignment.forgeMode = ['rework', 'refine'].includes(mode) ? mode : 'new'; h.assignment.type = 'forge'; h.assignment.questId = null; save(); render(); } }
+/** Pick which armory piece the smith reworks/refines this week (keeps the current mode). */
 function setRefineItem(itemId) {
   const h = heroById(selectedId); if (!h) return;
   const it = findItem(guild.inventory, itemId); if (!it || it.location !== 'armory') return;
-  h.assignment.type = 'forge'; h.assignment.forgeMode = 'refine'; h.assignment.refineItemId = itemId; h.assignment.questId = null;
+  h.assignment.type = 'forge';
+  if (!['rework', 'refine'].includes(h.assignment.forgeMode)) h.assignment.forgeMode = 'rework';
+  h.assignment.refineItemId = itemId; h.assignment.questId = null;
+  save(); render();
+}
+/** Arm the refine attempt with a protective reagent (or none). */
+function setRefineGuard(g) { const h = heroById(selectedId); if (h && REFINE_GUARDS[g]) { h.assignment.refineGuard = g; save(); render(); } }
+/** Curriculum — declare a specialization inside a levelled discipline. */
+function setSpecialization(discId, specId) {
+  const h = heroById(selectedId); if (!h || !specById(discId, specId)) return;
+  if (!activeDisciplines(h).includes(discId) || discLevel(h.disc[discId]) < SPEC_UNLOCK_LVL) return;
+  if (!h.spec || typeof h.spec !== 'object') h.spec = {};
+  h.spec[discId] = specId;
+  notice = `${h.name.split(' ')[0]} declares ${specById(discId, specId).name}.`;
   save(); render();
 }
 /** Buy a volume off the market's shelf — it lands in the Library. */
@@ -572,7 +605,11 @@ function buyBook(bookId) {
   save(); render();
 }
 function setPotion(id) { const h = heroById(selectedId); if (h) { h.assignment.potionId = id; h.assignment.type = 'brew'; h.assignment.questId = null; save(); render(); } }
-function setDiscipline(d) { const h = heroById(selectedId); if (h) { h.assignment.discipline = d === 'alchemy' ? 'alchemy' : 'blacksmithing'; h.assignment.type = 'study'; h.assignment.questId = null; save(); render(); } }
+function setDiscipline(d) { const h = heroById(selectedId); if (h && canWorkAssign(h, 'study')) { h.assignment.discipline = BOOK_SUBJECTS[d] ? d : 'blacksmithing'; h.assignment.type = 'study'; h.assignment.questId = null; save(); render(); } }
+/** Switch the Library week between studying and PENNING a volume. */
+function setStudyMode(m) { const h = heroById(selectedId); if (h && canWorkAssign(h, 'study')) { h.assignment.studyMode = m === 'write' ? 'write' : 'read'; h.assignment.type = 'study'; h.assignment.questId = null; save(); render(); } }
+/** Switch the Enchanter's bench between crafting materia and a Smith's Blessing. */
+function setEnchantMode(m) { const h = heroById(selectedId); if (h && canWorkAssign(h, 'enchant')) { h.assignment.enchantMode = m === 'blessing' ? 'blessing' : 'materia'; h.assignment.type = 'enchant'; save(); render(); } }
 function setDiet(id) { const h = heroById(selectedId); if (h) { h.assignment.dietId = id; h.dietPlanId = id; save(); render(); } }
 
 function usePotion(batchId) {
@@ -589,7 +626,7 @@ function equipItem(itemId) {
   const h = heroById(selectedId); if (!h) { notice = 'Select a hero first, then equip.'; render(); return; }
   const item = findItem(guild.inventory, itemId); if (!item || item.location !== 'armory') return;
   doEquip(h, item);
-  notice = `${h.name} equips the ${item.name}.`;
+  notice = `${h.name} equips the ${itemLabel(item)}.`;
   save(); render();
 }
 function unequipSlot(slot) {
@@ -626,7 +663,7 @@ function sellItem(itemId) {
   if (i < 0) return;
   guild.inventory.items.splice(i, 1);
   addGold(guild, value);
-  notice = `Sold ${item.name} for ${value}g.`;
+  notice = `Sold ${itemLabel(item)} for ${value}g.`;
   save(); render();
 }
 
@@ -894,10 +931,43 @@ async function advanceAll() {
       entry.rested = true; entry.injury = res.injury;
     } else if (a.type === 'forge') {
       if (a.forgeMode === 'refine') {
+        // The +N game: one refine attempt on a shelved piece. Guarded or bare —
+        // a bare failure past the safe line DESTROYS the piece, story and all.
+        const it = a.refineItemId ? findItem(guild.inventory, a.refineItemId) : null;
+        const meta = it ? (MATERIAL_META[it.material] || MATERIAL_META.iron) : null;
+        if (!it) {
+          entry.refinePlus = { ok: false, reason: 'gone' }; // destroyed/sold — truly dead
+        } else if (it.location !== 'armory') {
+          entry.refinePlus = { ok: false, reason: 'equipped' }; // someone carries it — transient, retry when it's shelved
+        } else if (guild.gold < meta.fee) {
+          entry.refinePlus = { ok: false, reason: 'fee', fee: meta.fee }; // coffers short — retries next week
+        } else {
+          entry.refinePlus = refine(h, it, guild.inventory, week, a.refineGuard);
+          if (entry.refinePlus.ok) {
+            addGold(guild, -meta.fee);
+            if (entry.refinePlus.broke) {
+              // The piece is destroyed — slotted materia and history go with it.
+              guild.inventory.items = guild.inventory.items.filter((x) => x.id !== it.id);
+            }
+          }
+        }
+        entry.recipeName = it ? itemLabel(it) : 'a missing piece';
+        const rp = entry.refinePlus;
+        entry.conduct = !rp.ok ? 'failed'
+          : rp.success ? (rp.to > (meta.safe || 7) ? 'exceeded' : 'solid')
+          : 'failed';
+        // Dead jobs clear back to forging fresh: the piece is gone (or shattered),
+        // or it has reached +10. Transient failures (ore/fee/stamina/guard) retry.
+        if ((!rp.ok && (rp.reason === 'gone' || rp.reason === 'maxed')) || rp.broke || (rp.success && rp.to >= MAX_PLUS)) {
+          a.refineItemId = null; a.forgeMode = 'new';
+        }
+      } else if (a.forgeMode === 'rework') {
         // The Armory feeds the Forge: rework a shelved piece instead of forging fresh.
         const it = a.refineItemId ? findItem(guild.inventory, a.refineItemId) : null;
-        entry.refine = (it && it.location === 'armory') ? refine(h, it, guild.inventory, week) : { ok: false, reason: 'gone' };
-        entry.recipeName = it ? it.name : 'a missing piece';
+        entry.refine = !it ? { ok: false, reason: 'gone' }
+          : it.location !== 'armory' ? { ok: false, reason: 'equipped' } // transient — retry when it's shelved
+          : rework(h, it, guild.inventory, week);
+        entry.recipeName = it ? itemLabel(it) : 'a missing piece';
         entry.conduct = entry.refine.ok ? ((entry.refine.to - entry.refine.from) >= 8 ? 'exceeded' : 'solid') : 'failed';
         // Only a DEAD job clears (piece gone / beyond their craft) — and the smith goes
         // back to forging fresh, not to repeating a fabricated failure every week.
@@ -912,27 +982,45 @@ async function advanceAll() {
         // Conduct (the Assembly): landing within a whisker of the material's ceiling is mastery.
         entry.conduct = entry.forge.ok ? (entry.forge.quality >= (recipe.ceil || 100) - 4 ? 'exceeded' : 'solid') : 'failed';
       }
+      entry.learned = learnOnTheJob(h, 'blacksmithing', guild.inventory); // the shelf teaches the shop floor
     } else if (a.type === 'brew') {
       const recipe = getPotionRecipe(a.potionId) || POTION_RECIPES[0];
       entry.brew = brew(h, recipe, guild.inventory, week);
       entry.recipeName = recipe.name;
       entry.conduct = entry.brew.ok ? (entry.brew.potency >= (recipe.ceil || 100) - 4 ? 'exceeded' : 'solid') : 'failed';
+      entry.learned = learnOnTheJob(h, 'alchemy', guild.inventory);
     } else if (a.type === 'cook') {
       const recipe = getRation(a.cookRecipeId) || RATION_RECIPES[0];
       entry.cook = cook(h, recipe, guild.inventory, week);
       entry.recipeName = recipe.name;
       entry.conduct = entry.cook.ok ? (entry.cook.qty >= recipe.ceil - 1 ? 'exceeded' : 'solid') : 'failed';
+      entry.learned = learnOnTheJob(h, 'cooking', guild.inventory);
     } else if (a.type === 'enchant') {
-      entry.enchant = craftMateria(h, a.enchantPlanet, guild.inventory, week);
-      entry.recipeName = entry.enchant.planet ? entry.enchant.planet.name + ' orb' : 'materia';
-      entry.conduct = entry.enchant.ok ? (entry.enchant.level >= 3 ? 'exceeded' : 'solid') : 'failed';
+      if (a.enchantMode === 'blessing') {
+        entry.blessing = craftBlessing(h, guild.inventory, week);
+        entry.recipeName = "Smith's Blessing";
+        entry.conduct = entry.blessing.ok ? 'solid' : 'failed';
+      } else {
+        entry.enchant = craftMateria(h, a.enchantPlanet, guild.inventory, week);
+        entry.recipeName = entry.enchant.planet ? entry.enchant.planet.name + ' orb' : 'materia';
+        entry.conduct = entry.enchant.ok ? (entry.enchant.level >= 3 ? 'exceeded' : 'solid') : 'failed';
+      }
+      entry.learned = learnOnTheJob(h, 'enchanting', guild.inventory);
     } else if (a.type === 'study') {
-      const disc = a.discipline === 'alchemy' ? 'alchemy' : 'blacksmithing';
-      const bk = bestBook(guild.inventory, disc); // the Library's shelf at work — the best volume guides the week
-      entry.study = study(h, disc, bookStudyMult(bk));
-      entry.discipline = disc;
-      if (bk) entry.book = bk.title;
-      entry.conduct = entry.study.theoryGain >= 8 ? 'exceeded' : 'solid';
+      const subject = BOOK_SUBJECTS[a.discipline] ? a.discipline : 'blacksmithing';
+      if (a.studyMode === 'write') {
+        // The Scriptorium: pen a volume on the subject — mastery becomes the shelf's.
+        entry.write = writeBook(h, subject, guild.inventory, week);
+        entry.discipline = subject;
+        entry.recipeName = entry.write.ok ? entry.write.book.title : 'an unwritten book';
+        entry.conduct = entry.write.ok ? (entry.write.tier >= 3 ? 'exceeded' : 'solid') : 'failed';
+      } else {
+        const bk = bestBook(guild.inventory, subject); // the Library's shelf at work — the best volume guides the week
+        entry.study = study(h, subject, bookStudyMult(bk));
+        entry.discipline = subject;
+        if (bk) entry.book = bk.title;
+        entry.conduct = entry.study.theoryGain >= 8 ? 'exceeded' : 'solid';
+      }
     } else if (a.type === 'quest') {
       const plan = questPlan[h.id];
       if (!plan || !plan.quest) {
@@ -1043,17 +1131,25 @@ async function advanceAll() {
       entry.rested = res.rested; entry.injured = res.injured; entry.injury = res.injury;
       entry.breakthrough = res.breakthrough; entry.slacked = !!res.slacked;
       entry.trained = Object.keys(res.gains).length > 0;
+      // An honest week drilling a stat already at its cap earns no stat gain — that's
+      // mastery, not failure (and it still feeds the discipline below).
+      const drill = getDrill(a.trainingId);
+      const atCap = !!(drill && (h.stats[drill.main] || 0) >= STAT_CAP);
       entry.conduct = entry.rested || entry.injured ? null
         : entry.slacked ? 'cheated'
         : entry.breakthrough ? 'exceeded'
-        : entry.trained ? 'solid' : 'failed';
+        : (entry.trained || atCap) ? 'solid' : 'failed';
       // Combat disciplines are a LENS over the drills: training a drill in one of the
       // member's active disciplines (their major, or a double-major's 2nd) levels it,
-      // unlocking techniques. Off-discipline drills still grow the stats, just not the craft.
+      // unlocking techniques. Off-discipline drills still grow the stats, just not the
+      // craft. Working the week is what feeds the craft — a capped stat doesn't stall
+      // the discipline. (Gate fixed: applyTraining never returned `trained`.)
       const dDisc = disciplineForDrill(a.trainingId);
-      if (dDisc && res.trained && !res.rested && !res.injured && activeDisciplines(h).indexOf(dDisc) >= 0) {
+      if (dDisc && !res.rested && !res.injured && activeDisciplines(h).indexOf(dDisc) >= 0) {
         const before = discLevel(h.disc[dDisc]);
-        h.disc[dDisc] = (h.disc[dDisc] || 0) + (res.slacked ? 3 : a.intensity === 'heavy' ? 12 : 7);
+        const base = res.slacked ? 3 : a.intensity === 'heavy' ? 12 : 7;
+        const specMult = specFor(h, dDisc) ? 1.15 : 1; // a declared specialization deepens the craft
+        h.disc[dDisc] = (h.disc[dDisc] || 0) + Math.round(base * specMult);
         const after = discLevel(h.disc[dDisc]);
         if (after > before) entry.discUp = { disc: dDisc, lvl: after, tech: (techniquesFor(dDisc, after).slice(-1)[0] || {}).name || null };
       }
@@ -1191,11 +1287,11 @@ function qualHTML(item) { const t = qualityTier(item.quality); return `<span sty
 function questTitle(id) { const q = guild.questBoard.find((x) => x.id === id); return q ? q.title : null; }
 function rosterRow(h) {
   const a = h.assignment;
-  const plan = a.type === 'forge' ? (a.forgeMode === 'refine' ? `♻ Refine ${refineItemName(a)}` : `🔨 ${getRecipe(a.recipeId).name}`)
+  const plan = a.type === 'forge' ? (a.forgeMode === 'refine' ? `✨ Refine ${refineItemName(a)}` : a.forgeMode === 'rework' ? `⚒ Rework ${refineItemName(a)}` : `🔨 ${getRecipe(a.recipeId).name}`)
     : a.type === 'brew' ? `⚗ ${(getPotionRecipe(a.potionId) || {}).name || 'Brew'}`
     : a.type === 'cook' ? `🍳 ${(getRation(a.cookRecipeId) || {}).name || 'Cook'}`
-    : a.type === 'enchant' ? `✨ ${(PLANETS[a.enchantPlanet] || {}).name || ''} orb`
-    : a.type === 'study' ? `📖 Study ${a.discipline === 'alchemy' ? 'Alchemy' : 'Smithing'}`
+    : a.type === 'enchant' ? (a.enchantMode === 'blessing' ? `⭐ Smith's Blessing` : `✨ ${(PLANETS[a.enchantPlanet] || {}).name || ''} orb`)
+    : a.type === 'study' ? `${a.studyMode === 'write' ? '📜 Write' : '📖 Study'} ${(BOOK_SUBJECTS[a.discipline] || BOOK_SUBJECTS.blacksmithing).label}`
     : a.type === 'quest' ? `🗺 ${a.questId ? (questTitle(a.questId) || 'On Quest') : '(choose quest)'}`
     : a.type === 'hunt' ? `🏹 ${a.huntId ? `Hunt ${(preyById(a.huntId) || {}).name || ''}` : '(choose prey)'}`
     : a.trainingId === 'spar' ? `🤺 Spar ${((heroById(a.sparWith) || {}).name || '?').split(' ')[0]}`
@@ -1215,7 +1311,7 @@ function equippedLine(h) {
   const parts = [];
   ['weapon', 'body'].forEach((slot) => {
     const id = h.equipped[slot];
-    if (id) { const it = findItem(guild.inventory, id); if (it) parts.push(`${KIND_GLYPH[it.kind] || '▪'} ${it.name} <span class="eq-q">${qualHTML(it)}</span> <button class="eq-x" onclick="__guild.unequipSlot('${slot}')">✕</button>`); }
+    if (id) { const it = findItem(guild.inventory, id); if (it) parts.push(`${KIND_GLYPH[it.kind] || '▪'} ${itemLabel(it)} <span class="eq-q">${qualHTML(it)}</span> <button class="eq-x" onclick="__guild.unequipSlot('${slot}')">✕</button>`); }
   });
   return parts.length ? `<div class="equipped">${parts.join('')}</div>` : `<div class="equipped none">— no gear equipped —</div>`;
 }
@@ -1232,12 +1328,16 @@ function heroSwitcher() {
  *  "⚔ Melee + 🏹 Ranged · Double Major". */
 function curriculumLabel(h) {
   const maj = disciplineById(h.major) || DISCIPLINES.melee;
+  // A declared specialization joins the identity line: "⚔ Melee · Swordsmanship".
+  const majSpec = specFor(h, h.major);
+  const majPart = `<span style="color:${maj.col}">${maj.glyph} ${maj.name}${majSpec ? ` · ${majSpec.name}` : ''}</span>`;
   if (h.track && h.track.kind === 'double' && h.track.second) {
     const s = disciplineById(h.track.second);
-    return `<span style="color:${maj.col}">${maj.glyph} ${maj.name}</span> + <span style="color:${s.col}">${s.glyph} ${s.name}</span> <span class="dim">· Double Major</span>`;
+    const secSpec = specFor(h, h.track.second);
+    return `${majPart} + <span style="color:${s.col}">${s.glyph} ${s.name}${secSpec ? ` · ${secSpec.name}` : ''}</span> <span class="dim">· Double Major</span>`;
   }
   const e = memberElective(h);
-  return `<span style="color:${maj.col}">${maj.glyph} ${maj.name}</span> · ${e ? `${e.glyph} ${e.name}` : '<span class="dim">Elective undeclared</span>'}`;
+  return `${majPart} · ${e ? `${e.glyph} ${e.name}` : '<span class="dim">Elective undeclared</span>'}`;
 }
 
 /** The Curriculum panel — the member's combat disciplines (levels + techniques) and
@@ -1248,12 +1348,32 @@ function curriculumPanel(h) {
   const discRows = activeDisciplines(h).map((id) => {
     const d = disciplineById(id); const pr = discProgress(h.disc[id]);
     const techs = techniquesFor(id, pr.lvl);
+    // The specialization line: declared → a lit chip (+ small re-declare chips, so a
+    // choice is never a trap); Lv2+ undeclared → the choice; below Lv2 → a locked
+    // hint. Affinity is only ADVERTISED for kinds the forge can actually produce.
+    const spec = specFor(h, id);
+    const FORGEABLE = new Set(RECIPES.map((r) => r.kind));
+    const liveKinds = (s) => s.kinds.filter((k) => FORGEABLE.has(k));
+    const specLine = spec
+      ? `<span class="disc-spec"><span class="spec-chip on" style="border-color:${d.col}">${spec.glyph} ${spec.name}</span> <span class="dim">· +15% ${d.name.toLowerCase()} craft${liveKinds(spec).length ? ` · affinity: ${liveKinds(spec).join('/')}` : ''}</span>${(SPECIALIZATIONS[id] || []).filter((s) => s.id !== spec.id).map((s) =>
+          `<button class="spec-chip alt" title="re-declare: ${s.name} — ${s.blurb}" onclick="__guild.setSpecialization('${id}','${s.id}')">${s.glyph}</button>`).join('')}</span>`
+      : pr.lvl >= SPEC_UNLOCK_LVL
+        ? `<span class="disc-spec"><span class="dim">Declare a specialization:</span> ${(SPECIALIZATIONS[id] || []).map((s) =>
+            `<button class="spec-chip" title="${s.blurb}${liveKinds(s).length ? ` (gear affinity: ${liveKinds(s).join('/')})` : ''}" onclick="__guild.setSpecialization('${id}','${s.id}')">${s.glyph} ${s.name}</button>`).join('')}</span>`
+        : `<span class="disc-spec dim">— specialization opens at Lv${SPEC_UNLOCK_LVL} —</span>`;
     return `<div class="disc-row">
         <span class="disc-name" style="color:${d.col}">${d.glyph} ${d.name} <span class="dim">Lv${pr.lvl}</span>${id === h.major ? '' : ' <span class="dim">· 2nd</span>'}</span>
         <span class="disc-bar"><span class="disc-fill" style="width:${Math.round(pr.frac * 100)}%;background:${d.col}"></span></span>
         ${techs.length ? `<span class="disc-techs">${techs.map((t) => `<span class="tech-chip" style="border-color:${d.col}55">${t.name}</span>`).join('')}</span>` : '<span class="disc-techs dim">— no techniques yet —</span>'}
+        ${specLine}
       </div>`;
   }).join('');
+  // The member's craft, on their own sheet: the elective's three-track skill shape.
+  const el = memberElective(h);
+  const craftLine = el ? (() => {
+    const p = h.professions[el.prof] || { theory: 0, practice: 0, field: 0 };
+    return `<div class="skill-shape">${el.glyph} ${el.name} — <b>Theory ${p.theory}</b> · <b>Practice ${p.practice}</b> · <span class="dim">Field ${p.field}</span></div>`;
+  })() : '';
   const trackToggle = `<div class="intensity-toggle">
       <button class="${!isDouble ? 'on' : ''}" onclick="__guild.setTrackKind('elective')">🎓 Take an Elective</button>
       <button class="${isDouble ? 'on' : ''}" onclick="__guild.setTrackKind('double')">⚔ Double Major</button>
@@ -1274,6 +1394,7 @@ function curriculumPanel(h) {
   }
   return `<div class="plan-title">🎓 Curriculum — <span class="pt-cur">${maj.glyph} ${maj.name}</span> <span class="dim" style="font-weight:400;text-transform:none">major · their nature</span></div>
     <div class="disc-list">${discRows}</div>
+    ${craftLine}
     ${trackToggle}${trackBody}`;
 }
 
@@ -1409,37 +1530,71 @@ function questBody(h) {
   return `<div class="opt-list">${list}</div>${lensBar}`;
 }
 
-/** Forge body for member h: forge a fresh piece, or REFINE one from the Armory. */
+/** Forge body for member h: forge fresh, REWORK quality, or REFINE +N from the Armory. */
 function forgeBody(h) {
   const at = h.assignment.type;
   const isForge = at === 'forge';
-  const refining = h.assignment.forgeMode === 'refine';
+  const mode = h.assignment.forgeMode;
   const prof = h.professions.blacksmithing;
   const modeToggle = `<div class="intensity-toggle">
-      <button class="${isForge && !refining ? 'on' : ''}" onclick="__guild.setForgeMode('new')">🔨 Forge new</button>
-      <button class="${isForge && refining ? 'on' : ''}" onclick="__guild.setForgeMode('refine')">♻ Refine from the Armory</button>
+      <button class="${isForge && mode === 'new' ? 'on' : ''}" onclick="__guild.setForgeMode('new')">🔨 Forge new</button>
+      <button class="${isForge && mode === 'rework' ? 'on' : ''}" onclick="__guild.setForgeMode('rework')">⚒ Rework</button>
+      <button class="${isForge && mode === 'refine' ? 'on' : ''}" onclick="__guild.setForgeMode('refine')">✨ Refine +N</button>
     </div>`;
   let body;
-  if (refining) {
+  if (isForge && mode === 'rework') {
     const shelf = armoryItems(guild.inventory);
     body = shelf.length ? shelf.map((it) => {
       const rec = recipeForItem(it);
-      const cost = REFINE_COST[it.material] || { iron_ore: 1 };
+      const cost = materialOreCost(it.material);
       const costTxt = Object.keys(cost).map((k) => `${MATERIALS[k].name} ×${cost[k]}`).join(', ');
       const enough = Object.keys(cost).every((k) => (guild.inventory.materials[k] || 0) >= cost[k]);
       if (!recipeUnlocked(h, rec)) {
-        return `<button class="opt lack" disabled><span><span class="o-name">🔒 ${it.name}</span> <span class="o-desc">study ${it.material} theory to rework it</span></span><span class="o-cost">Theory ${rec.reqTheory}</span></button>`;
+        return `<button class="opt lack" disabled><span><span class="o-name">🔒 ${itemLabel(it)}</span> <span class="o-desc">study ${it.material} theory to rework it</span></span><span class="o-cost">Theory ${rec.reqTheory}</span></button>`;
       }
-      const to = previewRefine(it, prof.practice, prof.field);
+      const to = previewRework(it, prof.practice, prof.field);
       if (to <= it.quality) {
-        return `<button class="opt lack" disabled><span><span class="o-name">${KIND_GLYPH[it.kind] || '▪'} ${it.name}</span> <span class="o-desc">beyond ${h.name.split(' ')[0]}'s craft — find a better smith</span></span><span class="o-cost">q${it.quality}</span></button>`;
+        return `<button class="opt lack" disabled><span><span class="o-name">${KIND_GLYPH[it.kind] || '▪'} ${itemLabel(it)}</span> <span class="o-desc">beyond ${h.name.split(' ')[0]}'s craft — find a better smith</span></span><span class="o-cost">q${it.quality}</span></button>`;
       }
-      return `<button class="opt ${isForge && refining && h.assignment.refineItemId === it.id ? 'active' : ''} ${enough ? '' : 'lack'}" onclick="__guild.setRefineItem('${it.id}')">
-        <span><span class="o-name">${KIND_GLYPH[it.kind] || '▪'} ${it.name}</span> <span class="o-desc">${costTxt} · durability restored</span></span>
+      return `<button class="opt ${h.assignment.refineItemId === it.id ? 'active' : ''} ${enough ? '' : 'lack'}" onclick="__guild.setRefineItem('${it.id}')">
+        <span><span class="o-name">${KIND_GLYPH[it.kind] || '▪'} ${itemLabel(it)}</span> <span class="o-desc">${costTxt} · durability restored</span></span>
         <span class="o-cost">q${it.quality} → ~q${to}</span></button>`;
     }).join('') : '<div class="hint">The Armory shelf is bare — forge something first, or unequip a piece to rework it.</div>';
     body = `<div class="opt-list">${body}</div>
-      <div class="hint" style="text-align:left;padding:4px 0">Refining reworks a real armory piece: quality climbs toward what the smith could forge outright, durability is restored, and the work joins the item's history — the blade keeps its story.</div>`;
+      <div class="hint" style="text-align:left;padding:4px 0">Reworking trues a real armory piece: quality climbs toward what the smith could forge outright, durability is restored, and the work joins the item's history — the blade keeps its story.</div>`;
+  } else if (isForge && mode === 'refine') {
+    const shelf = armoryItems(guild.inventory);
+    const guard = REFINE_GUARDS[h.assignment.refineGuard] || REFINE_GUARDS.none;
+    body = shelf.length ? shelf.map((it) => {
+      const rec = recipeForItem(it);
+      const meta = MATERIAL_META[it.material] || MATERIAL_META.iron;
+      if (!recipeUnlocked(h, rec)) {
+        return `<button class="opt lack" disabled><span><span class="o-name">🔒 ${itemLabel(it)}</span> <span class="o-desc">study ${it.material} theory to refine it</span></span><span class="o-cost">Theory ${rec.reqTheory}</span></button>`;
+      }
+      if ((it.plus || 0) >= MAX_PLUS) {
+        return `<button class="opt lack" disabled><span><span class="o-name">${KIND_GLYPH[it.kind] || '▪'} ${itemLabel(it)}</span> <span class="o-desc">a finished masterpiece — it can climb no higher</span></span><span class="o-cost">MAX</span></button>`;
+      }
+      const cost = materialOreCost(it.material);
+      const costTxt = Object.keys(cost).map((k) => `${MATERIALS[k].name} ×${cost[k]}`).join(', ') + ` · ${meta.fee}g`;
+      const enough = Object.keys(cost).every((k) => (guild.inventory.materials[k] || 0) >= cost[k]) && guild.gold >= meta.fee;
+      const next = (it.plus || 0) + 1;
+      const chance = refineChance(it, h);
+      const risky = next > meta.safe;
+      return `<button class="opt ${h.assignment.refineItemId === it.id ? 'active' : ''} ${enough ? '' : 'lack'}" onclick="__guild.setRefineItem('${it.id}')">
+        <span><span class="o-name">${KIND_GLYPH[it.kind] || '▪'} ${itemLabel(it)}</span> <span class="o-desc">${costTxt} · safe to +${meta.safe} · +${next} is <b class="${risky ? 'risk' : 'up'}">${chance}%</b>${risky ? ' ⚠' : ''}</span></span>
+        <span class="o-cost">+${it.plus || 0} → +${next}</span></button>`;
+    }).join('') : '<div class="hint">The Armory shelf is bare — forge something first, or unequip a piece to refine it.</div>';
+    const guardBtn = (g) => {
+      const have = g.material ? materialCount(guild.inventory, g.material) : null;
+      return `<button class="${guard.id === g.id ? 'on' : ''} ${g.material && !have ? 'lack' : ''}" onclick="__guild.setRefineGuard('${g.id}')">${g.glyph} ${g.id === 'none' ? 'Bare' : g.name}${have != null ? ` ·${have}` : ''}</button>`;
+    };
+    const guardHint = guard.id === 'oil' ? 'a failure only knocks the piece −1'
+      : guard.id === 'blessing' ? 'a failure keeps the level'
+      : '<b class="risk">a failure past the safe line DESTROYS the piece</b> — materia, story and all';
+    body = `<div class="opt-list">${body}</div>
+      <div class="dept-lbl" style="margin-top:8px">🧰 Protection for the attempt</div>
+      <div class="intensity-toggle guard-toggle">${guardBtn(REFINE_GUARDS.none)}${guardBtn(REFINE_GUARDS.oil)}${guardBtn(REFINE_GUARDS.blessing)}</div>
+      <div class="hint" style="text-align:left;padding:4px 0">Each week is ONE attempt: +1 on success — and ${guardHint}. The Alchemist brews Tempering Oil; the Enchanter crafts Smith's Blessings. A practiced smith rolls up to +10% better.</div>`;
   } else {
     const forgeList = RECIPES.map((r) => {
       const cost = Object.keys(r.cost).map((k) => `${MATERIALS[k].name} ×${r.cost[k]}`).join(', ');
@@ -1447,7 +1602,7 @@ function forgeBody(h) {
       if (!recipeUnlocked(h, r)) {
         return `<button class="opt lack" disabled><span><span class="o-name">🔒 ${r.name}</span> <span class="o-desc">study to unlock</span></span><span class="o-cost">Theory ${r.reqTheory}</span></button>`;
       }
-      return `<button class="opt ${isForge && !refining && r.id === h.assignment.recipeId ? 'active' : ''} ${enough ? '' : 'lack'}" onclick="__guild.setRecipe('${r.id}')">
+      return `<button class="opt ${isForge && mode === 'new' && r.id === h.assignment.recipeId ? 'active' : ''} ${enough ? '' : 'lack'}" onclick="__guild.setRecipe('${r.id}')">
         <span><span class="o-name">${KIND_GLYPH[r.kind] || ''} ${r.name}</span> <span class="o-desc">${cost}</span></span>
         <span class="o-cost">~q${previewQuality(r, prof.practice, prof.field)}</span></button>`;
     }).join('');
@@ -1473,7 +1628,7 @@ function brewBody(h) {
     }
     return `<button class="opt ${isBrew && r.id === h.assignment.potionId ? 'active' : ''} ${enough ? '' : 'lack'}" onclick="__guild.setPotion('${r.id}')">
       <span><span class="o-name">${r.glyph} ${r.name}</span> <span class="o-desc">${cost}</span></span>
-      <span class="o-cost">~p${previewPotency(r, prof.practice, prof.field)} ×${r.yield}</span></button>`;
+      <span class="o-cost">~p${previewPotency(r, prof.practice, prof.field)} ×${previewBrewYield(r, prof.practice, prof.field)}</span></button>`;
   }).join('');
   return `${alchemyShapeOf(h)}<div class="opt-list">${list}</div>`;
 }
@@ -1504,10 +1659,25 @@ function enchantingShapeOf(h) {
   const p = h.professions.enchanting || { theory: 0, practice: 0, field: 0 };
   return `<div class="skill-shape">✨ Enchanting — <b>Theory ${p.theory}</b> · <b>Practice ${p.practice}</b> · <span class="dim">Field ${p.field} · forges Lv${previewOrbLevel(p.practice, p.field)} orbs</span></div>`;
 }
-/** Enchanter's bench: pick a planet to craft, and slot crafted orbs into weapons. */
+/** Enchanter's bench: craft a planet's orb — or a Smith's Blessing for the Forge. */
 function enchantBody(h) {
   const isEnch = h.assignment.type === 'enchant';
   const prof = h.professions.enchanting || { theory: 0, practice: 0, field: 0 };
+  const blessing = h.assignment.enchantMode === 'blessing';
+  const benchToggle = `<div class="intensity-toggle">
+      <button class="${isEnch && !blessing ? 'on' : ''}" onclick="__guild.setEnchantMode('materia')">✨ Craft materia</button>
+      <button class="${isEnch && blessing ? 'on' : ''}" onclick="__guild.setEnchantMode('blessing')">⭐ Smith's Blessing</button>
+    </div>`;
+  if (blessing) {
+    const costTxt = Object.keys(BLESSING_COST).map((k) => `${MATERIALS[k].name} ×${BLESSING_COST[k]}`).join(', ');
+    const unlocked = blessingUnlocked(h);
+    const have = materialCount(guild.inventory, 'smith_blessing');
+    return `${enchantingShapeOf(h)}${benchToggle}
+      <div class="opt-list"><button class="opt active ${unlocked ? '' : 'lack'}" ${unlocked ? '' : 'disabled'}>
+        <span><span class="o-name">⭐ Smith's Blessing</span> <span class="o-desc">${unlocked ? costTxt : `deeper lore needed — Theory ${BLESSING_REQ_THEORY}`}</span></span>
+        <span class="o-cost">in stock: ${have}</span></button></div>
+      <div class="hint" style="text-align:left;padding:4px 0">A mithril-laced charm for the Forge: guard a refine attempt with one and a <b>failed attempt keeps its level</b> instead of shattering. Shelved in the Forge stockroom.</div>`;
+  }
   const list = PLANETS.map((pl, i) => {
     const cost = orbCost(i);
     const costTxt = Object.keys(cost).map((k) => `${MATERIALS[k].name} ×${cost[k]}`).join(', ');
@@ -1520,31 +1690,51 @@ function enchantBody(h) {
       <span class="o-cost">Lv${previewOrbLevel(prof.practice, prof.field)}</span></button>`;
   }).join('');
   const store = guild.inventory.materia || [];
-  const weapons = armoryItems(guild.inventory).filter((it) => it.kind === 'sword' || it.kind === 'bow');
+  const weapons = armoryItems(guild.inventory).filter((it) => it.slot === 'weapon');
   const freeWeapon = weapons.find((w) => (w.materia || []).length < itemSockets(w));
   const storeHTML = store.length ? store.map((orb, i) => { const L = orbLabel(orb);
     return `<div class="market-row"><span class="mk-name"><b style="color:${L.col}">${L.sym} ${L.name} Lv${L.lvl}</b></span>
-      <button class="rc-hire ${freeWeapon ? '' : 'disabled'}" onclick="__guild.slotOrb(${i})">${freeWeapon ? `↳ Slot into ${freeWeapon.name}` : 'no free socket'}</button></div>`; }).join('')
+      <button class="rc-hire ${freeWeapon ? '' : 'disabled'}" onclick="__guild.slotOrb(${i})">${freeWeapon ? `↳ Slot into ${itemLabel(freeWeapon)}` : 'no free socket'}</button></div>`; }).join('')
     : '<div class="hint">No orbs yet — the Enchanter crafts one each week they work.</div>';
-  return `${enchantingShapeOf(h)}<div class="opt-list">${list}</div>
+  return `${enchantingShapeOf(h)}${benchToggle}<div class="opt-list">${list}</div>
     <div class="dept-lbl" style="margin-top:8px">✨ Materia store · ${store.length}</div>
     <div class="market-list">${storeHTML}</div>
     <div class="hint" style="text-align:left;padding:4px 0">Crafted orbs slot into armoury weapons. <span class="dim">A slotted orb doesn't change a played fight yet — the arena bridge comes later.</span></div>`;
 }
 
-/** Library/Study body: pick a discipline; the Scholar raises its Theory this week. */
+/** Library body: study a subject's Theory — or spend the week WRITING a book on it. */
 function studyBody(h) {
   const a = h.assignment;
   const assigned = a.type === 'study';
-  const disc = a.discipline === 'alchemy' ? 'alchemy' : 'blacksmithing';
-  const toggle = `<div class="intensity-toggle">
-      <button class="${assigned && disc === 'blacksmithing' ? 'on' : ''}" onclick="__guild.setDiscipline('blacksmithing')">⚒ Metallurgy</button>
-      <button class="${assigned && disc === 'alchemy' ? 'on' : ''}" onclick="__guild.setDiscipline('alchemy')">⚗ Alchemy</button>
+  const disc = BOOK_SUBJECTS[a.discipline] ? a.discipline : 'blacksmithing';
+  const writing = a.studyMode === 'write';
+  const modeToggle = `<div class="intensity-toggle">
+      <button class="${assigned && !writing ? 'on' : ''}" onclick="__guild.setStudyMode('read')">📖 Study</button>
+      <button class="${assigned && writing ? 'on' : ''}" onclick="__guild.setStudyMode('write')">📜 Write a book</button>
     </div>`;
-  const shape = disc === 'alchemy' ? alchemyShapeOf(h) : skillShapeOf(h);
-  return `${shape}${toggle}
-      <div class="hint" style="text-align:left;padding:4px 0">Pick a discipline — the Scholar studies it, raising its <b>Theory</b> (which unlocks recipes). Practice from working the craft still sets quality.</div>
-      ${assigned ? `<div class="room-jobline">📖 ${h.name} is studying <b>${disc === 'alchemy' ? 'Alchemy' : 'Metallurgy'}</b> this week.</div>` : '<div class="hint">Pick a discipline above to assign this member to study.</div>'}`;
+  const subjToggle = `<div class="intensity-toggle subj-toggle">${BOOK_SUBJECT_IDS.map((s) => {
+    const B = BOOK_SUBJECTS[s];
+    return `<button class="${assigned && disc === s ? 'on' : ''}" onclick="__guild.setDiscipline('${s}')">${B.glyph} ${B.label}</button>`;
+  }).join('')}</div>`;
+  const shapes = { blacksmithing: skillShapeOf, alchemy: alchemyShapeOf, cooking: cookingShapeOf, enchanting: enchantingShapeOf };
+  const shape = (shapes[disc] || skillShapeOf)(h);
+  let jobline;
+  if (writing) {
+    const tier = previewBookTier(h, disc);
+    const theory = (h.professions[disc] || {}).theory || 0;
+    jobline = tier < 1
+      ? `<div class="hint">✍ ${h.name.split(' ')[0]} knows too little ${BOOK_SUBJECTS[disc].label} to write on it — Theory ${theory}/${WRITE_MIN_THEORY}. Study first (or pick a subject they've mastered).</div>`
+      : `<div class="room-jobline">📜 ${h.name} will pen a <b>${'★'.repeat(tier)}${'☆'.repeat(3 - tier)} ${BOOK_SUBJECTS[disc].label}</b> volume this week — their mastery becomes the shelf's.</div>`;
+  } else {
+    jobline = assigned
+      ? `<div class="room-jobline">📖 ${h.name} is studying <b>${BOOK_SUBJECTS[disc].label}</b> this week.</div>`
+      : '<div class="hint">Pick a subject above to assign this member to study.</div>';
+  }
+  return `${shape}${modeToggle}${subjToggle}
+      <div class="hint" style="text-align:left;padding:4px 0">${writing
+        ? 'Writing shelves a real volume, <b>authored by the member</b> — everyone studies faster from it, and workers consult it on the job. Deeper Theory pens deeper books (★ at 30 · ★★ at 55 · ★★★ at 80).'
+        : 'Studying raises the subject\'s <b>Theory</b> (which unlocks recipes). Practice from working the craft still sets quality.'}</div>
+      ${jobline}`;
 }
 
 /** Diet list for member h. */
@@ -1557,16 +1747,16 @@ function dietBody(h) {
  *  equipped/sold piece reads "(pick a piece)" instead of promising a doomed job. */
 function refineItemName(a) {
   const it = a.refineItemId ? findItem(guild.inventory, a.refineItemId) : null;
-  return (it && it.location === 'armory') ? it.name : '(pick a piece)';
+  return (it && it.location === 'armory') ? itemLabel(it) : '(pick a piece)';
 }
 /** One-line summary of what a member is doing this week. */
 function jobLabel(h) {
   const a = h.assignment;
-  return a.type === 'forge' ? (a.forgeMode === 'refine' ? `♻ Refining ${refineItemName(a)}` : `🔨 Forging ${(getRecipe(a.recipeId) || {}).name || ''}`)
+  return a.type === 'forge' ? (a.forgeMode === 'refine' ? `✨ Refining ${refineItemName(a)}` : a.forgeMode === 'rework' ? `⚒ Reworking ${refineItemName(a)}` : `🔨 Forging ${(getRecipe(a.recipeId) || {}).name || ''}`)
     : a.type === 'brew' ? `⚗ Brewing ${(getPotionRecipe(a.potionId) || {}).name || ''}`
     : a.type === 'cook' ? `🍳 Cooking ${(getRation(a.cookRecipeId) || {}).name || ''}`
-    : a.type === 'enchant' ? `✨ Enchanting ${(PLANETS[a.enchantPlanet] || {}).name || ''}`
-    : a.type === 'study' ? `📖 Studying ${a.discipline === 'alchemy' ? 'alchemy' : 'metallurgy'}`
+    : a.type === 'enchant' ? (a.enchantMode === 'blessing' ? `⭐ Crafting a Smith's Blessing` : `✨ Enchanting ${(PLANETS[a.enchantPlanet] || {}).name || ''}`)
+    : a.type === 'study' ? `${a.studyMode === 'write' ? '📜 Writing on' : '📖 Studying'} ${((BOOK_SUBJECTS[a.discipline] || BOOK_SUBJECTS.blacksmithing).label).toLowerCase()}`
     : a.type === 'quest' ? `🗺 ${a.questId ? (questTitle(a.questId) || 'On a quest') : 'Quest (pick one)'}`
     : a.type === 'hunt' ? `🏹 ${a.huntId ? `Hunting ${(preyById(a.huntId) || {}).name || ''}` : 'Hunt (pick prey)'}`
     : a.trainingId === 'spar' ? `🤺 Sparring ${((heroById(a.sparWith) || {}).name || '?').split(' ')[0]}`
@@ -1581,10 +1771,10 @@ function armoryPanel() {
   const shelf = armoryItems(inv);
   const carried = inv.items.filter((it) => it.location !== 'armory');
   const shelfHTML = shelf.length ? shelf.map((it) => {
-    const reworked = (it.history.repairs || []).length;
+    const reworked = (it.history.repairs || []).filter((r) => r.from != null).length;
     return `<div class="armory-item">
       <span class="ai-icon">${KIND_GLYPH[it.kind] || '▪'}</span>
-      <span class="ai-main"><b>${it.name}</b><span class="rr-sub">${qualHTML(it)}${it.history.forgedByName ? ' · forged by ' + it.history.forgedByName : ''}${reworked ? ` · reworked ×${reworked}` : ''}</span></span>
+      <span class="ai-main"><b>${itemLabel(it)}</b><span class="rr-sub">${qualHTML(it)}${it.history.forgedByName ? ' · forged by ' + it.history.forgedByName : ''}${reworked ? ` · reworked ×${reworked}` : ''}</span></span>
       <span class="ai-actions">
         <button class="rc-hire" onclick="__guild.equipItem('${it.id}')">Equip</button>
         <button class="rc-hire sell" onclick="__guild.sellItem('${it.id}')">Sell ${itemSellValue(it)}g</button>
@@ -1596,7 +1786,7 @@ function armoryPanel() {
       <div class="plan-title">🏛 Armory · finished gear</div>
       <div class="armory-shelf">${shelfHTML}</div>
       ${carried.length ? `<div class="rr-sub" style="margin-top:8px">${carried.length} item(s) carried by heroes.</div>` : ''}
-      <div class="hint" style="text-align:left;padding:6px 0 0">The Forge can ♻ refine shelved pieces — raw ore lives in the Forge's own stockroom.</div>
+      <div class="hint" style="text-align:left;padding:6px 0 0">The Forge can ⚒ rework a shelved piece's quality, or ✨ refine it +1 at a time — raw ore lives in the Forge's own stockroom.</div>
     </div>`;
 }
 
@@ -1617,22 +1807,25 @@ function libraryShelfPanel() {
   const books = guild.inventory.books || [];
   const rows = books.length ? books.map((b) => {
     const sub = BOOK_SUBJECTS[b.subject] || { glyph: '📖', label: b.subject };
+    const provenance = b.source === 'quest' ? 'recovered on a quest'
+      : b.source === 'penned' ? `✍ penned by ${b.author || 'a member'}` : 'bought at market';
     return `<div class="armory-item">
         <span class="ai-icon">${sub.glyph}</span>
-        <span class="ai-main"><b>${b.title}</b><span class="rr-sub">${sub.label} · ${'★'.repeat(b.tier)}${'☆'.repeat(3 - b.tier)}${b.source === 'quest' ? ' · recovered on a quest' : ' · bought at market'}</span></span>
+        <span class="ai-main"><b>${b.title}</b><span class="rr-sub">${sub.label} · ${'★'.repeat(b.tier)}${'☆'.repeat(3 - b.tier)} · ${provenance}</span></span>
       </div>`;
-  }).join('') : '<div class="hint">Bare shelves. Buy volumes at the ⚖ Market (Armory room) — or recover them on rank-2+ quests.</div>';
-  const best = { blacksmithing: bestBook(guild.inventory, 'blacksmithing'), alchemy: bestBook(guild.inventory, 'alchemy') };
-  const guide = ['blacksmithing', 'alchemy'].map((s) => {
+  }).join('') : '<div class="hint">Bare shelves. Buy volumes at the ⚖ Market (Armory room), recover them on rank-2+ quests — or have a Historian write one.</div>';
+  const guide = BOOK_SUBJECT_IDS.map((s) => {
     const sub = BOOK_SUBJECTS[s];
-    return best[s]
-      ? `<div class="r-line">${sub.glyph} ${sub.label} study is guided by <b>${best[s].title}</b> — <span class="up">Theory ×${bookStudyMult(best[s]).toFixed(2)}</span></div>`
+    const bk = bestBook(guild.inventory, s);
+    return bk
+      ? `<div class="r-line">${sub.glyph} ${sub.label} study is guided by <b>${bk.title}</b> — <span class="up">Theory ×${bookStudyMult(bk).toFixed(2)}</span></div>`
       : `<div class="r-line dim">${sub.glyph} No ${sub.label.toLowerCase()} volume shelved — scholars study from loose notes.</div>`;
   }).join('');
   return `<div class="plan-card">
       <div class="plan-title">📚 The Shelf · ${books.length} volume${books.length === 1 ? '' : 's'}</div>
       <div class="armory-shelf">${rows}</div>
       <div style="margin-top:8px;font-size:0.82em">${guide}</div>
+      <div class="hint" style="text-align:left;padding:6px 0 0">The shelf also teaches the shop floor: every trade week, the worker consults the best volume on their craft for a little Theory.</div>
     </div>`;
 }
 
@@ -1702,38 +1895,65 @@ function recapPanel() {
   const rep = report || guild.lastReport; // module var this session, persisted copy after a reload
   if (!rep) return '';
   const lines = rep.results.map((r) => {
+    // The shelf taught the worker on the job — a small suffix on any trade line.
+    const learned = r.learned ? ` <span class="dim">· 📖 consulted “${r.learned.title}” — Theory +${r.learned.theoryGain}</span>` : '';
+    if (r.type === 'forge' && r.refinePlus) {
+      const f = r.refinePlus;
+      if (f.ok && f.success) return `<div class="r-line"><b>${r.name}</b> refined <span class="up">${r.recipeName} → +${f.to}</span> <span class="dim">· ${f.chance}% held${f.to > 0 && f.chance < 100 ? ' — nerves of steel' : ''}</span>${learned}</div>`;
+      if (f.ok && f.broke) return `<div class="r-line"><b>${r.name}</b> <span class="down">💥 pushed ${r.recipeName} past +${f.from} — it SHATTERED on the anvil</span> <span class="dim">· ${f.chance}% missed</span>${learned}</div>`;
+      if (f.ok && f.downgraded) return `<div class="r-line"><b>${r.name}</b> <span class="down">failed the refine — the Tempering Oil held the piece together at +${f.to}</span>${learned}</div>`;
+      if (f.ok && f.kept) return `<div class="r-line"><b>${r.name}</b> <span class="down">failed the refine — the Smith's Blessing kept it at +${f.from}</span>${learned}</div>`;
+      const why = f.reason === 'materials' ? 'out of ore' : f.reason === 'fee' ? `the coffers can't cover the ${f.fee}g fee` : f.reason === 'guard' ? 'no protective reagent in stock'
+        : f.reason === 'locked' ? 'theory not yet studied' : f.reason === 'stamina' ? 'too tired to work' : f.reason === 'maxed' ? 'the piece is already +10'
+        : f.reason === 'equipped' ? 'the piece is off the shelf — a member carries it (unequip it to continue)' : 'the piece left the armory';
+      return `<div class="r-line"><b>${r.name}</b> <span class="down">couldn't refine — ${why}</span></div>`;
+    }
     if (r.type === 'forge' && r.refine) {
       const f = r.refine;
-      if (f.ok) return `<div class="r-line"><b>${r.name}</b> refined <span class="up">${f.item.name} — q${f.from} → q${f.to}</span> <span class="dim">· edge trued, +${f.practiceGain} practice</span></div>`;
+      if (f.ok) return `<div class="r-line"><b>${r.name}</b> reworked <span class="up">${itemLabel(f.item)} — q${f.from} → q${f.to}</span> <span class="dim">· edge trued, +${f.practiceGain} practice</span>${learned}</div>`;
       const why = f.reason === 'materials' ? 'out of ore' : f.reason === 'locked' ? 'theory not yet studied' : f.reason === 'stamina' ? 'too tired to work'
-        : f.reason === 'mastered' ? 'the piece is beyond their craft' : 'the piece left the armory';
-      return `<div class="r-line"><b>${r.name}</b> <span class="down">couldn't refine — ${why}</span></div>`;
+        : f.reason === 'mastered' ? 'the piece is beyond their craft'
+        : f.reason === 'equipped' ? 'the piece is off the shelf — a member carries it (unequip it to continue)' : 'the piece left the armory';
+      return `<div class="r-line"><b>${r.name}</b> <span class="down">couldn't rework — ${why}</span></div>`;
     }
     if (r.type === 'forge') {
       const f = r.forge;
-      if (f.ok) return `<div class="r-line"><b>${r.name}</b> forged <span class="up">${f.item.name} (q${f.quality})</span> <span class="dim">· +${f.practiceGain} practice</span></div>`;
+      if (f.ok) return `<div class="r-line"><b>${r.name}</b> forged <span class="up">${f.item.name} (q${f.quality})</span> <span class="dim">· +${f.practiceGain} practice</span>${learned}</div>`;
       const why = f.reason === 'materials' ? 'out of materials' : (f.reason === 'locked' ? 'recipe not yet unlocked' : 'too tired to work');
-      return `<div class="r-line"><b>${r.name}</b> <span class="down">couldn't forge — ${why}</span></div>`;
+      return `<div class="r-line"><b>${r.name}</b> <span class="down">couldn't forge — ${why}</span>${learned}</div>`;
     }
     if (r.type === 'brew') {
       const b = r.brew;
-      if (b.ok) return `<div class="r-line"><b>${r.name}</b> brewed <span class="up">${b.qty}× ${b.batch.name} (p${b.potency})</span> <span class="dim">· +${b.practiceGain} practice</span></div>`;
+      if (b.ok && b.material) return `<div class="r-line"><b>${r.name}</b> distilled <span class="up">${b.qty}× ${b.glyph} ${b.name}</span> <span class="dim">· to the Forge stockroom · +${b.practiceGain} practice</span>${learned}</div>`;
+      if (b.ok) return `<div class="r-line"><b>${r.name}</b> brewed <span class="up">${b.qty}× ${b.batch.name} (p${b.potency})</span> <span class="dim">· +${b.practiceGain} practice</span>${learned}</div>`;
       const why = b.reason === 'materials' ? 'out of herbs' : (b.reason === 'locked' ? 'recipe not yet unlocked' : 'too tired to brew');
-      return `<div class="r-line"><b>${r.name}</b> <span class="down">couldn't brew — ${why}</span></div>`;
+      return `<div class="r-line"><b>${r.name}</b> <span class="down">couldn't brew — ${why}</span>${learned}</div>`;
+    }
+    if (r.type === 'enchant' && r.blessing) {
+      const bl = r.blessing;
+      if (bl.ok) return `<div class="r-line"><b>${r.name}</b> crafted <span class="up">⭐ a Smith's Blessing</span> <span class="dim">· to the Forge stockroom · +${bl.practiceGain} practice</span>${learned}</div>`;
+      const why = bl.reason === 'materials' ? 'out of ore' : (bl.reason === 'locked' ? 'lore not yet deep enough' : 'too tired to work');
+      return `<div class="r-line"><b>${r.name}</b> <span class="down">couldn't craft the blessing — ${why}</span>${learned}</div>`;
+    }
+    if (r.type === 'study' && r.write) {
+      const w = r.write;
+      if (w.ok) return `<div class="r-line"><b>${r.name}</b> penned <span class="up">“${w.book.title}”</span> <span class="dim">· ${(BOOK_SUBJECTS[w.book.subject] || {}).label || w.book.subject} ${'★'.repeat(w.tier)} · shelved in the Library</span></div>`;
+      const why = w.reason === 'unread' ? 'they know too little of the subject yet' : w.reason === 'stamina' ? 'too tired to write' : 'no subject chosen';
+      return `<div class="r-line"><b>${r.name}</b> <span class="down">couldn't finish a book — ${why}</span></div>`;
     }
     if (r.type === 'cook') {
       const ck = r.cook;
-      if (ck && ck.ok) return `<div class="r-line"><b>${r.name}</b> cooked <span class="up">${ck.glyph} ${ck.qty}× ${MATERIALS[ck.food].name}</span> <span class="dim">· +${ck.practiceGain} practice</span></div>`;
+      if (ck && ck.ok) return `<div class="r-line"><b>${r.name}</b> cooked <span class="up">${ck.glyph} ${ck.qty}× ${MATERIALS[ck.food].name}</span> <span class="dim">· +${ck.practiceGain} practice</span>${learned}</div>`;
       const why = ck && ck.reason === 'materials' ? 'out of ingredients' : (ck && ck.reason === 'locked' ? 'recipe not yet learned' : 'too tired to cook');
-      return `<div class="r-line"><b>${r.name}</b> <span class="down">couldn't cook — ${why}</span></div>`;
+      return `<div class="r-line"><b>${r.name}</b> <span class="down">couldn't cook — ${why}</span>${learned}</div>`;
     }
     if (r.type === 'enchant') {
       const en = r.enchant;
-      if (en && en.ok) return `<div class="r-line"><b>${r.name}</b> enchanted <span class="up" style="color:${en.planet.col}">${en.planet.sym} ${en.planet.name} orb Lv${en.level}</span> <span class="dim">· +${en.practiceGain} practice</span></div>`;
+      if (en && en.ok) return `<div class="r-line"><b>${r.name}</b> enchanted <span class="up" style="color:${en.planet.col}">${en.planet.sym} ${en.planet.name} orb Lv${en.level}</span> <span class="dim">· +${en.practiceGain} practice</span>${learned}</div>`;
       const why = en && en.reason === 'materials' ? 'out of ore' : (en && en.reason === 'locked' ? 'lore not yet deep enough' : 'too tired to enchant');
-      return `<div class="r-line"><b>${r.name}</b> <span class="down">couldn't enchant — ${why}</span></div>`;
+      return `<div class="r-line"><b>${r.name}</b> <span class="down">couldn't enchant — ${why}</span>${learned}</div>`;
     }
-    if (r.type === 'study') return `<div class="r-line"><b>${r.name}</b> studied ${r.discipline === 'alchemy' ? 'alchemy' : 'metallurgy'} — <span class="up">Theory +${r.study.theoryGain}</span>${r.book ? ` <span class="dim">· guided by “${r.book}”</span>` : ''}</div>`;
+    if (r.type === 'study') return `<div class="r-line"><b>${r.name}</b> studied ${((BOOK_SUBJECTS[r.discipline] || {}).label || 'metallurgy').toLowerCase()} — <span class="up">Theory +${r.study.theoryGain}</span>${r.book ? ` <span class="dim">· guided by “${r.book}”</span>` : ''}</div>`;
     if (r.type === 'retire') {
       const cr = r.career || {};
       const titles = (cr.titles || []).length ? ` · 👑 ${(cr.titles || []).length} title${cr.titles.length > 1 ? 's' : ''}` : '';
@@ -1814,10 +2034,18 @@ const CONDUCT_BADGE = {
 
 /** One line of what the member's week actually produced (gains, items, outcomes). */
 function assemblyOutcome(r) {
+  if (r.type === 'forge' && r.refinePlus) {
+    const f = r.refinePlus;
+    if (f.ok && f.success) return `refined <span class="up">${r.recipeName} → +${f.to}</span> <span class="dim">· ${f.chance}%</span>`;
+    if (f.ok && f.broke) return `<span class="down">💥 shattered ${r.recipeName} at the anvil</span>`;
+    if (f.ok && f.downgraded) return `<span class="down">failed — the oil held it at +${f.to}</span>`;
+    if (f.ok && f.kept) return `<span class="down">failed — the blessing kept +${f.from}</span>`;
+    return `<span class="down">couldn't refine — ${f.reason === 'materials' ? 'out of ore' : f.reason === 'fee' ? 'coffers short' : f.reason === 'guard' ? 'no reagent' : f.reason === 'locked' ? 'theory unstudied' : f.reason === 'stamina' ? 'too tired' : f.reason === 'maxed' ? 'already +10' : f.reason === 'equipped' ? 'the piece is being carried' : 'piece gone'}</span>`;
+  }
   if (r.type === 'forge' && r.refine) {
     const f = r.refine;
-    return f.ok ? `refined <span class="up">${f.item.name} — q${f.from} → q${f.to}</span>`
-      : `<span class="down">couldn't refine — ${f.reason === 'materials' ? 'out of ore' : f.reason === 'locked' ? 'theory unstudied' : f.reason === 'stamina' ? 'too tired' : f.reason === 'mastered' ? 'beyond their craft' : 'piece gone'}</span>`;
+    return f.ok ? `reworked <span class="up">${itemLabel(f.item)} — q${f.from} → q${f.to}</span>`
+      : `<span class="down">couldn't rework — ${f.reason === 'materials' ? 'out of ore' : f.reason === 'locked' ? 'theory unstudied' : f.reason === 'stamina' ? 'too tired' : f.reason === 'mastered' ? 'beyond their craft' : f.reason === 'equipped' ? 'the piece is being carried' : 'piece gone'}</span>`;
   }
   if (r.type === 'forge') {
     const f = r.forge;
@@ -1826,6 +2054,7 @@ function assemblyOutcome(r) {
   }
   if (r.type === 'brew') {
     const b = r.brew;
+    if (b.ok && b.material) return `distilled <span class="up">${b.qty}× ${b.glyph} ${b.name}</span>`;
     return b.ok ? `brewed <span class="up">${b.qty}× ${b.batch.name} (p${b.potency})</span>`
       : `<span class="down">couldn't brew — ${b.reason === 'materials' ? 'out of herbs' : b.reason === 'locked' ? 'recipe locked' : 'too tired'}</span>`;
   }
@@ -1834,12 +2063,22 @@ function assemblyOutcome(r) {
     return ck && ck.ok ? `cooked <span class="up">${ck.qty}× ${MATERIALS[ck.food].name}</span>`
       : `<span class="down">couldn't cook — ${ck && ck.reason === 'materials' ? 'no ingredients' : ck && ck.reason === 'locked' ? 'recipe locked' : 'too tired'}</span>`;
   }
+  if (r.type === 'enchant' && r.blessing) {
+    const bl = r.blessing;
+    return bl.ok ? `crafted <span class="up">⭐ a Smith's Blessing</span>`
+      : `<span class="down">couldn't craft the blessing — ${bl.reason === 'materials' ? 'no ore' : bl.reason === 'locked' ? 'lore too shallow' : 'too tired'}</span>`;
+  }
   if (r.type === 'enchant') {
     const en = r.enchant;
     return en && en.ok ? `enchanted <span class="up" style="color:${en.planet.col}">${en.planet.sym} ${en.planet.name} Lv${en.level}</span>`
       : `<span class="down">couldn't enchant — ${en && en.reason === 'materials' ? 'no ore' : en && en.reason === 'locked' ? 'lore too shallow' : 'too tired'}</span>`;
   }
-  if (r.type === 'study') return `studied ${r.discipline === 'alchemy' ? 'alchemy' : 'metallurgy'} — <span class="up">Theory +${r.study.theoryGain}</span>${r.book ? ` <span class="dim">· ${r.book}</span>` : ''}`;
+  if (r.type === 'study' && r.write) {
+    const w = r.write;
+    return w.ok ? `penned <span class="up">“${w.book.title}”</span> <span class="dim">· ${'★'.repeat(w.tier)}</span>`
+      : `<span class="down">couldn't finish a book — ${w.reason === 'unread' ? 'subject unmastered' : 'too tired'}</span>`;
+  }
+  if (r.type === 'study') return `studied ${((BOOK_SUBJECTS[r.discipline] || {}).label || 'metallurgy').toLowerCase()} — <span class="up">Theory +${r.study.theoryGain}</span>${r.book ? ` <span class="dim">· ${r.book}</span>` : ''}`;
   if (r.type === 'quest') {
     if (r.quest.noQuest) return '<span class="down">had no quest assigned</span>';
     if (r.quest.tooTired) return '<span class="down">too exhausted to march</span>';
@@ -2882,7 +3121,7 @@ export function openGuild() {
 // Every handler no-ops while a week is advancing (a played battle can be mid-flight;
 // rail buttons still render behind the battle screen and would corrupt the in-flight
 // week). practiceBout/advanceAll keep their own internal checks as a second belt.
-const __guildApi = { selectHero, setActivity, setTraining, setIntensity, scheduleAdd, scheduleRemoveAt, scheduleClear, setRecipe, setForgeMode, setRefineItem, setPotion, setDiscipline, usePotion, setDiet, setQuest, setHunt, selectWildsLocale, scoutRegion, setPlayHunt, sellMaterial, setElective, setTrackKind, setSecondDiscipline, setCookRecipe, setEnchantPlanet, slotOrb, assignTo, setSpar, equipItem, unequipSlot, setPolicy, provision, buyMaterial, sellItem, buyBook, hire, takeApprentice, promoteApprentice, dismissApprentice, advanceAll, back, openRoom, toggleFullscreen, upgradeFacility, enterTournament, leaveTournament, setPlayNext, setPlayQuest, setAskTournaments, toggleDraw, selectCalEvent, praiseHero, scoldHero, openAssembly, closeAssembly, appointTrainer, practiceBout, openRanch, enterRoomFromRanch, manageMemberFromRanch, ranchBuild: toggleBuild, ranchPick: pickStation, ranchPlace: placeStationAt, ranchRemoveStation: removeStationById, ranchZoomIn, ranchZoomOut, ranchZoomFit };
+const __guildApi = { selectHero, setActivity, setTraining, setIntensity, scheduleAdd, scheduleRemoveAt, scheduleClear, setRecipe, setForgeMode, setRefineItem, setRefineGuard, setStudyMode, setEnchantMode, setSpecialization, setPotion, setDiscipline, usePotion, setDiet, setQuest, setHunt, selectWildsLocale, scoutRegion, setPlayHunt, sellMaterial, setElective, setTrackKind, setSecondDiscipline, setCookRecipe, setEnchantPlanet, slotOrb, assignTo, setSpar, equipItem, unequipSlot, setPolicy, provision, buyMaterial, sellItem, buyBook, hire, takeApprentice, promoteApprentice, dismissApprentice, advanceAll, back, openRoom, toggleFullscreen, upgradeFacility, enterTournament, leaveTournament, setPlayNext, setPlayQuest, setAskTournaments, toggleDraw, selectCalEvent, praiseHero, scoldHero, openAssembly, closeAssembly, appointTrainer, practiceBout, openRanch, enterRoomFromRanch, manageMemberFromRanch, ranchBuild: toggleBuild, ranchPick: pickStation, ranchPlace: placeStationAt, ranchRemoveStation: removeStationById, ranchZoomIn, ranchZoomOut, ranchZoomFit };
 window.__guild = {};
 for (const k in __guildApi) {
   window.__guild[k] = (...args) => {

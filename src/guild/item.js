@@ -29,8 +29,9 @@ export function qualityTier(q) {
  * @property {string} id
  * @property {string} kind    'sword' | 'armor' | 'bow' | ...
  * @property {string} slot    'weapon' | 'body' | ...
- * @property {string} material 'iron' | 'steel' | 'mithril' | ...
+ * @property {string} material 'iron' | 'steel' | 'mithril' | 'leather' | ...
  * @property {number} quality 0..100 — set at forge time from smith Practice + material
+ * @property {number} plus    0..10 — the REFINE level (+N, RO-style); flat power on top of quality
  * @property {string} name
  * @property {{current:number,max:number}} durability  edge quality (wear comes later)
  * @property {Object} history  { forgedBy, forgedByName, forgedWeek, wielders[], kills, repairs[] }
@@ -45,9 +46,15 @@ export function createItem(init = {}) {
     slot: init.slot || 'weapon',
     material: init.material || 'iron',
     quality: init.quality ?? 30,
+    plus: init.plus || 0,
     name: init.name || 'Iron Sword',
     durability: init.durability || { current: 100, max: 100 },
     history: init.history || { forgedBy: null, forgedByName: null, forgedWeek: null, wielders: [], kills: 0, repairs: [] },
     location: init.location || 'armory',
   };
+}
+
+/** Display name with the refine level worn up front, RO-style: "+5 Steel Sword". */
+export function itemLabel(item) {
+  return (item.plus > 0 ? `+${item.plus} ` : '') + item.name;
 }

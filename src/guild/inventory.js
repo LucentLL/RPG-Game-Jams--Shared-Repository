@@ -3,6 +3,7 @@
  * Item INSTANCES; raw materials are counted stacks. (Consumables/food batches with
  * expiry come in later phases — see DESIGN.md.)
  */
+import { specAffinityKinds } from './curriculum.js';
 
 /** Raw materials. `kind` groups them BY ROOM (ore → Forge stockroom, herb → Laboratory
  *  stores, food → Kitchen pantry); `tier` sets the quality floor of what they craft
@@ -21,10 +22,15 @@ export const MATERIALS = {
   // and sold for gold at the Market. Neither is buyable — you hunt them.
   game_meat: { id: 'game_meat', name: 'Game Meat', kind: 'food', tier: 2, col: '#a85a4a' },
   pelt: { id: 'pelt', name: 'Pelt', kind: 'hide', tier: 1, col: '#b8895a' },
+  // Refining reagents — CRAFTED by the other trades, never bought (RO's protective ores).
+  // Tempering Oil (Alchemist): a failed refine only drops the piece −1 instead of breaking.
+  // Smith's Blessing (Enchanter): a failed refine keeps its level. Shelved at the Forge.
+  tempering_oil: { id: 'tempering_oil', name: 'Tempering Oil', kind: 'reagent', tier: 2, col: '#d0a040' },
+  smith_blessing: { id: 'smith_blessing', name: "Smith's Blessing", kind: 'reagent', tier: 3, col: '#e8d080' },
 };
 
 /** Which room a material kind is stored in (its working inventory). */
-export const ROOM_OF_KIND = { ore: 'forge', herb: 'laboratory', food: 'kitchen', hide: 'armory' };
+export const ROOM_OF_KIND = { ore: 'forge', herb: 'laboratory', food: 'kitchen', hide: 'armory', reagent: 'forge' };
 /** The material ids shelved in a given room's store. */
 export function roomMaterialIds(roomId) {
   return Object.keys(MATERIALS).filter((k) => ROOM_OF_KIND[MATERIALS[k].kind] === roomId);
@@ -83,6 +89,23 @@ export function armoryItems(inv) { return inv.items.filter((it) => it.location =
 export const EQUIP_SLOTS = ['weapon', 'body'];
 /** How much each slot's quality is worth as combat power. */
 const GEAR_SLOT_WEIGHT = { weapon: 0.6, body: 0.5 };
+/** Flat power each refine level (+1) is worth, by material — RO's per-weapon-level ATK. */
+export const PLUS_POWER = { leather: 2, iron: 2, steel: 3, mithril: 5 };
+
+/**
+ * One item's combat-power contribution for a wearer: quality (slot- and durability-
+ * scaled) + the refine level's flat power, ×1.15 if the wearer's declared
+ * specialization covers the item's kind (sword → Swordsmanship, armor → Shield & Guard…).
+ * Shared by gearBonus and the quartermaster's itemScore so the ⚡ never lies.
+ * @param {import('./item.js').Item} it @param {?import('./hero.js').Hero} hero
+ */
+export function itemPower(it, hero) {
+  const dur = it.durability ? it.durability.current / (it.durability.max || 100) : 1;
+  let p = (it.quality || 0) * (GEAR_SLOT_WEIGHT[it.slot] || 0.5) * dur
+    + (it.plus || 0) * (PLUS_POWER[it.material] || 2);
+  if (hero && specAffinityKinds(hero).has(it.kind)) p *= 1.15;
+  return p;
+}
 
 /**
  * Combat power a hero's equipped gear adds on top of their trained stats. Quality
@@ -96,8 +119,7 @@ export function gearBonus(inv, hero) {
   for (const slot in eq) {
     const it = findItem(inv, eq[slot]);
     if (!it) continue;
-    const dur = it.durability ? it.durability.current / (it.durability.max || 100) : 1;
-    bonus += (it.quality || 0) * (GEAR_SLOT_WEIGHT[slot] || 0.5) * dur;
+    bonus += itemPower(it, hero);
   }
   return Math.round(bonus);
 }

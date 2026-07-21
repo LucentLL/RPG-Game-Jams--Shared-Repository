@@ -24,9 +24,15 @@ import { hasMaterials, spendMaterials, addItem } from './inventory.js';
 // fresh smith can only forge iron until they study the metallurgy of steel/mithril.
 export const RECIPES = [
   { id: 'iron_sword', name: 'Iron Sword', kind: 'sword', slot: 'weapon', material: 'iron', cost: { iron_ore: 2 }, base: 20, ceil: 55, reqTheory: 0, staminaCost: 30 },
+  { id: 'iron_dagger', name: 'Iron Dagger', kind: 'dagger', slot: 'weapon', material: 'iron', cost: { iron_ore: 1 }, base: 18, ceil: 50, reqTheory: 2, staminaCost: 24 },
+  { id: 'iron_axe', name: 'Iron Axe', kind: 'axe', slot: 'weapon', material: 'iron', cost: { iron_ore: 2 }, base: 20, ceil: 55, reqTheory: 6, staminaCost: 30 },
+  { id: 'leather_jerkin', name: 'Leather Jerkin', kind: 'armor', slot: 'body', material: 'leather', cost: { pelt: 3 }, base: 15, ceil: 45, reqTheory: 4, staminaCost: 26 },
+  { id: 'hunters_bow', name: "Hunter's Bow", kind: 'bow', slot: 'weapon', material: 'leather', cost: { pelt: 2, iron_ore: 1 }, base: 18, ceil: 50, reqTheory: 8, staminaCost: 28 },
   { id: 'iron_armor', name: 'Iron Armor', kind: 'armor', slot: 'body', material: 'iron', cost: { iron_ore: 3 }, base: 20, ceil: 55, reqTheory: 12, staminaCost: 32 },
   { id: 'steel_sword', name: 'Steel Sword', kind: 'sword', slot: 'weapon', material: 'steel', cost: { steel_ore: 2 }, base: 40, ceil: 80, reqTheory: 30, staminaCost: 30 },
+  { id: 'steel_armor', name: 'Steel Armor', kind: 'armor', slot: 'body', material: 'steel', cost: { steel_ore: 3 }, base: 40, ceil: 80, reqTheory: 40, staminaCost: 34 },
   { id: 'mithril_sword', name: 'Mithril Sword', kind: 'sword', slot: 'weapon', material: 'mithril', cost: { mithril_ore: 2 }, base: 60, ceil: 100, reqTheory: 60, staminaCost: 34 },
+  { id: 'mithril_armor', name: 'Mithril Armor', kind: 'armor', slot: 'body', material: 'mithril', cost: { mithril_ore: 3 }, base: 60, ceil: 100, reqTheory: 72, staminaCost: 36 },
 ];
 
 /** Has this smith studied enough Theory to make this recipe? @returns {boolean} */
@@ -104,7 +110,7 @@ export function forge(hero, recipe, inv, week) {
   return { ok: true, item, quality, practiceGain: gain };
 }
 
-// ─── Refining: the Armory feeds the Forge ────────────────────────────────────
+// ─── Reworking: the Armory feeds the Forge ───────────────────────────────────
 // A smith's week can REWORK an existing armory piece instead of forging fresh:
 // true the edge, re-temper, re-fit. Quality closes half the gap toward what the
 // smith could forge outright (same Practice/Field math — the anti-lie principle),
@@ -113,9 +119,22 @@ export function forge(hero, recipe, inv, week) {
 // its story. Costs one ore of the item's material. A smith whose own work is no
 // better than the piece can't improve it ('mastered' — find a better smith).
 
-export const REFINE_STAMINA = 26;
-/** Ore consumed to rework an item, by its material. */
-export const REFINE_COST = { iron: { iron_ore: 1 }, steel: { steel_ore: 1 }, mithril: { mithril_ore: 1 } };
+export const REWORK_STAMINA = 26;
+
+/** Per-material refine/rework table: the ore it consumes, the SAFE refine limit
+ *  (guaranteed +1s up to it — RO's safety level: finer material, earlier risk),
+ *  and the gold fee per refine attempt. (What each + is WORTH lives elsewhere:
+ *  combat power in inventory.js PLUS_POWER, sale premium in market.js MAT_PLUS_GAIN.) */
+export const MATERIAL_META = {
+  leather: { ore: 'pelt',        safe: 7, fee: 8 },
+  iron:    { ore: 'iron_ore',    safe: 7, fee: 10 },
+  steel:   { ore: 'steel_ore',   safe: 6, fee: 25 },
+  mithril: { ore: 'mithril_ore', safe: 5, fee: 60 },
+};
+/** Ore consumed per rework/refine attempt, by material. */
+export function materialOreCost(material) {
+  return { [(MATERIAL_META[material] || MATERIAL_META.iron).ore]: 1 };
+}
 
 /** The recipe governing an item's material (its quality ceiling + Theory gate). */
 export function recipeForItem(item) {
@@ -123,8 +142,8 @@ export function recipeForItem(item) {
     || RECIPES.find((r) => r.material === item.material) || RECIPES[0];
 }
 
-/** Expected post-refine quality for the UI preview (no jitter, same halfway math). */
-export function previewRefine(item, practice, field) {
+/** Expected post-rework quality for the UI preview (no jitter, same halfway math). */
+export function previewRework(item, practice, field) {
   const recipe = recipeForItem(item);
   const target = previewQuality(recipe, practice, field);
   if (target <= item.quality) return item.quality;
@@ -138,15 +157,15 @@ export function previewRefine(item, practice, field) {
  * @param {import('./inventory.js').Inventory} inv @param {number} week
  * @returns {{ok:boolean, reason?:string, item?:import('./item.js').Item, from?:number, to?:number, practiceGain?:number}}
  */
-export function refine(hero, item, inv, week) {
+export function rework(hero, item, inv, week) {
   const c = hero.condition;
   const prof = hero.professions.blacksmithing;
   const recipe = recipeForItem(item);
   if (!recipeUnlocked(hero, recipe)) return { ok: false, reason: 'locked' };
   if (previewQuality(recipe, prof.practice, prof.field) <= item.quality) return { ok: false, reason: 'mastered' };
-  const cost = REFINE_COST[item.material] || { iron_ore: 1 };
+  const cost = materialOreCost(item.material);
   if (!hasMaterials(inv, cost)) return { ok: false, reason: 'materials' };
-  if (c.stamina < REFINE_STAMINA) return { ok: false, reason: 'stamina' };
+  if (c.stamina < REWORK_STAMINA) return { ok: false, reason: 'stamina' };
 
   spendMaterials(inv, cost);
   const from = item.quality;
@@ -159,8 +178,103 @@ export function refine(hero, item, inv, week) {
   const gain = Math.max(1, Math.round(3 * (0.3 + 0.7 * room)));
   prof.practice = Math.min(100, prof.practice + gain);
 
-  c.stamina = Math.max(0, c.stamina - REFINE_STAMINA);
+  c.stamina = Math.max(0, c.stamina - REWORK_STAMINA);
   c.fatigue = Math.min(100, c.fatigue + 10);
   hero.xp += 7;
   return { ok: true, item, from, to: item.quality, practiceGain: gain };
+}
+
+// ─── Refinement: the +N system (Ragnarok Online's grammar) ───────────────────
+// A separate axis from quality: each refine attempt pushes an item's `plus` one
+// step (+0 → +10). Up to the material's SAFE limit every attempt succeeds; past
+// it, success rolls a per-material table and FAILURE DESTROYS THE PIECE — story,
+// slotted materia and all — unless a protective reagent softens the blow:
+//   · Tempering Oil   (Alchemist-brewed)  → failure only drops the piece −1
+//   · Smith's Blessing (Enchanter-made)   → failure keeps the level
+// Each attempt costs 1 ore of the item's material + a gold fee (+ the reagent).
+// The smith's Practice adds up to +10 percentage points (the Mastersmith bonus).
+
+export const REFINE_STAMINA = 24;
+export const MAX_PLUS = 10;
+
+// Success % for the attempt at (current plus + 1), indexed from safe+1 .. 10.
+// Rows echo RO's Lv1/Lv2/Lv3 weapon columns.
+const REFINE_ROWS = {
+  7: [60, 40, 19],             // safe 7: +8, +9, +10
+  6: [60, 40, 20, 19],         // safe 6: +7 .. +10
+  5: [60, 50, 20, 20, 19],     // safe 5: +6 .. +10
+};
+
+/** Success chance (0..100) for refining this item one step, by this smith. */
+export function refineChance(item, hero) {
+  const meta = MATERIAL_META[item.material] || MATERIAL_META.iron;
+  const next = (item.plus || 0) + 1;
+  if (next > MAX_PLUS) return 0;
+  if (next <= meta.safe) return 100;
+  const row = REFINE_ROWS[meta.safe] || REFINE_ROWS[7];
+  const base = row[next - meta.safe - 1] ?? 19;
+  const prof = hero ? hero.professions.blacksmithing : null;
+  const smithBonus = prof ? Math.round((prof.practice || 0) / 10) : 0; // Mastersmith: up to +10
+  return Math.min(100, base + smithBonus);
+}
+
+/** What a failed attempt does under each guard. */
+export const REFINE_GUARDS = {
+  none:     { id: 'none',     name: 'No protection',    glyph: '⚠', material: null },
+  oil:      { id: 'oil',      name: 'Tempering Oil',    glyph: '🫙', material: 'tempering_oil' },
+  blessing: { id: 'blessing', name: "Smith's Blessing", glyph: '⭐', material: 'smith_blessing' },
+};
+
+/**
+ * Attempt ONE refine step on an armory item. Mutates the smith, the inventory
+ * (ore + fee is charged by the caller via `spendGold`; reagent consumed here), and
+ * the item (`plus`, or its existence — a failure with no guard DESTROYS it; the
+ * caller must drop it from the inventory when `broke` is true).
+ * @param {import('./hero.js').Hero} hero @param {import('./item.js').Item} item
+ * @param {import('./inventory.js').Inventory} inv @param {number} week
+ * @param {'none'|'oil'|'blessing'} [guardId]
+ * @returns {{ok:boolean, reason?:string, success?:boolean, broke?:boolean, downgraded?:boolean,
+ *            kept?:boolean, from?:number, to?:number, chance?:number, fee?:number, practiceGain?:number}}
+ */
+export function refine(hero, item, inv, week, guardId = 'none') {
+  const c = hero.condition;
+  const prof = hero.professions.blacksmithing;
+  const recipe = recipeForItem(item);
+  const meta = MATERIAL_META[item.material] || MATERIAL_META.iron;
+  if (!recipeUnlocked(hero, recipe)) return { ok: false, reason: 'locked' };
+  if ((item.plus || 0) >= MAX_PLUS) return { ok: false, reason: 'maxed' };
+  const guard = REFINE_GUARDS[guardId] || REFINE_GUARDS.none;
+  const cost = materialOreCost(item.material);
+  if (guard.material) cost[guard.material] = (cost[guard.material] || 0) + 1;
+  if (!hasMaterials(inv, cost)) return { ok: false, reason: guard.material && (inv.materials[guard.material] || 0) < 1 ? 'guard' : 'materials' };
+  if (c.stamina < REFINE_STAMINA) return { ok: false, reason: 'stamina' };
+
+  spendMaterials(inv, cost); // ore + reagent are spent on the ATTEMPT, win or lose (RO's rule)
+  const from = item.plus || 0;
+  const chance = refineChance(item, hero);
+  const success = Math.random() * 100 < chance;
+  const res = { ok: true, success, from, to: from, chance, fee: meta.fee };
+  if (success) {
+    item.plus = from + 1;
+    res.to = item.plus;
+    item.history.repairs.push({ week, smithId: hero.id, smithName: hero.name, plus: item.plus });
+  } else if (guard.id === 'blessing') {
+    res.kept = true;
+  } else if (guard.id === 'oil') {
+    item.plus = Math.max(0, from - 1);
+    res.to = item.plus;
+    res.downgraded = true;
+  } else {
+    res.broke = true; // the caller removes the piece and tells its story
+  }
+
+  const room = (100 - prof.practice) / 100; // the risk game teaches nerve, not craft
+  const gain = Math.max(1, Math.round(3 * (0.3 + 0.7 * room)));
+  prof.practice = Math.min(100, prof.practice + gain);
+  res.practiceGain = gain;
+
+  c.stamina = Math.max(0, c.stamina - REFINE_STAMINA);
+  c.fatigue = Math.min(100, c.fatigue + 10);
+  hero.xp += 7;
+  return res;
 }
