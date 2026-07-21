@@ -24,6 +24,8 @@ import { hasMaterials, spendMaterials, addItem } from './inventory.js';
 // fresh smith can only forge iron until they study the metallurgy of steel/mithril.
 export const RECIPES = [
   { id: 'iron_sword', name: 'Iron Sword', kind: 'sword', slot: 'weapon', material: 'iron', cost: { iron_ore: 2 }, base: 20, ceil: 55, reqTheory: 0, staminaCost: 30 },
+  { id: 'iron_dagger', name: 'Iron Dagger', kind: 'dagger', slot: 'weapon', material: 'iron', cost: { iron_ore: 1 }, base: 18, ceil: 50, reqTheory: 2, staminaCost: 24 },
+  { id: 'iron_axe', name: 'Iron Axe', kind: 'axe', slot: 'weapon', material: 'iron', cost: { iron_ore: 2 }, base: 20, ceil: 55, reqTheory: 6, staminaCost: 30 },
   { id: 'leather_jerkin', name: 'Leather Jerkin', kind: 'armor', slot: 'body', material: 'leather', cost: { pelt: 3 }, base: 15, ceil: 45, reqTheory: 4, staminaCost: 26 },
   { id: 'hunters_bow', name: "Hunter's Bow", kind: 'bow', slot: 'weapon', material: 'leather', cost: { pelt: 2, iron_ore: 1 }, base: 18, ceil: 50, reqTheory: 8, staminaCost: 28 },
   { id: 'iron_armor', name: 'Iron Armor', kind: 'armor', slot: 'body', material: 'iron', cost: { iron_ore: 3 }, base: 20, ceil: 55, reqTheory: 12, staminaCost: 32 },
@@ -121,12 +123,13 @@ export const REWORK_STAMINA = 26;
 
 /** Per-material refine/rework table: the ore it consumes, the SAFE refine limit
  *  (guaranteed +1s up to it — RO's safety level: finer material, earlier risk),
- *  the flat power each + is worth, and the gold fee per refine attempt. */
+ *  and the gold fee per refine attempt. (What each + is WORTH lives elsewhere:
+ *  combat power in inventory.js PLUS_POWER, sale premium in market.js MAT_PLUS_GAIN.) */
 export const MATERIAL_META = {
-  leather: { ore: 'pelt',        safe: 7, plusPower: 2, fee: 8 },
-  iron:    { ore: 'iron_ore',    safe: 7, plusPower: 2, fee: 10 },
-  steel:   { ore: 'steel_ore',   safe: 6, plusPower: 3, fee: 25 },
-  mithril: { ore: 'mithril_ore', safe: 5, plusPower: 5, fee: 60 },
+  leather: { ore: 'pelt',        safe: 7, fee: 8 },
+  iron:    { ore: 'iron_ore',    safe: 7, fee: 10 },
+  steel:   { ore: 'steel_ore',   safe: 6, fee: 25 },
+  mithril: { ore: 'mithril_ore', safe: 5, fee: 60 },
 };
 /** Ore consumed per rework/refine attempt, by material. */
 export function materialOreCost(material) {

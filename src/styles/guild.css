@@ -422,6 +422,8 @@
   background: rgba(255, 255, 255, 0.03); font-family: 'Cinzel', serif; letter-spacing: 0.03em; cursor: pointer; }
 .spec-chip:hover { border-color: var(--gold); color: var(--gold); }
 .spec-chip.on { border-color: var(--gold); color: var(--gold); background: linear-gradient(135deg, #2a1a0a, #3a2a10); cursor: default; }
+.spec-chip.alt { opacity: 0.55; padding: 2px 5px; }
+.spec-chip.alt:hover { opacity: 1; }
 /* Refine +N — inline success/risk emphasis inside option rows */
 .o-desc .up { color: var(--success); font-style: normal; }
 .o-desc .risk, .hint .risk { color: var(--danger); font-style: normal; }

@@ -54,6 +54,14 @@ export function previewPotency(recipe, practice, field) {
   return Math.max(5, Math.min(recipe.ceil, Math.round(recipe.base + (practice || 0) * 0.5 + (field || 0) * 0.2)));
 }
 
+/** A reagent distillation this potent fills a second bottle. */
+const REAGENT_DOUBLE_AT = 55;
+/** Expected bottles for the UI — reagent recipes double at high potency. */
+export function previewBrewYield(recipe, practice, field) {
+  if (!recipe.material) return recipe.yield;
+  return previewPotency(recipe, practice, field) >= REAGENT_DOUBLE_AT ? 2 : 1;
+}
+
 function jitter() { return Math.floor(Math.random() * 10) - 3; } // -3..+6
 
 /**
@@ -77,7 +85,7 @@ export function brew(hero, recipe, inv, week) {
   if (recipe.material) {
     // Reagent recipes bottle into a counted material stack (the Forge stockroom),
     // not the Apothecary; a truly potent distillation fills a second bottle.
-    qty = potency >= 55 ? 2 : 1;
+    qty = potency >= REAGENT_DOUBLE_AT ? 2 : 1;
     addMaterial(inv, recipe.material, qty);
   } else {
     batch = {

@@ -22,7 +22,7 @@ import { PLANETS } from '../game/data/progression.js';
 import { advanceWeek, formatDate } from './calendar.js';
 import { weeklyUpkeep, addGold, guildIncome } from './economy.js';
 import { RECIPES, getRecipe, previewQuality, forge, study, recipeUnlocked, rework, previewRework, refine, refineChance, recipeForItem, materialOreCost, MATERIAL_META, MAX_PLUS, REFINE_GUARDS } from './smithing.js';
-import { POTION_RECIPES, getPotionRecipe, previewPotency, brew, potionUnlocked, applyPotion } from './alchemy.js';
+import { POTION_RECIPES, getPotionRecipe, previewPotency, previewBrewYield, brew, potionUnlocked, applyPotion } from './alchemy.js';
 import { MATERIALS, createInventory, armoryItems, findItem, addMaterial, gearBonus, itemPower, EQUIP_SLOTS, findPotion, consumePotion, potionCount, roomMaterialIds, materialCount } from './inventory.js';
 import { BOOK_SUBJECTS, BOOK_SUBJECT_IDS, mintBook, addBook, bestBook, bookStudyMult, bookPrice, writeBook, previewBookTier, learnOnTheJob, WRITE_MIN_THEORY } from './books.js';
 import { generateQuestBoard, resolveQuest, resolveQuestPlayed } from './quests.js';
@@ -47,7 +47,7 @@ const QUEST_STAMINA = 40; // dispatching on a quest costs stamina — questing c
 const canMarch = (h) => !h.condition.injury && h.condition.stamina >= QUEST_STAMINA;
 const DRILL_MIGRATE = { drill_pow: 'pow', guard_def: 'def', forms_skl: 'skl', sprint_spd: 'spd', study_int: 'int', march_vit: 'vit', spar: 'pow' };
 const ARCH_GLYPH = { Knight: '⚔', Mage: '✦', Ranger: '🏹', Cleric: '☩', Rogue: '🗡', Berserker: '🪓', Adventurer: '☉' };
-const KIND_GLYPH = { sword: '⚔', armor: '🛡', bow: '🏹' };
+const KIND_GLYPH = { sword: '⚔', armor: '🛡', bow: '🏹', axe: '🪓', dagger: '🔪' };
 
 let guild = null;
 let selectedId = null;
@@ -272,10 +272,16 @@ function doEquip(h, item) {
 function armHeroes(candidates) {
   const inv = guild.inventory;
   const order = [...candidates].sort((a, b) => heroPower(b) - heroPower(a)); // rank by trained stats (stable during allocation)
+  // A piece a smith is mid-rework/refine on stays on the bench — the quartermaster
+  // must not steal the +N project out from under them (its plus-boosted itemScore
+  // would otherwise make it the FIRST pick).
+  const reserved = new Set(guild.roster
+    .filter((x) => x.assignment && x.assignment.type === 'forge' && x.assignment.forgeMode !== 'new' && x.assignment.refineItemId)
+    .map((x) => x.assignment.refineItemId));
   let issued = 0;
   for (const slot of EQUIP_SLOTS) {
     for (const h of order) {
-      const pool = armoryItems(inv).filter((it) => it.slot === slot).sort((a, b) => itemScore(b) - itemScore(a));
+      const pool = armoryItems(inv).filter((it) => it.slot === slot && !reserved.has(it.id)).sort((a, b) => itemScore(b) - itemScore(a));
       if (!pool.length) break; // nothing of this slot left to hand out
       const best = pool[0];
       const cur = h.equipped[slot] ? findItem(inv, h.equipped[slot]) : null;
@@ -532,7 +538,7 @@ function setCookRecipe(id) { const h = heroById(selectedId); if (h && getRation(
 function setEnchantPlanet(i) { const h = heroById(selectedId); if (h && PLANETS[i] && canWorkAssign(h, 'enchant')) { h.assignment.type = 'enchant'; h.assignment.enchantPlanet = i; save(); render(); } }
 /** Slot a stored orb (by index) into the first armoury weapon with a free socket. */
 function slotOrb(orbIdx) {
-  const weapons = armoryItems(guild.inventory).filter((it) => it.kind === 'sword' || it.kind === 'bow');
+  const weapons = armoryItems(guild.inventory).filter((it) => it.slot === 'weapon');
   const target = weapons.find((w) => (w.materia || []).length < itemSockets(w));
   if (!target) { notice = 'No armoury weapon has a free socket.'; render(); return; }
   const res = slotMateria(target, guild.inventory, orbIdx);
@@ -929,8 +935,10 @@ async function advanceAll() {
         // a bare failure past the safe line DESTROYS the piece, story and all.
         const it = a.refineItemId ? findItem(guild.inventory, a.refineItemId) : null;
         const meta = it ? (MATERIAL_META[it.material] || MATERIAL_META.iron) : null;
-        if (!it || it.location !== 'armory') {
-          entry.refinePlus = { ok: false, reason: 'gone' };
+        if (!it) {
+          entry.refinePlus = { ok: false, reason: 'gone' }; // destroyed/sold — truly dead
+        } else if (it.location !== 'armory') {
+          entry.refinePlus = { ok: false, reason: 'equipped' }; // someone carries it — transient, retry when it's shelved
         } else if (guild.gold < meta.fee) {
           entry.refinePlus = { ok: false, reason: 'fee', fee: meta.fee }; // coffers short — retries next week
         } else {
@@ -956,7 +964,9 @@ async function advanceAll() {
       } else if (a.forgeMode === 'rework') {
         // The Armory feeds the Forge: rework a shelved piece instead of forging fresh.
         const it = a.refineItemId ? findItem(guild.inventory, a.refineItemId) : null;
-        entry.refine = (it && it.location === 'armory') ? rework(h, it, guild.inventory, week) : { ok: false, reason: 'gone' };
+        entry.refine = !it ? { ok: false, reason: 'gone' }
+          : it.location !== 'armory' ? { ok: false, reason: 'equipped' } // transient — retry when it's shelved
+          : rework(h, it, guild.inventory, week);
         entry.recipeName = it ? itemLabel(it) : 'a missing piece';
         entry.conduct = entry.refine.ok ? ((entry.refine.to - entry.refine.from) >= 8 ? 'exceeded' : 'solid') : 'failed';
         // Only a DEAD job clears (piece gone / beyond their craft) — and the smith goes
@@ -1121,17 +1131,21 @@ async function advanceAll() {
       entry.rested = res.rested; entry.injured = res.injured; entry.injury = res.injury;
       entry.breakthrough = res.breakthrough; entry.slacked = !!res.slacked;
       entry.trained = Object.keys(res.gains).length > 0;
+      // An honest week drilling a stat already at its cap earns no stat gain — that's
+      // mastery, not failure (and it still feeds the discipline below).
+      const drill = getDrill(a.trainingId);
+      const atCap = !!(drill && (h.stats[drill.main] || 0) >= STAT_CAP);
       entry.conduct = entry.rested || entry.injured ? null
         : entry.slacked ? 'cheated'
         : entry.breakthrough ? 'exceeded'
-        : entry.trained ? 'solid' : 'failed';
+        : (entry.trained || atCap) ? 'solid' : 'failed';
       // Combat disciplines are a LENS over the drills: training a drill in one of the
       // member's active disciplines (their major, or a double-major's 2nd) levels it,
       // unlocking techniques. Off-discipline drills still grow the stats, just not the
-      // craft. (Gate fixed: applyTraining never returned `trained` — the computed
-      // entry.trained is the real flag; the old res.trained check never passed.)
+      // craft. Working the week is what feeds the craft — a capped stat doesn't stall
+      // the discipline. (Gate fixed: applyTraining never returned `trained`.)
       const dDisc = disciplineForDrill(a.trainingId);
-      if (dDisc && entry.trained && !res.rested && !res.injured && activeDisciplines(h).indexOf(dDisc) >= 0) {
+      if (dDisc && !res.rested && !res.injured && activeDisciplines(h).indexOf(dDisc) >= 0) {
         const before = discLevel(h.disc[dDisc]);
         const base = res.slacked ? 3 : a.intensity === 'heavy' ? 12 : 7;
         const specMult = specFor(h, dDisc) ? 1.15 : 1; // a declared specialization deepens the craft
@@ -1334,14 +1348,18 @@ function curriculumPanel(h) {
   const discRows = activeDisciplines(h).map((id) => {
     const d = disciplineById(id); const pr = discProgress(h.disc[id]);
     const techs = techniquesFor(id, pr.lvl);
-    // The specialization line: declared → a lit chip; Lv2+ undeclared → the choice;
-    // below Lv2 → a locked hint. The major's SECOND declaration (Melee → Swords…).
+    // The specialization line: declared → a lit chip (+ small re-declare chips, so a
+    // choice is never a trap); Lv2+ undeclared → the choice; below Lv2 → a locked
+    // hint. Affinity is only ADVERTISED for kinds the forge can actually produce.
     const spec = specFor(h, id);
+    const FORGEABLE = new Set(RECIPES.map((r) => r.kind));
+    const liveKinds = (s) => s.kinds.filter((k) => FORGEABLE.has(k));
     const specLine = spec
-      ? `<span class="disc-spec"><span class="spec-chip on" style="border-color:${d.col}">${spec.glyph} ${spec.name}</span> <span class="dim">· +15% ${d.name.toLowerCase()} craft${spec.kinds.length ? ` · affinity: ${spec.kinds.join('/')}` : ''}</span></span>`
+      ? `<span class="disc-spec"><span class="spec-chip on" style="border-color:${d.col}">${spec.glyph} ${spec.name}</span> <span class="dim">· +15% ${d.name.toLowerCase()} craft${liveKinds(spec).length ? ` · affinity: ${liveKinds(spec).join('/')}` : ''}</span>${(SPECIALIZATIONS[id] || []).filter((s) => s.id !== spec.id).map((s) =>
+          `<button class="spec-chip alt" title="re-declare: ${s.name} — ${s.blurb}" onclick="__guild.setSpecialization('${id}','${s.id}')">${s.glyph}</button>`).join('')}</span>`
       : pr.lvl >= SPEC_UNLOCK_LVL
         ? `<span class="disc-spec"><span class="dim">Declare a specialization:</span> ${(SPECIALIZATIONS[id] || []).map((s) =>
-            `<button class="spec-chip" title="${s.blurb}" onclick="__guild.setSpecialization('${id}','${s.id}')">${s.glyph} ${s.name}</button>`).join('')}</span>`
+            `<button class="spec-chip" title="${s.blurb}${liveKinds(s).length ? ` (gear affinity: ${liveKinds(s).join('/')})` : ''}" onclick="__guild.setSpecialization('${id}','${s.id}')">${s.glyph} ${s.name}</button>`).join('')}</span>`
         : `<span class="disc-spec dim">— specialization opens at Lv${SPEC_UNLOCK_LVL} —</span>`;
     return `<div class="disc-row">
         <span class="disc-name" style="color:${d.col}">${d.glyph} ${d.name} <span class="dim">Lv${pr.lvl}</span>${id === h.major ? '' : ' <span class="dim">· 2nd</span>'}</span>
@@ -1610,7 +1628,7 @@ function brewBody(h) {
     }
     return `<button class="opt ${isBrew && r.id === h.assignment.potionId ? 'active' : ''} ${enough ? '' : 'lack'}" onclick="__guild.setPotion('${r.id}')">
       <span><span class="o-name">${r.glyph} ${r.name}</span> <span class="o-desc">${cost}</span></span>
-      <span class="o-cost">~p${previewPotency(r, prof.practice, prof.field)} ×${r.yield}</span></button>`;
+      <span class="o-cost">~p${previewPotency(r, prof.practice, prof.field)} ×${previewBrewYield(r, prof.practice, prof.field)}</span></button>`;
   }).join('');
   return `${alchemyShapeOf(h)}<div class="opt-list">${list}</div>`;
 }
@@ -1672,7 +1690,7 @@ function enchantBody(h) {
       <span class="o-cost">Lv${previewOrbLevel(prof.practice, prof.field)}</span></button>`;
   }).join('');
   const store = guild.inventory.materia || [];
-  const weapons = armoryItems(guild.inventory).filter((it) => it.kind === 'sword' || it.kind === 'bow');
+  const weapons = armoryItems(guild.inventory).filter((it) => it.slot === 'weapon');
   const freeWeapon = weapons.find((w) => (w.materia || []).length < itemSockets(w));
   const storeHTML = store.length ? store.map((orb, i) => { const L = orbLabel(orb);
     return `<div class="market-row"><span class="mk-name"><b style="color:${L.col}">${L.sym} ${L.name} Lv${L.lvl}</b></span>
@@ -1886,14 +1904,16 @@ function recapPanel() {
       if (f.ok && f.downgraded) return `<div class="r-line"><b>${r.name}</b> <span class="down">failed the refine — the Tempering Oil held the piece together at +${f.to}</span>${learned}</div>`;
       if (f.ok && f.kept) return `<div class="r-line"><b>${r.name}</b> <span class="down">failed the refine — the Smith's Blessing kept it at +${f.from}</span>${learned}</div>`;
       const why = f.reason === 'materials' ? 'out of ore' : f.reason === 'fee' ? `the coffers can't cover the ${f.fee}g fee` : f.reason === 'guard' ? 'no protective reagent in stock'
-        : f.reason === 'locked' ? 'theory not yet studied' : f.reason === 'stamina' ? 'too tired to work' : f.reason === 'maxed' ? 'the piece is already +10' : 'the piece left the armory';
+        : f.reason === 'locked' ? 'theory not yet studied' : f.reason === 'stamina' ? 'too tired to work' : f.reason === 'maxed' ? 'the piece is already +10'
+        : f.reason === 'equipped' ? 'the piece is off the shelf — a member carries it (unequip it to continue)' : 'the piece left the armory';
       return `<div class="r-line"><b>${r.name}</b> <span class="down">couldn't refine — ${why}</span></div>`;
     }
     if (r.type === 'forge' && r.refine) {
       const f = r.refine;
       if (f.ok) return `<div class="r-line"><b>${r.name}</b> reworked <span class="up">${itemLabel(f.item)} — q${f.from} → q${f.to}</span> <span class="dim">· edge trued, +${f.practiceGain} practice</span>${learned}</div>`;
       const why = f.reason === 'materials' ? 'out of ore' : f.reason === 'locked' ? 'theory not yet studied' : f.reason === 'stamina' ? 'too tired to work'
-        : f.reason === 'mastered' ? 'the piece is beyond their craft' : 'the piece left the armory';
+        : f.reason === 'mastered' ? 'the piece is beyond their craft'
+        : f.reason === 'equipped' ? 'the piece is off the shelf — a member carries it (unequip it to continue)' : 'the piece left the armory';
       return `<div class="r-line"><b>${r.name}</b> <span class="down">couldn't rework — ${why}</span></div>`;
     }
     if (r.type === 'forge') {
@@ -2020,12 +2040,12 @@ function assemblyOutcome(r) {
     if (f.ok && f.broke) return `<span class="down">💥 shattered ${r.recipeName} at the anvil</span>`;
     if (f.ok && f.downgraded) return `<span class="down">failed — the oil held it at +${f.to}</span>`;
     if (f.ok && f.kept) return `<span class="down">failed — the blessing kept +${f.from}</span>`;
-    return `<span class="down">couldn't refine — ${f.reason === 'materials' ? 'out of ore' : f.reason === 'fee' ? 'coffers short' : f.reason === 'guard' ? 'no reagent' : f.reason === 'locked' ? 'theory unstudied' : f.reason === 'stamina' ? 'too tired' : f.reason === 'maxed' ? 'already +10' : 'piece gone'}</span>`;
+    return `<span class="down">couldn't refine — ${f.reason === 'materials' ? 'out of ore' : f.reason === 'fee' ? 'coffers short' : f.reason === 'guard' ? 'no reagent' : f.reason === 'locked' ? 'theory unstudied' : f.reason === 'stamina' ? 'too tired' : f.reason === 'maxed' ? 'already +10' : f.reason === 'equipped' ? 'the piece is being carried' : 'piece gone'}</span>`;
   }
   if (r.type === 'forge' && r.refine) {
     const f = r.refine;
     return f.ok ? `reworked <span class="up">${itemLabel(f.item)} — q${f.from} → q${f.to}</span>`
-      : `<span class="down">couldn't rework — ${f.reason === 'materials' ? 'out of ore' : f.reason === 'locked' ? 'theory unstudied' : f.reason === 'stamina' ? 'too tired' : f.reason === 'mastered' ? 'beyond their craft' : 'piece gone'}</span>`;
+      : `<span class="down">couldn't rework — ${f.reason === 'materials' ? 'out of ore' : f.reason === 'locked' ? 'theory unstudied' : f.reason === 'stamina' ? 'too tired' : f.reason === 'mastered' ? 'beyond their craft' : f.reason === 'equipped' ? 'the piece is being carried' : 'piece gone'}</span>`;
   }
   if (r.type === 'forge') {
     const f = r.forge;
