@@ -605,6 +605,87 @@ One `guild.inventory` still persists everything (no save-shape upheaval), but ev
   pairing with K6 errantries); withdrawing room stock into quest supply manifests (Phase 3
   provisioning).
 
+## The Refinement System & the Scriptorium (owner 2026-07-21)
+
+> Owner directive (with the iRO Refinement System reference): *"expand on
+> blacksmithing/forging where materials are formed into armor/weapons, then refined.
+> Similar systems can be used for potion brewing, cooking, Book writing (guild members
+> can write books based on their skillset for other members to study). Majors should
+> have specializations like Melee → Swords or Magic → Offensive."*
+
+Four systems, one grammar: **craft it, then push it further — at a price.**
+
+### Refinement — the +N system (Ragnarok Online's grammar, guild-sized)
+
+A forged piece now carries a **`plus` level (+0 → +10)** on top of its quality — shown
+RO-style in its name (*+5 Steel Sword*). The smith's week gains a third mode:
+
+- **Forge** (new piece) · **Rework** (the old quality-rework, renamed — closes half the
+  gap to the smith's own ceiling, restores durability) · **Refine** (+N, the new risk game).
+- Every material has a **safety limit** (`MATERIAL_META` in smithing.js): iron/leather +7,
+  steel +6, mithril +5 — up to it, refines **always succeed** (RO's safe line: the finer
+  the material, the earlier the risk starts). Past it, success rolls a per-material table
+  (RO Lv1–3 weapon columns, ~60% → ~19% at +10) **plus the smith's Practice/10** as a
+  Mastersmith-style bonus, and **failure destroys the piece** — story, slotted materia
+  and all. The Weekly Assembly reports the shatter.
+- Each attempt costs 1 ore of the item's material + a gold fee (10/25/60g by tier) —
+  refining mithril is a rich guild's game, exactly like RO's 5,000z Oridecon clicks.
+- Each +1 adds **flat power** by material (iron/leather +2, steel +3, mithril +5 — RO's
+  per-weapon-level ATK), folded into `gearBonus` and `itemScore`, so the quartermaster
+  values a +7 blade correctly and tournament odds tell the truth (anti-lie).
+- **Protective reagents** (the Enriched/HD/Blessing tier, made by the OTHER trades):
+  - 🫙 **Tempering Oil** (Alchemist brew, emberroot+sunleaf): a failure only knocks the
+    piece **−1** instead of destroying it (RO's HD ore).
+  - ⭐ **Smith's Blessing** (Enchanter craft, mithril-laced): a failure **keeps the
+    level** (RO's Blacksmith Blessing). Consumed per attempt, like the ore.
+  Both are `reagent`-kind materials shelved in the Forge stockroom — the first goods one
+  trade makes *for* another trade. The refine panel picks the guard per smith.
+
+### Forging — materials into armor & weapons (recipe spread)
+
+The recipe book doubles: steel/mithril **armor**, and two Wilds-fed pieces — a
+**Leather Jerkin** (3 pelts) and a **Hunter's Bow** (pelts + iron band) — so the hunt →
+forge → refine loop runs on home-won materials. `leather` joins the material table
+(refines with pelts; safe +7 like iron).
+
+### The Scriptorium — members write the Library (and the shelf teaches back)
+
+Books stop being import-only. Two moves:
+
+- **Writing** (the Historian's second mode, Library room): a member with **Theory ≥ 30**
+  in a subject can spend the week **penning a volume** on it — tier 1/2/3 at Theory
+  30/55/80 (a practiced Historian's scribe-craft nudges the threshold), stamped
+  **`author`** and `source:'penned'` on the shelf. The Historian finally has a real
+  product: they turn one member's mastery into everyone's multiplier.
+- **The shelf teaches the shop floor**: every trade week (forge/rework/refine, brew,
+  cook, enchant) the worker **consults the best book on their subject** — a small weekly
+  Theory gain (`learnOnTheJob`, scaled by book tier). This closes the loop that was
+  silently broken: Cooking/Enchanting Theory had NO growth path (study only offered
+  Metallurgy/Alchemy), so cure-meat, hearty stew and planets 1+ were unreachable gates.
+  Study now offers all **four subjects** (`BOOK_SUBJECTS` + titles for Culinary Arts 📙
+  and Enchantment 📘), and a novice cook with a stocked shelf learns on the job.
+
+### Specializations — the major's second declaration
+
+At **discipline level 2** a member may declare a specialization inside their major
+(`SPECIALIZATIONS` in curriculum.js, picked on the Curriculum panel):
+
+- ⚔ Melee → 🗡 **Swordsmanship** · 🪓 **Axes & Maces** · 🛡 **Shield & Guard**
+- 🏹 Ranged → 🏹 **Bows** · 🎯 **Crossbows** · 🔪 **Thrown Blades**
+- ✦ Magic → 🔥 **Offensive** · 💫 **Restorative** · 🌀 **Warding**
+
+Phase-1 effects (same altitude as techniques): **+15% discipline XP** in that discipline,
+and a **gear affinity** — an equipped piece whose kind matches the specialization
+(sword → Swordsmanship, bow → Bows, armor → Shield & Guard…) contributes **×1.15** to
+`gearBonus`. The declaration shows on the member sheet's identity line
+(*⚔ Melee · Swordsmanship*). Phase 2 (the gear→engine bridge) will make specs reshape
+the arena kit. Also fixed here: discipline XP accrual was dead code (`res.trained` vs
+`entry.trained` — the gate could never pass), so disciplines actually level now.
+
+**NEXT:** spec-specific techniques; refine events (a visiting master smith week, RO's
+refine-rate events); selling penned books to the market; enchanted armor kinds for the
+magic specs to claim as affinity.
+
 ## Visual direction — 2D sprites in a 3D world (owner 2026-07-09)
 
 > Owner directive: *"Visually, I'd like to do something like Shining Soul or Ys VI. 2D

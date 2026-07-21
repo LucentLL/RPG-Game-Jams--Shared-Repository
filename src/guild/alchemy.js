@@ -8,7 +8,7 @@
  * same three-track skill model as the smith. Potions are CONSUMABLES: batches with
  * a quantity, spent to heal a hero (cure injuries, restore stamina, shed wear).
  */
-import { hasMaterials, spendMaterials, addPotion } from './inventory.js';
+import { hasMaterials, spendMaterials, addPotion, addMaterial } from './inventory.js';
 
 let _potionSeq = 0;
 const _potionRun = Math.random().toString(36).slice(2, 6);
@@ -33,6 +33,11 @@ export const POTION_RECIPES = [
   { id: 'greater_heal', name: 'Greater Draught', kind: 'heal', glyph: '⚗',
     cost: { sunleaf: 2, nightcap: 1 }, base: 48, ceil: 88, reqTheory: 28, staminaCost: 26, yield: 2,
     blurb: 'A potent heal that reliably cures injuries.' },
+  // A REAGENT, not a potion: bottles land in the Forge stockroom as counted stock.
+  // Guarding a refine with one turns a shattering failure into a mere −1 (RO's HD ore).
+  { id: 'tempering_oil', name: 'Tempering Oil', kind: 'oil', glyph: '🫙', material: 'tempering_oil',
+    cost: { emberroot: 2, sunleaf: 1 }, base: 26, ceil: 70, reqTheory: 14, staminaCost: 22, yield: 1,
+    blurb: 'Shields a refine — a failed attempt only knocks the piece −1.' },
 ];
 
 /** @param {string} id @returns {?PotionRecipe} */
@@ -67,12 +72,20 @@ export function brew(hero, recipe, inv, week) {
 
   spendMaterials(inv, recipe.cost);
   const potency = Math.max(5, Math.min(recipe.ceil, Math.round(recipe.base + prof.practice * 0.5 + prof.field * 0.2 + jitter())));
-  const qty = recipe.yield; // fixed per brew — skill drives POTENCY, not quantity (mirrors the smith's one-item-per-forge), so cost-per-heal stays flat
-  const batch = {
-    id: nextPotionId(), recipeId: recipe.id, type: recipe.kind, name: recipe.name, glyph: recipe.glyph,
-    potency, qty, brewedBy: hero.id, brewedByName: hero.name, week,
-  };
-  addPotion(inv, batch);
+  let qty = recipe.yield; // fixed per brew — skill drives POTENCY, not quantity (mirrors the smith's one-item-per-forge), so cost-per-heal stays flat
+  let batch = null;
+  if (recipe.material) {
+    // Reagent recipes bottle into a counted material stack (the Forge stockroom),
+    // not the Apothecary; a truly potent distillation fills a second bottle.
+    qty = potency >= 55 ? 2 : 1;
+    addMaterial(inv, recipe.material, qty);
+  } else {
+    batch = {
+      id: nextPotionId(), recipeId: recipe.id, type: recipe.kind, name: recipe.name, glyph: recipe.glyph,
+      potency, qty, brewedBy: hero.id, brewedByName: hero.name, week,
+    };
+    addPotion(inv, batch);
+  }
 
   const room = (100 - prof.practice) / 100; // cap-taper, same as smithing
   const gain = Math.max(1, Math.round(5 * (0.3 + 0.7 * room)));
@@ -81,7 +94,7 @@ export function brew(hero, recipe, inv, week) {
   c.stamina = Math.max(0, c.stamina - recipe.staminaCost);
   c.fatigue = Math.min(100, c.fatigue + 12);
   hero.xp += 8;
-  return { ok: true, batch, potency, qty, practiceGain: gain };
+  return { ok: true, batch, material: recipe.material || null, name: recipe.name, glyph: recipe.glyph, potency, qty, practiceGain: gain };
 }
 
 /**
