@@ -35,6 +35,16 @@ const PLAYER_SPEED = 3.4;      // tiles/sec — brisk but catchable by nothing
 const BODY_R = 0.28;           // collision half-width around the feet point
 const WALK_FRAMES = [0, 1, 2, 1];
 
+/**
+ * Painter's depth for anything STANDING on the plane (a walker, a creature, a
+ * furnishing). Rows sort back to front, and whatever stands in a row draws
+ * ABOVE that row's own geometry — RPG Maker's rule. That is what keeps a
+ * member walking up to a counter in front of it instead of sinking into it,
+ * and what lets a shelf keep its end panels without swallowing anyone beside
+ * it. The fractional term orders two bodies within the same row.
+ */
+const standZ = (y) => 10 + (Math.floor(y) + 1) * TILE + 2 + Math.round((y - Math.floor(y)) * 3);
+
 /** @type {?Object} the active session (null when no delve is running) */
 let D = null;
 /** Synchronous latch for openDelve's async window — set before the first await
@@ -189,9 +199,16 @@ function cutWallTex(sheets, theme) {
     return c;
   };
   const sheetTile = (cg, t, dx, dy) => cg.drawImage(cliffs, t[0] * TILE, t[1] * TILE, TILE, TILE, dx, dy, TILE, TILE);
+  // A south-facing texture (TILE wide × h tall) turned into the east/west pair:
+  // the element is laid out flat and then folded about a vertical edge, so its
+  // art has to be rotated a quarter turn to end up standing upright.
+  const sidePair = (face, h) => {
+    const e = texCv(h, TILE, (cg) => { cg.translate(0, TILE); cg.rotate(-Math.PI / 2); cg.drawImage(face, 0, 0); });
+    const w2 = texCv(h, TILE, (cg) => { cg.translate(h, 0); cg.scale(-1, 1); cg.drawImage(e, 0, 0); });
+    return [e.toDataURL(), w2.toDataURL()];
+  };
   const faceS = texCv(TILE, DEPTH, (cg) => { sheetTile(cg, theme.faceTop.m, 0, 0); sheetTile(cg, theme.faceBot.m, 0, TILE); });
-  const faceSideE = texCv(DEPTH, TILE, (cg) => { cg.translate(0, TILE); cg.rotate(-Math.PI / 2); cg.drawImage(faceS, 0, 0); });
-  const faceSideW = texCv(DEPTH, TILE, (cg) => { cg.translate(DEPTH, 0); cg.scale(-1, 1); cg.drawImage(faceSideE, 0, 0); });
+  const [faceSideE, faceSideW] = sidePair(faceS, DEPTH);
 
   let block;
   if (theme.walls) {
@@ -213,12 +230,15 @@ function cutWallTex(sheets, theme) {
     const tall = cut(theme.walls.tall, TILE, H);
     const low = cut(theme.walls.low, TILE, BLOCK_H);
     const top = cut(theme.walls.crown, TILE, TILE);          // crown wood, stretched — the shelf's top
+    const [tallE, tallW] = sidePair(tall, H);
+    const [lowE, lowW] = sidePair(low, BLOCK_H);
     block = {
-      B: { face: tall.toDataURL(), top: top.toDataURL(), h: H },
-      b: { face: low.toDataURL(), top: top.toDataURL(), h: BLOCK_H },
+      B: { face: tall.toDataURL(), sideE: tallE, sideW: tallW, top: top.toDataURL(), h: H },
+      b: { face: low.toDataURL(), sideE: lowE, sideW: lowW, top: top.toDataURL(), h: BLOCK_H },
     };
   } else {
     const bFace = texCv(TILE, BLOCK_H, (cg) => sheetTile(cg, theme.faceTop.m, 0, 0));
+    const [bE, bW] = sidePair(bFace, BLOCK_H);
     const bTop = texCv(TILE, TILE, (cg) => {
       sheetTile(cg, theme.fill[0], 0, 0);
       const strip = (t, ox, oy, w2, h2) => cg.drawImage(cliffs, t[0] * TILE + ox, t[1] * TILE + oy, w2, h2, ox, oy, w2, h2);
@@ -227,13 +247,10 @@ function cutWallTex(sheets, theme) {
       strip(theme.rim.nw, 0, 0, 24, 24); strip(theme.rim.ne, 24, 0, 24, 24);
       strip(theme.rim.sw, 0, 24, 24, 24); strip(theme.rim.se, 24, 24, 24, 24);
     });
-    const one = { face: bFace.toDataURL(), top: bTop.toDataURL(), h: BLOCK_H };
+    const one = { face: bFace.toDataURL(), sideE: bE, sideW: bW, top: bTop.toDataURL(), h: BLOCK_H };
     block = { B: one, b: one };
   }
-  return {
-    faceS: faceS.toDataURL(), faceSideE: faceSideE.toDataURL(), faceSideW: faceSideW.toDataURL(),
-    block,
-  };
+  return { faceS: faceS.toDataURL(), faceSideE, faceSideW, block };
 }
 
 /**
@@ -608,11 +625,18 @@ export function attachTerrain(parent, baked, opts = {}) {
         `background-image:url(${K.face});background-size:100% 100%;` +
         `transform-origin:50% 0;transform:translateZ(${h}px) rotateX(-90deg);z-index:${zFace};`);
     }
-    // NO east/west end caps on blocks. The camera only tilts about X, so those
-    // planes are edge-on slivers that contribute almost nothing — but they are
-    // tall, and any z-index that made them visible also made them swallow
-    // members standing beside a shelf run. Cliff faces keep theirs: they ring
-    // wide chasms where perspective flares them into view and nobody stands.
+    // End panels, so a run doesn't read as a hollow cutout from the side. They
+    // are safe now that anyone standing in this row sorts above them (standZ).
+    if (hOf(b.x + 1, b.y) < h) {
+      el('dv-face', `left:${(b.x + 1) / cols * 100}%;top:${b.y / rows * 100}%;width:${hT / cols * 100}%;height:${100 / rows}%;` +
+        `background-image:url(${K.sideE});background-size:100% 100%;` +
+        `transform-origin:0 50%;transform:translateZ(${h}px) rotateY(90deg);z-index:${zFace};`);
+    }
+    if (hOf(b.x - 1, b.y) < h) {
+      el('dv-face', `left:${(b.x - hT) / cols * 100}%;top:${b.y / rows * 100}%;width:${hT / cols * 100}%;height:${100 / rows}%;` +
+        `background-image:url(${K.sideW});background-size:100% 100%;` +
+        `transform-origin:100% 50%;transform:translateZ(${h}px) rotateY(-90deg);z-index:${zFace};`);
+    }
   }
 }
 
@@ -623,7 +647,7 @@ function addProp(html, x, y, w) {
   el.style.left = (x * TILE) + 'px';
   el.style.top = (y * TILE) + 'px';
   el.style.width = w + 'px';
-  el.style.zIndex = 10 + Math.round(y * TILE);
+  el.style.zIndex = standZ(y);
   D.field.appendChild(el);
 }
 
@@ -653,7 +677,7 @@ function addPropCanvas(decalName, sheets, x, y) {
   el.style.left = (x * TILE) + 'px';
   el.style.top = (y * TILE) + 'px';
   el.style.width = d.w + 'px';
-  el.style.zIndex = 10 + Math.round(y * TILE);
+  el.style.zIndex = standZ(y);
   D.field.appendChild(el);
 }
 
@@ -673,7 +697,7 @@ function addOre(x, y, oresImg) {
   el.querySelector('.dv-up').appendChild(cv);
   el.style.left = ((x + 0.5) * TILE) + 'px';
   el.style.top = ((y + 1) * TILE - 2) + 'px';
-  el.style.zIndex = 10 + Math.round((y + 1) * TILE) - 6;
+  el.style.zIndex = standZ(y + 1);
   D.field.appendChild(el);
   D.ores.push({ x, y, kind, el });
 }
@@ -1036,12 +1060,12 @@ function render(now) {
   if (_heroFootPct != null && !p.grounded) { p.cv.style.setProperty('--footpct', _heroFootPct.toFixed(2) + '%'); p.grounded = true; }
   p.el.style.left = (p.x * TILE) + 'px';
   p.el.style.top = (p.y * TILE) + 'px';
-  p.el.style.zIndex = 10 + Math.round(p.y * TILE);
+  p.el.style.zIndex = standZ(p.y);
   for (const c of D.creatures) {
     drawCreature(c, now);
     c.el.style.left = (c.x * TILE) + 'px';
     c.el.style.top = (c.y * TILE) + 'px';
-    c.el.style.zIndex = 10 + Math.round(c.y * TILE);
+    c.el.style.zIndex = standZ(c.y);
   }
   for (const c of D.companions) {
     D.gfx.tickActor(c.actor, now);
@@ -1049,7 +1073,7 @@ function render(now) {
     if (_heroFootPct != null && !c.grounded) { c.cv.style.setProperty('--footpct', _heroFootPct.toFixed(2) + '%'); c.grounded = true; }
     c.el.style.left = (c.x * TILE) + 'px';
     c.el.style.top = (c.y * TILE) + 'px';
-    c.el.style.zIndex = 10 + Math.round(c.y * TILE);
+    c.el.style.zIndex = standZ(c.y);
   }
   // Camera: the innermost translate slides the PLANE (in plane px) so the
   // walker sits at its center, which the rotateX·translateZ·scale chain then
