@@ -261,6 +261,48 @@ export const DELVE_MAPS = {
     spawns: [],
   },
 
+  // ── The grounds ──────────────────────────────────────────────────────────
+  // The hub the Guildmaster walks. Every building stands on its own footprint
+  // ('f' cells, impassable) with a '+' doorway cut into its south wall; step
+  // onto that and you are inside. Its door puts you back on this spot.
+  //             0         1         2
+  //             012345678901234567890123
+  campus: {
+    id: 'campus', theme: 'meadow', name: 'The Grounds',
+    grid: [
+      '##########################', //  0
+      '##......................##', //  1
+      '##..ffff......ffff......##', //  2  ← Library · Kitchen
+      '##..ffff......ffff......##', //  3
+      '##..f+ff......ff+f......##', //  4
+      '##......................##', //  5
+      '##..ffffff....ffff......##', //  6  ← the Great Hall · the Academy
+      '##..ffffff....ffff......##', //  7
+      '##..ff+fff....ff+f......##', //  8
+      '##......................##', //  9
+      '##..ffff......ffff......##', // 10  ← Forge · Armory
+      '##..ffff......ffff......##', // 11
+      '##..f+ff......ff+f......##', // 12
+      '##...............t......##', // 13
+      '##..ffff................##', // 14  ← the Dormitory
+      '##..ffff.......r........##', // 15
+      '##..f+ff................##', // 16
+      '##....................t.##', // 17
+      '##.......w..............##', // 18  ← the gate: the way back to the desk
+      '##########################', // 19
+    ],
+    entry: [11.5, 17.3],
+    buildings: [
+      { to: 'library',    glyph: '📖', name: 'Library',    x: 4,  y: 2,  w: 4, h: 3, door: [5, 4] },
+      { to: 'kitchen',    glyph: '🍲', name: 'Kitchen',    x: 14, y: 2,  w: 4, h: 3, door: [16, 4] },
+      { to: 'guildhall',  glyph: '🏰', name: 'Great Hall', x: 4,  y: 6,  w: 6, h: 3, door: [6, 8] },
+      { to: 'classroom',  glyph: '🎓', name: 'Academy',    x: 14, y: 6,  w: 4, h: 3, door: [16, 8] },
+      { to: 'forge',      glyph: '🔨', name: 'Forge',      x: 4,  y: 10, w: 4, h: 3, door: [5, 12] },
+      { to: 'armory',     glyph: '🗡', name: 'Armory',     x: 14, y: 10, w: 4, h: 3, door: [16, 12] },
+      { to: 'dormitory',  glyph: '🏠', name: 'Dormitory',  x: 4,  y: 14, w: 4, h: 3, door: [5, 16] },
+    ],
+  },
+
   // ── The working buildings ────────────────────────────────────────────────
   // Each is one building you walk THROUGH: an interior wall with a doorway
   // splits it into two rooms, so crossing the gap is crossing a threshold.
@@ -288,7 +330,7 @@ export const DELVE_MAPS = {
       { art: 'stoneOven', x: 4.5, y: 3, w: 48 }, { art: 'kitchenStove', x: 13.5, y: 3, w: 48 },
       { art: 'hangingHerbs', x: 8, y: 2.02, w: 96 }, { art: 'hangingMeat', x: 10.6, y: 2.02, w: 52 },
       { art: 'hangingPot', x: 15.6, y: 2.02, w: 40 },
-      { art: 'breadPile', x: 6.5, y: 5.02, w: 44 }, { art: 'floppyfish', x: 12, y: 5.02, w: 22 },
+      { art: 'breadPile', x: 3.5, y: 6, w: 44 }, { art: 'floppyfish', x: 11.5, y: 6, w: 22 },
       { art: 'sackPile', x: 4.5, y: 9, w: 78 }, { art: 'provisionBarrel', x: 16.5, y: 9, w: 42 },
     ],
   },
@@ -367,7 +409,7 @@ export const DELVE_MAPS = {
       { art: 'bunkPosted', x: 11.5, y: 4, w: 48 }, { art: 'bunkIron', x: 13.5, y: 4, w: 44 }, { art: 'bed', x: 15.5, y: 4, w: 44 },
       { art: 'bunkIron', x: 3.5, y: 8, w: 44 }, { art: 'bed', x: 5.5, y: 8, w: 44 }, { art: 'bunkPosted', x: 7.5, y: 8, w: 48 },
       { art: 'bed', x: 11.5, y: 8, w: 44 }, { art: 'bunkIron', x: 13.5, y: 8, w: 44 }, { art: 'bed', x: 15.5, y: 8, w: 44 },
-      { art: 'wardrobe', x: 9.5, y: 2.02, w: 90 }, { art: 'washstand', x: 9.5, y: 6.02, w: 90 },
+      { art: 'wardrobe', x: 9.5, y: 2.02, w: 90 }, { art: 'washstand', x: 4.5, y: 6.02, w: 90 },
       { art: 'footlocker', x: 4.5, y: 2.02, w: 52 }, { art: 'bedCandle', x: 14.5, y: 6.02, w: 20 },
     ],
   },
@@ -377,7 +419,7 @@ export const DELVE_MAPS = {
     grid: [
       '###################', //  0
       '#BBBBBBBBBBBBBBBBB#', //  1
-      '#B......f........B#', //  2  ← the lectern
+      '#B......ff.......B#', //  2  ← the lectern
       '#B...............B#', //  3
       '#B.ff..ff..ff....B#', //  4  ← rows of desks
       '#B...............B#', //  5
@@ -391,7 +433,7 @@ export const DELVE_MAPS = {
     ],
     entry: [9.5, 10.3],
     props: [
-      { art: 'lectern', x: 8.5, y: 3, w: 110 },
+      { art: 'lectern', x: 9, y: 3, w: 110 },
       { art: 'lessonBoard', x: 5, y: 2.02, w: 96 }, { art: 'globe', x: 12.5, y: 2.02, w: 42 },
       { art: 'classDesk', x: 3.5, y: 5, w: 48 }, { art: 'classDesk', x: 4.5, y: 5, w: 48 },
       { art: 'classDesk', x: 7.5, y: 5, w: 48 }, { art: 'classDesk', x: 8.5, y: 5, w: 48 },
@@ -434,7 +476,7 @@ export const DELVE_MAPS = {
       '###################', //  0
       '#BBBBBBBBBBBBBBBBB#', //  1
       '#B...............B#', //  2
-      '#B.ff..f....ff...B#', //  3  ← shelved walls flanking the great desk
+      '#B.ff..ff...ff...B#', //  3  ← shelved walls flanking the great desk
       '#B...............B#', //  4
       '#B......f........B#', //  5  ← the chair
       '#B...............B#', //  6
@@ -446,7 +488,7 @@ export const DELVE_MAPS = {
     entry: [6.5, 8.3],
     props: [
       { art: 'gmBookshelf', x: 4, y: 4, w: 96 }, { art: 'gmBookshelf', x: 13, y: 4, w: 96 },
-      { art: 'gmDesk', x: 7.5, y: 4, w: 130 }, { art: 'gmLedgers', x: 7.5, y: 3.6, w: 42 },
+      { art: 'gmDesk', x: 8, y: 4, w: 130 }, { art: 'gmLedgers', x: 7.2, y: 4.12, w: 40 },
       { art: 'gmThrone', x: 8.5, y: 6, w: 36 },
       { art: 'gmStrongbox', x: 3.5, y: 8, w: 66 }, { art: 'gmBanner', x: 15.5, y: 8, w: 45 },
       { art: 'gmPortrait', x: 11.5, y: 2.02, w: 78 }, { art: 'gmBust', x: 5.5, y: 2.02, w: 36 },

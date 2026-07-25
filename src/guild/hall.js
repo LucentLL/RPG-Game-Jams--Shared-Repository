@@ -611,9 +611,71 @@ function strollBar(id) {
   if (!subject) return '';
   return `<div class="tourney-lens quest-lens"><button class="tourney-play" onclick="__guild.strollRoom('${w[0]}','${room.glyph}')">🚶 Walk ${w[1]} — take ${subject.name.split(' ')[0]} inside</button></div>`;
 }
+/** Body types the Elements compositor builds from (crucible BODY_TYPES). */
+const MASTER_BUILDS = ['salt', 'sulfur', 'mercury'];
+/**
+ * The Guildmaster — YOU. Not on the roster, never assigned, never fights: an
+ * avatar with a name, a build and a look, who walks the grounds. Shaped like a
+ * Person so the sprite compositor takes it unchanged.
+ */
+function ensureMaster(guild) {
+  if (!guild.master || typeof guild.master !== 'object') {
+    guild.master = { id: 'guildmaster', name: 'The Guildmaster', archetype: 'Adventurer', prime: 'salt',
+      stats: { POW: 40, DEF: 40, SKL: 40, SPD: 40, INT: 40, VIT: 40 },
+      appearanceSeed: Math.floor(Math.random() * 1e9) };
+  }
+  const m = guild.master;
+  if (!m.id) m.id = 'guildmaster';
+  if (!m.name) m.name = 'The Guildmaster';
+  if (!MASTER_BUILDS.includes(m.prime)) m.prime = 'salt';
+  if (!m.stats) m.stats = { POW: 40, DEF: 40, SKL: 40, SPD: 40, INT: 40, VIT: 40 };
+  return m;
+}
+/** Re-roll the master's face/hair/kit (the appearance is derived from this seed). */
+function masterReroll() {
+  const m = ensureMaster(guild);
+  m.appearanceSeed = Math.floor(Math.random() * 1e9);
+  delete m.appearance; // rebuilt from the new seed on the next composite
+  save(); render();
+}
+/** Cycle the master's build — the compositor's three body archetypes. */
+function masterBuild() {
+  const m = ensureMaster(guild);
+  m.prime = MASTER_BUILDS[(MASTER_BUILDS.indexOf(m.prime) + 1) % MASTER_BUILDS.length];
+  delete m.appearance;
+  save(); render();
+}
+/** Rename the master. */
+function masterName(v) {
+  const m = ensureMaster(guild);
+  const t = String(v || '').trim().slice(0, 28);
+  if (t) { m.name = t; save(); }
+}
+/** Walk the grounds: the Guildmaster on the campus map, doors into every building. */
+async function walkGuild() {
+  const m = ensureMaster(guild);
+  if (!hasDelveMap('campus') || isDelveOpen()) return;
+  try {
+    await openDelve('campus', m, {
+      locale: { glyph: '☙', name: guild.name },
+      fight: async () => null,
+      onKill: () => null,
+      onOre: () => null,
+      companions: (mid) => (INTERIOR_FOLK[mid] ? INTERIOR_FOLK[mid](guild.roster) : []).slice(0, 5),
+      onEnd: () => { showScreen('guildScreen'); render({ top: true }); },
+    });
+  } catch (e) {
+    console.warn('walk: failed to open', e);
+    notice = 'The gate is stuck — try again.';
+    render();
+  }
+}
+
 /** Who is at work in each interior — they populate the room as you walk it.
  *  Capped by the caller; a handful of animated bodies is the budget. */
 const INTERIOR_FOLK = {
+  // On the grounds: everyone who isn't shut indoors is out and about.
+  campus: (r) => r.filter((h) => ['train', 'rest', 'quest', 'hunt'].includes(h.assignment.type)),
   guildhall: (r) => r.filter((h) => h.assignment.type === 'train'),
   library: (r) => r.filter((h) => h.assignment.type === 'study'),
   kitchen: (r) => r.filter((h) => h.assignment.type === 'cook'),
@@ -2797,7 +2859,24 @@ function groundsRoom() {
   const facGrid = Object.keys(FACILITIES).map(facilityCard).join(''); // derived — new facilities appear for free
   const strip = roster.slice(0, 8).map((h) => `<button class="hs-chip" title="${h.name}" onclick="__guild.selectHero('${h.id}')">${personSprite(h, 48)}</button>`).join('')
     + (roster.length > 8 ? `<span class="hs-more">+${roster.length - 8}</span>` : '');
+  const m = ensureMaster(guild);
   return `${compoundScene()}
+    <div class="plan-card">
+      <div class="plan-title">☙ The Guildmaster</div>
+      <div class="gm-row">
+        <span class="gm-face">${personSprite(m, 72)}</span>
+        <span class="gm-body">
+          <input class="gm-name" value="${(m.name || '').replace(/"/g, '&quot;')}" maxlength="28"
+                 oninput="__guild.masterName(this.value)" onchange="__guild.masterName(this.value)" />
+          <span class="gm-note">Build: <b>${m.prime}</b> — this is you. Walk the grounds and step through any door.</span>
+          <span class="gm-btns">
+            <button class="tourney-play" onclick="__guild.masterBuild()">◑ Build</button>
+            <button class="tourney-play" onclick="__guild.masterReroll()">🎲 New look</button>
+          </span>
+        </span>
+      </div>
+      <div class="tourney-lens quest-lens"><button class="tourney-play" onclick="__guild.walkGuild()">🚶 Walk the grounds — enter any building through its door</button></div>
+    </div>
     <div class="plan-card">
       <div class="plan-title">🏕 The Grounds · capacity</div>
       ${bar('Housing', cap ? housed / cap * 100 : 0, housed >= cap ? 'var(--danger)' : 'var(--success)', `${housed} / ${cap}`)}
@@ -3263,7 +3342,7 @@ export function openGuild() {
 // Every handler no-ops while a week is advancing (a played battle can be mid-flight;
 // rail buttons still render behind the battle screen and would corrupt the in-flight
 // week). practiceBout/advanceAll keep their own internal checks as a second belt.
-const __guildApi = { selectHero, setActivity, setTraining, setIntensity, scheduleAdd, scheduleRemoveAt, scheduleClear, setRecipe, setForgeMode, setRefineItem, setRefineGuard, setStudyMode, setEnchantMode, setSpecialization, setPotion, setDiscipline, usePotion, setDiet, setQuest, setHunt, selectWildsLocale, scoutRegion, setPlayHunt, exploreLocale, strollRoom, sellMaterial, setElective, setTrackKind, setSecondDiscipline, setCookRecipe, setEnchantPlanet, slotOrb, assignTo, setSpar, equipItem, unequipSlot, setPolicy, provision, buyMaterial, sellItem, buyBook, hire, takeApprentice, promoteApprentice, dismissApprentice, advanceAll, back, openRoom, toggleFullscreen, upgradeFacility, enterTournament, leaveTournament, setPlayNext, setPlayQuest, setAskTournaments, toggleDraw, selectCalEvent, praiseHero, scoldHero, openAssembly, closeAssembly, appointTrainer, practiceBout, openRanch, enterRoomFromRanch, manageMemberFromRanch, ranchBuild: toggleBuild, ranchPick: pickStation, ranchPlace: placeStationAt, ranchRemoveStation: removeStationById, ranchZoomIn, ranchZoomOut, ranchZoomFit };
+const __guildApi = { selectHero, setActivity, setTraining, setIntensity, scheduleAdd, scheduleRemoveAt, scheduleClear, setRecipe, setForgeMode, setRefineItem, setRefineGuard, setStudyMode, setEnchantMode, setSpecialization, setPotion, setDiscipline, usePotion, setDiet, setQuest, setHunt, selectWildsLocale, scoutRegion, setPlayHunt, exploreLocale, strollRoom, walkGuild, masterName, masterBuild, masterReroll, sellMaterial, setElective, setTrackKind, setSecondDiscipline, setCookRecipe, setEnchantPlanet, slotOrb, assignTo, setSpar, equipItem, unequipSlot, setPolicy, provision, buyMaterial, sellItem, buyBook, hire, takeApprentice, promoteApprentice, dismissApprentice, advanceAll, back, openRoom, toggleFullscreen, upgradeFacility, enterTournament, leaveTournament, setPlayNext, setPlayQuest, setAskTournaments, toggleDraw, selectCalEvent, praiseHero, scoldHero, openAssembly, closeAssembly, appointTrainer, practiceBout, openRanch, enterRoomFromRanch, manageMemberFromRanch, ranchBuild: toggleBuild, ranchPick: pickStation, ranchPlace: placeStationAt, ranchRemoveStation: removeStationById, ranchZoomIn, ranchZoomOut, ranchZoomFit };
 window.__guild = {};
 for (const k in __guildApi) {
   window.__guild[k] = (...args) => {
