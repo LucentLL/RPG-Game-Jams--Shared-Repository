@@ -98,6 +98,7 @@ const SHEET_URLS = {
   woodwall: TILES_BASE + 'woodwall.png',
   shelves: ART_BASE + 'bookshelf_3x.png',
   mansion: ART_BASE + 'mansion_3x.png',
+  kitchen: ART_BASE + 'kitchen_3x.png',
 };
 
 /** Load exactly what this map needs: the cliff kit (rim art is always cut from
@@ -196,14 +197,17 @@ function cutWallTex(sheets, theme) {
   if (theme.walls) {
     const w = sheets[theme.walls.sheet];
     const H = theme.wallH || 96;
-    // A rect either STRETCHES to fill the texture (a whole shelf face) or TILES
-    // at 48px cells (a 16px brick/plank that must repeat, not smear).
+    // A rect either STRETCHES to fill the texture (one whole shelf face), or
+    // REPEATS at world scale — the rect is drawn at its own size times
+    // TILE/walls.src, so a 48px source lands 1:1 (no squashing) and a 16px
+    // brick is blown up to a 48px course before it tiles. Getting this wrong
+    // silently halves the height of every stone course.
+    const scale = TILE / (theme.walls.src || TILE);
     const cut = (rect, dw, dh) => texCv(dw, dh, (cg) => {
       if (!theme.walls.tileFill) { cg.drawImage(w, rect[0], rect[1], rect[2], rect[3], 0, 0, dw, dh); return; }
-      for (let ty = 0; ty < Math.ceil(dh / TILE); ty++) {
-        for (let tx = 0; tx < Math.ceil(dw / TILE); tx++) {
-          cg.drawImage(w, rect[0], rect[1], rect[2], rect[3], tx * TILE, ty * TILE, TILE, TILE);
-        }
+      const tw = Math.max(1, Math.round(rect[2] * scale)), th = Math.max(1, Math.round(rect[3] * scale));
+      for (let y = 0; y < dh; y += th) {
+        for (let x = 0; x < dw; x += tw) cg.drawImage(w, rect[0], rect[1], rect[2], rect[3], x, y, tw, th);
       }
     });
     const tall = cut(theme.walls.tall, TILE, H);
@@ -353,12 +357,18 @@ export async function bakeEstate(grid, themeName = 'meadow') {
  */
 /** Bake a map and preload its creature sheets — everything slow, done up front
  *  so the scene build itself is synchronous and can't interleave. */
+const _bakeCache = {};
 async function prepMap(mapId) {
   const map = mapForLocale(mapId);
   if (!map) throw new Error('delve: no map ' + mapId);
   validateMap(map);
   const theme = THEMES[map.theme];
-  const baked = await bakeMap(map, theme);
+  // Bake once per map per session — walking back through a door shouldn't
+  // re-rasterise a plane and re-cut its wall textures. Everything cached is
+  // immutable except `pass`, which movement mutates, so hand out a copy.
+  let baked = _bakeCache[map.id];
+  if (!baked) baked = _bakeCache[map.id] = await bakeMap(map, theme);
+  baked = { ...baked, pass: baked.pass.map((row) => row.slice()) };
   const spawns = [];
   for (const s of (map.spawns || [])) {
     const prey = preyById(s.prey);
@@ -393,6 +403,11 @@ function mountScene(prep, entry) {
   D.exit = null; D.exitArmed = false;
   D.portals = []; D.portalArmed = false;
   D.cam.snap = true;
+  // Arriving in a room must not carry the walk that brought you here: drop held
+  // input (as a bout does) and ignore movement for a beat, so a key still down
+  // from stepping through the door can't march you straight back out.
+  D.keys = {}; D.joy = null;
+  D.settleUntil = performance.now() + 350;
 
   attachTerrain(field, baked, { zMode: 'y' });
 
@@ -408,6 +423,9 @@ function mountScene(prep, entry) {
   field.appendChild(pWrap);
   const at = entry || map.entry;
   D.player = { actor, cv: pcv, el: pWrap, x: at[0], y: at[1], moving: false, grounded: _heroFootPct != null };
+  // The reused actor may still be mid-stride from the last room; moving:false
+  // above would otherwise never fire movePlayer's stop branch.
+  D.gfx.setAnim(actor, 'idle');
 
   // --- exits, portals and interactables from the grid ---
   for (let y = 0; y < D.rows; y++) {
@@ -419,7 +437,10 @@ function mountScene(prep, entry) {
       else if (ch === 't') addPropCanvas('stalag', baked.sheets, x + 0.5, y + 0.97);
       else if (ch === 'r') addPropCanvas(theme.grayProps ? 'boulderGray' : 'boulder', baked.sheets, x + 0.5, y + 0.97);
       else if (ch === 'm') addPropCanvas('cart', baked.sheets, x + 0.5, y + 1);
-      else if (ch === 'o') addOre(x, y, baked.sheets.ores);
+      // A vein already worked this delve stays worked, even if you leave the
+      // room and come back through the door.
+      else if (ch === 'o' && !D.mined.has(map.id + ':' + x + ',' + y)) addOre(x, y, baked.sheets.ores);
+      else if (ch === 'o') D.pass[y][x] = true;
     }
   }
   // Authored furnishings — upright art.js standees (beds, anvils, counters…).
@@ -476,7 +497,8 @@ export async function openDelve(localeId, member, hooks) {
       last: 0, raf: 0, ended: false, fighting: false, grace: false, transiting: false,
       haul: { kills: {}, gold: 0, mats: {}, field: 0, bouts: 0 },
       player: null, creatures: [], ores: [], portals: [], companions: [],
-      exit: null, exitArmed: false, portalArmed: false,
+      exit: null, exitArmed: false, portalArmed: false, settleUntil: 0,
+      mined: new Set(),
     };
     mountScene(prep, null);
 
@@ -494,19 +516,26 @@ export async function openDelve(localeId, member, hooks) {
 /** Walk through a door into another map, keeping the session alive. */
 async function usePortal(portal) {
   if (!D || D.transiting || D.ended) return;
-  D.transiting = true;
-  if (D.raf) { cancelAnimationFrame(D.raf); D.raf = 0; }
+  const S = D; // this transition belongs to THIS session, not whatever follows it
+  S.transiting = true;
+  if (S.raf) { cancelAnimationFrame(S.raf); S.raf = 0; }
   try {
     const prep = await prepMap(portal.to);
-    if (!D || D.ended) return;
+    if (D !== S || S.ended) return; // left (or a new delve began) during the bake
     mountScene(prep, portal.at);
-    toast(`${prep.map.name || 'Onward'}`);
+    toast(prep.map.name || 'Onward');
     startLoop();
   } catch (e) {
     console.warn('delve: door failed', e);
-    if (D) toast('That door is stuck.');
+    if (D === S && !S.ended) {
+      // Retire the broken door rather than retrying it every frame; any later
+      // mount rebuilds the list from the map data anyway.
+      S.portals = S.portals.filter((q) => q !== portal);
+      toast('That door is stuck.');
+      startLoop();
+    }
   } finally {
-    if (D) D.transiting = false;
+    if (D === S) S.transiting = false;
   }
 }
 
@@ -875,6 +904,7 @@ function checkOres() {
       D.ores.splice(i, 1);
       o.el.remove();
       D.pass[o.y][o.x] = true;
+      D.mined.add(D.map.id + ':' + o.x + ',' + o.y);
       const kind = ORE_KINDS[o.kind];
       const r = D.hooks.onOre(o.kind);
       D.haul.gold += kind.gold;
@@ -1019,13 +1049,17 @@ function tick(now) {
   if (!D || D.ended) return;
   if (!screenActive()) { D.raf = 0; return; } // a bout borrowed the screen — resumed on return
   const dt = Math.min(0.08, (now - (D.last || now)) / 1000);
+  // A freshly mounted room settles for a beat: the room lives (people potter
+  // about) but the walker holds still, so input left over from the doorway
+  // can't walk them back through it.
+  const settling = now < D.settleUntil;
   if (!D.fighting && !D.transiting) {
-    movePlayer(dt);
+    if (!settling) movePlayer(dt);
     moveCreatures(dt);
     moveCompanions(dt);
     checkOres();
-    checkExit();
-    if (!D.ended) checkPortals();
+    if (!settling) checkExit();
+    if (!settling && !D.ended) checkPortals();
     if (D.grace) {
       // Post-bout grace holds until every creature is back outside engage range.
       if (D.creatures.every((c) => Math.hypot(c.x - D.player.x, c.y - D.player.y) > 0.75 + (c.fw / TILE) * 0.28)) D.grace = false;
