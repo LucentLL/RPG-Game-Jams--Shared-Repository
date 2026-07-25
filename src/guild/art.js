@@ -45,6 +45,27 @@ const SHEETS = {
   skeleton: { w: 234, h: 432 },
   ratking: { w: 234, h: 432 },
   slimeking: { w: 414, h: 576 },
+  // Interior furnishings for the walkable rooms (delve-maps.js props). Dims
+  // measured off the copied sheets; crops below were probe-verified per sheet.
+  mansion_3x: { w: 768, h: 768 },
+  judgebench_3x: { w: 192, h: 144 },
+  banners_3x: { w: 384, h: 192 },
+  safe_3x: { w: 288, h: 384 },
+  wizworkshop_3x: { w: 384, h: 672 },
+  workbench_3x: { w: 576, h: 336 },
+  questboard_3x: { w: 240, h: 288 },
+  churchtiles_3x: { w: 384, h: 384 },
+  kitchen_3x: { w: 384, h: 240 },
+  ovenbake_3x: { w: 576, h: 384 },
+  bakerykit_3x: { w: 336, h: 384 },
+  forge_3x: { w: 288, h: 528 },
+  anvils_3x: { w: 384, h: 192 },
+  ruins_3x: { w: 384, h: 528 },
+  armorshop_3x: { w: 384, h: 144 },
+  storage_3x: { w: 336, h: 384 },
+  interior_3x: { w: 768, h: 768 },
+  chests_3x: { w: 936, h: 864 },
+  candles_3x: { w: 576, h: 480 },
 };
 
 /** Named crops: { sheet, x, y, w, h } in sheet pixels. Crops tagged `MEASURE`
@@ -82,6 +103,55 @@ export const ART = {
   skeleton:  { sheet: 'skeleton',  x: 84,  y: 6,  w: 63, h: 102 },
   ratking:   { sheet: 'ratking',   x: 84,  y: 24, w: 63, h: 84 },
   slimeking: { sheet: 'slimeking', x: 174, y: 78, w: 66, h: 63 },
+
+  // ── Furnishings for the walkable interiors (delve-maps.js `props`) ───────
+  // The Guildmaster's study
+  gmDesk:      { sheet: 'judgebench_3x', x: 3,   y: 51,  w: 138, h: 90 },  // the great bench-desk
+  gmThrone:    { sheet: 'judgebench_3x', x: 150, y: 12,  w: 36,  h: 72 },  // high-backed chair
+  gmBookshelf: { sheet: 'mansion_3x',    x: 3,   y: 537, w: 138, h: 150 },
+  gmPortrait:  { sheet: 'mansion_3x',    x: 297, y: 405, w: 78,  h: 72 },
+  gmBust:      { sheet: 'mansion_3x',    x: 198, y: 651, w: 36,  h: 48 },
+  gmLedgers:   { sheet: 'mansion_3x',    x: 195, y: 531, w: 42,  h: 24 },
+  gmBanner:    { sheet: 'banners_3x',    x: 48,  y: 15,  w: 45,  h: 144 },
+  gmStrongbox: { sheet: 'safe_3x',       x: 207, y: 0,   w: 66,  h: 78 },
+  // The classroom
+  lectern:     { sheet: 'judgebench_3x', x: 3,   y: 51,  w: 138, h: 90 },
+  lessonBoard: { sheet: 'questboard_3x', x: 0,   y: 210, w: 96,  h: 66 },
+  classDesk:   { sheet: 'workbench_3x',  x: 48,  y: 6,   w: 48,  h: 54 },
+  classBench:  { sheet: 'churchtiles_3x', x: 120, y: 240, w: 66, h: 45 },
+  teacherDesk: { sheet: 'wizworkshop_3x', x: 3,  y: 294, w: 138, h: 81 },
+  globe:       { sheet: 'wizworkshop_3x', x: 291, y: 507, w: 42, h: 60 },
+  abacus:      { sheet: 'wizworkshop_3x', x: 240, y: 483, w: 48, h: 42 },
+  // The kitchen
+  stoneOven:    { sheet: 'ovenbake_3x', x: 48,  y: 144, w: 48,  h: 84 },
+  prepCounter:  { sheet: 'kitchen_3x',  x: 144, y: 60,  w: 144, h: 57 },
+  kitchenStove: { sheet: 'kitchen_3x',  x: 336, y: 33,  w: 48,  h: 87 },
+  hangingHerbs: { sheet: 'kitchen_3x',  x: 48,  y: 165, w: 96,  h: 72 },
+  hangingMeat:  { sheet: 'kitchen_3x',  x: 236, y: 165, w: 52,  h: 72 },
+  hangingPot:   { sheet: 'kitchen_3x',  x: 330, y: 162, w: 40,  h: 60 },
+  sackPile:     { sheet: 'bakerykit_3x', x: 249, y: 147, w: 78, h: 45 },
+  provisionBarrel: { sheet: 'bakerykit_3x', x: 99, y: 147, w: 42, h: 42 },
+  // The forge
+  forgeFurnace: { sheet: 'forge_3x',  x: 171, y: 12,  w: 90, h: 144 },
+  forgeTwin:    { sheet: 'forge_3x',  x: 144, y: 363, w: 96, h: 126 },
+  anvilWork:    { sheet: 'anvils_3x', x: 264, y: 138, w: 84, h: 54 },
+  anvilFront:   { sheet: 'anvils_3x', x: 192, y: 0,   w: 48, h: 48 },
+  quenchBarrel: { sheet: 'ruins_3x',  x: 6,   y: 213, w: 36, h: 54 },
+  // The armory
+  armorPlate:     { sheet: 'armorshop_3x', x: 150, y: 57, w: 39, h: 84 },
+  armorSteel:     { sheet: 'armorshop_3x', x: 48,  y: 57, w: 45, h: 84 },
+  armorKnight:    { sheet: 'armorshop_3x', x: 96,  y: 51, w: 45, h: 90 },
+  practiceTarget: { sheet: 'armorshop_3x', x: 342, y: 60, w: 39, h: 81 },
+  gearCubbies:    { sheet: 'storage_3x',   x: 198, y: 21, w: 132, h: 96 },
+  issueCounter:   { sheet: 'storage_3x',   x: 3,   y: 153, w: 186, h: 78 },
+  storeBarrel:    { sheet: 'storage_3x',   x: 6,   y: 261, w: 36, h: 54 },
+  // The dormitory
+  bunkPosted: { sheet: 'beds_3x',     x: 159, y: 21,  w: 114, h: 156 },
+  bunkIron:   { sheet: 'beds_3x',     x: 21,  y: 219, w: 102, h: 147 },
+  wardrobe:   { sheet: 'interior_3x', x: 192, y: 249, w: 96,  h: 129 },
+  washstand:  { sheet: 'interior_3x', x: 0,   y: 291, w: 96,  h: 87 },
+  footlocker: { sheet: 'chests_3x',   x: 87,  y: 54,  w: 57,  h: 51 },
+  bedCandle:  { sheet: 'candles_3x',  x: 159, y: 249, w: 21,  h: 45 },
 };
 
 /**

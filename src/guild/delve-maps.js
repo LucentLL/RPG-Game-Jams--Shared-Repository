@@ -75,20 +75,52 @@ export const THEMES = {
     walls: { sheet: 'shelves', tall: [222, 40, 48, 96], low: [222, 88, 48, 48], crown: [222, 40, 48, 18] },
     wallH: 96,
   },
-  // Working rooms of the guild — the same parquet on rock, but walls of rough
-  // stone (the cliff kit's face tiles) instead of bookshelves. Kitchen, Forge,
-  // Armory, Dormitory, Classroom and the Guildmaster's study all share it;
-  // each room's CHARACTER comes from its furnishings, not its masonry.
-  hall: {
-    sheet: 'floors', src: 16,
-    fill: [[0, 4], [1, 4], [2, 4], [3, 4]],
-    rimSheet: 'cliffs',
-    rim: { nw: [9, 2], n: [10, 2], ne: [11, 2], w: [9, 3], e: [11, 3], sw: [9, 4], s: [10, 4], se: [11, 4] },
-    faceTop: { l: [9, 5], m: [10, 5], r: [11, 5] },
-    faceBot: { l: [9, 6], m: [10, 6], r: [11, 6] },
-    voidSample: [312, 166],
-    grayProps: false,
-  },
+  // ── The guild's working rooms ────────────────────────────────────────────
+  // Each is the same contract: a floor sheet, and a WALL cut from an RPG-Maker
+  // A4 wall sheet (`stonewall.png` / `woodwall.png`) whose bands map 1:1 onto
+  // it — y 0..48 is the wall's top, y 48..144 its 96px face. A palette is just
+  // an x offset (stone: grey 96, green-grey 192, dark blue-grey 288, blue 384,
+  // tan/gold 480, orange-brown 576, teal 672); the +24 lands the 48px repeat
+  // inside a stone course so the seam disappears. Rooms differ by palette and
+  // furniture, never by code.
+  ...(() => {
+    const rock = {
+      rimSheet: 'cliffs',
+      rim: { nw: [9, 2], n: [10, 2], ne: [11, 2], w: [9, 3], e: [11, 3], sw: [9, 4], s: [10, 4], se: [11, 4] },
+      faceTop: { l: [9, 5], m: [10, 5], r: [11, 5] },
+      faceBot: { l: [9, 6], m: [10, 6], r: [11, 6] },
+      voidSample: [312, 166],
+      grayProps: false,
+      wallH: 96,
+    };
+    /** A room theme: floor tiles + one wall palette off an A4 wall sheet. */
+    const room = (sheet, src, fill, wallSheet, wx) => ({
+      ...rock, sheet, src, fill,
+      walls: { sheet: wallSheet, tileFill: true, tall: [wx, 48, 48, 96], low: [wx, 96, 48, 48], crown: [wx, 0, 48, 48] },
+    });
+    return {
+      // limestone slabs · tan-gold ashlar
+      guildhall: room('floors', 16, [[0, 3], [1, 3], [2, 3], [3, 3]], 'stonewall', 504),
+      // scrubbed limestone · teal-grey ashlar
+      kitchen: room('floors', 16, [[4, 2], [5, 2], [6, 2], [7, 2]], 'stonewall', 696),
+      // the darkest floor in the sheet · sooty blue-grey stone
+      forge: room('floors', 16, [[4, 1], [5, 1], [6, 1], [7, 1]], 'stonewall', 312),
+      // warm brown brick · keep-grey ashlar
+      armory: room('floors', 16, [[2, 1], [3, 1]], 'stonewall', 120),
+      // plank floor AND plank walls off the one wood A4 sheet
+      dormitory: room('woodwall', 48, [[3, 0]], 'woodwall', 24),
+      // tan flagstone · pale green-grey ashlar
+      classroom: room('floors', 16, [[0, 3], [1, 3], [2, 3], [3, 3]], 'stonewall', 216),
+      // red damask carpet AND gold damask wall covering, off the mansion sheet
+      guildmaster: room('mansion', 48, [[12, 7], [13, 7]], 'mansion', 384),
+    };
+  })(),
+};
+// The study's damask is a plain 48px tile, not an A4 band — retune its wall
+// rects to that sheet's own geometry (the carpet/wall weave at 384,336).
+THEMES.guildmaster.walls = {
+  sheet: 'mansion', tileFill: true,
+  tall: [384, 336, 48, 48], low: [384, 336, 48, 48], crown: [20, 268, 48, 16],
 };
 
 /** Pixel-rect decals on the prop sheets (px units; sheets are 3x/48px scale). */
@@ -227,7 +259,7 @@ export const DELVE_MAPS = {
   // 19 tiles wide by convention: '#' margin, 'B' wall, 15 cells, 'B', '#'.
   //             0123456789012345678
   kitchen: {
-    id: 'kitchen', theme: 'hall', name: 'The Kitchen',
+    id: 'kitchen', theme: 'kitchen', name: 'The Kitchen',
     grid: [
       '###################', //  0
       '#BBBBBBBBBBBBBBBBB#', //  1
@@ -245,15 +277,16 @@ export const DELVE_MAPS = {
     ],
     entry: [9.5, 10.3],
     props: [
-      { art: 'oven', x: 4.5, y: 3, w: 46 }, { art: 'oven', x: 13.5, y: 3, w: 46 },
-      { art: 'breadPile', x: 6.5, y: 3.05, w: 44 }, { art: 'floppyfish', x: 11.5, y: 5.05, w: 22 },
-      { art: 'sacks', x: 4.5, y: 9, w: 40 }, { art: 'sacks', x: 16.5, y: 9, w: 40 },
-      { art: 'tools', x: 7.5, y: 5.05, w: 40 },
+      { art: 'stoneOven', x: 4.5, y: 3, w: 48 }, { art: 'kitchenStove', x: 13.5, y: 3, w: 48 },
+      { art: 'hangingHerbs', x: 8, y: 2.02, w: 96 }, { art: 'hangingMeat', x: 10.6, y: 2.02, w: 52 },
+      { art: 'hangingPot', x: 15.6, y: 2.02, w: 40 },
+      { art: 'breadPile', x: 6.5, y: 5.02, w: 44 }, { art: 'floppyfish', x: 12, y: 5.02, w: 22 },
+      { art: 'sackPile', x: 4.5, y: 9, w: 78 }, { art: 'provisionBarrel', x: 16.5, y: 9, w: 42 },
     ],
   },
   //             0123456789012345678
   forge: {
-    id: 'forge', theme: 'hall', name: 'The Forge',
+    id: 'forge', theme: 'forge', name: 'The Forge',
     grid: [
       '###################', //  0
       '#BBBBBBBBBBBBBBBBB#', //  1
@@ -271,14 +304,15 @@ export const DELVE_MAPS = {
     ],
     entry: [9.5, 10.3],
     props: [
-      { art: 'anvil', x: 4.5, y: 4, w: 50 }, { art: 'anvil', x: 8.5, y: 4, w: 50 }, { art: 'anvil', x: 12.5, y: 4, w: 50 },
-      { art: 'sacks', x: 3.5, y: 6, w: 40 }, { art: 'tools', x: 15.5, y: 6, w: 44 },
-      { art: 'sacks', x: 12.5, y: 10, w: 40 },
+      { art: 'anvilWork', x: 4.5, y: 4, w: 84 }, { art: 'anvilFront', x: 8.5, y: 4, w: 48 },
+      { art: 'anvilWork', x: 12.5, y: 4, w: 84 },
+      { art: 'forgeFurnace', x: 3.6, y: 6, w: 90 }, { art: 'quenchBarrel', x: 15.5, y: 6, w: 36 },
+      { art: 'forgeTwin', x: 12.5, y: 10, w: 96 }, { art: 'tools', x: 8, y: 2.02, w: 44 },
     ],
   },
   //             0123456789012345678
   armory: {
-    id: 'armory', theme: 'hall', name: 'The Armory',
+    id: 'armory', theme: 'armory', name: 'The Armory',
     grid: [
       '###################', //  0
       '#BBBBBBBBBBBBBBBBB#', //  1
@@ -286,23 +320,26 @@ export const DELVE_MAPS = {
       '#B.bbbbb...bbbbb.B#', //  3  ← the racks along both walls
       '#B...............B#', //  4
       '#B...............B#', //  5
-      '#B.f...........f.B#', //  6  ← issue counter · armour stand
+      '#B.ff..........f.B#', //  6  ← the issue counter (two cells) · armour stand
       '#BBBBBBB...BBBBBBB#', //  7  ← through to the vault
       '#B...............B#', //  8
-      '#B..bb.....bb....B#', //  9  ← crated stock
+      '#B..bb..f..bb..f.B#', //  9  ← crated stock
       '#B...............B#', // 10
       '#BBBBBBBBdBBBBBBBB#', // 11
       '###################', // 12
     ],
     entry: [9.5, 10.3],
     props: [
-      { art: 'counter', x: 3.5, y: 7, w: 46 }, { art: 'anvil', x: 15.5, y: 7, w: 44 },
-      { art: 'sacks', x: 5.5, y: 10, w: 40 }, { art: 'sacks', x: 12.5, y: 10, w: 40 },
+      { art: 'issueCounter', x: 4.0, y: 7, w: 130 }, { art: 'armorPlate', x: 15.5, y: 7, w: 39 },
+      { art: 'armorKnight', x: 9.5, y: 2.02, w: 45 }, { art: 'armorSteel', x: 7, y: 2.02, w: 45 },
+      { art: 'practiceTarget', x: 12, y: 2.02, w: 39 },
+      { art: 'footlocker', x: 8.5, y: 10, w: 57 }, { art: 'storeBarrel', x: 15.5, y: 10, w: 36 },
+      { art: 'gearCubbies', x: 3.6, y: 11.02, w: 132 },
     ],
   },
   //             0123456789012345678
   dormitory: {
-    id: 'dormitory', theme: 'hall', name: 'The Dormitory',
+    id: 'dormitory', theme: 'dormitory', name: 'The Dormitory',
     grid: [
       '###################', //  0
       '#BBBBBBBBBBBBBBBBB#', //  1
@@ -318,39 +355,49 @@ export const DELVE_MAPS = {
     ],
     entry: [9.5, 8.3],
     props: [
-      { art: 'bed', x: 3.5, y: 4, w: 42 }, { art: 'bed', x: 5.5, y: 4, w: 42 }, { art: 'bed', x: 7.5, y: 4, w: 42 },
-      { art: 'bed', x: 11.5, y: 4, w: 42 }, { art: 'bed', x: 13.5, y: 4, w: 42 }, { art: 'bed', x: 15.5, y: 4, w: 42 },
-      { art: 'bed', x: 3.5, y: 8, w: 42 }, { art: 'bed', x: 5.5, y: 8, w: 42 }, { art: 'bed', x: 7.5, y: 8, w: 42 },
-      { art: 'bed', x: 11.5, y: 8, w: 42 }, { art: 'bed', x: 13.5, y: 8, w: 42 }, { art: 'bed', x: 15.5, y: 8, w: 42 },
+      { art: 'bed', x: 3.5, y: 4, w: 44 }, { art: 'bunkIron', x: 5.5, y: 4, w: 44 }, { art: 'bed', x: 7.5, y: 4, w: 44 },
+      { art: 'bunkPosted', x: 11.5, y: 4, w: 48 }, { art: 'bunkIron', x: 13.5, y: 4, w: 44 }, { art: 'bed', x: 15.5, y: 4, w: 44 },
+      { art: 'bunkIron', x: 3.5, y: 8, w: 44 }, { art: 'bed', x: 5.5, y: 8, w: 44 }, { art: 'bunkPosted', x: 7.5, y: 8, w: 48 },
+      { art: 'bed', x: 11.5, y: 8, w: 44 }, { art: 'bunkIron', x: 13.5, y: 8, w: 44 }, { art: 'bed', x: 15.5, y: 8, w: 44 },
+      { art: 'wardrobe', x: 9.5, y: 2.02, w: 90 }, { art: 'washstand', x: 9.5, y: 6.02, w: 90 },
+      { art: 'footlocker', x: 4.5, y: 2.02, w: 52 }, { art: 'bedCandle', x: 14.5, y: 6.02, w: 20 },
     ],
   },
   //             0123456789012345678
   classroom: {
-    id: 'classroom', theme: 'hall', name: 'The Classroom',
+    id: 'classroom', theme: 'classroom', name: 'The Classroom',
     grid: [
       '###################', //  0
       '#BBBBBBBBBBBBBBBBB#', //  1
       '#B......f........B#', //  2  ← the lectern
       '#B...............B#', //  3
-      '#B.bbb.bbb.bbb...B#', //  4  ← rows of desks
+      '#B.ff..ff..ff....B#', //  4  ← rows of desks
       '#B...............B#', //  5
-      '#B.bbb.bbb.bbb...B#', //  6
+      '#B.ff..ff..ff....B#', //  6
       '#B...............B#', //  7
       '#BBBBBBB...BBBBBBB#', //  8  ← through to the study nook
       '#B...............B#', //  9
-      '#B.f.........f...B#', // 10  ← reference shelves
+      '#B.ff........f...B#', // 10  ← the master's desk (two cells) · the abacus
       '#BBBBBBBBdBBBBBBBB#', // 11
       '###################', // 12
     ],
     entry: [9.5, 10.3],
     props: [
-      { art: 'counter', x: 8.5, y: 3, w: 50 },
-      { art: 'bookshelf', x: 3.5, y: 11, w: 46 }, { art: 'bookshelf', x: 13.5, y: 11, w: 46 },
+      { art: 'lectern', x: 8.5, y: 3, w: 110 },
+      { art: 'lessonBoard', x: 5, y: 2.02, w: 96 }, { art: 'globe', x: 12.5, y: 2.02, w: 42 },
+      { art: 'classDesk', x: 3.5, y: 5, w: 48 }, { art: 'classDesk', x: 4.5, y: 5, w: 48 },
+      { art: 'classDesk', x: 7.5, y: 5, w: 48 }, { art: 'classDesk', x: 8.5, y: 5, w: 48 },
+      { art: 'classDesk', x: 11.5, y: 5, w: 48 }, { art: 'classDesk', x: 12.5, y: 5, w: 48 },
+      { art: 'classDesk', x: 3.5, y: 7, w: 48 }, { art: 'classDesk', x: 4.5, y: 7, w: 48 },
+      { art: 'classDesk', x: 7.5, y: 7, w: 48 }, { art: 'classDesk', x: 8.5, y: 7, w: 48 },
+      { art: 'classDesk', x: 11.5, y: 7, w: 48 }, { art: 'classDesk', x: 12.5, y: 7, w: 48 },
+      { art: 'teacherDesk', x: 4, y: 11, w: 120 }, { art: 'abacus', x: 13.5, y: 11, w: 48 },
+      { art: 'classBench', x: 15.5, y: 10.02, w: 60 },
     ],
   },
   //             0123456789012345678
   guildhall: {
-    id: 'guildhall', theme: 'hall', name: 'The Great Hall',
+    id: 'guildhall', theme: 'guildhall', name: 'The Great Hall',
     grid: [
       '###################', //  0
       '#BBBBBBBB+BBBBBBBB#', //  1  ← the stair up to the Guildmaster's study
@@ -366,18 +413,20 @@ export const DELVE_MAPS = {
     ],
     entry: [9.5, 8.3],
     props: [
-      { art: 'oven', x: 3.5, y: 8, w: 46 }, { art: 'bookshelf', x: 15.5, y: 8, w: 46 },
+      { art: 'gmBanner', x: 3.5, y: 8, w: 45 }, { art: 'gmBookshelf', x: 15.5, y: 8, w: 100 },
+      { art: 'gmPortrait', x: 6.5, y: 2.02, w: 78 }, { art: 'gmPortrait', x: 12.5, y: 2.02, w: 78 },
+      { art: 'gmBust', x: 4.5, y: 2.02, w: 36 }, { art: 'gmBust', x: 14.5, y: 2.02, w: 36 },
     ],
     portals: [{ x: 9.5, y: 1.5, to: 'guildmaster', at: [9.5, 8.3] }],
   },
   //             0123456789012345678
   guildmaster: {
-    id: 'guildmaster', theme: 'hall', name: "The Guildmaster's Study",
+    id: 'guildmaster', theme: 'guildmaster', name: "The Guildmaster's Study",
     grid: [
       '###################', //  0
       '#BBBBBBBBBBBBBBBBB#', //  1
       '#B...............B#', //  2
-      '#B.BB..f....BB...B#', //  3  ← shelved walls flanking the great desk
+      '#B.ff..f....ff...B#', //  3  ← shelved walls flanking the great desk
       '#B...............B#', //  4
       '#B......f........B#', //  5  ← the chair
       '#B...............B#', //  6
@@ -388,8 +437,11 @@ export const DELVE_MAPS = {
     ],
     entry: [6.5, 8.3],
     props: [
-      { art: 'counter', x: 8.5, y: 4, w: 52 }, { art: 'bed', x: 8.5, y: 6, w: 34 },
-      { art: 'sacks', x: 3.5, y: 8, w: 40 }, { art: 'bookshelf', x: 15.5, y: 8, w: 46 },
+      { art: 'gmBookshelf', x: 4, y: 4, w: 96 }, { art: 'gmBookshelf', x: 13, y: 4, w: 96 },
+      { art: 'gmDesk', x: 7.5, y: 4, w: 130 }, { art: 'gmLedgers', x: 7.5, y: 3.6, w: 42 },
+      { art: 'gmThrone', x: 8.5, y: 6, w: 36 },
+      { art: 'gmStrongbox', x: 3.5, y: 8, w: 66 }, { art: 'gmBanner', x: 15.5, y: 8, w: 45 },
+      { art: 'gmPortrait', x: 11.5, y: 2.02, w: 78 }, { art: 'gmBust', x: 5.5, y: 2.02, w: 36 },
     ],
     portals: [{ x: 9.5, y: 9.5, to: 'guildhall', at: [9.5, 2.3] }],
   },
