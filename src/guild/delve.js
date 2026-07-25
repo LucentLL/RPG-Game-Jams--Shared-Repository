@@ -86,6 +86,35 @@ const hash2 = (x, y) => {
   return (h ^ (h >>> 16)) >>> 0;
 };
 
+/** Where each sheet key lives. THEMES and DECALS name sheets by these keys. */
+const SHEET_URLS = {
+  cliffs: TILES_BASE + 'cliffs.png',
+  stairs: TILES_BASE + 'stairs.png',
+  ores: TILES_BASE + 'ores.png',
+  rocks: TILES_BASE + 'rocks.png',
+  rails: TILES_BASE + 'rails.png',
+  floors: TILES_BASE + 'floors.png',
+  stonewall: TILES_BASE + 'stonewall.png',
+  woodwall: TILES_BASE + 'woodwall.png',
+  shelves: ART_BASE + 'bookshelf_3x.png',
+  mansion: ART_BASE + 'mansion_3x.png',
+};
+
+/** Load exactly what this map needs: the cliff kit (rim art is always cut from
+ *  it), the theme's floor and wall sheets, and a prop sheet only if the grid
+ *  actually uses that prop. Interiors never pay for the mine's rails. */
+async function loadSheets(map, theme) {
+  const keys = new Set(['cliffs', theme.sheet, theme.rimSheet, theme.walls && theme.walls.sheet].filter(Boolean));
+  const chars = map.grid.join('');
+  if (chars.includes('s')) keys.add('stairs');
+  if (chars.includes('o')) keys.add('ores');
+  if (/[rt]/.test(chars)) keys.add('rocks');
+  if (/[=m]/.test(chars)) keys.add('rails');
+  const sheets = {};
+  for (const k of keys) sheets[k] = await loadImg(SHEET_URLS[k] || (TILES_BASE + k + '.png'));
+  return sheets;
+}
+
 /** Bounds-safe accessors over an ASCII grid (outside counts as chasm). */
 function gridFns(grid) {
   const rows = grid.length, cols = grid[0].length;
@@ -254,15 +283,7 @@ function extractGeometry(grid) {
  * geometry, plus the delve's flat floor decals (stair mouths, rails).
  */
 async function bakeMap(map, theme) {
-  const sheets = {
-    cliffs: await loadImg(TILES_BASE + 'cliffs.png'),
-    stairs: await loadImg(TILES_BASE + 'stairs.png'),
-    ores: await loadImg(TILES_BASE + 'ores.png'),
-    rocks: await loadImg(TILES_BASE + 'rocks.png'),
-    rails: await loadImg(TILES_BASE + 'rails.png'),
-    floors: await loadImg(TILES_BASE + 'floors.png'),
-    shelves: await loadImg(ART_BASE + 'bookshelf_3x.png'),
-  };
+  const sheets = await loadSheets(map, theme);
   const { rows, cols, at } = gridFns(map.grid);
   const cv = document.createElement('canvas');
   cv.width = cols * TILE; cv.height = rows * TILE;
@@ -408,6 +429,16 @@ function mountScene(prep, entry) {
 
   for (const sp of spawns) spawnCreature(sp.prey, sp.img, sp.s.x + 0.5, sp.s.y + 0.5);
 
+  // The room's own people — whoever the caller says works here, going about
+  // their business. They wander, they don't fight, and they don't block.
+  D.companions = [];
+  for (const person of (D.hooks.companions ? D.hooks.companions(map.id) : [])) {
+    if (!person || person.id === D.member.id) continue;
+    const spot = randomFloor();
+    if (!spot) break;
+    spawnCompanion(person, spot.x, spot.y);
+  }
+
   const title = D.host.querySelector('.dv-title');
   if (title) title.textContent = `${D.hooks.locale.glyph} ${map.name || D.hooks.locale.name}`;
 }
@@ -444,7 +475,7 @@ export async function openDelve(localeId, member, hooks) {
       cam: { x: 0, y: 0, snap: true }, zoom: window.innerHeight < 520 ? 1.4 : 1.8,
       last: 0, raf: 0, ended: false, fighting: false, grace: false, transiting: false,
       haul: { kills: {}, gold: 0, mats: {}, field: 0, bouts: 0 },
-      player: null, creatures: [], ores: [], portals: [],
+      player: null, creatures: [], ores: [], portals: [], companions: [],
       exit: null, exitArmed: false, portalArmed: false,
     };
     mountScene(prep, null);
@@ -632,6 +663,35 @@ function groundHeroSprite(cv) {
   return (_heroFootPct = (cv.height - 1 - low) / cv.height * 100);
 }
 
+/** A random walkable point, biased away from doorways. Null if the map is full. */
+function randomFloor() {
+  for (let i = 0; i < 80; i++) {
+    const x = 1 + Math.random() * (D.cols - 2), y = 1 + Math.random() * (D.rows - 2);
+    if (!canStand(x, y)) continue;
+    if (D.exit && Math.hypot(D.exit.x - x, D.exit.y - y) < 2) continue;
+    if (Math.hypot(D.player.x - x, D.player.y - y) < 1.5) continue;
+    return { x, y };
+  }
+  return null;
+}
+
+/** A fellow member at work in the room — a real compositor actor that strolls. */
+function spawnCompanion(person, x, y) {
+  const el = document.createElement('div');
+  el.className = 'dv-actor dv-player dv-companion';
+  el.innerHTML = '<div class="dv-shadow"></div><div class="dv-up"></div>';
+  const cv = document.createElement('canvas');
+  cv.width = 96; cv.height = 96;
+  el.querySelector('.dv-up').appendChild(cv);
+  if (_heroFootPct != null) cv.style.setProperty('--footpct', _heroFootPct.toFixed(2) + '%');
+  D.field.appendChild(el);
+  D.companions.push({
+    actor: D.gfx.makeActor(person), cv, el, x, y, home: { x, y },
+    mode: 'idle', tx: x, ty: y, t: 0.5 + Math.random() * 2.5, moving: false,
+    grounded: _heroFootPct != null,
+  });
+}
+
 function spawnCreature(prey, img, x, y) {
   const fw = Math.floor(img.naturalWidth / 3), fh = Math.floor(img.naturalHeight / 4);
   const el = document.createElement('div');
@@ -782,6 +842,31 @@ function moveCreatures(dt) {
   }
 }
 
+/** Companions potter about near where they started, pausing between errands. */
+function moveCompanions(dt) {
+  for (const c of D.companions) {
+    if (c.mode === 'idle') {
+      c.t -= dt;
+      if (c.moving) { D.gfx.setAnim(c.actor, 'idle'); c.moving = false; }
+      if (c.t <= 0) {
+        for (let i = 0; i < 8; i++) {
+          const nx = c.home.x + (Math.random() * 5 - 2.5), ny = c.home.y + (Math.random() * 5 - 2.5);
+          if (canStand(nx, ny)) { c.tx = nx; c.ty = ny; c.mode = 'walk'; break; }
+        }
+        if (c.mode !== 'walk') c.t = 1.5;
+      }
+      continue;
+    }
+    const dx = c.tx - c.x, dy = c.ty - c.y;
+    const d = Math.hypot(dx, dy);
+    if (d < 0.12) { c.mode = 'idle'; c.t = 1.5 + Math.random() * 4; continue; }
+    const step = Math.min(d, 1.15 * dt);
+    if (!tryMove(c, dx / d * step, dy / d * step)) { c.mode = 'idle'; c.t = 1 + Math.random() * 2; continue; }
+    c.actor.facing = Math.atan2(dx / d, -dy / d);
+    if (!c.moving) { D.gfx.setAnim(c.actor, 'move'); c.moving = true; }
+  }
+}
+
 function checkOres() {
   const p = D.player;
   for (let i = D.ores.length - 1; i >= 0; i--) {
@@ -892,15 +977,24 @@ function render(now) {
   // Player — compositor actor, canvas anchored at the feet.
   D.gfx.tickActor(p.actor, now);
   D.gfx.renderActor(p.cv, p.actor);
-  if (!p.grounded) { // first composited frame: measure the sprite's empty foot band
-    const pct = groundHeroSprite(p.cv);
-    if (pct != null) { p.cv.style.setProperty('--footpct', pct.toFixed(2) + '%'); p.grounded = true; }
-  }
+  // First composited frame: measure the compositor's empty foot band, then
+  // ground every hero-shaped sprite in the scene with it (companions spawn
+  // before the measurement exists, so they collect it here).
+  if (_heroFootPct == null) groundHeroSprite(p.cv);
+  if (_heroFootPct != null && !p.grounded) { p.cv.style.setProperty('--footpct', _heroFootPct.toFixed(2) + '%'); p.grounded = true; }
   p.el.style.left = (p.x * TILE) + 'px';
   p.el.style.top = (p.y * TILE) + 'px';
   p.el.style.zIndex = 10 + Math.round(p.y * TILE);
   for (const c of D.creatures) {
     drawCreature(c, now);
+    c.el.style.left = (c.x * TILE) + 'px';
+    c.el.style.top = (c.y * TILE) + 'px';
+    c.el.style.zIndex = 10 + Math.round(c.y * TILE);
+  }
+  for (const c of D.companions) {
+    D.gfx.tickActor(c.actor, now);
+    D.gfx.renderActor(c.cv, c.actor);
+    if (_heroFootPct != null && !c.grounded) { c.cv.style.setProperty('--footpct', _heroFootPct.toFixed(2) + '%'); c.grounded = true; }
     c.el.style.left = (c.x * TILE) + 'px';
     c.el.style.top = (c.y * TILE) + 'px';
     c.el.style.zIndex = 10 + Math.round(c.y * TILE);
@@ -928,6 +1022,7 @@ function tick(now) {
   if (!D.fighting && !D.transiting) {
     movePlayer(dt);
     moveCreatures(dt);
+    moveCompanions(dt);
     checkOres();
     checkExit();
     if (!D.ended) checkPortals();

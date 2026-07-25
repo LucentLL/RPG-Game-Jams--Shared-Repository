@@ -611,10 +611,22 @@ function strollBar(id) {
   if (!subject) return '';
   return `<div class="tourney-lens quest-lens"><button class="tourney-play" onclick="__guild.strollRoom('${w[0]}','${room.glyph}')">🚶 Walk ${w[1]} — take ${subject.name.split(' ')[0]} inside</button></div>`;
 }
+/** Who is at work in each interior — they populate the room as you walk it.
+ *  Capped by the caller; a handful of animated bodies is the budget. */
+const INTERIOR_FOLK = {
+  guildhall: (r) => r.filter((h) => h.assignment.type === 'train'),
+  library: (r) => r.filter((h) => h.assignment.type === 'study'),
+  kitchen: (r) => r.filter((h) => h.assignment.type === 'cook'),
+  forge: (r) => r.filter((h) => h.assignment.type === 'forge'),
+  armory: (r) => r.filter((h) => h.assignment.type === 'enchant'),
+  classroom: (r) => r.filter((h) => h.assignment.type === 'train'),
+  dormitory: (r) => r.filter((h) => h.condition.injury),
+};
 /**
  * Stroll a guild interior — the delve engine running a room map (no stamina,
  * no creatures, no spoils; it's home). The selected member walks the space,
- * and doorways carry them from room to room without leaving the building.
+ * doorways carry them from room to room without leaving the building, and the
+ * members assigned to that work are in there with them.
  */
 async function strollRoom(mapId, glyph) {
   const h = heroById(selectedId) || guild.roster[0]; if (!h) return;
@@ -625,6 +637,7 @@ async function strollRoom(mapId, glyph) {
       fight: async () => null,
       onKill: () => null,
       onOre: () => null,
+      companions: (mid) => (INTERIOR_FOLK[mid] ? INTERIOR_FOLK[mid](guild.roster) : []).slice(0, 5),
       onEnd: () => { showScreen('guildScreen'); render({ top: true }); },
     });
   } catch (e) {
