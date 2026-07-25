@@ -9,11 +9,15 @@
  * playHuntBout) and a win banks real hunt spoils on the spot (hall's `onKill`
  * hook). Ore nodes are mined by bumping them. Losing a bout ends the delve.
  *
- * Rendering follows the ranch's contract, minus the tilt: the ground is baked
- * ONCE to a data-URI (real tiles from public/assets/tiles/, drawn by the
- * autotiler below — see delve-maps.js THEMES), actors are per-entity canvases
- * positioned in world px inside one scaled field div, depth is y-sort z-index,
- * and the single rAF loop self-stops whenever #delveScreen loses .active
+ * Rendering follows the ranch's CSS-3D contract (DESIGN.md "2D sprites in a
+ * 3D world", Octopath-style): the ground is baked ONCE to a data-URI (real
+ * tiles from public/assets/tiles/ — see delve-maps.js THEMES) and lives on a
+ * perspective-tilted plane (rotateX under perspective); every plateau edge
+ * grows REAL vertical cliff-face geometry (strips folded 90° off the plane,
+ * textured with the kit's rock faces), raised blocks are true boxes, and all
+ * sprites are paper standees counter-rotated upright about their feet. The
+ * camera composes rotate·z-lift·scale·translate on the field and follows the
+ * walker. The single rAF loop self-stops whenever #delveScreen loses .active
  * (battles borrow the screen; we resume on return). The member is a real
  * Elements-compositor actor via window.__ranchGfx; creatures are plain
  * RPG-Maker 3×4 walk sheets from public/assets/art/.
@@ -24,6 +28,9 @@ import { THEMES, DECALS, ORE_KINDS, mapForLocale, validateMap } from './delve-ma
 import { artSprite } from './art.js';
 
 const TILE = 48;
+const TILT = 52;               // plane tilt in degrees — matches the ranch's diorama
+const DEPTH = 96;              // cliff drop in px (2 tiles of face art)
+const BLOCK_H = 48;            // raised-block height in px (1 tile of face art)
 const PLAYER_SPEED = 3.4;      // tiles/sec — brisk but catchable by nothing
 const BODY_R = 0.28;           // collision half-width around the feet point
 const WALK_FRAMES = [0, 1, 2, 1];
@@ -71,7 +78,7 @@ function loadImg(url) {
 // The bake — ASCII grid → one ground image + passability
 // ---------------------------------------------------------------------------
 
-const BLOCKING = { '#': 1, o: 1, r: 1, t: 1, m: 1 };
+const BLOCKING = { '#': 1, o: 1, r: 1, t: 1, m: 1, B: 1 };
 // Well-mixed 2D hash — naive xor-of-primes checkerboards on % 2 variant picks.
 const hash2 = (x, y) => {
   let h = (x * 374761393 + y * 668265263) | 0;
@@ -80,11 +87,11 @@ const hash2 = (x, y) => {
 };
 
 /**
- * Bake a delve map's ground to a data-URI and derive its passability grid.
- * The autotiler reads only floor-vs-void: floor cells get a fill + rubble rim
- * strips on void-facing edges; void cells get the void color, then the north
- * band / side bands / 2-tall rock face that the neighboring floor casts into
- * them (the whole 2.5D illusion lives in these void-cell tiles).
+ * Bake a delve map's ground plane to a data-URI, derive passability, cut the
+ * wall textures, and extract the 3D geometry the plane needs: cliff-face RUNS
+ * along every floor/chasm boundary (south-facing walls fold down off south
+ * edges; east/west walls off the sides) and raised-block cells. Chasm cells
+ * stay TRANSPARENT — the stage's dark background is the bottomless drop.
  */
 async function bakeMap(map, theme) {
   const sheets = {
@@ -98,9 +105,6 @@ async function bakeMap(map, theme) {
   const at = (x, y) => (x < 0 || y < 0 || x >= cols || y >= rows) ? '#' : map.grid[y][x];
   const isFloor = (x, y) => at(x, y) !== '#';
   const isVoid = (x, y) => at(x, y) === '#';
-  const isFaceTop = (x, y) => isVoid(x, y) && isFloor(x, y - 1);
-  const isFaceBot = (x, y) => isVoid(x, y) && isFaceTop(x, y - 1);
-  const isFace = (x, y) => isFaceTop(x, y) || isFaceBot(x, y);
 
   const cv = document.createElement('canvas');
   cv.width = cols * TILE; cv.height = rows * TILE;
@@ -119,56 +123,33 @@ async function bakeMap(map, theme) {
   // A sub-rect of a rim tile, drawn at the same offset inside the destination cell.
   const part = (t, ox, oy, w, h, dx, dy) =>
     g.drawImage(sheets.cliffs, t[0] * TILE + ox, t[1] * TILE + oy, w, h, dx * TILE + ox, dy * TILE + oy, w, h);
-  // A run tile with directional end caps; a 1-wide run composites both cap
-  // halves, since the sheet ships no single both-ends tile.
-  const capped = (set, isStart, isEnd, startKey, endKey, x, y) => {
-    if (isStart && isEnd) {
-      part(set[startKey], 0, 0, 24, TILE, x, y);
-      part(set[endKey], 24, 0, 24, TILE, x, y);
-    } else {
-      tile(set[isStart ? startKey : isEnd ? endKey : 'm'], x, y);
-    }
-  };
 
+  // GROUND: floor cells only — fill + the dark ragged rim on chasm-facing
+  // edges (the lip you see from above). The vertical rock itself is real
+  // geometry now, not paint, so void cells stay transparent.
   for (let y = 0; y < rows; y++) {
     for (let x = 0; x < cols; x++) {
-      if (isFloor(x, y)) {
-        tile(theme.fill[hash2(x, y) % theme.fill.length], x, y);
-        const vN = isVoid(x, y - 1), vS = isVoid(x, y + 1), vW = isVoid(x - 1, y), vE = isVoid(x + 1, y);
-        if (vN) part(theme.rim.n, 0, 0, TILE, 24, x, y);
-        if (vS) part(theme.rim.s, 0, 24, TILE, 24, x, y);
-        if (vW) part(theme.rim.w, 0, 0, 24, TILE, x, y);
-        if (vE) part(theme.rim.e, 24, 0, 24, TILE, x, y);
-        if (vN && vW) part(theme.rim.nw, 0, 0, 24, 24, x, y);
-        if (vN && vE) part(theme.rim.ne, 24, 0, 24, 24, x, y);
-        if (vS && vW) part(theme.rim.sw, 0, 24, 24, 24, x, y);
-        if (vS && vE) part(theme.rim.se, 24, 24, 24, 24, x, y);
-        // Diagonal-only void: a small rubble nub keeps the rim's corner honest.
-        if (!vN && !vW && isVoid(x - 1, y - 1)) part(theme.rim.nw, 0, 0, 14, 14, x, y);
-        if (!vN && !vE && isVoid(x + 1, y - 1)) part(theme.rim.ne, 34, 0, 14, 14, x, y);
-        if (!vS && !vW && isVoid(x - 1, y + 1)) part(theme.rim.sw, 0, 34, 14, 14, x, y);
-        if (!vS && !vE && isVoid(x + 1, y + 1)) part(theme.rim.se, 34, 34, 14, 14, x, y);
-        continue;
-      }
-      // Void cell — base darkness, then whatever the neighboring floor casts here.
-      g.fillStyle = voidColor;
-      g.fillRect(x * TILE, y * TILE, TILE, TILE);
-      if (isFaceTop(x, y)) {
-        capped(theme.faceTop, !isFaceTop(x - 1, y), !isFaceTop(x + 1, y), 'l', 'r', x, y);
-      } else if (isFaceBot(x, y)) {
-        capped(theme.faceBot, !isFaceBot(x - 1, y), !isFaceBot(x + 1, y), 'l', 'r', x, y);
-      } else if (isFloor(x, y + 1)) {
-        const bandAt = (bx) => isVoid(bx, y) && isFloor(bx, y + 1) && !isFace(bx, y);
-        capped(theme.bandN, !bandAt(x - 1), !bandAt(x + 1), 'w', 'e', x, y);
-      } else if (isFloor(x + 1, y) || isFace(x + 1, y)) {
-        tile(theme.bandW[y % theme.bandW.length], x, y);
-      } else if (isFloor(x - 1, y) || isFace(x - 1, y)) {
-        tile(theme.bandE[y % theme.bandE.length], x, y);
-      }
+      if (!isFloor(x, y)) continue;
+      tile(theme.fill[hash2(x, y) % theme.fill.length], x, y);
+      const vN = isVoid(x, y - 1), vS = isVoid(x, y + 1), vW = isVoid(x - 1, y), vE = isVoid(x + 1, y);
+      if (vN) part(theme.rim.n, 0, 0, TILE, 24, x, y);
+      if (vS) part(theme.rim.s, 0, 24, TILE, 24, x, y);
+      if (vW) part(theme.rim.w, 0, 0, 24, TILE, x, y);
+      if (vE) part(theme.rim.e, 24, 0, 24, TILE, x, y);
+      if (vN && vW) part(theme.rim.nw, 0, 0, 24, 24, x, y);
+      if (vN && vE) part(theme.rim.ne, 24, 0, 24, 24, x, y);
+      if (vS && vW) part(theme.rim.sw, 0, 24, 24, 24, x, y);
+      if (vS && vE) part(theme.rim.se, 24, 24, 24, 24, x, y);
+      // Diagonal-only void: a small rubble nub keeps the rim's corner honest.
+      if (!vN && !vW && isVoid(x - 1, y - 1)) part(theme.rim.nw, 0, 0, 14, 14, x, y);
+      if (!vN && !vE && isVoid(x + 1, y - 1)) part(theme.rim.ne, 34, 0, 14, 14, x, y);
+      if (!vS && !vW && isVoid(x - 1, y + 1)) part(theme.rim.sw, 0, 34, 14, 14, x, y);
+      if (!vS && !vE && isVoid(x + 1, y + 1)) part(theme.rim.se, 34, 34, 14, 14, x, y);
     }
   }
 
-  // Baked props (permanent dressing; collectible ores stay DOM — see openDelve).
+  // Flat floor decals that belong ON the plane (holes and track). Boulders,
+  // stalagmites and the cart are upright standees now — see openDelve.
   const decal = (name, dx, dy) => {
     const d = DECALS[name];
     g.drawImage(sheets[d.sheet], d.x, d.y, d.w, d.h, dx, dy, d.w, d.h);
@@ -177,21 +158,70 @@ async function bakeMap(map, theme) {
     for (let x = 0; x < cols; x++) {
       const ch = at(x, y);
       if (ch === '=') decal('railH', x * TILE, y * TILE - 4);
+      else if (ch === 's') decal(theme.grayProps ? 'stairsDownGray' : 'stairsDown', (x - 1) * TILE, (y - 1) * TILE);
     }
   }
+
+  // WALL TEXTURES — cut once from the kit's face tiles. South walls read the
+  // art upright; side walls use it rotated so the cliff-top edge lies along
+  // the plane boundary (E mirror-flipped for the opposite fold).
+  const texCv = (w, h, draw) => {
+    const c = document.createElement('canvas');
+    c.width = w; c.height = h;
+    const cg = c.getContext('2d');
+    cg.imageSmoothingEnabled = false;
+    draw(cg);
+    return c;
+  };
+  const sheetTile = (cg, t, dx, dy) => cg.drawImage(sheets.cliffs, t[0] * TILE, t[1] * TILE, TILE, TILE, dx, dy, TILE, TILE);
+  const faceS = texCv(TILE, DEPTH, (cg) => { sheetTile(cg, theme.faceTop.m, 0, 0); sheetTile(cg, theme.faceBot.m, 0, TILE); });
+  const faceSideE = texCv(DEPTH, TILE, (cg) => { cg.translate(0, TILE); cg.rotate(-Math.PI / 2); cg.drawImage(faceS, 0, 0); });
+  const faceSideW = texCv(DEPTH, TILE, (cg) => { cg.translate(DEPTH, 0); cg.scale(-1, 1); cg.drawImage(faceSideE, 0, 0); });
+  const blockSide = texCv(TILE, BLOCK_H, (cg) => sheetTile(cg, theme.faceTop.m, 0, 0));
+  const blockSideE = texCv(BLOCK_H, TILE, (cg) => { cg.translate(0, TILE); cg.rotate(-Math.PI / 2); cg.drawImage(blockSide, 0, 0); });
+  const blockSideW = texCv(BLOCK_H, TILE, (cg) => { cg.translate(BLOCK_H, 0); cg.scale(-1, 1); cg.drawImage(blockSideE, 0, 0); });
+  const blockTop = texCv(TILE, TILE, (cg) => {
+    sheetTile(cg, theme.fill[0], 0, 0);
+    const strip = (t, ox, oy, w, h) => cg.drawImage(sheets.cliffs, t[0] * TILE + ox, t[1] * TILE + oy, w, h, ox, oy, w, h);
+    strip(theme.rim.n, 0, 0, TILE, 24); strip(theme.rim.s, 0, 24, TILE, 24);
+    strip(theme.rim.w, 0, 0, 24, TILE); strip(theme.rim.e, 24, 0, 24, TILE);
+    strip(theme.rim.nw, 0, 0, 24, 24); strip(theme.rim.ne, 24, 0, 24, 24);
+    strip(theme.rim.sw, 0, 24, 24, 24); strip(theme.rim.se, 24, 24, 24, 24);
+  });
+
+  // GEOMETRY RUNS — maximal wall segments along floor/chasm boundaries.
+  // kind 's': wall faces south (+y), hangs off a plateau's south edge.
+  // kind 'e': wall faces east (+x), boundary at the void cell's west edge.
+  // kind 'w': wall faces west (−x), boundary at the void cell's east edge.
+  const faces = [];
   for (let y = 0; y < rows; y++) {
-    for (let x = 0; x < cols; x++) {
-      const ch = at(x, y);
-      if (ch === 's') decal(theme.grayProps ? 'stairsDownGray' : 'stairsDown', (x - 1) * TILE, (y - 1) * TILE);
-      else if (ch === 'r') decal(theme.grayProps ? 'boulderGray' : 'boulder', x * TILE, y * TILE);
-      else if (ch === 'm') decal('cart', x * TILE + 24 - DECALS.cart.w / 2, (y + 1) * TILE - DECALS.cart.h + 6);
-      else if (ch === 't' && map.theme === 'mine') {
-        // Stalagmites — the tall one only where the cell above is chasm (it
-        // reaches into that cell; over walkable ground it would occlude feet).
-        if (isVoid(x, y - 1) && hash2(x, y) % 2) decal('stalagTall', x * TILE, (y - 1) * TILE);
-        else decal('stalag', x * TILE, y * TILE);
-      }
+    for (let x = 0; x < cols;) {
+      if (isVoid(x, y) && isFloor(x, y - 1)) {
+        const x0 = x;
+        while (x < cols && isVoid(x, y) && isFloor(x, y - 1)) x++;
+        faces.push({ kind: 's', x: x0, y, len: x - x0 });
+      } else x++;
     }
+  }
+  for (let x = 0; x < cols; x++) {
+    for (let y = 0; y < rows;) {
+      if (isVoid(x, y) && isFloor(x - 1, y)) {
+        const y0 = y;
+        while (y < rows && isVoid(x, y) && isFloor(x - 1, y)) y++;
+        faces.push({ kind: 'e', x, y: y0, len: y - y0 });
+      } else y++;
+    }
+    for (let y = 0; y < rows;) {
+      if (isVoid(x, y) && isFloor(x + 1, y)) {
+        const y0 = y;
+        while (y < rows && isVoid(x, y) && isFloor(x + 1, y)) y++;
+        faces.push({ kind: 'w', x: x + 1, y: y0, len: y - y0 });
+      } else y++;
+    }
+  }
+  const blocks = [];
+  for (let y = 0; y < rows; y++) {
+    for (let x = 0; x < cols; x++) if (at(x, y) === 'B') blocks.push({ x, y });
   }
 
   const pass = [];
@@ -199,7 +229,14 @@ async function bakeMap(map, theme) {
     pass.push([]);
     for (let x = 0; x < cols; x++) pass[y].push(!BLOCKING[at(x, y)]);
   }
-  return { url: cv.toDataURL('image/png'), pass, cols, rows, voidColor, sheets };
+  return {
+    url: cv.toDataURL('image/png'), pass, cols, rows, voidColor, sheets, faces, blocks,
+    tex: {
+      faceS: faceS.toDataURL(), faceSideE: faceSideE.toDataURL(), faceSideW: faceSideW.toDataURL(),
+      blockS: blockSide.toDataURL(), blockSideE: blockSideE.toDataURL(), blockSideW: blockSideW.toDataURL(),
+      blockTop: blockTop.toDataURL(),
+    },
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -239,9 +276,11 @@ export async function openDelve(localeId, member, hooks) {
     if (D || !guildUp || !guildUp.classList.contains('active')) return false;
 
     const host = document.getElementById('delveScreen');
+    const W = baked.cols * TILE, H = baked.rows * TILE;
+    host.style.setProperty('--dvtilt', TILT + 'deg');
     host.innerHTML = `
     <div class="delve-stage" style="background:${baked.voidColor}">
-      <div class="delve-field" style="width:${baked.cols * TILE}px;height:${baked.rows * TILE}px;background-image:url(${baked.url})"></div>
+      <div class="delve-field" style="width:${W}px;height:${H}px;margin-left:${-W / 2}px;margin-top:${-H / 2}px;background-image:url(${baked.url})"></div>
     </div>
     <div class="delve-hud">
       <button class="dv-leave" onclick="__delve.leave()">⬅ Leave</button>
@@ -255,21 +294,25 @@ export async function openDelve(localeId, member, hooks) {
       map, theme, hooks, member, gfx, field, host,
       pass: baked.pass, cols: baked.cols, rows: baked.rows,
       keys: {}, joy: null, joyEl: null,
-      cam: { x: 0, y: 0, snap: true }, zoom: window.innerHeight < 520 ? 1.5 : 2,
+      cam: { x: 0, y: 0, snap: true }, zoom: window.innerHeight < 520 ? 1.4 : 1.8,
       last: 0, raf: 0, ended: false, fighting: false, grace: false,
       haul: { kills: {}, gold: 0, mats: {}, field: 0, bouts: 0 },
       player: null, creatures: [], ores: [],
       exit: null, exitArmed: false,
     };
 
+    // --- the 3D geometry: cliff walls off every edge, raised blocks as boxes ---
+    for (const f of baked.faces) addFace(f, baked.tex);
+    for (const b of baked.blocks) addBlock(b, baked.tex);
+
     // --- the walker (a real guild member, Elements compositor) ---
     const actor = gfx.makeActor(member);
     const pWrap = document.createElement('div');
     pWrap.className = 'dv-actor dv-player';
-    pWrap.innerHTML = '<div class="dv-shadow"></div>';
+    pWrap.innerHTML = '<div class="dv-shadow"></div><div class="dv-up"></div>';
     const pcv = document.createElement('canvas');
     pcv.width = 96; pcv.height = 96;
-    pWrap.appendChild(pcv);
+    pWrap.querySelector('.dv-up').appendChild(pcv);
     field.appendChild(pWrap);
     D.player = { actor, cv: pcv, el: pWrap, x: map.entry[0], y: map.entry[1], moving: false };
 
@@ -279,8 +322,11 @@ export async function openDelve(localeId, member, hooks) {
         const ch = map.grid[y][x];
         if (ch === 's' || ch === 'w') D.exit = { x: x + 0.5, y: y + 0.5 };
         if (ch === 'w') addProp(artSprite('wagon', 'dv-wagon'), x + 0.5, y + 1, 78);
-        if (ch === 't' && map.theme === 'meadow') addProp(artSprite('tree', 'dv-tree'), x + 0.5, y + 1, 92);
-        if (ch === 'o') addOre(x, y, baked.sheets.ores);
+        else if (ch === 't' && map.theme === 'meadow') addProp(artSprite('tree', 'dv-tree'), x + 0.5, y + 1, 92);
+        else if (ch === 't') addPropCanvas('stalag', baked.sheets, x + 0.5, y + 0.97);
+        else if (ch === 'r') addPropCanvas(theme.grayProps ? 'boulderGray' : 'boulder', baked.sheets, x + 0.5, y + 0.97);
+        else if (ch === 'm') addPropCanvas('cart', baked.sheets, x + 0.5, y + 1);
+        else if (ch === 'o') addOre(x, y, baked.sheets.ores);
       }
     }
 
@@ -297,13 +343,79 @@ export async function openDelve(localeId, member, hooks) {
   }
 }
 
+/**
+ * A cliff-wall strip: positioned on the plane along its boundary run, then
+ * folded 90° off it. South walls pivot about their top edge and hang DOWN
+ * (-z); side walls pivot about the boundary edge sideways. Backface-hidden,
+ * so each wall only shows from its outward side.
+ */
+function addFace(f, tex) {
+  const el = document.createElement('div');
+  el.className = 'dv-face';
+  if (f.kind === 's') {
+    el.style.cssText = `left:${f.x * TILE}px;top:${f.y * TILE}px;width:${f.len * TILE}px;height:${DEPTH}px;` +
+      `background-image:url(${tex.faceS});transform-origin:50% 0;transform:rotateX(-90deg);` +
+      `z-index:${10 + f.y * TILE - 1};`;
+  } else if (f.kind === 'e') {
+    el.style.cssText = `left:${f.x * TILE}px;top:${f.y * TILE}px;width:${DEPTH}px;height:${f.len * TILE}px;` +
+      `background-image:url(${tex.faceSideE});transform-origin:0 50%;transform:rotateY(90deg);` +
+      `z-index:${10 + (f.y + f.len) * TILE - 1};`;
+  } else { // 'w'
+    el.style.cssText = `left:${f.x * TILE - DEPTH}px;top:${f.y * TILE}px;width:${DEPTH}px;height:${f.len * TILE}px;` +
+      `background-image:url(${tex.faceSideW});transform-origin:100% 50%;transform:rotateY(-90deg);` +
+      `z-index:${10 + (f.y + f.len) * TILE - 1};`;
+  }
+  D.field.appendChild(el);
+}
+
+/** A raised block: a lifted top plus three visible sides (north faces away). */
+function addBlock(b, tex) {
+  const L = b.x * TILE, T = b.y * TILE;
+  const add = (css) => {
+    const el = document.createElement('div');
+    el.className = 'dv-face';
+    el.style.cssText = css;
+    D.field.appendChild(el);
+  };
+  const top = document.createElement('div');
+  top.className = 'dv-block-top';
+  top.style.cssText = `left:${L}px;top:${T}px;width:${TILE}px;height:${TILE}px;` +
+    `background-image:url(${tex.blockTop});transform:translateZ(${BLOCK_H}px);z-index:${10 + (b.y + 1) * TILE + 20};`;
+  D.field.appendChild(top);
+  add(`left:${L}px;top:${T + TILE}px;width:${TILE}px;height:${BLOCK_H}px;background-image:url(${tex.blockS});` +
+    `transform-origin:50% 0;transform:translateZ(${BLOCK_H}px) rotateX(-90deg);z-index:${10 + (b.y + 1) * TILE + 10};`);
+  add(`left:${L + TILE}px;top:${T}px;width:${BLOCK_H}px;height:${TILE}px;background-image:url(${tex.blockSideE});` +
+    `transform-origin:0 50%;transform:translateZ(${BLOCK_H}px) rotateY(90deg);z-index:${10 + (b.y + 1) * TILE + 10};`);
+  add(`left:${L - BLOCK_H}px;top:${T}px;width:${BLOCK_H}px;height:${TILE}px;background-image:url(${tex.blockSideW});` +
+    `transform-origin:100% 50%;transform:translateZ(${BLOCK_H}px) rotateY(-90deg);z-index:${10 + (b.y + 1) * TILE + 10};`);
+}
+
 function addProp(html, x, y, w) {
   const el = document.createElement('div');
   el.className = 'dv-prop';
-  el.innerHTML = html;
+  el.innerHTML = `<div class="dv-shadow"></div><div class="dv-up">${html}</div>`;
   el.style.left = (x * TILE) + 'px';
   el.style.top = (y * TILE) + 'px';
   el.style.width = w + 'px';
+  el.style.zIndex = 10 + Math.round(y * TILE);
+  D.field.appendChild(el);
+}
+
+/** An upright standee cut from a prop sheet (boulders, stalagmites, the cart). */
+function addPropCanvas(decalName, sheets, x, y) {
+  const d = DECALS[decalName];
+  const cv = document.createElement('canvas');
+  cv.width = d.w; cv.height = d.h;
+  const g = cv.getContext('2d');
+  g.imageSmoothingEnabled = false;
+  g.drawImage(sheets[d.sheet], d.x, d.y, d.w, d.h, 0, 0, d.w, d.h);
+  const el = document.createElement('div');
+  el.className = 'dv-prop';
+  el.innerHTML = '<div class="dv-shadow"></div><div class="dv-up"></div>';
+  el.querySelector('.dv-up').appendChild(cv);
+  el.style.left = (x * TILE) + 'px';
+  el.style.top = (y * TILE) + 'px';
+  el.style.width = d.w + 'px';
   el.style.zIndex = 10 + Math.round(y * TILE);
   D.field.appendChild(el);
 }
@@ -319,10 +431,11 @@ function addOre(x, y, oresImg) {
   g.drawImage(oresImg, d.x, d.y, d.w, d.h, 0, 0, d.w, d.h);
   const el = document.createElement('div');
   el.className = 'dv-ore';
-  el.style.left = (x * TILE) + 'px';
-  el.style.top = (y * TILE) + 'px';
-  el.style.zIndex = 10 + Math.round((y + 1) * TILE) - 24;
-  el.appendChild(cv);
+  el.innerHTML = '<div class="dv-shadow"></div><div class="dv-up"></div>';
+  el.querySelector('.dv-up').appendChild(cv);
+  el.style.left = ((x + 0.5) * TILE) + 'px';
+  el.style.top = ((y + 1) * TILE - 2) + 'px';
+  el.style.zIndex = 10 + Math.round((y + 1) * TILE) - 6;
   D.field.appendChild(el);
   D.ores.push({ x, y, kind, el });
 }
@@ -331,11 +444,11 @@ function spawnCreature(prey, img, x, y) {
   const fw = Math.floor(img.naturalWidth / 3), fh = Math.floor(img.naturalHeight / 4);
   const el = document.createElement('div');
   el.className = 'dv-actor dv-creature';
-  el.innerHTML = '<div class="dv-shadow"></div>';
+  el.innerHTML = '<div class="dv-shadow"></div><div class="dv-up"></div>';
   const cv = document.createElement('canvas');
   cv.width = fw; cv.height = fh;
+  el.querySelector('.dv-up').appendChild(cv);
   el.style.width = fw + 'px';
-  el.appendChild(cv);
   D.field.appendChild(el);
   D.creatures.push({
     prey, img, fw, fh, cv, el, x, y, home: { x, y },
@@ -570,10 +683,6 @@ function drawCreature(c, now) {
 
 function render(now) {
   const p = D.player;
-  // Layout reads FIRST (rAF starts with clean layout; reading after the style
-  // writes below would force a synchronous reflow every frame).
-  const stage = D.field.parentElement;
-  const vw = stage.clientWidth, vh = stage.clientHeight, Z = D.zoom;
   // Player — compositor actor, canvas anchored at the feet.
   D.gfx.tickActor(p.actor, now);
   D.gfx.renderActor(p.cv, p.actor);
@@ -586,20 +695,20 @@ function render(now) {
     c.el.style.top = (c.y * TILE) + 'px';
     c.el.style.zIndex = 10 + Math.round(c.y * TILE);
   }
-  // Camera follows the walker; the world never shows past its own edge unless
-  // the map is smaller than the viewport (then it centers).
-  const worldW = D.cols * TILE * Z, worldH = D.rows * TILE * Z;
-  let tx = vw / 2 - p.x * TILE * Z;
-  let ty = vh / 2 - p.y * TILE * Z;
-  tx = worldW <= vw ? (vw - worldW) / 2 : Math.min(0, Math.max(vw - worldW, tx));
-  ty = worldH <= vh ? (vh - worldH) / 2 : Math.min(0, Math.max(vh - worldH, ty));
+  // Camera: the innermost translate slides the PLANE (in plane px) so the
+  // walker sits at its center, which the rotateX·translateZ·scale chain then
+  // presents at the stage's perspective focus — the ranch's applyCamera
+  // recipe, made to follow. Lerped for a drifting-crane feel.
+  const tx = D.cols * TILE / 2 - p.x * TILE;
+  const ty = D.rows * TILE / 2 - p.y * TILE;
   if (D.cam.snap) { D.cam.x = tx; D.cam.y = ty; D.cam.snap = false; }
   else {
     const k = Math.min(1, 8 * ((now - D.last) / 1000 || 0.016));
     D.cam.x += (tx - D.cam.x) * k;
     D.cam.y += (ty - D.cam.y) * k;
   }
-  D.field.style.transform = `translate3d(${D.cam.x}px,${D.cam.y}px,0) scale(${Z})`;
+  D.field.style.transform =
+    `rotateX(${TILT}deg) translateZ(-120px) scale(${D.zoom}) translate(${D.cam.x}px,${D.cam.y}px)`;
 }
 
 function tick(now) {
