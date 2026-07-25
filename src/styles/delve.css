@@ -60,16 +60,19 @@
   transform-style: preserve-3d;
   pointer-events: none;
 }
+/* --footpad = the sprite art's transparent rows below its feet (measured per
+   sheet at spawn); the translateY slides the cutout down its own upright axis
+   so the visible feet — not the frame edge — sit on the ground point. */
 .dv-up {
-  transform: rotateX(calc(-1 * var(--dvtilt)));
+  transform: rotateX(calc(-1 * var(--dvtilt))) translateY(var(--footpad, 0px));
   transform-origin: 50% 100%;
 }
 .dv-up canvas { display: block; image-rendering: pixelated; }
 .dv-player .dv-up canvas { width: 79px; height: 79px; }
 .dv-prop .dv-up .px-art { display: block; width: 100%; }
 .dv-shadow {
-  position: absolute; left: 50%; bottom: -7%;
-  width: 60%; height: 16%;
+  position: absolute; left: 50%; bottom: -6px;
+  width: 56%; height: 12px;
   transform: translateX(-50%);
   border-radius: 50%;
   background: radial-gradient(ellipse, rgba(0,0,0,.42), transparent 68%);

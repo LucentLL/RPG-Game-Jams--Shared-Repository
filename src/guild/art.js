@@ -50,10 +50,11 @@ const SHEETS = {
 /** Named crops: { sheet, x, y, w, h } in sheet pixels. Crops tagged `MEASURE`
  *  are provisional and refined against the real sheet with the alpha-box probe. */
 export const ART = {
-  tree:      { sheet: 'tree_3x', x: 96, y: 0, w: 96, h: 144 },   // the full Elements tree
+  tree:      { sheet: 'tree_3x', x: 96, y: 0, w: 96, h: 144 },   // canopy crop (campus rows)
+  treeTall:  { sheet: 'tree_3x', x: 96, y: 0, w: 96, h: 240 },   // the FULL tree, trunk included (delve standees)
   treeSmall: { sheet: 'tree_3x', x: 0, y: 0, w: 96, h: 120 },    // its rounder sibling
   stall:     { sheet: 'stall_3x', x: 3, y: 156, w: 138, h: 156 },// red-striped market stall, table + legs
-  wagon:     { sheet: 'wagon_1x', x: 4, y: 0, w: 92, h: 88 },    // covered wagon, front-quarter view
+  wagon:     { sheet: 'wagon_1x', x: 4, y: 26, w: 94, h: 66 },   // covered wagon side view (tight box — the sheet's barrel row sits above it)
   well:      { sheet: 'well_3x', x: 192, y: 6, w: 189, h: 254 }, // the roofed village well
   bookshelf: { sheet: 'bookshelf_3x', x: 147, y: 9, w: 138, h: 150 }, // a full library shelf
   anvil:     { sheet: 'smithy_3x', x: 1380, y: 744, w: 75, h: 63 },   // anvil on its stump

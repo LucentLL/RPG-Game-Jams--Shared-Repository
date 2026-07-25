@@ -86,47 +86,34 @@ const hash2 = (x, y) => {
   return (h ^ (h >>> 16)) >>> 0;
 };
 
-/**
- * Bake a delve map's ground plane to a data-URI, derive passability, cut the
- * wall textures, and extract the 3D geometry the plane needs: cliff-face RUNS
- * along every floor/chasm boundary (south-facing walls fold down off south
- * edges; east/west walls off the sides) and raised-block cells. Chasm cells
- * stay TRANSPARENT — the stage's dark background is the bottomless drop.
- */
-async function bakeMap(map, theme) {
-  const sheets = {
-    cliffs: await loadImg(TILES_BASE + 'cliffs.png'),
-    stairs: await loadImg(TILES_BASE + 'stairs.png'),
-    ores: await loadImg(TILES_BASE + 'ores.png'),
-    rocks: await loadImg(TILES_BASE + 'rocks.png'),
-    rails: await loadImg(TILES_BASE + 'rails.png'),
-  };
-  const rows = map.grid.length, cols = map.grid[0].length;
-  const at = (x, y) => (x < 0 || y < 0 || x >= cols || y >= rows) ? '#' : map.grid[y][x];
-  const isFloor = (x, y) => at(x, y) !== '#';
-  const isVoid = (x, y) => at(x, y) === '#';
+/** Bounds-safe accessors over an ASCII grid (outside counts as chasm). */
+function gridFns(grid) {
+  const rows = grid.length, cols = grid[0].length;
+  const at = (x, y) => (x < 0 || y < 0 || x >= cols || y >= rows) ? '#' : grid[y][x];
+  return { rows, cols, at, isFloor: (x, y) => at(x, y) !== '#', isVoid: (x, y) => at(x, y) === '#' };
+}
 
-  const cv = document.createElement('canvas');
-  cv.width = cols * TILE; cv.height = rows * TILE;
-  const g = cv.getContext('2d');
-  g.imageSmoothingEnabled = false;
-
-  // Void color, sampled off the cliff sheet's own chasm holes so it always matches.
+/** The chasm color, sampled off the cliff sheet's own holes so it always matches. */
+function sampleVoidColor(cliffs, theme) {
   const probe = document.createElement('canvas');
   probe.width = 1; probe.height = 1;
   const pg = probe.getContext('2d', { willReadFrequently: true });
-  pg.drawImage(sheets.cliffs, theme.voidSample[0], theme.voidSample[1], 1, 1, 0, 0, 1, 1);
+  pg.drawImage(cliffs, theme.voidSample[0], theme.voidSample[1], 1, 1, 0, 0, 1, 1);
   const px = pg.getImageData(0, 0, 1, 1).data;
-  const voidColor = `rgb(${px[0]},${px[1]},${px[2]})`;
+  return `rgb(${px[0]},${px[1]},${px[2]})`;
+}
 
-  const tile = (t, dx, dy) => g.drawImage(sheets.cliffs, t[0] * TILE, t[1] * TILE, TILE, TILE, dx * TILE, dy * TILE, TILE, TILE);
+/**
+ * Paint the walkable ground onto ctx: fill per floor cell + the dark ragged
+ * rim on chasm-facing edges (the lip you see from above). The vertical rock
+ * is real geometry (attachTerrain), so void cells stay TRANSPARENT.
+ */
+function paintGround(g, grid, theme, cliffs) {
+  const { rows, cols, isFloor, isVoid } = gridFns(grid);
+  const tile = (t, dx, dy) => g.drawImage(cliffs, t[0] * TILE, t[1] * TILE, TILE, TILE, dx * TILE, dy * TILE, TILE, TILE);
   // A sub-rect of a rim tile, drawn at the same offset inside the destination cell.
   const part = (t, ox, oy, w, h, dx, dy) =>
-    g.drawImage(sheets.cliffs, t[0] * TILE + ox, t[1] * TILE + oy, w, h, dx * TILE + ox, dy * TILE + oy, w, h);
-
-  // GROUND: floor cells only — fill + the dark ragged rim on chasm-facing
-  // edges (the lip you see from above). The vertical rock itself is real
-  // geometry now, not paint, so void cells stay transparent.
+    g.drawImage(cliffs, t[0] * TILE + ox, t[1] * TILE + oy, w, h, dx * TILE + ox, dy * TILE + oy, w, h);
   for (let y = 0; y < rows; y++) {
     for (let x = 0; x < cols; x++) {
       if (!isFloor(x, y)) continue;
@@ -147,24 +134,14 @@ async function bakeMap(map, theme) {
       if (!vS && !vE && isVoid(x + 1, y + 1)) part(theme.rim.se, 34, 34, 14, 14, x, y);
     }
   }
+}
 
-  // Flat floor decals that belong ON the plane (holes and track). Boulders,
-  // stalagmites and the cart are upright standees now — see openDelve.
-  const decal = (name, dx, dy) => {
-    const d = DECALS[name];
-    g.drawImage(sheets[d.sheet], d.x, d.y, d.w, d.h, dx, dy, d.w, d.h);
-  };
-  for (let y = 0; y < rows; y++) {
-    for (let x = 0; x < cols; x++) {
-      const ch = at(x, y);
-      if (ch === '=') decal('railH', x * TILE, y * TILE - 4);
-      else if (ch === 's') decal(theme.grayProps ? 'stairsDownGray' : 'stairsDown', (x - 1) * TILE, (y - 1) * TILE);
-    }
-  }
-
-  // WALL TEXTURES — cut once from the kit's face tiles. South walls read the
-  // art upright; side walls use it rotated so the cliff-top edge lies along
-  // the plane boundary (E mirror-flipped for the opposite fold).
+/**
+ * Cut the wall textures once from the kit's face tiles. South walls read the
+ * art upright; side walls use it rotated so the cliff-top edge lies along the
+ * plane boundary (W mirror-flipped for the opposite fold).
+ */
+function cutWallTex(cliffs, theme) {
   const texCv = (w, h, draw) => {
     const c = document.createElement('canvas');
     c.width = w; c.height = h;
@@ -173,7 +150,7 @@ async function bakeMap(map, theme) {
     draw(cg);
     return c;
   };
-  const sheetTile = (cg, t, dx, dy) => cg.drawImage(sheets.cliffs, t[0] * TILE, t[1] * TILE, TILE, TILE, dx, dy, TILE, TILE);
+  const sheetTile = (cg, t, dx, dy) => cg.drawImage(cliffs, t[0] * TILE, t[1] * TILE, TILE, TILE, dx, dy, TILE, TILE);
   const faceS = texCv(TILE, DEPTH, (cg) => { sheetTile(cg, theme.faceTop.m, 0, 0); sheetTile(cg, theme.faceBot.m, 0, TILE); });
   const faceSideE = texCv(DEPTH, TILE, (cg) => { cg.translate(0, TILE); cg.rotate(-Math.PI / 2); cg.drawImage(faceS, 0, 0); });
   const faceSideW = texCv(DEPTH, TILE, (cg) => { cg.translate(DEPTH, 0); cg.scale(-1, 1); cg.drawImage(faceSideE, 0, 0); });
@@ -182,19 +159,31 @@ async function bakeMap(map, theme) {
   const blockSideW = texCv(BLOCK_H, TILE, (cg) => { cg.translate(BLOCK_H, 0); cg.scale(-1, 1); cg.drawImage(blockSideE, 0, 0); });
   const blockTop = texCv(TILE, TILE, (cg) => {
     sheetTile(cg, theme.fill[0], 0, 0);
-    const strip = (t, ox, oy, w, h) => cg.drawImage(sheets.cliffs, t[0] * TILE + ox, t[1] * TILE + oy, w, h, ox, oy, w, h);
+    const strip = (t, ox, oy, w, h) => cg.drawImage(cliffs, t[0] * TILE + ox, t[1] * TILE + oy, w, h, ox, oy, w, h);
     strip(theme.rim.n, 0, 0, TILE, 24); strip(theme.rim.s, 0, 24, TILE, 24);
     strip(theme.rim.w, 0, 0, 24, TILE); strip(theme.rim.e, 24, 0, 24, TILE);
     strip(theme.rim.nw, 0, 0, 24, 24); strip(theme.rim.ne, 24, 0, 24, 24);
     strip(theme.rim.sw, 0, 24, 24, 24); strip(theme.rim.se, 24, 24, 24, 24);
   });
+  return {
+    faceS: faceS.toDataURL(), faceSideE: faceSideE.toDataURL(), faceSideW: faceSideW.toDataURL(),
+    blockS: blockSide.toDataURL(), blockSideE: blockSideE.toDataURL(), blockSideW: blockSideW.toDataURL(),
+    blockTop: blockTop.toDataURL(),
+  };
+}
 
-  // GEOMETRY RUNS — maximal wall segments along floor/chasm boundaries.
-  // kind 's': wall faces south (+y), hangs off a plateau's south edge.
-  // kind 'e': wall faces east (+x), boundary at the void cell's west edge.
-  // kind 'w': wall faces west (−x), boundary at the void cell's east edge.
+/**
+ * Extract maximal wall runs along floor/chasm boundaries, INCLUDING the
+ * grid's outer boundary (the virtual outside is chasm — a full-bleed estate
+ * grows rock sides at its rim).
+ * kind 's': wall faces south (+y), hangs off a plateau's south edge.
+ * kind 'e': wall faces east (+x), boundary at the void cell's west edge.
+ * kind 'w': wall faces west (−x), boundary at the void cell's east edge.
+ */
+function extractGeometry(grid) {
+  const { rows, cols, at, isFloor, isVoid } = gridFns(grid);
   const faces = [];
-  for (let y = 0; y < rows; y++) {
+  for (let y = 0; y <= rows; y++) {
     for (let x = 0; x < cols;) {
       if (isVoid(x, y) && isFloor(x, y - 1)) {
         const x0 = x;
@@ -203,7 +192,7 @@ async function bakeMap(map, theme) {
       } else x++;
     }
   }
-  for (let x = 0; x < cols; x++) {
+  for (let x = -1; x <= cols; x++) {
     for (let y = 0; y < rows;) {
       if (isVoid(x, y) && isFloor(x - 1, y)) {
         const y0 = y;
@@ -223,6 +212,41 @@ async function bakeMap(map, theme) {
   for (let y = 0; y < rows; y++) {
     for (let x = 0; x < cols; x++) if (at(x, y) === 'B') blocks.push({ x, y });
   }
+  return { faces, blocks };
+}
+
+/**
+ * Bake a delve map: ground plane data-URI, passability, wall textures and
+ * geometry, plus the delve's flat floor decals (stair mouths, rails).
+ */
+async function bakeMap(map, theme) {
+  const sheets = {
+    cliffs: await loadImg(TILES_BASE + 'cliffs.png'),
+    stairs: await loadImg(TILES_BASE + 'stairs.png'),
+    ores: await loadImg(TILES_BASE + 'ores.png'),
+    rocks: await loadImg(TILES_BASE + 'rocks.png'),
+    rails: await loadImg(TILES_BASE + 'rails.png'),
+  };
+  const { rows, cols, at } = gridFns(map.grid);
+  const cv = document.createElement('canvas');
+  cv.width = cols * TILE; cv.height = rows * TILE;
+  const g = cv.getContext('2d');
+  g.imageSmoothingEnabled = false;
+  paintGround(g, map.grid, theme, sheets.cliffs);
+
+  // Flat floor decals that belong ON the plane (holes and track). Boulders,
+  // stalagmites and the cart are upright standees — see openDelve.
+  const decal = (name, dx, dy) => {
+    const d = DECALS[name];
+    g.drawImage(sheets[d.sheet], d.x, d.y, d.w, d.h, dx, dy, d.w, d.h);
+  };
+  for (let y = 0; y < rows; y++) {
+    for (let x = 0; x < cols; x++) {
+      const ch = at(x, y);
+      if (ch === '=') decal('railH', x * TILE, y * TILE - 4);
+      else if (ch === 's') decal(theme.grayProps ? 'stairsDownGray' : 'stairsDown', (x - 1) * TILE, (y - 1) * TILE);
+    }
+  }
 
   const pass = [];
   for (let y = 0; y < rows; y++) {
@@ -230,12 +254,33 @@ async function bakeMap(map, theme) {
     for (let x = 0; x < cols; x++) pass[y].push(!BLOCKING[at(x, y)]);
   }
   return {
-    url: cv.toDataURL('image/png'), pass, cols, rows, voidColor, sheets, faces, blocks,
-    tex: {
-      faceS: faceS.toDataURL(), faceSideE: faceSideE.toDataURL(), faceSideW: faceSideW.toDataURL(),
-      blockS: blockSide.toDataURL(), blockSideE: blockSideE.toDataURL(), blockSideW: blockSideW.toDataURL(),
-      blockTop: blockTop.toDataURL(),
-    },
+    url: cv.toDataURL('image/png'), pass, cols, rows, sheets,
+    voidColor: sampleVoidColor(sheets.cliffs, theme),
+    tex: cutWallTex(sheets.cliffs, theme),
+    ...extractGeometry(map.grid),
+  };
+}
+
+/**
+ * Bake a bare estate plane for OTHER scenes (the ranch campus): zcliffs
+ * ground + rim + wall geometry for an arbitrary grid, meadow palette. The
+ * caller may draw its own landmarks onto `canvas` (ponds, paths) before
+ * reading it out, then hand faces/blocks/tex to attachTerrain.
+ */
+export async function bakeEstate(grid, themeName = 'meadow') {
+  const cliffs = await loadImg(TILES_BASE + 'cliffs.png');
+  const theme = THEMES[themeName];
+  const { rows, cols } = gridFns(grid);
+  const canvas = document.createElement('canvas');
+  canvas.width = cols * TILE; canvas.height = rows * TILE;
+  const g = canvas.getContext('2d');
+  g.imageSmoothingEnabled = false;
+  paintGround(g, grid, theme, cliffs);
+  return {
+    canvas, cols, rows,
+    voidColor: sampleVoidColor(cliffs, theme),
+    tex: cutWallTex(cliffs, theme),
+    ...extractGeometry(grid),
   };
 }
 
@@ -302,8 +347,7 @@ export async function openDelve(localeId, member, hooks) {
     };
 
     // --- the 3D geometry: cliff walls off every edge, raised blocks as boxes ---
-    for (const f of baked.faces) addFace(f, baked.tex);
-    for (const b of baked.blocks) addBlock(b, baked.tex);
+    attachTerrain(field, baked, { zMode: 'y' });
 
     // --- the walker (a real guild member, Elements compositor) ---
     const actor = gfx.makeActor(member);
@@ -313,6 +357,8 @@ export async function openDelve(localeId, member, hooks) {
     const pcv = document.createElement('canvas');
     pcv.width = 96; pcv.height = 96;
     pWrap.querySelector('.dv-up').appendChild(pcv);
+    // The compositor leaves ~3 source px under the feet; ground the cutout.
+    pWrap.style.setProperty('--footpad', '5px');
     field.appendChild(pWrap);
     D.player = { actor, cv: pcv, el: pWrap, x: map.entry[0], y: map.entry[1], moving: false };
 
@@ -321,8 +367,8 @@ export async function openDelve(localeId, member, hooks) {
       for (let x = 0; x < D.cols; x++) {
         const ch = map.grid[y][x];
         if (ch === 's' || ch === 'w') D.exit = { x: x + 0.5, y: y + 0.5 };
-        if (ch === 'w') addProp(artSprite('wagon', 'dv-wagon'), x + 0.5, y + 1, 78);
-        else if (ch === 't' && map.theme === 'meadow') addProp(artSprite('tree', 'dv-tree'), x + 0.5, y + 1, 92);
+        if (ch === 'w') addProp(artSprite('wagon', 'dv-wagon'), x + 0.5, y + 1, 82);
+        else if (ch === 't' && map.theme === 'meadow') addProp(artSprite('treeTall', 'dv-tree'), x + 0.5, y + 1, 86);
         else if (ch === 't') addPropCanvas('stalag', baked.sheets, x + 0.5, y + 0.97);
         else if (ch === 'r') addPropCanvas(theme.grayProps ? 'boulderGray' : 'boulder', baked.sheets, x + 0.5, y + 0.97);
         else if (ch === 'm') addPropCanvas('cart', baked.sheets, x + 0.5, y + 1);
@@ -344,50 +390,55 @@ export async function openDelve(localeId, member, hooks) {
 }
 
 /**
- * A cliff-wall strip: positioned on the plane along its boundary run, then
- * folded 90° off it. South walls pivot about their top edge and hang DOWN
- * (-z); side walls pivot about the boundary edge sideways. Backface-hidden,
- * so each wall only shows from its outward side.
+ * Attach the extruded terrain (cliff walls + raised blocks) to a plane
+ * element. Positions and sizes are PERCENT of the plane, so the same
+ * geometry works on the delve's native-px field AND the ranch's responsive
+ * one. zMode 'y' interleaves walls with y-sorted standees (delve interiors);
+ * 'under' pins them below everything (estate rims, where sprites never
+ * stand outside the walls). Raised blocks lift by px (translateZ has no
+ * percent) — use them only on native-px planes like the delve's.
  */
-function addFace(f, tex) {
-  const el = document.createElement('div');
-  el.className = 'dv-face';
-  if (f.kind === 's') {
-    el.style.cssText = `left:${f.x * TILE}px;top:${f.y * TILE}px;width:${f.len * TILE}px;height:${DEPTH}px;` +
-      `background-image:url(${tex.faceS});transform-origin:50% 0;transform:rotateX(-90deg);` +
-      `z-index:${10 + f.y * TILE - 1};`;
-  } else if (f.kind === 'e') {
-    el.style.cssText = `left:${f.x * TILE}px;top:${f.y * TILE}px;width:${DEPTH}px;height:${f.len * TILE}px;` +
-      `background-image:url(${tex.faceSideE});transform-origin:0 50%;transform:rotateY(90deg);` +
-      `z-index:${10 + (f.y + f.len) * TILE - 1};`;
-  } else { // 'w'
-    el.style.cssText = `left:${f.x * TILE - DEPTH}px;top:${f.y * TILE}px;width:${DEPTH}px;height:${f.len * TILE}px;` +
-      `background-image:url(${tex.faceSideW});transform-origin:100% 50%;transform:rotateY(-90deg);` +
-      `z-index:${10 + (f.y + f.len) * TILE - 1};`;
-  }
-  D.field.appendChild(el);
-}
-
-/** A raised block: a lifted top plus three visible sides (north faces away). */
-function addBlock(b, tex) {
-  const L = b.x * TILE, T = b.y * TILE;
-  const add = (css) => {
-    const el = document.createElement('div');
-    el.className = 'dv-face';
-    el.style.cssText = css;
-    D.field.appendChild(el);
+export function attachTerrain(parent, baked, opts = {}) {
+  const { cols, rows, tex } = baked;
+  const zMode = opts.zMode || 'under';
+  const dW = DEPTH / TILE; // wall drop in tile units
+  const el = (cls, css) => {
+    const d = document.createElement('div');
+    d.className = cls;
+    d.style.cssText = css;
+    parent.appendChild(d);
   };
-  const top = document.createElement('div');
-  top.className = 'dv-block-top';
-  top.style.cssText = `left:${L}px;top:${T}px;width:${TILE}px;height:${TILE}px;` +
-    `background-image:url(${tex.blockTop});transform:translateZ(${BLOCK_H}px);z-index:${10 + (b.y + 1) * TILE + 20};`;
-  D.field.appendChild(top);
-  add(`left:${L}px;top:${T + TILE}px;width:${TILE}px;height:${BLOCK_H}px;background-image:url(${tex.blockS});` +
-    `transform-origin:50% 0;transform:translateZ(${BLOCK_H}px) rotateX(-90deg);z-index:${10 + (b.y + 1) * TILE + 10};`);
-  add(`left:${L + TILE}px;top:${T}px;width:${BLOCK_H}px;height:${TILE}px;background-image:url(${tex.blockSideE});` +
-    `transform-origin:0 50%;transform:translateZ(${BLOCK_H}px) rotateY(90deg);z-index:${10 + (b.y + 1) * TILE + 10};`);
-  add(`left:${L - BLOCK_H}px;top:${T}px;width:${BLOCK_H}px;height:${TILE}px;background-image:url(${tex.blockSideW});` +
-    `transform-origin:100% 50%;transform:translateZ(${BLOCK_H}px) rotateY(-90deg);z-index:${10 + (b.y + 1) * TILE + 10};`);
+  for (const f of baked.faces) {
+    const z = zMode === 'under' ? 1 : (f.kind === 's' ? 10 + f.y * TILE - 1 : 10 + (f.y + f.len) * TILE - 1);
+    if (f.kind === 's') {
+      el('dv-face', `left:${f.x / cols * 100}%;top:${f.y / rows * 100}%;width:${f.len / cols * 100}%;height:${dW / rows * 100}%;` +
+        `background-image:url(${tex.faceS});background-size:${100 / f.len}% 100%;` +
+        `transform-origin:50% 0;transform:rotateX(-90deg);z-index:${z};`);
+    } else if (f.kind === 'e') {
+      el('dv-face', `left:${f.x / cols * 100}%;top:${f.y / rows * 100}%;width:${dW / cols * 100}%;height:${f.len / rows * 100}%;` +
+        `background-image:url(${tex.faceSideE});background-size:100% ${100 / f.len}%;` +
+        `transform-origin:0 50%;transform:rotateY(90deg);z-index:${z};`);
+    } else { // 'w'
+      el('dv-face', `left:${(f.x - dW) / cols * 100}%;top:${f.y / rows * 100}%;width:${dW / cols * 100}%;height:${f.len / rows * 100}%;` +
+        `background-image:url(${tex.faceSideW});background-size:100% ${100 / f.len}%;` +
+        `transform-origin:100% 50%;transform:rotateY(-90deg);z-index:${z};`);
+    }
+  }
+  for (const b of baked.blocks) {
+    const zTop = zMode === 'under' ? 2 : 10 + (b.y + 1) * TILE + 20;
+    const zSide = zMode === 'under' ? 1 : 10 + (b.y + 1) * TILE + 10;
+    el('dv-block-top', `left:${b.x / cols * 100}%;top:${b.y / rows * 100}%;width:${100 / cols}%;height:${100 / rows}%;` +
+      `background-image:url(${tex.blockTop});background-size:100% 100%;transform:translateZ(${BLOCK_H}px);z-index:${zTop};`);
+    el('dv-face', `left:${b.x / cols * 100}%;top:${(b.y + 1) / rows * 100}%;width:${100 / cols}%;height:${BLOCK_H / TILE / rows * 100}%;` +
+      `background-image:url(${tex.blockS});background-size:100% 100%;` +
+      `transform-origin:50% 0;transform:translateZ(${BLOCK_H}px) rotateX(-90deg);z-index:${zSide};`);
+    el('dv-face', `left:${(b.x + 1) / cols * 100}%;top:${b.y / rows * 100}%;width:${BLOCK_H / TILE / cols * 100}%;height:${100 / rows}%;` +
+      `background-image:url(${tex.blockSideE});background-size:100% 100%;` +
+      `transform-origin:0 50%;transform:translateZ(${BLOCK_H}px) rotateY(90deg);z-index:${zSide};`);
+    el('dv-face', `left:${(b.x - 1) / cols * 100}%;top:${b.y / rows * 100}%;width:${BLOCK_H / TILE / cols * 100}%;height:${100 / rows}%;` +
+      `background-image:url(${tex.blockSideW});background-size:100% 100%;` +
+      `transform-origin:100% 50%;transform:translateZ(${BLOCK_H}px) rotateY(-90deg);z-index:${zSide};`);
+  }
 }
 
 function addProp(html, x, y, w) {
@@ -440,6 +491,25 @@ function addOre(x, y, oresImg) {
   D.ores.push({ x, y, kind, el });
 }
 
+/** Transparent rows under a walk sheet's feet (front-idle frame), cached per sheet —
+ *  fed to --footpad so the sprite's soles, not its frame edge, touch the ground. */
+const _padCache = {};
+function footPadOf(art, img, fw, fh) {
+  if (_padCache[art] != null) return _padCache[art];
+  const c = document.createElement('canvas');
+  c.width = fw; c.height = fh;
+  const g = c.getContext('2d', { willReadFrequently: true });
+  g.drawImage(img, fw, 0, fw, fh, 0, 0, fw, fh);
+  const data = g.getImageData(0, 0, fw, fh).data;
+  let pad = 0;
+  outer: for (let y = fh - 1; y >= 0; y--) {
+    for (let x = 0; x < fw; x++) {
+      if (data[(y * fw + x) * 4 + 3] > 10) { pad = fh - 1 - y; break outer; }
+    }
+  }
+  return (_padCache[art] = pad);
+}
+
 function spawnCreature(prey, img, x, y) {
   const fw = Math.floor(img.naturalWidth / 3), fh = Math.floor(img.naturalHeight / 4);
   const el = document.createElement('div');
@@ -449,6 +519,7 @@ function spawnCreature(prey, img, x, y) {
   cv.width = fw; cv.height = fh;
   el.querySelector('.dv-up').appendChild(cv);
   el.style.width = fw + 'px';
+  el.style.setProperty('--footpad', footPadOf(prey.art, img, fw, fh) + 'px');
   D.field.appendChild(el);
   D.creatures.push({
     prey, img, fw, fh, cv, el, x, y, home: { x, y },
