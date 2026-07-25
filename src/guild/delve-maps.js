@@ -113,6 +113,8 @@ export const THEMES = {
       classroom: room('floors', 16, [[0, 3], [1, 3], [2, 3], [3, 3]], 'stonewall', 216),
       // red damask carpet AND gold damask wall covering, off the mansion sheet
       guildmaster: room('mansion', 48, [[12, 7], [13, 7]], 'mansion', 384),
+      // raked sand under blue-grey ashlar tiers
+      arena: room('floors', 16, [[4, 2], [5, 2], [6, 2], [7, 2]], 'stonewall', 408),
     };
   })(),
 };
@@ -265,41 +267,78 @@ export const DELVE_MAPS = {
   // The hub the Guildmaster walks. Every building stands on its own footprint
   // ('f' cells, impassable) with a '+' doorway cut into its south wall; step
   // onto that and you are inside. Its door puts you back on this spot.
-  //             0         1         2
-  //             012345678901234567890123
-  campus: {
-    id: 'campus', theme: 'meadow', name: 'The Grounds',
+  // Generated rather than drawn: each building declares its facade sprite, how
+  // wide to render it, which row its base sits on, and where its door falls
+  // across its width — the grid, the footprint it blocks and the threshold cell
+  // are derived, so a door can never drift off its own doorway. Bases are set
+  // ~13 rows apart because these facades are TALL (the cathedral is eleven
+  // tiles) and a near building would otherwise swallow the one behind it.
+  campus: (() => {
+    const W = 28, H = 46;
+    const g = Array.from({ length: H }, () => Array(W).fill('.'));
+    for (let y = 0; y < H; y++) {
+      for (let x = 0; x < W; x++) if (x < 2 || x >= W - 2 || y < 1 || y >= H - 1) g[y][x] = '#';
+    }
+    const PLAN = [
+      { to: 'library',   art: 'bldgLibrary',   name: 'Library',    x: 3,  px: 238, base: 13, frac: 0.50 },
+      { to: 'guildhall', art: 'bldgGuildhall', name: 'Great Hall', x: 11, px: 240, base: 13, frac: 0.50 },
+      { to: 'kitchen',   art: 'bldgKitchen',   name: 'Kitchen',    x: 19, px: 285, base: 13, frac: 0.45 },
+      { to: 'forge',     art: 'bldgForge',     name: 'Forge',      x: 3,  px: 285, base: 27, frac: 0.45 },
+      { to: 'classroom', art: 'bldgAcademy',   name: 'Academy',    x: 11, px: 238, base: 27, frac: 0.50 },
+      { to: 'armory',    art: 'bldgArmory',    name: 'Armory',     x: 19, px: 288, base: 27, frac: 0.27 },
+      { to: 'dormitory', art: 'bldgDormitory', name: 'Dormitory',  x: 4,  px: 267, base: 40, frac: 0.50 },
+      { to: 'arena',     art: 'bldgArena',     name: 'Arena',      x: 16, px: 228, base: 40, frac: 0.50 },
+    ];
+    const buildings = PLAN.map((b) => {
+      const w = Math.max(1, Math.round(b.px / 48));
+      for (let y = b.base - 2; y < b.base; y++) {
+        for (let x = b.x; x < b.x + w; x++) if (g[y] && g[y][x] === '.') g[y][x] = 'f';
+      }
+      const dx = b.x + Math.min(w - 1, Math.floor(w * b.frac));
+      g[b.base - 1][dx] = '+'; // the threshold: walk onto it and you're inside
+      return { to: b.to, art: b.art, name: b.name, x: b.x, y: b.base - 2, w, h: 2, px: b.px, door: [dx, b.base - 1] };
+    });
+    g[H - 3][13] = 'w'; // the gate — the way back to the desk
+    return {
+      id: 'campus', theme: 'meadow', name: 'The Grounds',
+      grid: g.map((r) => r.join('')),
+      entry: [13.5, H - 4.7],
+      buildings,
+      props: [
+        { art: 'statue', x: 13.5, y: 20, w: 90 },
+        { art: 'lampPost', x: 9.5, y: 20, w: 58 }, { art: 'lampPost', x: 17.5, y: 20, w: 58 },
+        { art: 'lampPost', x: 9.5, y: 34, w: 58 }, { art: 'lampPost', x: 17.5, y: 34, w: 58 },
+        { art: 'trainDummy', x: 22.5, y: 38, w: 50 }, { art: 'trainDummy', x: 23.5, y: 39, w: 50 },
+        { art: 'gateArch', x: 13.5, y: 44, w: 144 },
+        { art: 'treeTall', x: 3.5, y: 20, w: 80 }, { art: 'treeTall', x: 24.5, y: 20, w: 80 },
+        { art: 'treeTall', x: 3.5, y: 34, w: 80 }, { art: 'treeTall', x: 24.5, y: 44, w: 80 },
+      ],
+    };
+  })(),
+
+  //             0123456789012345678
+  arena: {
+    id: 'arena', theme: 'arena', name: 'The Sparring Ring',
     grid: [
-      '##########################', //  0
-      '##......................##', //  1
-      '##..ffff......ffff......##', //  2  ← Library · Kitchen
-      '##..ffff......ffff......##', //  3
-      '##..f+ff......ff+f......##', //  4
-      '##......................##', //  5
-      '##..ffffff....ffff......##', //  6  ← the Great Hall · the Academy
-      '##..ffffff....ffff......##', //  7
-      '##..ff+fff....ff+f......##', //  8
-      '##......................##', //  9
-      '##..ffff......ffff......##', // 10  ← Forge · Armory
-      '##..ffff......ffff......##', // 11
-      '##..f+ff......ff+f......##', // 12
-      '##...............t......##', // 13
-      '##..ffff................##', // 14  ← the Dormitory
-      '##..ffff.......r........##', // 15
-      '##..f+ff................##', // 16
-      '##....................t.##', // 17
-      '##.......w..............##', // 18  ← the gate: the way back to the desk
-      '##########################', // 19
+      '###################', //  0
+      '#BBBBBBBBBBBBBBBBB#', //  1
+      '#B...............B#', //  2
+      '#B..f.........f..B#', //  3  ← the pells
+      '#B...............B#', //  4
+      '#B...............B#', //  5
+      '#B.......f.......B#', //  6  ← the sword in the stone, centre ring
+      '#B...............B#', //  7
+      '#B...............B#', //  8
+      '#B..f.........f..B#', //  9
+      '#B...............B#', // 10
+      '#BBBBBBBBdBBBBBBBB#', // 11
+      '###################', // 12
     ],
-    entry: [11.5, 17.3],
-    buildings: [
-      { to: 'library',    glyph: '📖', name: 'Library',    x: 4,  y: 2,  w: 4, h: 3, door: [5, 4] },
-      { to: 'kitchen',    glyph: '🍲', name: 'Kitchen',    x: 14, y: 2,  w: 4, h: 3, door: [16, 4] },
-      { to: 'guildhall',  glyph: '🏰', name: 'Great Hall', x: 4,  y: 6,  w: 6, h: 3, door: [6, 8] },
-      { to: 'classroom',  glyph: '🎓', name: 'Academy',    x: 14, y: 6,  w: 4, h: 3, door: [16, 8] },
-      { to: 'forge',      glyph: '🔨', name: 'Forge',      x: 4,  y: 10, w: 4, h: 3, door: [5, 12] },
-      { to: 'armory',     glyph: '🗡', name: 'Armory',     x: 14, y: 10, w: 4, h: 3, door: [16, 12] },
-      { to: 'dormitory',  glyph: '🏠', name: 'Dormitory',  x: 4,  y: 14, w: 4, h: 3, door: [5, 16] },
+    entry: [9.5, 10.3],
+    props: [
+      { art: 'trainDummy', x: 4.5, y: 4, w: 50 }, { art: 'trainDummy', x: 14.5, y: 4, w: 50 },
+      { art: 'trainDummy', x: 4.5, y: 10, w: 50 }, { art: 'trainDummy', x: 14.5, y: 10, w: 50 },
+      { art: 'statue', x: 9.5, y: 7, w: 84 },
     ],
   },
 
