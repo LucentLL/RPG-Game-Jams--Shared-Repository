@@ -17,7 +17,10 @@
  *   o  ore node   (floor, blocks movement, COLLECTIBLE — bump it to mine it)
  *   r  boulder    (floor, impassable)      t  stalagmite / tree (impassable)
  *   =  minecart rail run (floor, passable) m  minecart (floor, impassable)
- *   B  raised block (floor base, impassable — rendered as a true 3D cube)
+ *   B  raised block (floor base, impassable — rendered as a true 3D cube;
+ *      interior theme: a room-height bookshelf wall)
+ *   b  low block (impassable, half height — interior aisle stacks seen over)
+ *   d  doorway exit (floor; exit zone, no decal — the wall gap is the door)
  *
  * Creature spawns are explicit `{prey, x, y}` (tile coords; delve.js centers
  * them) so terrain and population balance independently. Every prey id must
@@ -48,6 +51,22 @@ export const THEMES = {
     faceBot: { l: [2, 6], m: [3, 6], r: [4, 6] },
     voidSample: [312, 166],
     grayProps: true, // gray stone reads better against grass
+  },
+  // Room interiors — parquet floor (floors.png, 16px source tiles) on a rock
+  // foundation (cliff rim/faces at the island edge), with WALLS OF BOOKSHELVES:
+  // 'B' cells are room-height shelf walls, 'b' cells waist-high aisle stacks
+  // you see over. Wall textures are cut from the wired bookshelf_3x sheet.
+  interior: {
+    sheet: 'floors', src: 16,
+    fill: [[0, 4], [1, 4], [2, 4], [3, 4]],
+    rimSheet: 'cliffs',
+    rim: { nw: [9, 2], n: [10, 2], ne: [11, 2], w: [9, 3], e: [11, 3], sw: [9, 4], s: [10, 4], se: [11, 4] },
+    faceTop: { l: [9, 5], m: [10, 5], r: [11, 5] },
+    faceBot: { l: [9, 6], m: [10, 6], r: [11, 6] },
+    voidSample: [312, 166],
+    grayProps: false,
+    walls: { sheet: 'shelves', tall: [222, 40, 48, 96], low: [222, 88, 48, 48], crown: [222, 40, 48, 18] },
+    wallH: 96,
   },
 };
 
@@ -159,6 +178,26 @@ export const DELVE_MAPS = {
       { prey: 'opossum', x: 10, y: 3 }, { prey: 'opossum', x: 7, y: 12 },
       { prey: 'badger', x: 19, y: 12 },
     ],
+  },
+  //             0123456789012345678
+  library: {
+    id: 'library', theme: 'interior',
+    grid: [
+      '##################', //  0
+      '#BBBBBBBBBBBBBBBB#', //  1  ← the back wall of the stacks
+      '#B..............B#', //  2
+      '#B.bbbbb..bbbbb.B#', //  3  ← aisle stacks (waist-high, seen over)
+      '#B..............B#', //  4
+      '#B.bbbbb..bbbbb.B#', //  5
+      '#B..............B#', //  6
+      '#B.bbbbb..bbbbb.B#', //  7
+      '#B..............B#', //  8
+      '#B..............B#', //  9
+      '#BBBBBBBBdBBBBBBB#', // 10  ← south wall; the gap is the door out
+      '##################', // 11
+    ],
+    entry: [9.5, 9.3],
+    spawns: [],
   },
 };
 

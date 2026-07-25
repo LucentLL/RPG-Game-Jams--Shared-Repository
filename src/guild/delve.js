@@ -78,7 +78,7 @@ function loadImg(url) {
 // The bake — ASCII grid → one ground image + passability
 // ---------------------------------------------------------------------------
 
-const BLOCKING = { '#': 1, o: 1, r: 1, t: 1, m: 1, B: 1 };
+const BLOCKING = { '#': 1, o: 1, r: 1, t: 1, m: 1, B: 1, b: 1 };
 // Well-mixed 2D hash — naive xor-of-primes checkerboards on % 2 variant picks.
 const hash2 = (x, y) => {
   let h = (x * 374761393 + y * 668265263) | 0;
@@ -106,14 +106,19 @@ function sampleVoidColor(cliffs, theme) {
 /**
  * Paint the walkable ground onto ctx: fill per floor cell + the dark ragged
  * rim on chasm-facing edges (the lip you see from above). The vertical rock
- * is real geometry (attachTerrain), so void cells stay TRANSPARENT.
+ * is real geometry (attachTerrain), so void cells stay TRANSPARENT. The fill
+ * may come from a different sheet than the rim (interiors lay 16px parquet
+ * on a 48px rock foundation — theme.src scales the fill source).
  */
-function paintGround(g, grid, theme, cliffs) {
+function paintGround(g, grid, theme, sheets) {
   const { rows, cols, isFloor, isVoid } = gridFns(grid);
-  const tile = (t, dx, dy) => g.drawImage(cliffs, t[0] * TILE, t[1] * TILE, TILE, TILE, dx * TILE, dy * TILE, TILE, TILE);
+  const fillImg = sheets[theme.sheet || 'cliffs'];
+  const rimImg = sheets[theme.rimSheet || theme.sheet || 'cliffs'];
+  const src = theme.src || TILE;
+  const tile = (t, dx, dy) => g.drawImage(fillImg, t[0] * src, t[1] * src, src, src, dx * TILE, dy * TILE, TILE, TILE);
   // A sub-rect of a rim tile, drawn at the same offset inside the destination cell.
   const part = (t, ox, oy, w, h, dx, dy) =>
-    g.drawImage(cliffs, t[0] * TILE + ox, t[1] * TILE + oy, w, h, dx * TILE + ox, dy * TILE + oy, w, h);
+    g.drawImage(rimImg, t[0] * TILE + ox, t[1] * TILE + oy, w, h, dx * TILE + ox, dy * TILE + oy, w, h);
   for (let y = 0; y < rows; y++) {
     for (let x = 0; x < cols; x++) {
       if (!isFloor(x, y)) continue;
@@ -137,11 +142,14 @@ function paintGround(g, grid, theme, cliffs) {
 }
 
 /**
- * Cut the wall textures once from the kit's face tiles. South walls read the
- * art upright; side walls use it rotated so the cliff-top edge lies along the
- * plane boundary (W mirror-flipped for the opposite fold).
+ * Cut the wall textures once. Cliff faces always come from the kit's rock
+ * tiles (south walls read the art upright; side walls rotated so the top
+ * edge lies along the boundary, W mirror-flipped). Raised-block textures are
+ * per KIND — 'B' tall, 'b' low — and a theme with `walls` (interiors) cuts
+ * them from its own sheet instead (bookshelf faces, crown-wood tops/sides).
  */
-function cutWallTex(cliffs, theme) {
+function cutWallTex(sheets, theme) {
+  const cliffs = sheets.cliffs; // rock rim/face art always comes from the cliff kit
   const texCv = (w, h, draw) => {
     const c = document.createElement('canvas');
     c.width = w; c.height = h;
@@ -154,21 +162,39 @@ function cutWallTex(cliffs, theme) {
   const faceS = texCv(TILE, DEPTH, (cg) => { sheetTile(cg, theme.faceTop.m, 0, 0); sheetTile(cg, theme.faceBot.m, 0, TILE); });
   const faceSideE = texCv(DEPTH, TILE, (cg) => { cg.translate(0, TILE); cg.rotate(-Math.PI / 2); cg.drawImage(faceS, 0, 0); });
   const faceSideW = texCv(DEPTH, TILE, (cg) => { cg.translate(DEPTH, 0); cg.scale(-1, 1); cg.drawImage(faceSideE, 0, 0); });
-  const blockSide = texCv(TILE, BLOCK_H, (cg) => sheetTile(cg, theme.faceTop.m, 0, 0));
-  const blockSideE = texCv(BLOCK_H, TILE, (cg) => { cg.translate(0, TILE); cg.rotate(-Math.PI / 2); cg.drawImage(blockSide, 0, 0); });
-  const blockSideW = texCv(BLOCK_H, TILE, (cg) => { cg.translate(BLOCK_H, 0); cg.scale(-1, 1); cg.drawImage(blockSideE, 0, 0); });
-  const blockTop = texCv(TILE, TILE, (cg) => {
-    sheetTile(cg, theme.fill[0], 0, 0);
-    const strip = (t, ox, oy, w, h) => cg.drawImage(cliffs, t[0] * TILE + ox, t[1] * TILE + oy, w, h, ox, oy, w, h);
-    strip(theme.rim.n, 0, 0, TILE, 24); strip(theme.rim.s, 0, 24, TILE, 24);
-    strip(theme.rim.w, 0, 0, 24, TILE); strip(theme.rim.e, 24, 0, 24, TILE);
-    strip(theme.rim.nw, 0, 0, 24, 24); strip(theme.rim.ne, 24, 0, 24, 24);
-    strip(theme.rim.sw, 0, 24, 24, 24); strip(theme.rim.se, 24, 24, 24, 24);
-  });
+
+  let block;
+  if (theme.walls) {
+    const w = sheets[theme.walls.sheet];
+    const H = theme.wallH || 96;
+    const cut = (rect, dw, dh) => texCv(dw, dh, (cg) => cg.drawImage(w, rect[0], rect[1], rect[2], rect[3], 0, 0, dw, dh));
+    const tall = cut(theme.walls.tall, TILE, H);
+    const low = cut(theme.walls.low, TILE, BLOCK_H);
+    const top = cut(theme.walls.crown, TILE, TILE);          // crown wood, stretched — the shelf's top
+    const sideTall = cut(theme.walls.crown, TILE, H);        // plain wood panel ends
+    const sideLow = cut(theme.walls.crown, TILE, BLOCK_H);
+    block = {
+      B: { face: tall.toDataURL(), sideE: sideTall.toDataURL(), sideW: sideTall.toDataURL(), top: top.toDataURL(), h: H },
+      b: { face: low.toDataURL(), sideE: sideLow.toDataURL(), sideW: sideLow.toDataURL(), top: top.toDataURL(), h: BLOCK_H },
+    };
+  } else {
+    const bFace = texCv(TILE, BLOCK_H, (cg) => sheetTile(cg, theme.faceTop.m, 0, 0));
+    const bSideE = texCv(BLOCK_H, TILE, (cg) => { cg.translate(0, TILE); cg.rotate(-Math.PI / 2); cg.drawImage(bFace, 0, 0); });
+    const bSideW = texCv(BLOCK_H, TILE, (cg) => { cg.translate(BLOCK_H, 0); cg.scale(-1, 1); cg.drawImage(bSideE, 0, 0); });
+    const bTop = texCv(TILE, TILE, (cg) => {
+      sheetTile(cg, theme.fill[0], 0, 0);
+      const strip = (t, ox, oy, w2, h2) => cg.drawImage(cliffs, t[0] * TILE + ox, t[1] * TILE + oy, w2, h2, ox, oy, w2, h2);
+      strip(theme.rim.n, 0, 0, TILE, 24); strip(theme.rim.s, 0, 24, TILE, 24);
+      strip(theme.rim.w, 0, 0, 24, TILE); strip(theme.rim.e, 24, 0, 24, TILE);
+      strip(theme.rim.nw, 0, 0, 24, 24); strip(theme.rim.ne, 24, 0, 24, 24);
+      strip(theme.rim.sw, 0, 24, 24, 24); strip(theme.rim.se, 24, 24, 24, 24);
+    });
+    const one = { face: bFace.toDataURL(), sideE: bSideE.toDataURL(), sideW: bSideW.toDataURL(), top: bTop.toDataURL(), h: BLOCK_H };
+    block = { B: one, b: one };
+  }
   return {
     faceS: faceS.toDataURL(), faceSideE: faceSideE.toDataURL(), faceSideW: faceSideW.toDataURL(),
-    blockS: blockSide.toDataURL(), blockSideE: blockSideE.toDataURL(), blockSideW: blockSideW.toDataURL(),
-    blockTop: blockTop.toDataURL(),
+    block,
   };
 }
 
@@ -210,7 +236,10 @@ function extractGeometry(grid) {
   }
   const blocks = [];
   for (let y = 0; y < rows; y++) {
-    for (let x = 0; x < cols; x++) if (at(x, y) === 'B') blocks.push({ x, y });
+    for (let x = 0; x < cols; x++) {
+      const ch = at(x, y);
+      if (ch === 'B' || ch === 'b') blocks.push({ x, y, kind: ch });
+    }
   }
   return { faces, blocks };
 }
@@ -226,13 +255,15 @@ async function bakeMap(map, theme) {
     ores: await loadImg(TILES_BASE + 'ores.png'),
     rocks: await loadImg(TILES_BASE + 'rocks.png'),
     rails: await loadImg(TILES_BASE + 'rails.png'),
+    floors: await loadImg(TILES_BASE + 'floors.png'),
+    shelves: await loadImg(ART_BASE + 'bookshelf_3x.png'),
   };
   const { rows, cols, at } = gridFns(map.grid);
   const cv = document.createElement('canvas');
   cv.width = cols * TILE; cv.height = rows * TILE;
   const g = cv.getContext('2d');
   g.imageSmoothingEnabled = false;
-  paintGround(g, map.grid, theme, sheets.cliffs);
+  paintGround(g, map.grid, theme, sheets);
 
   // Flat floor decals that belong ON the plane (holes and track). Boulders,
   // stalagmites and the cart are upright standees — see openDelve.
@@ -256,7 +287,7 @@ async function bakeMap(map, theme) {
   return {
     url: cv.toDataURL('image/png'), pass, cols, rows, sheets,
     voidColor: sampleVoidColor(sheets.cliffs, theme),
-    tex: cutWallTex(sheets.cliffs, theme),
+    tex: cutWallTex(sheets, theme),
     ...extractGeometry(map.grid),
   };
 }
@@ -268,18 +299,18 @@ async function bakeMap(map, theme) {
  * reading it out, then hand faces/blocks/tex to attachTerrain.
  */
 export async function bakeEstate(grid, themeName = 'meadow') {
-  const cliffs = await loadImg(TILES_BASE + 'cliffs.png');
+  const sheets = { cliffs: await loadImg(TILES_BASE + 'cliffs.png') };
   const theme = THEMES[themeName];
   const { rows, cols } = gridFns(grid);
   const canvas = document.createElement('canvas');
   canvas.width = cols * TILE; canvas.height = rows * TILE;
   const g = canvas.getContext('2d');
   g.imageSmoothingEnabled = false;
-  paintGround(g, grid, theme, cliffs);
+  paintGround(g, grid, theme, sheets);
   return {
     canvas, cols, rows,
-    voidColor: sampleVoidColor(cliffs, theme),
-    tex: cutWallTex(cliffs, theme),
+    voidColor: sampleVoidColor(sheets.cliffs, theme),
+    tex: cutWallTex(sheets, theme),
     ...extractGeometry(grid),
   };
 }
@@ -366,7 +397,7 @@ export async function openDelve(localeId, member, hooks) {
     for (let y = 0; y < D.rows; y++) {
       for (let x = 0; x < D.cols; x++) {
         const ch = map.grid[y][x];
-        if (ch === 's' || ch === 'w') D.exit = { x: x + 0.5, y: y + 0.5 };
+        if (ch === 's' || ch === 'w' || ch === 'd') D.exit = { x: x + 0.5, y: y + 0.5 };
         if (ch === 'w') addProp(artSprite('wagon', 'dv-wagon'), x + 0.5, y + 1, 82);
         else if (ch === 't' && map.theme === 'meadow') addProp(artSprite('treeTall', 'dv-tree'), x + 0.5, y + 1, 86);
         else if (ch === 't') addPropCanvas('stalag', baked.sheets, x + 0.5, y + 0.97);
@@ -424,20 +455,35 @@ export function attachTerrain(parent, baked, opts = {}) {
         `transform-origin:100% 50%;transform:rotateY(-90deg);z-index:${z};`);
     }
   }
+  // Faces BETWEEN two blocks stay inside the joined wall — skip them so a run
+  // of cells reads as one continuous shelf/rock wall with no seams poking out.
+  const bKind = new Map(baked.blocks.map((b) => [b.x + ',' + b.y, b.kind]));
+  const hOf = (x, y) => {
+    const k = bKind.get(x + ',' + y);
+    return k ? (tex.block[k] || tex.block.B).h : 0;
+  };
   for (const b of baked.blocks) {
+    const K = tex.block[b.kind] || tex.block.B;
+    const h = K.h, hT = h / TILE; // height in px and in tile units
     const zTop = zMode === 'under' ? 2 : 10 + (b.y + 1) * TILE + 20;
     const zSide = zMode === 'under' ? 1 : 10 + (b.y + 1) * TILE + 10;
     el('dv-block-top', `left:${b.x / cols * 100}%;top:${b.y / rows * 100}%;width:${100 / cols}%;height:${100 / rows}%;` +
-      `background-image:url(${tex.blockTop});background-size:100% 100%;transform:translateZ(${BLOCK_H}px);z-index:${zTop};`);
-    el('dv-face', `left:${b.x / cols * 100}%;top:${(b.y + 1) / rows * 100}%;width:${100 / cols}%;height:${BLOCK_H / TILE / rows * 100}%;` +
-      `background-image:url(${tex.blockS});background-size:100% 100%;` +
-      `transform-origin:50% 0;transform:translateZ(${BLOCK_H}px) rotateX(-90deg);z-index:${zSide};`);
-    el('dv-face', `left:${(b.x + 1) / cols * 100}%;top:${b.y / rows * 100}%;width:${BLOCK_H / TILE / cols * 100}%;height:${100 / rows}%;` +
-      `background-image:url(${tex.blockSideE});background-size:100% 100%;` +
-      `transform-origin:0 50%;transform:translateZ(${BLOCK_H}px) rotateY(90deg);z-index:${zSide};`);
-    el('dv-face', `left:${(b.x - 1) / cols * 100}%;top:${b.y / rows * 100}%;width:${BLOCK_H / TILE / cols * 100}%;height:${100 / rows}%;` +
-      `background-image:url(${tex.blockSideW});background-size:100% 100%;` +
-      `transform-origin:100% 50%;transform:translateZ(${BLOCK_H}px) rotateY(-90deg);z-index:${zSide};`);
+      `background-image:url(${K.top});background-size:100% 100%;transform:translateZ(${h}px);z-index:${zTop};`);
+    if (hOf(b.x, b.y + 1) < h) {
+      el('dv-face', `left:${b.x / cols * 100}%;top:${(b.y + 1) / rows * 100}%;width:${100 / cols}%;height:${hT / rows * 100}%;` +
+        `background-image:url(${K.face});background-size:100% 100%;` +
+        `transform-origin:50% 0;transform:translateZ(${h}px) rotateX(-90deg);z-index:${zSide};`);
+    }
+    if (hOf(b.x + 1, b.y) < h) {
+      el('dv-face', `left:${(b.x + 1) / cols * 100}%;top:${b.y / rows * 100}%;width:${hT / cols * 100}%;height:${100 / rows}%;` +
+        `background-image:url(${K.sideE});background-size:100% 100%;` +
+        `transform-origin:0 50%;transform:translateZ(${h}px) rotateY(90deg);z-index:${zSide};`);
+    }
+    if (hOf(b.x - 1, b.y) < h) {
+      el('dv-face', `left:${(b.x - hT) / cols * 100}%;top:${b.y / rows * 100}%;width:${hT / cols * 100}%;height:${100 / rows}%;` +
+        `background-image:url(${K.sideW});background-size:100% 100%;` +
+        `transform-origin:100% 50%;transform:translateZ(${h}px) rotateY(-90deg);z-index:${zSide};`);
+    }
   }
 }
 
