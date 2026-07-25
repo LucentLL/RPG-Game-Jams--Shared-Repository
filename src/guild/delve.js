@@ -78,7 +78,7 @@ function loadImg(url) {
 // The bake — ASCII grid → one ground image + passability
 // ---------------------------------------------------------------------------
 
-const BLOCKING = { '#': 1, o: 1, r: 1, t: 1, m: 1, B: 1, b: 1 };
+const BLOCKING = { '#': 1, o: 1, r: 1, t: 1, m: 1, B: 1, b: 1, f: 1 };
 // Well-mixed 2D hash — naive xor-of-primes checkerboards on % 2 variant picks.
 const hash2 = (x, y) => {
   let h = (x * 374761393 + y * 668265263) | 0;
@@ -167,20 +167,25 @@ function cutWallTex(sheets, theme) {
   if (theme.walls) {
     const w = sheets[theme.walls.sheet];
     const H = theme.wallH || 96;
-    const cut = (rect, dw, dh) => texCv(dw, dh, (cg) => cg.drawImage(w, rect[0], rect[1], rect[2], rect[3], 0, 0, dw, dh));
+    // A rect either STRETCHES to fill the texture (a whole shelf face) or TILES
+    // at 48px cells (a 16px brick/plank that must repeat, not smear).
+    const cut = (rect, dw, dh) => texCv(dw, dh, (cg) => {
+      if (!theme.walls.tileFill) { cg.drawImage(w, rect[0], rect[1], rect[2], rect[3], 0, 0, dw, dh); return; }
+      for (let ty = 0; ty < Math.ceil(dh / TILE); ty++) {
+        for (let tx = 0; tx < Math.ceil(dw / TILE); tx++) {
+          cg.drawImage(w, rect[0], rect[1], rect[2], rect[3], tx * TILE, ty * TILE, TILE, TILE);
+        }
+      }
+    });
     const tall = cut(theme.walls.tall, TILE, H);
     const low = cut(theme.walls.low, TILE, BLOCK_H);
     const top = cut(theme.walls.crown, TILE, TILE);          // crown wood, stretched — the shelf's top
-    const sideTall = cut(theme.walls.crown, TILE, H);        // plain wood panel ends
-    const sideLow = cut(theme.walls.crown, TILE, BLOCK_H);
     block = {
-      B: { face: tall.toDataURL(), sideE: sideTall.toDataURL(), sideW: sideTall.toDataURL(), top: top.toDataURL(), h: H },
-      b: { face: low.toDataURL(), sideE: sideLow.toDataURL(), sideW: sideLow.toDataURL(), top: top.toDataURL(), h: BLOCK_H },
+      B: { face: tall.toDataURL(), top: top.toDataURL(), h: H },
+      b: { face: low.toDataURL(), top: top.toDataURL(), h: BLOCK_H },
     };
   } else {
     const bFace = texCv(TILE, BLOCK_H, (cg) => sheetTile(cg, theme.faceTop.m, 0, 0));
-    const bSideE = texCv(BLOCK_H, TILE, (cg) => { cg.translate(0, TILE); cg.rotate(-Math.PI / 2); cg.drawImage(bFace, 0, 0); });
-    const bSideW = texCv(BLOCK_H, TILE, (cg) => { cg.translate(BLOCK_H, 0); cg.scale(-1, 1); cg.drawImage(bSideE, 0, 0); });
     const bTop = texCv(TILE, TILE, (cg) => {
       sheetTile(cg, theme.fill[0], 0, 0);
       const strip = (t, ox, oy, w2, h2) => cg.drawImage(cliffs, t[0] * TILE + ox, t[1] * TILE + oy, w2, h2, ox, oy, w2, h2);
@@ -189,7 +194,7 @@ function cutWallTex(sheets, theme) {
       strip(theme.rim.nw, 0, 0, 24, 24); strip(theme.rim.ne, 24, 0, 24, 24);
       strip(theme.rim.sw, 0, 24, 24, 24); strip(theme.rim.se, 24, 24, 24, 24);
     });
-    const one = { face: bFace.toDataURL(), sideE: bSideE.toDataURL(), sideW: bSideW.toDataURL(), top: bTop.toDataURL(), h: BLOCK_H };
+    const one = { face: bFace.toDataURL(), top: bTop.toDataURL(), h: BLOCK_H };
     block = { B: one, b: one };
   }
   return {
@@ -325,24 +330,94 @@ export async function bakeEstate(grid, themeName = 'meadow') {
  * onOre(kind)→{txt}, onEnd(summary) }. Resolves true only if the delve
  * actually took the screen — hall charges the march's stamina on that signal.
  */
+/** Bake a map and preload its creature sheets — everything slow, done up front
+ *  so the scene build itself is synchronous and can't interleave. */
+async function prepMap(mapId) {
+  const map = mapForLocale(mapId);
+  if (!map) throw new Error('delve: no map ' + mapId);
+  validateMap(map);
+  const theme = THEMES[map.theme];
+  const baked = await bakeMap(map, theme);
+  const spawns = [];
+  for (const s of (map.spawns || [])) {
+    const prey = preyById(s.prey);
+    if (!prey) continue;
+    try { spawns.push({ prey, s, img: await loadImg(ART_BASE + prey.art + '.png') }); }
+    catch (e) { console.warn('delve: creature sheet missing for', s.prey, e); }
+  }
+  return { map, theme, baked, spawns };
+}
+
+/**
+ * Build (or rebuild) the scene for one map inside the session's stage: sizes
+ * the plane, attaches the terrain, and creates the walker, props, ores and
+ * creatures. Called on open AND on every door the member walks through, so
+ * the session (haul, hooks, input, the actor's own animation state) survives
+ * moving from room to room.
+ */
+function mountScene(prep, entry) {
+  const { map, theme, baked, spawns } = prep;
+  const W = baked.cols * TILE, H = baked.rows * TILE;
+  const stage = D.host.querySelector('.delve-stage');
+  stage.style.background = baked.voidColor;
+  const field = document.createElement('div');
+  field.className = 'delve-field';
+  field.style.cssText = `width:${W}px;height:${H}px;margin-left:${-W / 2}px;margin-top:${-H / 2}px;background-image:url(${baked.url})`;
+  stage.innerHTML = '';
+  stage.appendChild(field);
+
+  D.map = map; D.theme = theme; D.field = field;
+  D.pass = baked.pass; D.cols = baked.cols; D.rows = baked.rows;
+  D.creatures = []; D.ores = [];
+  D.exit = null; D.exitArmed = false;
+  D.portals = []; D.portalArmed = false;
+  D.cam.snap = true;
+
+  attachTerrain(field, baked, { zMode: 'y' });
+
+  // --- the walker: a fresh element per scene, the SAME actor across rooms ---
+  const actor = D.player ? D.player.actor : D.gfx.makeActor(D.member);
+  const pWrap = document.createElement('div');
+  pWrap.className = 'dv-actor dv-player';
+  pWrap.innerHTML = '<div class="dv-shadow"></div><div class="dv-up"></div>';
+  const pcv = document.createElement('canvas');
+  pcv.width = 96; pcv.height = 96;
+  pWrap.querySelector('.dv-up').appendChild(pcv);
+  if (_heroFootPct != null) pcv.style.setProperty('--footpct', _heroFootPct.toFixed(2) + '%');
+  field.appendChild(pWrap);
+  const at = entry || map.entry;
+  D.player = { actor, cv: pcv, el: pWrap, x: at[0], y: at[1], moving: false, grounded: _heroFootPct != null };
+
+  // --- exits, portals and interactables from the grid ---
+  for (let y = 0; y < D.rows; y++) {
+    for (let x = 0; x < D.cols; x++) {
+      const ch = map.grid[y][x];
+      if (ch === 's' || ch === 'w' || ch === 'd') D.exit = { x: x + 0.5, y: y + 0.5 };
+      if (ch === 'w') addProp(artSprite('wagon', 'dv-wagon'), x + 0.5, y + 1, 82);
+      else if (ch === 't' && map.theme === 'meadow') addProp(artSprite('treeTall', 'dv-tree'), x + 0.5, y + 1, 86);
+      else if (ch === 't') addPropCanvas('stalag', baked.sheets, x + 0.5, y + 0.97);
+      else if (ch === 'r') addPropCanvas(theme.grayProps ? 'boulderGray' : 'boulder', baked.sheets, x + 0.5, y + 0.97);
+      else if (ch === 'm') addPropCanvas('cart', baked.sheets, x + 0.5, y + 1);
+      else if (ch === 'o') addOre(x, y, baked.sheets.ores);
+    }
+  }
+  // Authored furnishings — upright art.js standees (beds, anvils, counters…).
+  for (const p of (map.props || [])) addProp(artSprite(p.art, 'dv-furn'), p.x, p.y, p.w || 48);
+  // Doors to other maps (the wall gap is the doorway; this is just the trigger).
+  for (const p of (map.portals || [])) D.portals.push({ x: p.x, y: p.y, to: p.to, at: p.at });
+
+  for (const sp of spawns) spawnCreature(sp.prey, sp.img, sp.s.x + 0.5, sp.s.y + 0.5);
+
+  const title = D.host.querySelector('.dv-title');
+  if (title) title.textContent = `${D.hooks.locale.glyph} ${map.name || D.hooks.locale.name}`;
+}
+
 export async function openDelve(localeId, member, hooks) {
-  const map = mapForLocale(localeId);
   const gfx = window.__ranchGfx;
-  if (!map || !member || !gfx || D || opening) return false;
+  if (!mapForLocale(localeId) || !member || !gfx || D || opening) return false;
   opening = true;
   try {
-    validateMap(map);
-    const theme = THEMES[map.theme];
-    const baked = await bakeMap(map, theme);
-    // Preload every creature sheet BEFORE committing anything: after this loop
-    // the whole build is synchronous, so nothing can interleave with it.
-    const spawns = [];
-    for (const s of map.spawns) {
-      const prey = preyById(s.prey);
-      if (!prey) continue;
-      try { spawns.push({ prey, s, img: await loadImg(ART_BASE + prey.art + '.png') }); }
-      catch (e) { console.warn('delve: creature sheet missing for', s.prey, e); }
-    }
+    const prep = await prepMap(localeId);
     // The bake took real time (network, on a first load). Re-validate the
     // launch context: if the guild screen is no longer up — a played bout took
     // the screen, or the player left for the title — opening now would steal
@@ -352,71 +427,55 @@ export async function openDelve(localeId, member, hooks) {
     if (D || !guildUp || !guildUp.classList.contains('active')) return false;
 
     const host = document.getElementById('delveScreen');
-    const W = baked.cols * TILE, H = baked.rows * TILE;
     host.style.setProperty('--dvtilt', TILT + 'deg');
     host.innerHTML = `
-    <div class="delve-stage" style="background:${baked.voidColor}">
-      <div class="delve-field" style="width:${W}px;height:${H}px;margin-left:${-W / 2}px;margin-top:${-H / 2}px;background-image:url(${baked.url})"></div>
-    </div>
+    <div class="delve-stage"></div>
     <div class="delve-hud">
       <button class="dv-leave" onclick="__delve.leave()">⬅ Leave</button>
-      <span class="dv-title">${hooks.locale.glyph} ${hooks.locale.name}</span>
+      <span class="dv-title"></span>
       <span class="dv-haul"></span>
     </div>
     <div class="delve-toasts"></div>`;
-    const field = host.querySelector('.delve-field');
 
     D = {
-      map, theme, hooks, member, gfx, field, host,
-      pass: baked.pass, cols: baked.cols, rows: baked.rows,
+      map: null, theme: null, hooks, member, gfx, field: null, host,
+      pass: null, cols: 0, rows: 0,
       keys: {}, joy: null, joyEl: null,
       cam: { x: 0, y: 0, snap: true }, zoom: window.innerHeight < 520 ? 1.4 : 1.8,
-      last: 0, raf: 0, ended: false, fighting: false, grace: false,
+      last: 0, raf: 0, ended: false, fighting: false, grace: false, transiting: false,
       haul: { kills: {}, gold: 0, mats: {}, field: 0, bouts: 0 },
-      player: null, creatures: [], ores: [],
-      exit: null, exitArmed: false,
+      player: null, creatures: [], ores: [], portals: [],
+      exit: null, exitArmed: false, portalArmed: false,
     };
-
-    // --- the 3D geometry: cliff walls off every edge, raised blocks as boxes ---
-    attachTerrain(field, baked, { zMode: 'y' });
-
-    // --- the walker (a real guild member, Elements compositor) ---
-    const actor = gfx.makeActor(member);
-    const pWrap = document.createElement('div');
-    pWrap.className = 'dv-actor dv-player';
-    pWrap.innerHTML = '<div class="dv-shadow"></div><div class="dv-up"></div>';
-    const pcv = document.createElement('canvas');
-    pcv.width = 96; pcv.height = 96;
-    pWrap.querySelector('.dv-up').appendChild(pcv);
-    // The compositor leaves ~3 source px under the feet; ground the cutout.
-    pWrap.style.setProperty('--footpad', '5px');
-    field.appendChild(pWrap);
-    D.player = { actor, cv: pcv, el: pWrap, x: map.entry[0], y: map.entry[1], moving: false };
-
-    // --- exit + interactables from the grid ---
-    for (let y = 0; y < D.rows; y++) {
-      for (let x = 0; x < D.cols; x++) {
-        const ch = map.grid[y][x];
-        if (ch === 's' || ch === 'w' || ch === 'd') D.exit = { x: x + 0.5, y: y + 0.5 };
-        if (ch === 'w') addProp(artSprite('wagon', 'dv-wagon'), x + 0.5, y + 1, 82);
-        else if (ch === 't' && map.theme === 'meadow') addProp(artSprite('treeTall', 'dv-tree'), x + 0.5, y + 1, 86);
-        else if (ch === 't') addPropCanvas('stalag', baked.sheets, x + 0.5, y + 0.97);
-        else if (ch === 'r') addPropCanvas(theme.grayProps ? 'boulderGray' : 'boulder', baked.sheets, x + 0.5, y + 0.97);
-        else if (ch === 'm') addPropCanvas('cart', baked.sheets, x + 0.5, y + 1);
-        else if (ch === 'o') addOre(x, y, baked.sheets.ores);
-      }
-    }
-
-    for (const sp of spawns) spawnCreature(sp.prey, sp.img, sp.s.x + 0.5, sp.s.y + 0.5);
+    mountScene(prep, null);
 
     wireInput();
     updateHaul();
     showScreen('delveScreen');
     startLoop();
-    toast(`${member.name.split(' ')[0]} descends into ${hooks.locale.name}.`);
+    toast(`${member.name.split(' ')[0]} enters ${prep.map.name || hooks.locale.name}.`);
     return true;
   } finally {
     opening = false;
+  }
+}
+
+/** Walk through a door into another map, keeping the session alive. */
+async function usePortal(portal) {
+  if (!D || D.transiting || D.ended) return;
+  D.transiting = true;
+  if (D.raf) { cancelAnimationFrame(D.raf); D.raf = 0; }
+  try {
+    const prep = await prepMap(portal.to);
+    if (!D || D.ended) return;
+    mountScene(prep, portal.at);
+    toast(`${prep.map.name || 'Onward'}`);
+    startLoop();
+  } catch (e) {
+    console.warn('delve: door failed', e);
+    if (D) toast('That door is stuck.');
+  } finally {
+    if (D) D.transiting = false;
   }
 }
 
@@ -465,25 +524,25 @@ export function attachTerrain(parent, baked, opts = {}) {
   for (const b of baked.blocks) {
     const K = tex.block[b.kind] || tex.block.B;
     const h = K.h, hT = h / TILE; // height in px and in tile units
-    const zTop = zMode === 'under' ? 2 : 10 + (b.y + 1) * TILE + 20;
-    const zSide = zMode === 'under' ? 1 : 10 + (b.y + 1) * TILE + 10;
+    // Painter's depth = the block's NEAR (south) edge, kept strictly BELOW a
+    // character standing at that edge (whose z is 10 + y*TILE). A positive
+    // bonus here is what made a shelf's top surface paint over the head of
+    // someone standing in front of it — reading as "walked into the bookcase".
+    const base = 10 + (b.y + 1) * TILE;
+    const zTop = zMode === 'under' ? 2 : base - 6;
+    const zFace = zMode === 'under' ? 1 : base - 2;
     el('dv-block-top', `left:${b.x / cols * 100}%;top:${b.y / rows * 100}%;width:${100 / cols}%;height:${100 / rows}%;` +
       `background-image:url(${K.top});background-size:100% 100%;transform:translateZ(${h}px);z-index:${zTop};`);
-    if (hOf(b.x, b.y + 1) < h) {
+    if (hOf(b.x, b.y + 1) < h) { // a block to the south hides this face
       el('dv-face', `left:${b.x / cols * 100}%;top:${(b.y + 1) / rows * 100}%;width:${100 / cols}%;height:${hT / rows * 100}%;` +
         `background-image:url(${K.face});background-size:100% 100%;` +
-        `transform-origin:50% 0;transform:translateZ(${h}px) rotateX(-90deg);z-index:${zSide};`);
+        `transform-origin:50% 0;transform:translateZ(${h}px) rotateX(-90deg);z-index:${zFace};`);
     }
-    if (hOf(b.x + 1, b.y) < h) {
-      el('dv-face', `left:${(b.x + 1) / cols * 100}%;top:${b.y / rows * 100}%;width:${hT / cols * 100}%;height:${100 / rows}%;` +
-        `background-image:url(${K.sideE});background-size:100% 100%;` +
-        `transform-origin:0 50%;transform:translateZ(${h}px) rotateY(90deg);z-index:${zSide};`);
-    }
-    if (hOf(b.x - 1, b.y) < h) {
-      el('dv-face', `left:${(b.x - hT) / cols * 100}%;top:${b.y / rows * 100}%;width:${hT / cols * 100}%;height:${100 / rows}%;` +
-        `background-image:url(${K.sideW});background-size:100% 100%;` +
-        `transform-origin:100% 50%;transform:translateZ(${h}px) rotateY(-90deg);z-index:${zSide};`);
-    }
+    // NO east/west end caps on blocks. The camera only tilts about X, so those
+    // planes are edge-on slivers that contribute almost nothing — but they are
+    // tall, and any z-index that made them visible also made them swallow
+    // members standing beside a shelf run. Cliff faces keep theirs: they ring
+    // wide chasms where perspective flares them into view and nobody stands.
   }
 }
 
@@ -537,23 +596,40 @@ function addOre(x, y, oresImg) {
   D.ores.push({ x, y, kind, el });
 }
 
-/** Transparent rows under a walk sheet's feet (front-idle frame), cached per sheet —
- *  fed to --footpad so the sprite's soles, not its frame edge, touch the ground. */
+/** The lowest opaque row of a canvas, or -1 while it's still blank. */
+function lowestOpaqueRow(cv) {
+  let data;
+  try { data = cv.getContext('2d', { willReadFrequently: true }).getImageData(0, 0, cv.width, cv.height).data; }
+  catch (e) { return -1; } // tainted (never here — every sheet loads same-origin)
+  for (let y = cv.height - 1; y >= 0; y--) {
+    for (let x = 0; x < cv.width; x++) if (data[(y * cv.width + x) * 4 + 3] > 10) return y;
+  }
+  return -1;
+}
+
+/** Empty rows under a walk sheet's feet as a PERCENT of frame height (cached
+ *  per sheet) — fed to --footpct so soles, not the frame edge, touch the ground. */
 const _padCache = {};
-function footPadOf(art, img, fw, fh) {
+function footPctOf(art, img, fw, fh) {
   if (_padCache[art] != null) return _padCache[art];
   const c = document.createElement('canvas');
   c.width = fw; c.height = fh;
   const g = c.getContext('2d', { willReadFrequently: true });
-  g.drawImage(img, fw, 0, fw, fh, 0, 0, fw, fh);
-  const data = g.getImageData(0, 0, fw, fh).data;
-  let pad = 0;
-  outer: for (let y = fh - 1; y >= 0; y--) {
-    for (let x = 0; x < fw; x++) {
-      if (data[(y * fw + x) * 4 + 3] > 10) { pad = fh - 1 - y; break outer; }
-    }
-  }
-  return (_padCache[art] = pad);
+  g.imageSmoothingEnabled = false;
+  g.drawImage(img, fw, 0, fw, fh, 0, 0, fw, fh); // front-idle frame (col 1, row 0)
+  const low = lowestOpaqueRow(c);
+  return (_padCache[art] = low < 0 ? 0 : (fh - 1 - low) / fh * 100);
+}
+
+/** The Elements compositor centres a 48px cell in the canvas, leaving a wide
+ *  empty band under the feet (~31% — measured, not assumed). Same for every
+ *  character, so measure the first composited frame once and reuse it. */
+let _heroFootPct = null;
+function groundHeroSprite(cv) {
+  if (_heroFootPct != null) return _heroFootPct;
+  const low = lowestOpaqueRow(cv);
+  if (low < 0) return null; // sheets still loading — try again next frame
+  return (_heroFootPct = (cv.height - 1 - low) / cv.height * 100);
 }
 
 function spawnCreature(prey, img, x, y) {
@@ -565,7 +641,7 @@ function spawnCreature(prey, img, x, y) {
   cv.width = fw; cv.height = fh;
   el.querySelector('.dv-up').appendChild(cv);
   el.style.width = fw + 'px';
-  el.style.setProperty('--footpad', footPadOf(prey.art, img, fw, fh) + 'px');
+  cv.style.setProperty('--footpct', footPctOf(prey.art, img, fw, fh).toFixed(2) + '%');
   D.field.appendChild(el);
   D.creatures.push({
     prey, img, fw, fh, cv, el, x, y, home: { x, y },
@@ -735,6 +811,19 @@ function checkExit() {
   if (d < 0.8) endDelve('walked out with the haul');
 }
 
+/** Doors to other maps — armed the same way, so arriving in a room doesn't
+ *  immediately bounce the walker back through the door they came in by. */
+function checkPortals() {
+  if (!D.portals.length) return;
+  const p = D.player;
+  const near = (q) => Math.hypot(q.x - p.x, q.y - p.y);
+  if (!D.portalArmed) {
+    if (D.portals.every((q) => near(q) > 1.35)) D.portalArmed = true;
+    return;
+  }
+  for (const q of D.portals) if (near(q) < 0.8) { usePortal(q); return; }
+}
+
 function checkEncounters() {
   const p = D.player;
   for (const c of D.creatures) {
@@ -803,6 +892,10 @@ function render(now) {
   // Player — compositor actor, canvas anchored at the feet.
   D.gfx.tickActor(p.actor, now);
   D.gfx.renderActor(p.cv, p.actor);
+  if (!p.grounded) { // first composited frame: measure the sprite's empty foot band
+    const pct = groundHeroSprite(p.cv);
+    if (pct != null) { p.cv.style.setProperty('--footpct', pct.toFixed(2) + '%'); p.grounded = true; }
+  }
   p.el.style.left = (p.x * TILE) + 'px';
   p.el.style.top = (p.y * TILE) + 'px';
   p.el.style.zIndex = 10 + Math.round(p.y * TILE);
@@ -832,11 +925,12 @@ function tick(now) {
   if (!D || D.ended) return;
   if (!screenActive()) { D.raf = 0; return; } // a bout borrowed the screen — resumed on return
   const dt = Math.min(0.08, (now - (D.last || now)) / 1000);
-  if (!D.fighting) {
+  if (!D.fighting && !D.transiting) {
     movePlayer(dt);
     moveCreatures(dt);
     checkOres();
     checkExit();
+    if (!D.ended) checkPortals();
     if (D.grace) {
       // Post-bout grace holds until every creature is back outside engage range.
       if (D.creatures.every((c) => Math.hypot(c.x - D.player.x, c.y - D.player.y) > 0.75 + (c.fw / TILE) * 0.28)) D.grace = false;

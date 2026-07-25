@@ -20,7 +20,14 @@
  *   B  raised block (floor base, impassable — rendered as a true 3D cube;
  *      interior theme: a room-height bookshelf wall)
  *   b  low block (impassable, half height — interior aisle stacks seen over)
+ *   f  furnishing (impassable, NO box geometry — a `props` standee stands here)
  *   d  doorway exit (floor; exit zone, no decal — the wall gap is the door)
+ *   +  interior door (walkable; a `portals` entry carries you to another map)
+ *
+ * Interiors may also carry:
+ *   name    the room's title, shown in the HUD (and on arrival)
+ *   props   [{art, x, y, w}] upright art.js standees (x centre, y base, px wide)
+ *   portals [{x, y, to, at}] walk within 0.8 tiles of (x,y) → map `to` at `at`
  *
  * Creature spawns are explicit `{prey, x, y}` (tile coords; delve.js centers
  * them) so terrain and population balance independently. Every prey id must
@@ -67,6 +74,20 @@ export const THEMES = {
     grayProps: false,
     walls: { sheet: 'shelves', tall: [222, 40, 48, 96], low: [222, 88, 48, 48], crown: [222, 40, 48, 18] },
     wallH: 96,
+  },
+  // Working rooms of the guild — the same parquet on rock, but walls of rough
+  // stone (the cliff kit's face tiles) instead of bookshelves. Kitchen, Forge,
+  // Armory, Dormitory, Classroom and the Guildmaster's study all share it;
+  // each room's CHARACTER comes from its furnishings, not its masonry.
+  hall: {
+    sheet: 'floors', src: 16,
+    fill: [[0, 4], [1, 4], [2, 4], [3, 4]],
+    rimSheet: 'cliffs',
+    rim: { nw: [9, 2], n: [10, 2], ne: [11, 2], w: [9, 3], e: [11, 3], sw: [9, 4], s: [10, 4], se: [11, 4] },
+    faceTop: { l: [9, 5], m: [10, 5], r: [11, 5] },
+    faceBot: { l: [9, 6], m: [10, 6], r: [11, 6] },
+    voidSample: [312, 166],
+    grayProps: false,
   },
 };
 
@@ -181,7 +202,7 @@ export const DELVE_MAPS = {
   },
   //             0123456789012345678
   library: {
-    id: 'library', theme: 'interior',
+    id: 'library', theme: 'interior', name: 'The Library',
     grid: [
       '##################', //  0
       '#BBBBBBBBBBBBBBBB#', //  1  ← the back wall of the stacks
@@ -199,18 +220,197 @@ export const DELVE_MAPS = {
     entry: [9.5, 9.3],
     spawns: [],
   },
+
+  // ── The working buildings ────────────────────────────────────────────────
+  // Each is one building you walk THROUGH: an interior wall with a doorway
+  // splits it into two rooms, so crossing the gap is crossing a threshold.
+  // 19 tiles wide by convention: '#' margin, 'B' wall, 15 cells, 'B', '#'.
+  //             0123456789012345678
+  kitchen: {
+    id: 'kitchen', theme: 'hall', name: 'The Kitchen',
+    grid: [
+      '###################', //  0
+      '#BBBBBBBBBBBBBBBBB#', //  1
+      '#B..f........f...B#', //  2  ← the two stone ovens, against the wall
+      '#B.bbbb.....bbbb.B#', //  3  ← counter runs
+      '#B...............B#', //  4
+      '#B.bb.......bb...B#', //  5  ← prep tables
+      '#B...............B#', //  6
+      '#BBBBBBB...BBBBBBB#', //  7  ← the pantry door
+      '#B..f...........fB#', //  8  ← sacks of grain
+      '#B.bbb.....bbb...B#', //  9  ← provision shelves
+      '#B...............B#', // 10
+      '#BBBBBBBBdBBBBBBBB#', // 11  ← out to the yard
+      '###################', // 12
+    ],
+    entry: [9.5, 10.3],
+    props: [
+      { art: 'oven', x: 4.5, y: 3, w: 46 }, { art: 'oven', x: 13.5, y: 3, w: 46 },
+      { art: 'breadPile', x: 6.5, y: 3.05, w: 44 }, { art: 'floppyfish', x: 11.5, y: 5.05, w: 22 },
+      { art: 'sacks', x: 4.5, y: 9, w: 40 }, { art: 'sacks', x: 16.5, y: 9, w: 40 },
+      { art: 'tools', x: 7.5, y: 5.05, w: 40 },
+    ],
+  },
+  //             0123456789012345678
+  forge: {
+    id: 'forge', theme: 'hall', name: 'The Forge',
+    grid: [
+      '###################', //  0
+      '#BBBBBBBBBBBBBBBBB#', //  1
+      '#B...............B#', //  2
+      '#B..f...f...f....B#', //  3  ← three anvils on their stumps
+      '#B...............B#', //  4
+      '#B.f...........f.B#', //  5  ← quench barrel · tool bench
+      '#B...............B#', //  6
+      '#BBBBBB....BBBBBBB#', //  7  ← through to the coal store
+      '#B...............B#', //  8
+      '#B.bbb......f....B#', //  9  ← coal bins · the stock rack
+      '#B...............B#', // 10
+      '#BBBBBBBBdBBBBBBBB#', // 11
+      '###################', // 12
+    ],
+    entry: [9.5, 10.3],
+    props: [
+      { art: 'anvil', x: 4.5, y: 4, w: 50 }, { art: 'anvil', x: 8.5, y: 4, w: 50 }, { art: 'anvil', x: 12.5, y: 4, w: 50 },
+      { art: 'sacks', x: 3.5, y: 6, w: 40 }, { art: 'tools', x: 15.5, y: 6, w: 44 },
+      { art: 'sacks', x: 12.5, y: 10, w: 40 },
+    ],
+  },
+  //             0123456789012345678
+  armory: {
+    id: 'armory', theme: 'hall', name: 'The Armory',
+    grid: [
+      '###################', //  0
+      '#BBBBBBBBBBBBBBBBB#', //  1
+      '#B...............B#', //  2
+      '#B.bbbbb...bbbbb.B#', //  3  ← the racks along both walls
+      '#B...............B#', //  4
+      '#B...............B#', //  5
+      '#B.f...........f.B#', //  6  ← issue counter · armour stand
+      '#BBBBBBB...BBBBBBB#', //  7  ← through to the vault
+      '#B...............B#', //  8
+      '#B..bb.....bb....B#', //  9  ← crated stock
+      '#B...............B#', // 10
+      '#BBBBBBBBdBBBBBBBB#', // 11
+      '###################', // 12
+    ],
+    entry: [9.5, 10.3],
+    props: [
+      { art: 'counter', x: 3.5, y: 7, w: 46 }, { art: 'anvil', x: 15.5, y: 7, w: 44 },
+      { art: 'sacks', x: 5.5, y: 10, w: 40 }, { art: 'sacks', x: 12.5, y: 10, w: 40 },
+    ],
+  },
+  //             0123456789012345678
+  dormitory: {
+    id: 'dormitory', theme: 'hall', name: 'The Dormitory',
+    grid: [
+      '###################', //  0
+      '#BBBBBBBBBBBBBBBBB#', //  1
+      '#B...............B#', //  2
+      '#B.f.f.f...f.f.f.B#', //  3  ← the bunks, two rows of three
+      '#B...............B#', //  4
+      '#BBBBBB.....BBBBBB#', //  5  ← through to the second bunkroom
+      '#B...............B#', //  6
+      '#B.f.f.f...f.f.f.B#', //  7
+      '#B...............B#', //  8
+      '#BBBBBBBBdBBBBBBBB#', //  9
+      '###################', // 10
+    ],
+    entry: [9.5, 8.3],
+    props: [
+      { art: 'bed', x: 3.5, y: 4, w: 42 }, { art: 'bed', x: 5.5, y: 4, w: 42 }, { art: 'bed', x: 7.5, y: 4, w: 42 },
+      { art: 'bed', x: 11.5, y: 4, w: 42 }, { art: 'bed', x: 13.5, y: 4, w: 42 }, { art: 'bed', x: 15.5, y: 4, w: 42 },
+      { art: 'bed', x: 3.5, y: 8, w: 42 }, { art: 'bed', x: 5.5, y: 8, w: 42 }, { art: 'bed', x: 7.5, y: 8, w: 42 },
+      { art: 'bed', x: 11.5, y: 8, w: 42 }, { art: 'bed', x: 13.5, y: 8, w: 42 }, { art: 'bed', x: 15.5, y: 8, w: 42 },
+    ],
+  },
+  //             0123456789012345678
+  classroom: {
+    id: 'classroom', theme: 'hall', name: 'The Classroom',
+    grid: [
+      '###################', //  0
+      '#BBBBBBBBBBBBBBBBB#', //  1
+      '#B......f........B#', //  2  ← the lectern
+      '#B...............B#', //  3
+      '#B.bbb.bbb.bbb...B#', //  4  ← rows of desks
+      '#B...............B#', //  5
+      '#B.bbb.bbb.bbb...B#', //  6
+      '#B...............B#', //  7
+      '#BBBBBBB...BBBBBBB#', //  8  ← through to the study nook
+      '#B...............B#', //  9
+      '#B.f.........f...B#', // 10  ← reference shelves
+      '#BBBBBBBBdBBBBBBBB#', // 11
+      '###################', // 12
+    ],
+    entry: [9.5, 10.3],
+    props: [
+      { art: 'counter', x: 8.5, y: 3, w: 50 },
+      { art: 'bookshelf', x: 3.5, y: 11, w: 46 }, { art: 'bookshelf', x: 13.5, y: 11, w: 46 },
+    ],
+  },
+  //             0123456789012345678
+  guildhall: {
+    id: 'guildhall', theme: 'hall', name: 'The Great Hall',
+    grid: [
+      '###################', //  0
+      '#BBBBBBBB+BBBBBBBB#', //  1  ← the stair up to the Guildmaster's study
+      '#B...............B#', //  2
+      '#B.bb.......bb...B#', //  3  ← the long tables
+      '#B...............B#', //  4
+      '#B.bb.......bb...B#', //  5
+      '#B...............B#', //  6
+      '#B.f...........f.B#', //  7  ← the hearth · the notice board
+      '#B...............B#', //  8
+      '#BBBBBBBBdBBBBBBBB#', //  9
+      '###################', // 10
+    ],
+    entry: [9.5, 8.3],
+    props: [
+      { art: 'oven', x: 3.5, y: 8, w: 46 }, { art: 'bookshelf', x: 15.5, y: 8, w: 46 },
+    ],
+    portals: [{ x: 9.5, y: 1.5, to: 'guildmaster', at: [9.5, 8.3] }],
+  },
+  //             0123456789012345678
+  guildmaster: {
+    id: 'guildmaster', theme: 'hall', name: "The Guildmaster's Study",
+    grid: [
+      '###################', //  0
+      '#BBBBBBBBBBBBBBBBB#', //  1
+      '#B...............B#', //  2
+      '#B.BB..f....BB...B#', //  3  ← shelved walls flanking the great desk
+      '#B...............B#', //  4
+      '#B......f........B#', //  5  ← the chair
+      '#B...............B#', //  6
+      '#B.f...........f.B#', //  7  ← the strongbox · the banner
+      '#B...............B#', //  8
+      '#BBBBBdBB+BBBBBBBB#', //  9  ← out · and the stair back down
+      '###################', // 10
+    ],
+    entry: [6.5, 8.3],
+    props: [
+      { art: 'counter', x: 8.5, y: 4, w: 52 }, { art: 'bed', x: 8.5, y: 6, w: 34 },
+      { art: 'sacks', x: 3.5, y: 8, w: 40 }, { art: 'bookshelf', x: 15.5, y: 8, w: 46 },
+    ],
+    portals: [{ x: 9.5, y: 9.5, to: 'guildhall', at: [9.5, 2.3] }],
+  },
 };
 
 /** The walkable chart for a locale, or null (most locales are still unmapped). */
 export function mapForLocale(localeId) { return DELVE_MAPS[localeId] || null; }
 
-/** Cheap authoring lint — ragged rows / off-floor spawns throw or warn early. */
+/** Cheap authoring lint — ragged rows throw; misplaced spawns/portals warn. */
 export function validateMap(map) {
   const w = map.grid[0].length;
   for (const row of map.grid) if (row.length !== w) throw new Error(`delve map ${map.id}: ragged row (${row.length} vs ${w})`);
-  for (const s of map.spawns) {
-    const ch = (map.grid[s.y] || '')[s.x];
+  const at = (x, y) => (map.grid[Math.floor(y)] || '')[Math.floor(x)];
+  for (const s of (map.spawns || [])) {
+    const ch = at(s.x, s.y);
     if (!ch || ch === '#') console.warn(`delve map ${map.id}: spawn ${s.prey} at ${s.x},${s.y} is on void`);
+  }
+  for (const p of (map.portals || [])) {
+    const ch = at(p.x, p.y);
+    if (!ch || ch === '#' || 'Bbfrtmo'.includes(ch)) console.warn(`delve map ${map.id}: portal at ${p.x},${p.y} sits on '${ch}' — unreachable`);
+    if (!DELVE_MAPS[p.to]) console.warn(`delve map ${map.id}: portal leads to unknown map '${p.to}'`);
   }
   return true;
 }

@@ -589,15 +589,39 @@ async function exploreLocale(localeId) {
   save();
 }
 /**
- * Stroll a guild interior — the delve engine running a room map (no stamina,
- * no creatures, no spoils; it's home). The selected member walks the space.
+ * Rooms whose building can be WALKED — room id → [delve map id, what to call
+ * the space]. The Guildmaster's Study isn't listed: you reach it by walking up
+ * the stair at the back of the Great Hall (delve-maps.js portals).
  */
-async function strollRoom(mapId, glyph, name) {
+const WALKABLE = {
+  roster: ['guildhall', 'the great hall'],
+  library: ['library', 'the stacks'],
+  kitchen: ['kitchen', 'the kitchen'],
+  forge: ['forge', 'the forge floor'],
+  armory: ['armory', 'the armory'],
+  quarters: ['dormitory', 'the bunkrooms'],
+  academy: ['classroom', 'the classroom'],
+};
+/** The "walk inside" bar shown atop every walkable room. */
+function strollBar(id) {
+  const w = WALKABLE[id];
+  const room = getRoom(id);
+  if (!w || !room || !hasDelveMap(w[0])) return '';
+  const subject = heroById(selectedId) || guild.roster[0];
+  if (!subject) return '';
+  return `<div class="tourney-lens quest-lens"><button class="tourney-play" onclick="__guild.strollRoom('${w[0]}','${room.glyph}')">🚶 Walk ${w[1]} — take ${subject.name.split(' ')[0]} inside</button></div>`;
+}
+/**
+ * Stroll a guild interior — the delve engine running a room map (no stamina,
+ * no creatures, no spoils; it's home). The selected member walks the space,
+ * and doorways carry them from room to room without leaving the building.
+ */
+async function strollRoom(mapId, glyph) {
   const h = heroById(selectedId) || guild.roster[0]; if (!h) return;
   if (!hasDelveMap(mapId) || isDelveOpen()) return;
   try {
     await openDelve(mapId, h, {
-      locale: { glyph, name },
+      locale: { glyph: glyph || '🚪', name: 'the guild' },
       fight: async () => null,
       onKill: () => null,
       onOre: () => null,
@@ -605,7 +629,7 @@ async function strollRoom(mapId, glyph, name) {
     });
   } catch (e) {
     console.warn('stroll: failed to open', e);
-    notice = `The ${name} doors are stuck — try again.`;
+    notice = 'That door is stuck — try again.';
     render();
   }
 }
@@ -2512,14 +2536,7 @@ function forgeRoom() {
   return deptRoom('forge', '🔨', 'Forge', forgeBody)
     + storesPanel('🪨 Forge Stockroom · ore', 'forge', 'Ore bought at market or bartered from quests is delivered here. Forging and ♻ refining both draw from this stock.');
 }
-function libraryRoom() {
-  // The stacks are WALKABLE — the delve engine runs the room's interior map.
-  const subject = heroById(selectedId) || guild.roster[0];
-  const strollBar = subject
-    ? `<div class="tourney-lens quest-lens"><button class="tourney-play" onclick="__guild.strollRoom('library','📖','Library — the stacks')">🚶 Stroll the stacks — walk ${subject.name.split(' ')[0]} through the shelves</button></div>`
-    : '';
-  return strollBar + deptRoom('study', '📖', 'Library', studyBody) + libraryShelfPanel();
-}
+function libraryRoom() { return deptRoom('study', '📖', 'Library', studyBody) + libraryShelfPanel(); }
 function laboratoryRoom() {
   return deptRoom('brew', '⚗', 'Laboratory', brewBody)
     + storesPanel('🌿 Laboratory Stores · herbs', 'laboratory', 'Herbs for the Alchemist’s brews. Finished potions shelve next door in the 🏺 Apothecary.');
@@ -3088,7 +3105,9 @@ function renderHub() {
 function renderRoom(id) {
   const room = getRoom(id);
   if (id === 'hub' || !room) return renderHub();
-  const hdr = roomScene(id) + roleTag(id); // EO-style scene banner, then the role line
+  // EO-style scene banner, the role line, then the "walk inside" bar if the
+  // building has a charted interior (delve-maps.js).
+  const hdr = roomScene(id) + roleTag(id) + strollBar(id);
   if (room.locked) return hdr + roomStub(room);
   switch (id) {
     case 'grounds': return hdr + groundsRoom();
