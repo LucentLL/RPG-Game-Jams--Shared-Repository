@@ -116,11 +116,19 @@ export const THEMES = {
     };
   })(),
 };
-// The study's damask is a plain 48px tile, not an A4 band — retune its wall
-// rects to that sheet's own geometry (the carpet/wall weave at 384,336).
+// Two rooms don't use the A4 wall strips:
+// The study hangs gold damask (a plain 48px tile that repeats down the face)
+// over its red damask carpet, both off the mansion sheet.
 THEMES.guildmaster.walls = {
-  sheet: 'mansion', tileFill: true,
+  sheet: 'mansion', src: 48, tileFill: true,
   tall: [384, 336, 48, 48], low: [384, 336, 48, 48], crown: [20, 268, 48, 16],
+};
+// The kitchen takes grey-blue ashlar off its own sheet, crowned with the pale
+// limestone counter top — so its waist-high runs read as scrubbed stone
+// counters rather than as walls that happen to be short.
+THEMES.kitchen.walls = {
+  sheet: 'kitchen', src: 48, tileFill: true,
+  tall: [24, 48, 48, 96], low: [24, 96, 48, 48], crown: [156, 64, 48, 18],
 };
 
 /** Pixel-rect decals on the prop sheets (px units; sheets are 3x/48px scale). */
