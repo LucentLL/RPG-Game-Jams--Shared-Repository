@@ -465,11 +465,11 @@ function mountScene(prep, entry) {
   // Buildings on the grounds: a facade standing on its footprint, and a door
   // you simply walk into. No menu, no button — the threshold IS the trigger.
   for (const b of (map.buildings || [])) {
-    addProp(
-      `<span class="dv-bldg"><span class="bl-roof"></span>` +
-      `<span class="bl-wall"><span class="bl-glyph">${b.glyph}</span><span class="bl-door"></span></span>` +
-      `<span class="bl-name">${b.name}</span></span>`,
-      b.x + b.w / 2, b.y + b.h, b.w * TILE);
+    const facade = b.art
+      ? artSprite(b.art)
+      : `<span class="bl-roof"></span><span class="bl-wall"><span class="bl-glyph">${b.glyph || ''}</span><span class="bl-door"></span></span>`;
+    addProp(`<span class="dv-bldg">${facade}<span class="bl-name">${b.name}</span></span>`,
+      b.x + b.w / 2, b.y + b.h, b.px || b.w * TILE);
     D.portals.push({ x: b.door[0] + 0.5, y: b.door[1] + 0.5, to: b.to, at: null, enter: true });
   }
   // Doors to other maps (the wall gap is the doorway; this is just the trigger).

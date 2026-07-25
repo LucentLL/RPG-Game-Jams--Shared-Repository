@@ -66,6 +66,17 @@ const SHEETS = {
   interior_3x: { w: 768, h: 768 },
   chests_3x: { w: 936, h: 864 },
   candles_3x: { w: 576, h: 480 },
+  // Campus exteriors — whole buildings you walk up to and enter.
+  guildhall_3x: { w: 816, h: 576 },
+  tower_3x: { w: 768, h: 768 },
+  huts_3x: { w: 672, h: 336 },
+  cottage_3x: { w: 267, h: 300 },
+  shopfront_3x: { w: 672, h: 384 },
+  colosseum_3x: { w: 432, h: 336 },
+  gate_3x: { w: 432, h: 576 },
+  dummy_3x: { w: 252, h: 432 },
+  lamppost_3x: { w: 192, h: 336 },
+  statues_3x: { w: 480, h: 240 },
 };
 
 /** Named crops: { sheet, x, y, w, h } in sheet pixels. Crops tagged `MEASURE`
@@ -152,6 +163,22 @@ export const ART = {
   washstand:  { sheet: 'interior_3x', x: 0,   y: 291, w: 96,  h: 87 },
   footlocker: { sheet: 'chests_3x',   x: 87,  y: 54,  w: 57,  h: 51 },
   bedCandle:  { sheet: 'candles_3x',  x: 159, y: 249, w: 21,  h: 45 },
+
+  // ── Campus exteriors (delve-maps.js campus `buildings`) ─────────────────
+  // Every one is a front-facing facade with its door on the centre line
+  // unless noted; the fraction is where the doorway sits across its width.
+  bldgGuildhall: { sheet: 'guildhall_3x', x: 48,  y: 30,  w: 240, h: 534 }, // stone cathedral · door .50
+  bldgLibrary:   { sheet: 'tower_3x',     x: 0,   y: 3,   w: 238, h: 477 }, // tan scholar's tower · .50
+  bldgAcademy:   { sheet: 'tower_3x',     x: 384, y: 3,   w: 238, h: 477 }, // grey granite twin · .50
+  bldgForge:     { sheet: 'huts_3x',      x: 33,  y: 42,  w: 285, h: 294 }, // mossy log hut · door .45
+  bldgKitchen:   { sheet: 'huts_3x',      x: 369, y: 42,  w: 285, h: 294 }, // its autumn sibling · .45
+  bldgDormitory: { sheet: 'cottage_3x',   x: 0,   y: 0,   w: 267, h: 300 }, // the bunk cottage · .50
+  bldgArmory:    { sheet: 'shopfront_3x', x: 240, y: 192, w: 288, h: 96 },  // a shop front · door .27
+  bldgArena:     { sheet: 'colosseum_3x', x: 15,  y: 192, w: 114, h: 141 }, // tiered amphitheatre · .50
+  gateArch:      { sheet: 'gate_3x',      x: 144, y: 0,   w: 144, h: 123 }, // the estate gate
+  trainDummy:    { sheet: 'dummy_3x',     x: 87,  y: 228, w: 75,  h: 96 },
+  lampPost:      { sheet: 'lamppost_3x',  x: 102, y: 36,  w: 87,  h: 105 },
+  statue:        { sheet: 'statues_3x',   x: 342, y: 3,   w: 135, h: 225 },
 };
 
 /**
