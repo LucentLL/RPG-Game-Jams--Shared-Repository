@@ -38,6 +38,13 @@ const SHEETS = {
   slime: { w: 414, h: 576 },
   wolf: { w: 468, h: 636 },
   bear: { w: 432, h: 384 },
+  // Delve denizens — same 3×4 walk-sheet format (delve.js animates the full
+  // sheet; these registry entries serve the front-idle standee crops below).
+  ghost: { w: 234, h: 432 },
+  ghoul: { w: 234, h: 432 },
+  skeleton: { w: 234, h: 432 },
+  ratking: { w: 234, h: 432 },
+  slimeking: { w: 414, h: 576 },
 };
 
 /** Named crops: { sheet, x, y, w, h } in sheet pixels. Crops tagged `MEASURE`
@@ -68,6 +75,12 @@ export const ART = {
   slime:    { sheet: 'slime',    x: 174, y: 87, w: 66, h: 54 },
   wolf:     { sheet: 'wolf',     x: 201, y: 51, w: 63, h: 99 },
   bear:     { sheet: 'bear',     x: 177, y: 3,  w: 78, h: 90 },
+  // Delve denizens — front-idle standees (probe-measured alpha boxes).
+  ghost:     { sheet: 'ghost',     x: 90,  y: 24, w: 51, h: 84 },
+  ghoul:     { sheet: 'ghoul',     x: 87,  y: 21, w: 60, h: 87 },
+  skeleton:  { sheet: 'skeleton',  x: 84,  y: 6,  w: 63, h: 102 },
+  ratking:   { sheet: 'ratking',   x: 84,  y: 24, w: 63, h: 84 },
+  slimeking: { sheet: 'slimeking', x: 174, y: 78, w: 66, h: 63 },
 };
 
 /**

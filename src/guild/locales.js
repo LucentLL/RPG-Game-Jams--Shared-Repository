@@ -59,6 +59,22 @@ export const PREY = {
   bear: { id: 'bear', name: 'Cave Bear', art: 'bear', glyph: '🐻', rank: 4, power: 330,
     meat: [4, 6], pelt: [2, 4], gold: 92, rep: 4, field: 6, risk: 0.28, loot: null,
     blurb: 'The apex of the near country. Bring a party, and bring a plan.' },
+  // Hollowvein Mine denizens — no meat, no hides; the dead pay in coin and lore.
+  ghost: { id: 'ghost', name: 'Mournwisp', art: 'ghost', glyph: '👻', rank: 3, power: 260,
+    meat: [0, 0], pelt: [0, 0], gold: 70, rep: 3, field: 6, risk: 0.1, loot: null,
+    blurb: 'A cold light that keens in the galleries. It does not want company.' },
+  skeleton: { id: 'skeleton', name: 'Old Delver', art: 'skeleton', glyph: '💀', rank: 3, power: 240,
+    meat: [0, 0], pelt: [0, 0], gold: 85, rep: 2, field: 6, risk: 0.15, loot: null,
+    blurb: 'A miner who never clocked out. His pockets still jingle.' },
+  ghoul: { id: 'ghoul', name: 'Barrow Ghoul', art: 'ghoul', glyph: '🧟', rank: 3, power: 280,
+    meat: [0, 0], pelt: [0, 0], gold: 78, rep: 3, field: 5, risk: 0.22, loot: null,
+    blurb: 'Gray-skinned and patient. It knows every dead end in the dark.' },
+  ratking: { id: 'ratking', name: 'Plague Speaker', art: 'ratking', glyph: '🐀', rank: 4, power: 350,
+    meat: [0, 0], pelt: [0, 0], gold: 110, rep: 4, field: 7, risk: 0.25, loot: null,
+    blurb: 'A skull-faced rat priest of the under-warrens, preaching ruin.' },
+  slimeking: { id: 'slimeking', name: 'Slime Sovereign', art: 'slimeking', glyph: '👑', rank: 5, power: 420,
+    meat: [0, 0], pelt: [0, 0], gold: 150, rep: 5, field: 8, risk: 0.15, loot: 'emberroot',
+    blurb: 'The crowned confluence of every ooze in the mine. Its core is a treasure.' },
 };
 
 /**
@@ -84,6 +100,9 @@ export const LOCALES = {
   blackpine: { id: 'blackpine', name: 'Blackpine Ridge', glyph: '⛰', biome: 'highland', tier: 4, start: false,
     prey: ['wolf', 'bear'],
     blurb: 'The near country’s roof. Only a proven party climbs it twice.' },
+  hollowvein: { id: 'hollowvein', name: 'Hollowvein Mine', glyph: '⛏', biome: 'abandoned mine', tier: 5, start: false,
+    prey: ['slime', 'beetle', 'skeleton', 'ghost', 'ghoul', 'ratking', 'slimeking'],
+    blurb: 'Timbered galleries under Blackpine. The vein ran dry; the miners never came back up.' },
 };
 
 /** @param {string} id @returns {?Prey} */

@@ -33,3 +33,8 @@ export const AUDIO_SFX_BASE = ASSET_BASE + 'audio/sfx/';
 // `rpg-assets/` library (the repo-root source packs — see rpg-assets/README.md).
 // Sprites are cropped from these sheets via src/guild/art.js.
 export const ART_BASE = ASSET_BASE + 'art/';
+
+// World tilesets (48px tiles, 3x scale) for explorable 2.5D maps — cliff kits,
+// stairs, ores, dressing. Baked into ground images by src/guild/delve.js.
+// (The DESIGN.md "real tile art" landing spot.)
+export const TILES_BASE = ASSET_BASE + 'tiles/';

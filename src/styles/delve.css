@@ -1,0 +1,118 @@
+/* The Delve — walkable 2.5D locale screen (src/guild/delve.js).
+   Contract mirrors the ranch, minus the tilt: one .delve-field div at native
+   world px (cols×48 by rows×48), camera = translate+scale on the field, every
+   sprite surface pixelated, actors are feet-anchored wrappers y-sorted by
+   z-index. #delveScreen itself never scrolls. */
+
+#delveScreen { padding: 0; overflow: hidden; position: relative; }
+
+.delve-stage {
+  position: absolute; inset: 0;
+  overflow: hidden;
+  touch-action: none;
+}
+.delve-field {
+  position: absolute; left: 0; top: 0;
+  transform-origin: 0 0;
+  background-size: 100% 100%;
+  background-repeat: no-repeat;
+  image-rendering: pixelated;
+  will-change: transform;
+}
+
+/* --- actors (the walker + creatures): positioned at their FEET point --- */
+.dv-actor { position: absolute; pointer-events: none; }
+.dv-actor canvas { display: block; image-rendering: pixelated; position: relative; z-index: 1; }
+.dv-player { transform: translate(-50%, -88%); }
+.dv-player canvas { width: 79px; }
+.dv-creature { transform: translate(-50%, -92%); }
+.dv-shadow {
+  position: absolute; left: 50%; bottom: 2px;
+  width: 62%; height: 12px;
+  transform: translateX(-50%);
+  background: radial-gradient(ellipse at center, rgba(0,0,0,.4) 0 45%, transparent 72%);
+}
+
+/* --- props (trees, the wagon) & collectible ores --- */
+.dv-prop { position: absolute; pointer-events: none; transform: translate(-50%, -96%); }
+.dv-prop .px-art { display: block; width: 100%; }
+.dv-ore { position: absolute; pointer-events: none; }
+.dv-ore canvas { display: block; image-rendering: pixelated; }
+
+/* --- HUD --- */
+.delve-hud {
+  position: absolute; top: 0; left: 0; right: 0;
+  display: flex; align-items: center; gap: 12px;
+  padding: 8px 12px;
+  z-index: 500; pointer-events: none;
+  background: linear-gradient(rgba(8,7,5,.72), transparent);
+}
+.delve-hud > * { pointer-events: auto; }
+.dv-leave {
+  font: inherit; cursor: pointer;
+  background: var(--card); color: inherit;
+  border: 1px solid var(--border); border-radius: 8px;
+  padding: 5px 12px;
+}
+.dv-leave:hover { border-color: var(--gold); }
+.dv-title { font-family: 'Cinzel', serif; font-weight: 700; letter-spacing: .04em; }
+.dv-haul { margin-left: auto; color: var(--gold); font-weight: 600; }
+
+/* --- toasts --- */
+.delve-toasts {
+  position: absolute; left: 0; right: 0; bottom: 13%;
+  display: flex; flex-direction: column; align-items: center; gap: 6px;
+  z-index: 600; pointer-events: none;
+}
+.dv-toast {
+  background: rgba(14,11,8,.88);
+  border: 1px solid #6b5a3a; border-radius: 8px;
+  padding: 6px 14px;
+  animation: dvToast 2.8s ease forwards;
+}
+@keyframes dvToast {
+  0% { opacity: 0; transform: translateY(8px); }
+  8% { opacity: 1; transform: translateY(0); }
+  80% { opacity: 1; }
+  100% { opacity: 0; transform: translateY(-10px); }
+}
+
+/* --- touch stick (lower-left quadrant; base appears under the thumb) --- */
+.delve-joy { position: absolute; left: 0; bottom: 0; width: 50%; height: 55%; z-index: 550; touch-action: none; }
+.dj-base {
+  position: fixed; width: 96px; height: 96px;
+  margin: -48px 0 0 -48px; border-radius: 50%;
+  border: 2px solid rgba(212,168,67,.5);
+  background: rgba(20,16,10,.35);
+  display: none;
+}
+.dj-base.on { display: block; }
+.dj-knob {
+  position: absolute; left: 50%; top: 50%;
+  width: 42px; height: 42px; margin: -21px 0 0 -21px;
+  border-radius: 50%;
+  background: rgba(212,168,67,.45);
+}
+
+/* --- end-of-delve summary --- */
+.delve-summary {
+  position: absolute; inset: 0; z-index: 700;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(0,0,0,.55);
+}
+.ds-card {
+  background: var(--card);
+  border: 1px solid var(--border); border-radius: 12px;
+  padding: 18px 24px; min-width: 300px; max-width: 90vw;
+  text-align: center;
+}
+.ds-title { font-family: 'Cinzel', serif; font-size: 1.25em; font-weight: 700; margin-bottom: 2px; }
+.ds-sub { color: var(--muted); margin-bottom: 10px; }
+.ds-line { padding: 2px 0; }
+.dv-close {
+  font: inherit; cursor: pointer; margin-top: 14px;
+  background: var(--card); color: inherit;
+  border: 1px solid var(--gold); border-radius: 8px;
+  padding: 7px 18px;
+}
+.dv-close:hover { background: rgba(212,168,67,.12); }

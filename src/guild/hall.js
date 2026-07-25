@@ -38,6 +38,8 @@ import { playTournamentMatch, playQuestBout, playHuntBout, battleEngineReady } f
 import { renderRanch, stopRanchLoop, toggleBuild, pickStation, placeStationAt, removeStationById, ranchZoomIn, ranchZoomOut, ranchZoomFit } from './ranch.js';
 import { artSprite } from './art.js';
 import { hasDiorama, roomSceneHTML, bindRoomScene, stopRoomLoop } from './rooms.js';
+import { openDelve, hasDelveMap, isDelveOpen } from './delve.js';
+import { ORE_KINDS } from './delve-maps.js';
 
 const SLOT = 'guild';
 // The roster cap is no longer a constant — it's derived from the Living Quarters
@@ -514,6 +516,78 @@ function setPlayHunt(localeId, preyId, mode) {
   notice = guild.playPlan ? 'The hunt will be played live on Advance Week.' : '';
   save(); render();
 }
+/**
+ * Walk a locale on foot — the DELVE. The selected member marches in (same
+ * stamina toll as any march), roams the charted 2.5D map, and every creature
+ * felled there banks REAL hunt spoils immediately (the same ledger the weekly
+ * hunt pays: gold, rep, meat, pelt, loot, field insight). Losing a bout ends
+ * the delve. All guild mutations stay HERE, passed to delve.js as hooks.
+ */
+async function exploreLocale(localeId) {
+  const h = heroById(selectedId) || guild.roster[0]; if (!h) return; // same fallback as wildsRoom's subject
+  if (!isDiscovered(guild, localeId) || !hasDelveMap(localeId) || isDelveOpen()) return;
+  if (!canMarch(h)) { notice = `${h.name.split(' ')[0]} is too tired or hurt to march.`; render(); return; }
+  if (!battleEngineReady()) { notice = 'The battle engine is still waking — try again in a moment.'; render(); return; }
+  const locale = localeById(localeId);
+  // Repeat marches into the same ground the same week find thinner pickings —
+  // gold/rep wear down per entry (material yields stay honest; each kill is
+  // still a real won bout). advanceAll resets the tallies with the new week.
+  const wilds = ensureWilds(guild);
+  const wear = [1, 0.5, 0.25][Math.min(2, (wilds.delveEntries || {})[localeId] || 0)];
+  let opened = false;
+  try {
+    opened = await openDelve(localeId, h, {
+      locale,
+      fight: async (preyId) => {
+        const prey = preyById(preyId); if (!prey) return null;
+        const bout = await playHuntBout(h, prey, 1, { mode: 'action', items: withdrawPotions() });
+        if (bout && bout.itemsUsed) { spendPotions(bout.itemsUsed); save(); }
+        return bout;
+      },
+      onKill: (preyId) => {
+        const prey = preyById(preyId); if (!prey) return null;
+        // The bout was PLAYED and WON — same resolver as a played weekly hunt, so
+        // an under-powered delver who scrapes a win drags home the minimum yield.
+        const outcome = resolveHuntPlayed(prey, [h], combatPower, true);
+        const spoils = huntSpoils(prey, outcome.score);
+        const gGold = Math.max(1, Math.round(spoils.gold * wear));
+        const gRep = Math.round(spoils.rep * wear);
+        addGold(guild, gGold);
+        guild.reputation += gRep;
+        if (spoils.meat > 0) addMaterial(guild.inventory, 'game_meat', spoils.meat);
+        if (spoils.pelt > 0) addMaterial(guild.inventory, 'pelt', spoils.pelt);
+        if (spoils.loot) addMaterial(guild.inventory, spoils.loot, 1);
+        for (const k in h.professions) h.professions[k].field = Math.min(100, (h.professions[k].field || 0) + prey.field);
+        h.condition.fatigue = Math.min(100, h.condition.fatigue + 8);
+        save();
+        const bits = [`+${gGold}g`];
+        if (spoils.meat) bits.push(`🥩${spoils.meat}`);
+        if (spoils.pelt) bits.push(`🟫${spoils.pelt}`);
+        if (spoils.loot && MATERIALS[spoils.loot]) bits.push(`✦ ${MATERIALS[spoils.loot].name}`);
+        return { txt: bits.join(' · '), gold: gGold, meat: spoils.meat, pelt: spoils.pelt, loot: spoils.loot, field: prey.field };
+      },
+      onOre: (kind) => {
+        const k = ORE_KINDS[kind]; if (!k) return null;
+        addGold(guild, k.gold);
+        if (k.mat) addMaterial(guild.inventory, k.mat, 1);
+        save();
+        return { txt: `⛏ ${k.name} · +${k.gold}g${k.mat && MATERIALS[k.mat] ? ' · ✦ ' + MATERIALS[k.mat].name : ''}` };
+      },
+      onEnd: () => { showScreen('guildScreen'); save(); render({ top: true }); },
+    });
+  } catch (e) {
+    console.warn('delve: failed to open', e);
+    notice = `The way into ${locale.name} is blocked — nothing was spent. Try again.`;
+    render();
+    return;
+  }
+  if (!opened) return; // bailed (screen changed mid-bake / double-click) — nothing charged
+  // The march is paid only once the delve has actually taken the screen.
+  h.condition.stamina = Math.max(0, h.condition.stamina - QUEST_STAMINA);
+  wilds.delveEntries = wilds.delveEntries || {};
+  wilds.delveEntries[localeId] = (wilds.delveEntries[localeId] || 0) + 1;
+  save();
+}
 /** Sell one unit of a hunted good (pelt / surplus game meat) at the Market. */
 function sellMaterial(matId) {
   if (!HUNT_MATERIALS.includes(matId)) return;
@@ -747,6 +821,9 @@ async function advanceAll() {
   // The quest board regenerates weekly, so any quest opt-in not consumed above is
   // dead — clear it or it lingers in the save forever (review fix).
   if (guild.playPlan && guild.playPlan.kind === 'quest') guild.playPlan = null;
+
+  // A new week restocks the wilds — the delve's thinner-pickings tallies reset.
+  if (guild.wilds && guild.wilds.delveEntries) guild.wilds.delveEntries = {};
 
   // --- Hunt pre-pass: heroes sent to the SAME prey in the SAME area form a hunting
   // PARTY; the hunt resolves ONCE on combined power and the spoils are paid ONCE.
@@ -2360,8 +2437,13 @@ function wildsRoom() {
       </div>
       <div class="hint" style="text-align:left;padding:0 2px 6px">On Advance Week the party's strongest marcher closes with <b>${cur.name}</b> — off screen, watched, or played by hand. Winning swings the luck; the party's ⚡ still decides.</div>`
       : `<div class="hint" style="text-align:left;padding:4px 2px">Pick a quarry above to dispatch <b>${subject.name.split(' ')[0]}</b>.</div>`;
+    // A charted locale can be WALKED — the Delve (delve.js): live 2.5D exploration.
+    const delveRow = hasDelveMap(open.id)
+      ? `<div class="tourney-lens quest-lens"><button class="tourney-play" ${hCanMarch ? '' : 'disabled'} onclick="__guild.exploreLocale('${open.id}')">⛏ ${hCanMarch ? `Walk ${open.name} — take ${subject.name.split(' ')[0]} in on foot` : `${subject.name.split(' ')[0]} can't march right now`}</button></div>
+        <div class="hint" style="text-align:left;padding:0 2px 6px">The area is charted. Explore it live: move with WASD or the stick, close with a creature to fight it for real, bump a vein to mine it. Entering costs ${QUEST_STAMINA} stamina and kills pay real spoils on the spot (repeat marches the same week find thinner pickings) — losing a bout sends ${subject.name.split(' ')[0]} home.</div>`
+      : '';
     preyPanel = `<div class="plan-title">${open.glyph} ${open.name} <span class="dim" style="font-weight:400;text-transform:none">— ${open.biome}</span></div>
-      <div class="opt-list">${rows}</div>${lensBar}`;
+      <div class="opt-list">${rows}</div>${delveRow}${lensBar}`;
   }
 
   return `<div class="plan-card">
@@ -3121,7 +3203,7 @@ export function openGuild() {
 // Every handler no-ops while a week is advancing (a played battle can be mid-flight;
 // rail buttons still render behind the battle screen and would corrupt the in-flight
 // week). practiceBout/advanceAll keep their own internal checks as a second belt.
-const __guildApi = { selectHero, setActivity, setTraining, setIntensity, scheduleAdd, scheduleRemoveAt, scheduleClear, setRecipe, setForgeMode, setRefineItem, setRefineGuard, setStudyMode, setEnchantMode, setSpecialization, setPotion, setDiscipline, usePotion, setDiet, setQuest, setHunt, selectWildsLocale, scoutRegion, setPlayHunt, sellMaterial, setElective, setTrackKind, setSecondDiscipline, setCookRecipe, setEnchantPlanet, slotOrb, assignTo, setSpar, equipItem, unequipSlot, setPolicy, provision, buyMaterial, sellItem, buyBook, hire, takeApprentice, promoteApprentice, dismissApprentice, advanceAll, back, openRoom, toggleFullscreen, upgradeFacility, enterTournament, leaveTournament, setPlayNext, setPlayQuest, setAskTournaments, toggleDraw, selectCalEvent, praiseHero, scoldHero, openAssembly, closeAssembly, appointTrainer, practiceBout, openRanch, enterRoomFromRanch, manageMemberFromRanch, ranchBuild: toggleBuild, ranchPick: pickStation, ranchPlace: placeStationAt, ranchRemoveStation: removeStationById, ranchZoomIn, ranchZoomOut, ranchZoomFit };
+const __guildApi = { selectHero, setActivity, setTraining, setIntensity, scheduleAdd, scheduleRemoveAt, scheduleClear, setRecipe, setForgeMode, setRefineItem, setRefineGuard, setStudyMode, setEnchantMode, setSpecialization, setPotion, setDiscipline, usePotion, setDiet, setQuest, setHunt, selectWildsLocale, scoutRegion, setPlayHunt, exploreLocale, sellMaterial, setElective, setTrackKind, setSecondDiscipline, setCookRecipe, setEnchantPlanet, slotOrb, assignTo, setSpar, equipItem, unequipSlot, setPolicy, provision, buyMaterial, sellItem, buyBook, hire, takeApprentice, promoteApprentice, dismissApprentice, advanceAll, back, openRoom, toggleFullscreen, upgradeFacility, enterTournament, leaveTournament, setPlayNext, setPlayQuest, setAskTournaments, toggleDraw, selectCalEvent, praiseHero, scoldHero, openAssembly, closeAssembly, appointTrainer, practiceBout, openRanch, enterRoomFromRanch, manageMemberFromRanch, ranchBuild: toggleBuild, ranchPick: pickStation, ranchPlace: placeStationAt, ranchRemoveStation: removeStationById, ranchZoomIn, ranchZoomOut, ranchZoomFit };
 window.__guild = {};
 for (const k in __guildApi) {
   window.__guild[k] = (...args) => {
