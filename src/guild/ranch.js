@@ -23,6 +23,7 @@ import { facilityTier } from './guild.js';
 import { formatDate } from './calendar.js';
 import { STATIONS, YARD_SLOTS, stationDef, stationCapacity, canBuild, addStation, removeStation } from './stations.js';
 import { artSprite } from './art.js';
+import { bakeEstate, attachTerrain } from './delve.js';
 
 // --- the campus world ---------------------------------------------------------
 /** Campus grid (tiles per side). The arena keeps its own 9 — this is the ESTATE. */
@@ -116,6 +117,7 @@ let actors = [];              // [{ id, actor, el, cv, ax, ay, facing, _duty, _m
 let ranchLoopRunning = false; // re-entrancy guard (mirrors actionLoopRunning)
 let ranchRaf = 0;             // the single in-flight rAF handle (cancelled on stop/restart)
 let groundURI = null;         // baked once per session
+let estate = null;            // zcliffs ground + rock-side geometry (bakeEstate), once per session
 let _guild = null;            // last guild passed to renderRanch — duties + build actions read it
 let _save = null;             // hall's save() hook, so placing/removing equipment persists
 let buildMode = false;        // yard build/place mode (ephemeral UI state, never saved)
@@ -420,6 +422,52 @@ function wireCamera(view) {
 }
 
 // --- render ------------------------------------------------------------------
+/**
+ * The estate in REAL tile art: bakeEstate (delve.js) lays zcliffs grass with
+ * rim lips and grows rock-side wall geometry at the island's edges, then the
+ * campus's own procedural painters stamp their non-grass landmarks (pond,
+ * lanes, yard, flowers, fringe rocks) back on top — so the layout every duty
+ * walks is untouched while the ground becomes the shared 3D language of the
+ * delve. Async (tile sheet load) — the procedural bake paints first and this
+ * swaps in when ready, once per session.
+ */
+async function ensureEstate(gfx) {
+  if (estate) return estate;
+  const grid = Array.from({ length: RANCH_GS }, () => '.'.repeat(RANCH_GS));
+  const baked = await bakeEstate(grid);
+  const procURI = gfx.bakeCampus ? gfx.bakeCampus(RANCH_GS, RANCH_GS, groundTypeAt) : null;
+  if (procURI) {
+    const img = await new Promise((res, rej) => {
+      const im = new Image();
+      im.onload = () => res(im);
+      im.onerror = () => rej(new Error('ranch: procedural overlay failed to load'));
+      im.src = procURI;
+    });
+    const g = baked.canvas.getContext('2d');
+    g.imageSmoothingEnabled = false;
+    const cell = img.width / RANCH_GS;
+    for (let r = 0; r < RANCH_GS; r++) {
+      for (let c = 0; c < RANCH_GS; c++) {
+        // Water and worn paths only — flower/rock sprinkle cells would carry
+        // their square procedural-grass backing onto the zcliffs turf.
+        const t = groundTypeAt(c, r);
+        if (t === 'water' || t === 'path') g.drawImage(img, c * cell, r * cell, cell, cell, c * 48, r * 48, 48, 48);
+      }
+    }
+  }
+  estate = { url: baked.canvas.toDataURL('image/png'), baked };
+  return estate;
+}
+
+function applyEstateTerrain(field, gfx) {
+  ensureEstate(gfx).then((t) => {
+    if (!field || !field.isConnected) return;
+    groundURI = t.url; // later full renders paint it directly
+    field.style.backgroundImage = `url(${t.url})`;
+    if (!field.querySelector('.dv-face')) attachTerrain(field, t.baked, { zMode: 'under' });
+  }).catch((e) => console.warn('ranch: estate terrain failed — procedural ground stays', e));
+}
+
 /** Build (or refresh) the ranch DOM and (re)start the duty loop. Call on entry / on roster change. */
 export function renderRanch(guild, save) {
   _guild = guild; if (save) _save = save;
@@ -528,6 +576,7 @@ export function renderRanch(guild, save) {
   }
   wireCamera(view);
   applyCamera();
+  applyEstateTerrain(field, gfx); // swap the ground to real tiles + rock sides when baked
   ranchRender();      // draw the first frame now (so sprites show before the RAF loop ticks)
   startRanchLoop();
 }
