@@ -462,8 +462,18 @@ function mountScene(prep, entry) {
   }
   // Authored furnishings — upright art.js standees (beds, anvils, counters…).
   for (const p of (map.props || [])) addProp(artSprite(p.art, 'dv-furn'), p.x, p.y, p.w || 48);
+  // Buildings on the grounds: a facade standing on its footprint, and a door
+  // you simply walk into. No menu, no button — the threshold IS the trigger.
+  for (const b of (map.buildings || [])) {
+    addProp(
+      `<span class="dv-bldg"><span class="bl-roof"></span>` +
+      `<span class="bl-wall"><span class="bl-glyph">${b.glyph}</span><span class="bl-door"></span></span>` +
+      `<span class="bl-name">${b.name}</span></span>`,
+      b.x + b.w / 2, b.y + b.h, b.w * TILE);
+    D.portals.push({ x: b.door[0] + 0.5, y: b.door[1] + 0.5, to: b.to, at: null, enter: true });
+  }
   // Doors to other maps (the wall gap is the doorway; this is just the trigger).
-  for (const p of (map.portals || [])) D.portals.push({ x: p.x, y: p.y, to: p.to, at: p.at });
+  for (const p of (map.portals || [])) D.portals.push({ x: p.x, y: p.y, to: p.to, at: p.at, enter: p.enter });
 
   for (const sp of spawns) spawnCreature(sp.prey, sp.img, sp.s.x + 0.5, sp.s.y + 0.5);
 
@@ -516,6 +526,10 @@ export async function openDelve(localeId, member, hooks) {
       player: null, creatures: [], ores: [], portals: [], companions: [],
       exit: null, exitArmed: false, portalArmed: false, settleUntil: 0,
       mined: new Set(),
+      // Where the way out leads. Walking into a building pushes the spot you
+      // stepped in from, so its door puts you back on the grounds instead of
+      // ending the walk. Empty = the exit really is the way home.
+      stack: [],
     };
     // From here the session object exists, so a throw would leave a half-built
     // scene latched as "a delve is open" and lock the feature out for the rest
@@ -544,14 +558,17 @@ export async function openDelve(localeId, member, hooks) {
 async function usePortal(portal) {
   if (!D || D.transiting || D.ended) return;
   const S = D; // this transition belongs to THIS session, not whatever follows it
+  // No need to park the loop: usePortal only ever runs from inside tick, whose
+  // tail re-arms it, and the sim is gated on D.transiting while we bake.
   S.transiting = true;
-  if (S.raf) { cancelAnimationFrame(S.raf); S.raf = 0; }
   try {
     const prep = await prepMap(portal.to);
     if (D !== S || S.ended) return; // left (or a new delve began) during the bake
+    // Stepping through a building's door remembers the doorstep you left, so
+    // its own door can bring you back. Pushed only after a successful bake.
+    if (portal.enter) S.stack.push({ to: S.map.id, at: [S.player.x, S.player.y] });
     mountScene(prep, portal.at);
     toast(prep.map.name || 'Onward');
-    startLoop();
   } catch (e) {
     console.warn('delve: door failed', e);
     if (D === S && !S.ended) {
@@ -559,7 +576,6 @@ async function usePortal(portal) {
       // mount rebuilds the list from the map data anyway.
       S.portals = S.portals.filter((q) => q !== portal);
       toast('That door is stuck.');
-      startLoop();
     }
   } finally {
     if (D === S) S.transiting = false;
@@ -969,7 +985,10 @@ function checkExit() {
   // walker has actually stepped clear of it, so one stray press at spawn
   // doesn't instantly end the delve.
   if (!D.exitArmed) { if (d > 1.35) D.exitArmed = true; return; }
-  if (d < 0.8) endDelve('walked out with the haul');
+  if (d >= 0.8) return;
+  // Inside a building? The door leads back out to where you came in.
+  if (D.stack.length) { usePortal({ ...D.stack.pop(), popped: true }); return; }
+  endDelve('walked out with the haul');
 }
 
 /** Doors to other maps — armed the same way, so arriving in a room doesn't

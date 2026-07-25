@@ -167,6 +167,17 @@
   background: linear-gradient(180deg, rgba(0, 0, 0, 0.14), rgba(0, 0, 0, 0.5)); border-top: 1px solid rgba(255, 255, 255, 0.05); }
 /* Cropped-sheet pixel art (src/guild/art.js) — sized by width OR height + aspect-ratio. */
 .px-art { display: block; background-repeat: no-repeat; image-rendering: pixelated; }
+
+/* The Guildmaster card (Grounds room): your avatar, name, build, and the walk. */
+.gm-row { display: flex; gap: 12px; align-items: center; padding: 4px 2px 8px; }
+.gm-face { flex: 0 0 auto; width: 72px; }
+.gm-body { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
+.gm-name { font: inherit; font-family: 'Cinzel', serif; color: var(--gold);
+  background: rgba(0, 0, 0, 0.35); border: 1px solid var(--border); border-radius: 6px;
+  padding: 4px 8px; max-width: 260px; }
+.gm-note { font-size: 0.82em; color: var(--muted); }
+.gm-note b { color: var(--text); text-transform: capitalize; }
+.gm-btns { display: flex; gap: 6px; }
 /* Real furniture standing in the scene banner (right side, behind the workers). */
 .rs-artrow { position: absolute; right: 12px; bottom: 26px; height: 74px;
   display: flex; align-items: flex-end; gap: 10px; pointer-events: none;
