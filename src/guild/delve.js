@@ -500,12 +500,22 @@ export async function openDelve(localeId, member, hooks) {
       exit: null, exitArmed: false, portalArmed: false, settleUntil: 0,
       mined: new Set(),
     };
-    mountScene(prep, null);
-
-    wireInput();
-    updateHaul();
-    showScreen('delveScreen');
-    startLoop();
+    // From here the session object exists, so a throw would leave a half-built
+    // scene latched as "a delve is open" and lock the feature out for the rest
+    // of the page. Tear it down and let the caller report the failure.
+    try {
+      mountScene(prep, null);
+      wireInput();
+      updateHaul();
+      showScreen('delveScreen');
+      startLoop();
+    } catch (e) {
+      if (D && D.raf) cancelAnimationFrame(D.raf);
+      D = null;
+      host.innerHTML = '';
+      showScreen('guildScreen');
+      throw e;
+    }
     toast(`${member.name.split(' ')[0]} enters ${prep.map.name || hooks.locale.name}.`);
     return true;
   } finally {
@@ -617,6 +627,16 @@ function addProp(html, x, y, w) {
   D.field.appendChild(el);
 }
 
+/** Ground a decal cutout the same way sprites are grounded — a 48px cell crop
+ *  usually has empty rows under the object. Measured once per decal. */
+function groundDecal(name, cv, h) {
+  if (_padCache[name] == null) {
+    const low = lowestOpaqueRow(cv);
+    _padCache[name] = low < 0 ? 0 : (h - 1 - low) / h * 100;
+  }
+  if (_padCache[name] > 0) cv.style.setProperty('--footpct', _padCache[name].toFixed(2) + '%');
+}
+
 /** An upright standee cut from a prop sheet (boulders, stalagmites, the cart). */
 function addPropCanvas(decalName, sheets, x, y) {
   const d = DECALS[decalName];
@@ -625,6 +645,7 @@ function addPropCanvas(decalName, sheets, x, y) {
   const g = cv.getContext('2d');
   g.imageSmoothingEnabled = false;
   g.drawImage(sheets[d.sheet], d.x, d.y, d.w, d.h, 0, 0, d.w, d.h);
+  groundDecal('decal:' + decalName, cv, d.h);
   const el = document.createElement('div');
   el.className = 'dv-prop';
   el.innerHTML = '<div class="dv-shadow"></div><div class="dv-up"></div>';
@@ -645,6 +666,7 @@ function addOre(x, y, oresImg) {
   const g = cv.getContext('2d');
   g.imageSmoothingEnabled = false;
   g.drawImage(oresImg, d.x, d.y, d.w, d.h, 0, 0, d.w, d.h);
+  groundDecal('ore:' + kind, cv, d.h);
   const el = document.createElement('div');
   el.className = 'dv-ore';
   el.innerHTML = '<div class="dv-shadow"></div><div class="dv-up"></div>';
