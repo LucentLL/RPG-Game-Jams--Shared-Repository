@@ -1,13 +1,14 @@
 /**
  * @file Delve maps — authored 2.5D explorable locales (data only; delve.js runs them).
  *
- * The look is the classic top-down "Zelda cliff" illusion: a walkable plateau
- * top, a rubble lip around its rim, a tall rock face hanging below every south
- * edge, and near-black chasm everywhere the ground fell away. All of it comes
- * from ONE pre-baked kit — `public/assets/tiles/cliffs.png` (zcliffs_3, 48px
- * tiles) — which ships the same plateau twice: sandy-tan (the mine) and grass
- * (the near country). A THEME below is just the tile-coordinate table for one
- * of those palettes, so every future biome is a new table, not new code.
+ * The look is Octopath-style "2D sprites in a 3D world": plateau tops live on
+ * a perspective-tilted plane, real vertical rock walls hang off every edge,
+ * and near-black chasm yawns everywhere the ground fell away (delve.js builds
+ * the geometry; the walls are textured with the kit's face tiles). All the art
+ * comes from ONE pre-baked kit — `public/assets/tiles/cliffs.png` (zcliffs_3,
+ * 48px tiles) — which ships the same plateau twice: sandy-tan (the mine) and
+ * grass (the near country). A THEME below is just the tile-coordinate table
+ * for one of those palettes, so every future biome is a new table, not code.
  *
  * Maps are ASCII grids (one string per row, all equal length):
  *   #  chasm / void            .  walkable floor
@@ -16,6 +17,7 @@
  *   o  ore node   (floor, blocks movement, COLLECTIBLE — bump it to mine it)
  *   r  boulder    (floor, impassable)      t  stalagmite / tree (impassable)
  *   =  minecart rail run (floor, passable) m  minecart (floor, impassable)
+ *   B  raised block (floor base, impassable — rendered as a true 3D cube)
  *
  * Creature spawns are explicit `{prey, x, y}` (tile coords; delve.js centers
  * them) so terrain and population balance independently. Every prey id must
@@ -103,13 +105,13 @@ export const DELVE_MAPS = {
       '###..########...........##', //  4  ← neck down to the west galleries
       '###..########....r......##', //  5
       '##........###.....o.....##', //  6  ← west galleries · north hall
-      '##......................##', //  7
+      '##....BB................##', //  7
       '##..t.................r.##', //  8
       '##........###########..###', //  9  ← east stair-shaft neck
       '#####..##############..###', // 10
       '#####..##############..###', // 11
       '#####..##############..###', // 12
-      '##..........###.........##', // 13  ← entry floor · east chamber
+      '##..........###....BB...##', // 13  ← entry floor · east chamber
       '##..s.......###.....r...##', // 14
       '##....====m..........o..##', // 15
       '##...o................t.##', // 16
