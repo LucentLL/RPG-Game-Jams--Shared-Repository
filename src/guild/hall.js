@@ -588,6 +588,27 @@ async function exploreLocale(localeId) {
   wilds.delveEntries[localeId] = (wilds.delveEntries[localeId] || 0) + 1;
   save();
 }
+/**
+ * Stroll a guild interior — the delve engine running a room map (no stamina,
+ * no creatures, no spoils; it's home). The selected member walks the space.
+ */
+async function strollRoom(mapId, glyph, name) {
+  const h = heroById(selectedId) || guild.roster[0]; if (!h) return;
+  if (!hasDelveMap(mapId) || isDelveOpen()) return;
+  try {
+    await openDelve(mapId, h, {
+      locale: { glyph, name },
+      fight: async () => null,
+      onKill: () => null,
+      onOre: () => null,
+      onEnd: () => { showScreen('guildScreen'); render({ top: true }); },
+    });
+  } catch (e) {
+    console.warn('stroll: failed to open', e);
+    notice = `The ${name} doors are stuck — try again.`;
+    render();
+  }
+}
 /** Sell one unit of a hunted good (pelt / surplus game meat) at the Market. */
 function sellMaterial(matId) {
   if (!HUNT_MATERIALS.includes(matId)) return;
@@ -2491,7 +2512,14 @@ function forgeRoom() {
   return deptRoom('forge', '🔨', 'Forge', forgeBody)
     + storesPanel('🪨 Forge Stockroom · ore', 'forge', 'Ore bought at market or bartered from quests is delivered here. Forging and ♻ refining both draw from this stock.');
 }
-function libraryRoom() { return deptRoom('study', '📖', 'Library', studyBody) + libraryShelfPanel(); }
+function libraryRoom() {
+  // The stacks are WALKABLE — the delve engine runs the room's interior map.
+  const subject = heroById(selectedId) || guild.roster[0];
+  const strollBar = subject
+    ? `<div class="tourney-lens quest-lens"><button class="tourney-play" onclick="__guild.strollRoom('library','📖','Library — the stacks')">🚶 Stroll the stacks — walk ${subject.name.split(' ')[0]} through the shelves</button></div>`
+    : '';
+  return strollBar + deptRoom('study', '📖', 'Library', studyBody) + libraryShelfPanel();
+}
 function laboratoryRoom() {
   return deptRoom('brew', '⚗', 'Laboratory', brewBody)
     + storesPanel('🌿 Laboratory Stores · herbs', 'laboratory', 'Herbs for the Alchemist’s brews. Finished potions shelve next door in the 🏺 Apothecary.');
@@ -3203,7 +3231,7 @@ export function openGuild() {
 // Every handler no-ops while a week is advancing (a played battle can be mid-flight;
 // rail buttons still render behind the battle screen and would corrupt the in-flight
 // week). practiceBout/advanceAll keep their own internal checks as a second belt.
-const __guildApi = { selectHero, setActivity, setTraining, setIntensity, scheduleAdd, scheduleRemoveAt, scheduleClear, setRecipe, setForgeMode, setRefineItem, setRefineGuard, setStudyMode, setEnchantMode, setSpecialization, setPotion, setDiscipline, usePotion, setDiet, setQuest, setHunt, selectWildsLocale, scoutRegion, setPlayHunt, exploreLocale, sellMaterial, setElective, setTrackKind, setSecondDiscipline, setCookRecipe, setEnchantPlanet, slotOrb, assignTo, setSpar, equipItem, unequipSlot, setPolicy, provision, buyMaterial, sellItem, buyBook, hire, takeApprentice, promoteApprentice, dismissApprentice, advanceAll, back, openRoom, toggleFullscreen, upgradeFacility, enterTournament, leaveTournament, setPlayNext, setPlayQuest, setAskTournaments, toggleDraw, selectCalEvent, praiseHero, scoldHero, openAssembly, closeAssembly, appointTrainer, practiceBout, openRanch, enterRoomFromRanch, manageMemberFromRanch, ranchBuild: toggleBuild, ranchPick: pickStation, ranchPlace: placeStationAt, ranchRemoveStation: removeStationById, ranchZoomIn, ranchZoomOut, ranchZoomFit };
+const __guildApi = { selectHero, setActivity, setTraining, setIntensity, scheduleAdd, scheduleRemoveAt, scheduleClear, setRecipe, setForgeMode, setRefineItem, setRefineGuard, setStudyMode, setEnchantMode, setSpecialization, setPotion, setDiscipline, usePotion, setDiet, setQuest, setHunt, selectWildsLocale, scoutRegion, setPlayHunt, exploreLocale, strollRoom, sellMaterial, setElective, setTrackKind, setSecondDiscipline, setCookRecipe, setEnchantPlanet, slotOrb, assignTo, setSpar, equipItem, unequipSlot, setPolicy, provision, buyMaterial, sellItem, buyBook, hire, takeApprentice, promoteApprentice, dismissApprentice, advanceAll, back, openRoom, toggleFullscreen, upgradeFacility, enterTournament, leaveTournament, setPlayNext, setPlayQuest, setAskTournaments, toggleDraw, selectCalEvent, praiseHero, scoldHero, openAssembly, closeAssembly, appointTrainer, practiceBout, openRanch, enterRoomFromRanch, manageMemberFromRanch, ranchBuild: toggleBuild, ranchPick: pickStation, ranchPlace: placeStationAt, ranchRemoveStation: removeStationById, ranchZoomIn, ranchZoomOut, ranchZoomFit };
 window.__guild = {};
 for (const k in __guildApi) {
   window.__guild[k] = (...args) => {
