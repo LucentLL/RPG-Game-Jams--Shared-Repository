@@ -60,14 +60,20 @@
   transform-style: preserve-3d;
   pointer-events: none;
 }
-/* --footpad = the sprite art's transparent rows below its feet (measured per
-   sheet at spawn); the translateY slides the cutout down its own upright axis
-   so the visible feet — not the frame edge — sit on the ground point. */
 .dv-up {
-  transform: rotateX(calc(-1 * var(--dvtilt))) translateY(var(--footpad, 0px));
+  transform: rotateX(calc(-1 * var(--dvtilt)));
   transform-origin: 50% 100%;
 }
-.dv-up canvas { display: block; image-rendering: pixelated; }
+/* --footpct = the transparent rows below the sprite's feet as a PERCENT of the
+   canvas height (measured per sheet, and for the compositor's output measured
+   from its own pixels — see measureFootPct). translateY% resolves against the
+   element's own height, so the art slides down its upright axis by exactly
+   that much and the visible SOLES land on the ground point, whatever the
+   canvas is scaled to. Without it a sprite hovers above its shadow. */
+.dv-up canvas {
+  display: block; image-rendering: pixelated;
+  transform: translateY(var(--footpct, 0%));
+}
 .dv-player .dv-up canvas { width: 79px; height: 79px; }
 .dv-prop .dv-up .px-art { display: block; width: 100%; }
 .dv-shadow {
