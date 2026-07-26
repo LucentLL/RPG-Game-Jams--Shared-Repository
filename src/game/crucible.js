@@ -48,7 +48,7 @@ import {
   MAX_REFINEMENT, MAX_SOCKETS, WEAPON_GEAR_TYPES, SHIELD_GEAR_TYPES,
   isTwoHandedType,
 } from './data/gear.js';
-import { BASIC_ATTACK, ALL_ATTACKS, ATTACKS } from './data/attacks.js';
+import { BASIC_ATTACK, ALL_ATTACKS, ATTACKS, typeColor } from './data/attacks.js';
 import {
   G, CTL, CT, CTR, CFL, CF, CFR, CWL, CW, CWR, WL, W, WR, WBL, WB, WBR, RK1, RK2, FL1, FL2,
   BF_TEMPLATES,
@@ -1991,19 +1991,24 @@ function renderBuilderControls(){
   var el = document.getElementById('builderControls');
   if (!el || !builderState) return;
   var html = '';
-  // Body type + Skin tone share a row.
-  var bt = builderState.bodyType;
+  // Skin tone. The alchemical BODY TYPE spinner (Salt / Sulfur / Mercury) that
+  // used to share this row is retired — it was Athanor flavour that the guild
+  // game has no use for. The field itself lives on internally (it still seeds
+  // the palette bias and the sprite base, and old saves carry it), so restoring
+  // the choice is just putting this block back:
+  //
+  //   var bt = builderState.bodyType;
+  //   ... '<div class="b-label">Body</div>'
+  //       '<button class="b-arrow" onclick="shiftBuilderBody(-1)">◄</button>'
+  //       '<div class="b-val">'+ (bt.charAt(0).toUpperCase()+bt.slice(1)) +'</div>'
+  //       '<button class="b-arrow" onclick="shiftBuilderBody(1)">►</button>'
+  //
+  // shiftBuilderBody() is deliberately left in place for that.
   var toneIdx = (builderState.appearance.skinTone | 0);
   var toneName = (ELEMENTS_SKIN_TONES[toneIdx] && ELEMENTS_SKIN_TONES[toneIdx].name) || 'Default';
   html += '<div class="builder-row">'
-    + '<div class="b-label">Body</div>'
+    + '<div class="b-label">Skin</div>'
     + '<div class="b-spinner">'
-    +   '<button class="b-arrow" onclick="shiftBuilderBody(-1)">◄</button>'
-    +   '<div class="b-val">'+ (bt.charAt(0).toUpperCase() + bt.slice(1)) +'</div>'
-    +   '<button class="b-arrow" onclick="shiftBuilderBody(1)">►</button>'
-    + '</div>'
-    + '<div class="b-spinner right">'
-    +   '<span class="b-lbl">skin</span>'
     +   '<button class="b-arrow" onclick="shiftBuilderSkin(-1)">◄</button>'
     +   '<div class="b-val" style="min-width:54px">'+ toneName +'</div>'
     +   '<button class="b-arrow" onclick="shiftBuilderSkin(1)">►</button>'
@@ -3670,13 +3675,13 @@ function forfeitAction(){
 // Person with Monster-Rancher stats {POW,DEF,SKL,SPD,INT,VIT}; convert to the
 // engine's D&D-ish fighter, fight in the arena, and hand back a plain result.
 var GUILD_ATTACKS_BY_ARCH = {
-  Knight:     ['Strike', 'Calcination Strike', 'Coagulation Slam'],
-  Berserker:  ['Strike', 'Calcination Strike', 'Coagulation Slam'],
-  Adventurer: ['Strike', 'Calcination Strike'],
-  Ranger:     ['Arrow Shot', 'Strike', 'Coagulation Slam'],   // a bow archer — leads with the shot
-  Mage:       ['Strike', 'Distillation Bolt', 'Conjunction'],
-  Cleric:     ['Strike', 'Exaltation', 'Calcination Strike'],
-  Rogue:      ['Strike', 'Thrown Blade', 'Mercury Shift'],     // throws blades, then closes
+  Knight:     ['Strike', 'Flame Strike', 'Stone Slam'],
+  Berserker:  ['Strike', 'Flame Strike', 'Stone Slam'],
+  Adventurer: ['Strike', 'Flame Strike'],
+  Ranger:     ['Arrow Shot', 'Strike', 'Stone Slam'],   // a bow archer — leads with the shot
+  Mage:       ['Strike', 'Lightning Bolt', 'Charged Strike'],
+  Cleric:     ['Strike', 'Mend', 'Flame Strike'],
+  Rogue:      ['Strike', 'Thrown Blade', 'Blink'],     // throws blades, then closes
 };
 // MR stat 0..100 → engine 8..20 so deriveStats' hp/ac/speed stay in the engine's band.
 function _mrToEng(v){ return Math.max(8, Math.min(20, Math.round(8 + (Math.max(0, Math.min(100, v || 0)) / 100) * 12))); }
@@ -3690,7 +3695,7 @@ function guildFighterFromSpec(spec, num){
   var d = deriveStats(stats);
   var defMod = Math.floor((stats.CHA - 10) / 2); // DEF (→CHA) now hardens AC, so trained defense matters in the arena
   var prime = spec.prime || (GUILD_ARCH_PRIME[spec.archetype] || 'salt');
-  var attacks = (GUILD_ATTACKS_BY_ARCH[spec.archetype] || ['Strike', 'Calcination Strike']).filter(function(n){ return !!ATTACKS[n]; });
+  var attacks = (GUILD_ATTACKS_BY_ARCH[spec.archetype] || ['Strike', 'Flame Strike']).filter(function(n){ return !!ATTACKS[n]; });
   return {
     prime: prime, num: num || 1, name: spec.name || 'Fighter', col: num === 2 ? '#ef4444' : '#d4a843',
     stats: stats, maxHp: d.hp, hp: d.hp, ac: d.ac + defMod, speed: d.speed, prof: d.proficiency,
@@ -4662,7 +4667,7 @@ function buildAttackBar(){
   // ═══ ATTACK MOVES ═══
   p1.attacks.forEach(function(name){
     var atk=ATTACKS[name];if(!atk)return;
-    var typCol=atk.type==='sol'?'#f59e0b':atk.type==='luna'?'#6366f1':atk.type==='physical'?'#94a3b8':'#a890f0';
+    var typCol=typeColor(atk.type);
     var btn=document.createElement('button');btn.className='atk-btn'+(selectedAttack===name?' selected':'');
     var shortName=name.length>14?name.split(' ').map(function(w){return w.slice(0,5)}).join(' '):name;
     btn.innerHTML='<div style="font-size:0.78em;line-height:1.1">'+shortName+'</div><div class="atk-type" style="color:'+typCol+'">● '+atk.type.toUpperCase()+'</div>';
@@ -4718,7 +4723,7 @@ function showReadyPopup(){
   p1.attacks.forEach(function(name){
     var atk=ATTACKS[name];if(!atk)return;
     if(atk.range===0&&atk.special!=='teleport')return; // skip self-only moves
-    var typCol=atk.type==='sol'?'#f59e0b':atk.type==='luna'?'#6366f1':atk.type==='physical'?'#94a3b8':'#a890f0';
+    var typCol=typeColor(atk.type);
     html+='<div style="background:#1e1e28;border:1px solid #333;border-left:3px solid '+typCol+';padding:8px 12px;margin:4px 0;border-radius:6px;cursor:pointer" onclick="pickReadyAttack(\''+name+'\')">';
     html+='<div style="color:#e8e0d0;font-size:0.9em">'+name+'</div>';
     html+='<div style="color:#888;font-size:0.75em">Range: '+(atk.range||1)+' | '+atk.dice+'</div></div>';
@@ -5566,7 +5571,7 @@ function resolveOneAttack(attacker,defender,atkName,done){
       if(attacker===p1&&run)run.totalDamage+=dmg; // guard: guild tactical battles have no `run` (twin of the arena's 2989 guard)
       logMsg(aName+' '+atkName+': '+(isCrit?'CRIT! ':'')+'d20('+roll+')+'+toHit+'='+total+' vs AC'+defAC+' ✔ '+dmg+' dmg',isCrit?'crit':'hit');
       if(matB.lifesteal&&dmg>0){var steal=rollDice(matB.lifestealDice||'1d4');attacker.hp=Math.min(attacker.maxHp,attacker.hp+steal);logMsg(aName+' drains '+steal+' HP!','hit')}
-      if(atk.special==='dot'){var dotTurns=atk.dotTurns+matB.dotBonus;defender.dot={dice:atk.dotDice,turns:dotTurns};logMsg('Putrefaction! ('+dotTurns+' turns)','dissolve')}
+      if(atk.special==='dot'){var dotTurns=atk.dotTurns+matB.dotBonus;defender.dot={dice:atk.dotDice,turns:dotTurns};logMsg('Poisoned! ('+dotTurns+' turns)','dissolve')}
     } else {
       logMsg(aName+' '+atkName+': d20('+roll+')+'+toHit+'='+total+' vs AC'+defAC+' ✘ MISS','miss');
     }
@@ -5591,7 +5596,7 @@ function showDice(header,roll,total,ac,isCrit,done){
 }
 function processDOT(f){
   if(!f||!f.dot)return;var dmg=rollDice(f.dot.dice);f.hp=Math.max(0,f.hp-dmg);
-  logMsg((f===p1?'You':'Opp')+' takes '+dmg+' Putrefaction dmg!','dissolve');
+  logMsg((f===p1?'You':'Opp')+' takes '+dmg+' poison dmg!','dissolve');
   f.dot.turns--;if(f.dot.turns<=0)f.dot=null;
 }
 function applyTileEffects(f){
@@ -6679,7 +6684,7 @@ function showMatDetail(planetIdx,level,xp){
   else if(p.bonus==='crit')bonusText='Attack: <span style="color:'+p.col+'">Crit range '+(21-Math.min(lvl,3))+'-20</span> on all attacks.';
   else if(p.bonus==='range')bonusText='Attack: <span style="color:'+p.col+'">+'+Math.min(lvl,2)+' range</span> on ranged attacks.';
   else if(p.bonus==='lifesteal')bonusText='Attack: <span style="color:'+p.col+'">Heal 1d4 HP</span> on hit.';
-  else if(p.bonus==='dot')bonusText='Attack: <span style="color:'+p.col+'">+'+Math.min(lvl,2)+' DOT turns</span> on Putrefaction attacks.';
+  else if(p.bonus==='dot')bonusText='Attack: <span style="color:'+p.col+'">+'+Math.min(lvl,2)+' DOT turns</span> on poison attacks.';
   // Compound info
   var compText='';
   COMPOUNDS.forEach(function(c){
@@ -6694,7 +6699,7 @@ function showMatDetail(planetIdx,level,xp){
     grantText='<div class="md-bonus"><div class="md-bonus-title">GRANTS ATTACKS</div>';
     p.grants.forEach(function(name){
       var atk=ATTACKS[name];if(!atk)return;
-      var typCol=atk.type==='sol'?'#f59e0b':atk.type==='luna'?'#6366f1':atk.type==='mercury'?'#a890f0':'#94a3b8';
+      var typCol=typeColor(atk.type);
       grantText+='<div style="margin-top:3px"><span style="color:'+typCol+'">'+name+'</span> — '+atk.desc+'</div>';
     });
     grantText+='</div>';

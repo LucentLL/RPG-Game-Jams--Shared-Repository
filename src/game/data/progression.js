@@ -3,19 +3,19 @@
 // ═══ PLANETARY METALS ═══
 var PLANETS=[
   {key:'silver',  sym:'☽',name:'Silver',  planet:'Moon',   col:'#b8c4d0',bonus:'defense', bonusDesc:'+AC',     desc:'Lunar reflection.',
-    grants:['Luna Ward','Exaltation']},
+    grants:['Stone Ward','Mend']},
   {key:'quicksilver',sym:'☿',name:'Quicksilver',planet:'Mercury',col:'#a890f0',bonus:'accuracy',bonusDesc:'+hit',   desc:'Volatile flux.',
-    grants:['Mercury Shift','Distillation Bolt']},
+    grants:['Blink','Lightning Bolt']},
   {key:'copper',  sym:'♀',name:'Copper',  planet:'Venus',  col:'#c87850',bonus:'lifesteal',bonusDesc:'Heal',     desc:'Restorative warmth.',
-    grants:['Conjunction','Coagulation Slam']},
+    grants:['Charged Strike','Stone Slam']},
   {key:'gold',    sym:'☉',name:'Gold',    planet:'Sun',    col:'#d4a843',bonus:'damage',   bonusDesc:'+dmg',     desc:'Solar radiance.',
-    grants:['Calcination Strike','Sol Flare']},
+    grants:['Flame Strike','Fire Blast']},
   {key:'iron',    sym:'♂',name:'Iron',    planet:'Mars',   col:'#c45040',bonus:'crit',     bonusDesc:'Crit++',   desc:'Aggressive edge.',
-    grants:['Dissolution Slash','Dissolution Crush']},
+    grants:['Rending Slash','Shattering Crush']},
   {key:'tin',     sym:'♃',name:'Tin',     planet:'Jupiter',col:'#a8b8c8',bonus:'range',    bonusDesc:'+range',   desc:'Expansive force.',
-    grants:['Dissolution Wave']},
+    grants:['Static Wave']},
   {key:'lead',    sym:'♄',name:'Lead',    planet:'Saturn', col:'#6b6b75',bonus:'dot',      bonusDesc:'+DOT',     desc:'Heavy oppression.',
-    grants:['Putrefaction Touch','Putrefaction Mist']}
+    grants:['Venom Touch','Poison Cloud']}
 ];
 var COMPOUNDS=[
   {a:0,b:1,name:'Lunar Flux',     col:'#c0b8e8',desc:'+3 AC and +1 hit'},
