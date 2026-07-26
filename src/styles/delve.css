@@ -87,7 +87,7 @@
 }
 
 /* --- Campus buildings: upright facades you walk into through the door --- */
-.dv-bldg { display: block; width: 100%; }
+.dv-bldg { display: block; width: 100%; position: relative; }
 .dv-bldg .bl-roof {
   display: block; height: 30px;
   background: linear-gradient(180deg, #7a4230, #4a2a1e 78%, #3a2016);
@@ -111,8 +111,18 @@
   position: absolute; left: 50%; top: 6px; transform: translateX(-50%);
   font-size: 15px; line-height: 1; filter: drop-shadow(0 1px 2px #000);
 }
+/* The sign hangs BELOW the facade's base, OUT OF THE FLOW. In the flow it added
+   its own height to .dv-up — whose bottom edge is the standee's pivot, the point
+   pinned to the ground — so every building floated one label-height above its own
+   footprint while its contact shadow stayed behind on the grass. Worse, the gap
+   is in the standee's upright frame, so perspective grew it with nearness (10px
+   at the back of the estate, 25px at the front): the buildings read as icons
+   hovering over a location, and the hover breathed as you walked. Props carrying
+   no label — the arena's statue, the pells — never had it, which is exactly why
+   only the campus looked unplanted. */
 .dv-bldg .bl-name {
-  display: block; margin-top: 2px;
+  position: absolute; top: 100%; left: 50%; transform: translateX(-50%);
+  margin-top: 2px;
   font-family: 'Cinzel', serif; font-size: 10px; color: #e8e0d0;
   text-align: center; white-space: nowrap;
   text-shadow: 0 1px 3px #000, 0 0 4px #000;
