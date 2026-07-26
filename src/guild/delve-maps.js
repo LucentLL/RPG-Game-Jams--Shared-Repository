@@ -1,3 +1,4 @@
+import { buildCampusMap } from './campus.js';
 /**
  * @file Delve maps — authored 2.5D explorable locales (data only; delve.js runs them).
  *
@@ -267,60 +268,14 @@ export const DELVE_MAPS = {
   },
 
   // ── The grounds ──────────────────────────────────────────────────────────
-  // The hub the Guildmaster walks. Every building stands on its own footprint
-  // ('f' cells, impassable) with a '+' doorway cut into its south wall; step
-  // onto that and you are inside. Its door puts you back on this spot.
-  // Generated rather than drawn: each building declares its facade sprite, how
-  // wide to render it, which row its base sits on, and where its door falls
-  // across its width — the grid, the footprint it blocks and the threshold cell
-  // are derived, so a door can never drift off its own doorway. Bases are set
-  // ~13 rows apart because these facades are TALL (the cathedral is eleven
-  // tiles) and a near building would otherwise swallow the one behind it.
-  campus: (() => {
-    const W = 28, H = 46;
-    const g = Array.from({ length: H }, () => Array(W).fill('.'));
-    for (let y = 0; y < H; y++) {
-      for (let x = 0; x < W; x++) if (x < 2 || x >= W - 2 || y < 1 || y >= H - 1) g[y][x] = '#';
-    }
-    const PLAN = [
-      { to: 'library',   art: 'bldgLibrary',   name: 'Library',    x: 3,  px: 238, base: 13, frac: 0.50 },
-      { to: 'guildhall', art: 'bldgGuildhall', name: 'Great Hall', x: 11, px: 240, base: 13, frac: 0.50 },
-      { to: 'kitchen',   art: 'bldgKitchen',   name: 'Kitchen',    x: 19, px: 285, base: 13, frac: 0.45 },
-      { to: 'forge',     art: 'bldgForge',     name: 'Forge',      x: 3,  px: 285, base: 27, frac: 0.45 },
-      { to: 'classroom', art: 'bldgAcademy',   name: 'Academy',    x: 11, px: 238, base: 27, frac: 0.50 },
-      { to: 'armory',    art: 'bldgArmory',    name: 'Armory',     x: 19, px: 288, base: 27, frac: 0.27 },
-      { to: 'dormitory',  art: 'bldgDormitory',  name: 'Dormitory',  x: 4,  px: 267, base: 40, frac: 0.50 },
-      { to: 'apothecary', art: 'bldgApothecary', name: 'Apothecary', x: 11, px: 144, base: 40, frac: 0.50 },
-      { to: 'arena',      art: 'bldgArena',      name: 'Arena',      x: 16, px: 228, base: 40, frac: 0.50 },
-    ];
-    const buildings = PLAN.map((b) => {
-      const w = Math.max(1, Math.round(b.px / 48));
-      for (let y = b.base - 2; y < b.base; y++) {
-        // 'F', not 'f': a facade is a full-height solid you can never step into,
-        // where furniture ('f') blocks only the shallow floor slice it rests on.
-        for (let x = b.x; x < b.x + w; x++) if (g[y] && g[y][x] === '.') g[y][x] = 'F';
-      }
-      const dx = b.x + Math.min(w - 1, Math.floor(w * b.frac));
-      g[b.base - 1][dx] = '+'; // the threshold: walk onto it and you're inside
-      return { to: b.to, art: b.art, name: b.name, x: b.x, y: b.base - 2, w, h: 2, px: b.px, door: [dx, b.base - 1] };
-    });
-    g[H - 3][13] = 'w'; // the gate — the way back to the desk
-    return {
-      id: 'campus', theme: 'meadow', name: 'The Grounds',
-      grid: g.map((r) => r.join('')),
-      entry: [13.5, H - 4.7],
-      buildings,
-      props: [
-        { art: 'statue', x: 13.5, y: 20, w: 90 },
-        { art: 'lampPost', x: 9.5, y: 20, w: 58 }, { art: 'lampPost', x: 17.5, y: 20, w: 58 },
-        { art: 'lampPost', x: 9.5, y: 34, w: 58 }, { art: 'lampPost', x: 17.5, y: 34, w: 58 },
-        { art: 'trainDummy', x: 22.5, y: 38, w: 50 }, { art: 'trainDummy', x: 23.5, y: 39, w: 50 },
-        { art: 'gateArch', x: 13.5, y: 44, w: 144 },
-        { art: 'treeTall', x: 3.5, y: 20, w: 80 }, { art: 'treeTall', x: 24.5, y: 20, w: 80 },
-        { art: 'treeTall', x: 3.5, y: 34, w: 80 }, { art: 'treeTall', x: 24.5, y: 44, w: 80 },
-      ],
-    };
-  })(),
+  // NOT a constant. The campus is the one map the player can REBUILD, so its
+  // layout lives on `guild.campus` and campus.js derives this shape from it —
+  // see mapForLocale below, which swaps this placeholder for the live campus.
+  // The derivation keeps the original invariant: each building declares only its
+  // facade, its width and where its door falls, and the grid, the footprint it
+  // blocks and the threshold cell are all computed, so a door can never drift
+  // off its own doorway however the player rearranges the estate.
+  campus: null,
 
   //             0123456789012345678
   arena: {
@@ -580,8 +535,20 @@ export const DELVE_MAPS = {
   },
 };
 
-/** The walkable chart for a locale, or null (most locales are still unmapped). */
-export function mapForLocale(localeId) { return DELVE_MAPS[localeId] || null; }
+/** The guild whose campus layout the grounds should be built from. hall.js sets
+ *  this on load; without it the grounds fall back to the default estate. */
+let _campusGuild = null;
+export function setCampusGuild(g) { _campusGuild = g; }
+
+/**
+ * The walkable chart for a locale, or null (most locales are still unmapped).
+ * 'campus' is the exception: it is DERIVED from the live layout every time it is
+ * asked for, so walking the grounds always shows what the Build tab last did.
+ */
+export function mapForLocale(localeId) {
+  if (localeId === 'campus') return buildCampusMap(_campusGuild || { campus: null });
+  return DELVE_MAPS[localeId] || null;
+}
 
 /** Cheap authoring lint — ragged rows throw; misplaced spawns/portals warn. */
 export function validateMap(map) {
