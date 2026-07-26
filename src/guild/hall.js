@@ -69,6 +69,7 @@ const ROOMS = [
   { id: 'calendar', glyph: '📅', name: 'Calendar', tag: 'SEASON' },
   { id: 'roster', glyph: '🛡', name: 'Roster', tag: 'MEMBERS' },
   { id: 'wilds', glyph: '🗺', name: 'Wilds', tag: 'EXPLORE' },
+  { id: 'town', glyph: '🏘', name: 'Town', tag: 'OFF-CAMPUS' },
   { id: 'arena', glyph: '⚔', name: 'Arena', tag: 'COMBAT' },
   { id: 'forge', glyph: '🔨', name: 'Forge', tag: 'WORK' },
   { id: 'kitchen', glyph: '🍲', name: 'Kitchen', tag: 'WORK' },
@@ -1615,7 +1616,10 @@ function personSprite(person, px) {
   return `<canvas class="hero-sprite" width="${p * 2}" height="${p * 2}" data-hid="${person.id}" aria-label="${person.name}"></canvas>`;
 }
 /** A member, a tavern recruit, OR a circuit rival, by id (all render the same way). */
-function personById(id) { return heroById(id) || (guild.recruits || []).find((r) => r.id === id) || rivalById(guild, id); }
+function personById(id) {
+  return heroById(id) || (guild.recruits || []).find((r) => r.id === id)
+    || (guild.apprentices || []).find((a) => a.id === id) || rivalById(guild, id);
+}
 /** After each render, draw every sprite canvas via the shared Elements renderer. */
 function paintSprites() {
   if (typeof window.renderGuildSprite !== 'function') return; // crucible.js not loaded (shouldn't happen)
@@ -2638,7 +2642,8 @@ function roomStatus(id) {
     case 'library': { const n = r.filter((h) => h.assignment.type === 'study').length; const b = (guild.inventory.books || []).length; return n ? `${n} studying` : `${b} book${b === 1 ? '' : 's'}`; }
     case 'kitchen': { const m = guild.inventory.materials; const p = (m.grain || 0) + (m.salted_meat || 0) + (m.game_meat || 0); return `${p} ration${p === 1 ? '' : 's'}`; }
     case 'armory': { const n = guild.inventory.items.length; return `${n} item${n === 1 ? '' : 's'}`; }
-    case 'quarters': return `${guild.recruits.length} for hire`;
+    case 'quarters': return `${guild.roster.length}/${maxRoster(guild)} housed`;
+    case 'town': return `${guild.recruits.length} for hire`;
     case 'academy': { const a = guild.apprentices || []; const ready = a.filter((x) => x.readiness >= 1).length; return ready ? `${a.length} · ${ready} ready` : `${a.length}/${dormCapacity(guild)} bunks`; }
     case 'laboratory': { const n = r.filter((h) => h.assignment.type === 'brew').length; return n ? `${n} brewing` : 'idle'; }
     case 'apothecary': { const n = potionCount(guild.inventory); return `${n} potion${n === 1 ? '' : 's'}`; }
@@ -2868,11 +2873,36 @@ function hallOfFamePanel() {
     </div>`;
 }
 
+/**
+ * The Quarters: where your people LIVE. The hire board used to sit here, which
+ * never made sense — the room is called Quarters, was titled "Tavern", and its
+ * walk-inside door opens on a map literally named The Dormitory. Sell-swords
+ * for hire belong in a town, not in your members' bunkroom, so that board moved
+ * to the Town and this room is now just the house and its history.
+ */
 function quartersRoom() {
+  const housed = guild.roster.length, cap = maxRoster(guild);
   return `${hallOfFamePanel()}<div class="plan-card">
-      <div class="plan-title">🍺 Tavern · Recruits · roster ${guild.roster.length}/${maxRoster(guild)}</div>
+      <div class="plan-title">🛏 Bunkrooms · ${housed}/${cap} housed</div>
+      <div class="hint" style="text-align:left">Your members sleep here between weeks. Beds come from Living Quarters — expand it in the 🏕 Grounds to house more.
+        Sell-swords for hire are down in the 🏘 Town; unnamed prospects train in the 🎓 Academy.</div>
+    </div>`;
+}
+
+/**
+ * The Town — everything that is emphatically NOT the guild. Today that is the
+ * tavern's hire board: drifting sell-swords, already grown, who cost real gold
+ * and arrive with no loyalty. The guild's own pipeline (Academy apprentices,
+ * and the recruiting class) is the cheap, slow, loyal alternative.
+ */
+function townRoom() {
+  const full = guild.roster.length >= maxRoster(guild);
+  return `<div class="plan-card">
+      <div class="plan-title">🍺 The Wayhouse · sell-swords for hire · roster ${guild.roster.length}/${maxRoster(guild)}</div>
+      <div class="hint" style="text-align:left">Grown fighters passing through town. They cost gold and come as they are — no
+        upbringing, no loyalty, no say in what they became. New faces drift in each week.</div>
       <div class="recruit-list">${guild.recruits.map(recruitCard).join('')}</div>
-      ${guild.roster.length >= maxRoster(guild) ? '<div class="hint">Quarters are full — expand Living Quarters in the 🏕 Grounds to house more.</div>' : ''}
+      ${full ? '<div class="hint">No room on the roster — expand Living Quarters in the 🏕 Grounds.</div>' : ''}
     </div>`;
 }
 
@@ -2886,7 +2916,7 @@ function apprenticeCard(a) {
   const rosterFull = guild.roster.length >= maxRoster(guild);
   const gradLabel = ready ? (rosterFull ? '🎓 Roster full' : '🎓 Graduate → roster') : `Developing · ${pct}%`;
   return `<div class="app-card ${ready ? 'ready' : ''}">
-      <div class="app-head"><span class="app-lean">${LEAN_GLYPH[a.lean] || '🎓'} Leans ${a.lean}</span><span class="app-stars" title="scouted potential">${starStr}</span></div>
+      <div class="app-head"><span class="app-face">${personSprite(a, 46)}</span><span class="app-lean">${LEAN_GLYPH[a.lean] || '🎓'} ${a.name || 'Leans ' + a.lean}</span><span class="app-stars" title="scouted potential">${starStr}</span></div>
       <div class="app-bar"><span style="width:${pct}%"></span></div>
       <div class="app-meta">${ready ? '<b>Ready to graduate</b>' : `week ${a.weeks} in the academy`}</div>
       <div class="app-actions">
@@ -3316,6 +3346,7 @@ const ROOM_FLAVOR = {
   armory: 'Every blade here has a name, a maker, and a story.',
   laboratory: 'Something bubbles that probably shouldn’t.',
   quarters: 'Bunks, tankards, and tomorrow’s legends asleep by nine.',
+  town: 'Cobbles, gossip, and whoever the road blew in this week.',
 };
 // Real furniture from the shared art library, dressed into each room's scene
 // banner (heights are % of the art row; aspect-ratio keeps each piece true).
@@ -3324,6 +3355,7 @@ const SCENE_ART = {
   library: [['bookshelf', 'height:94%'], ['bookshelf', 'height:94%'], ['bookshelf', 'height:94%']],
   forge: [['anvil', 'height:46%']],
   quarters: [['bed', 'height:90%'], ['bed', 'height:90%']],
+  town: [['stall', 'height:88%'], ['wagon', 'height:70%']],
 };
 
 /** Who's pictured working the room this week (falls back to the selected member). */
@@ -3388,6 +3420,7 @@ function renderRoom(id) {
     case 'apothecary': return hdr + apothecaryRoom();
     case 'armory': return hdr + armoryRoom();
     case 'quarters': return hdr + quartersRoom();
+    case 'town': return hdr + townRoom();
     case 'academy': return hdr + academyRoom();
     default: return renderHub();
   }
