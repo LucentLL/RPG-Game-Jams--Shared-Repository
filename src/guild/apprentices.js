@@ -47,7 +47,15 @@ export function developmentRate(guild) {
 
 /** Take in a fresh apprentice: a random lean + hidden potential, zero readiness. */
 export function makeApprentice() {
-  return { id: nextId(), lean: LEANS[rand(LEANS.length)], potential: 0.35 + Math.random() * 0.6, weeks: 0, readiness: 0 };
+  const id = nextId();
+  return {
+    id, lean: LEANS[rand(LEANS.length)], potential: 0.35 + Math.random() * 0.6, weeks: 0, readiness: 0,
+    // A face, but a plain one. `plainLook` tells the sprite renderer to strip
+    // every accessory layer (cape, hat, sash): a trainee wears guild-issue kit
+    // and nothing else, so graduating is visibly becoming somebody.
+    appearanceSeed: (Math.random() * 0x7fffffff) | 0,
+    plainLook: true,
+  };
 }
 
 /** Sanitize a loaded apprentice (defends old/partial saves). */
@@ -59,6 +67,11 @@ export function normalizeApprentice(a) {
     potential: Math.max(0.2, Math.min(1, typeof a.potential === 'number' ? a.potential : 0.5)),
     weeks: Math.max(0, a.weeks | 0),
     readiness: Math.max(0, Math.min(1, typeof a.readiness === 'number' ? a.readiness : 0)),
+    // Older saves predate the trainee portrait — mint one rather than leaving
+    // them faceless, and always keep them plain.
+    appearanceSeed: typeof a.appearanceSeed === 'number' ? a.appearanceSeed : (Math.random() * 0x7fffffff) | 0,
+    plainLook: true,
+    name: a.name || null,
   };
 }
 
@@ -91,5 +104,13 @@ export function graduate(app) {
   hero.stats = stats;
   hero.preference = app.lean;      // flavor: the specialty they trained toward
   hero.fromAcademy = true;         // debut record — a home-grown hero, not a hire
+  // A recruited prospect arrives already named; an anonymous intake takes the
+  // name generateRecruit() lent it.
+  if (app.name) hero.name = app.name;
+  // Shed the trainee kit: drop the plain flag and the cached plain appearance so
+  // the renderer rolls a full look, accessories and all, on their debut.
+  hero.plainLook = false;
+  hero.appearance = null;
+  hero.appearanceSeed = app.appearanceSeed != null ? app.appearanceSeed : hero.appearanceSeed;
   return hero;
 }

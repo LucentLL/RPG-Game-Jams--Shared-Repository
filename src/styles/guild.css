@@ -244,6 +244,12 @@
 .rdi-empty { position: absolute; left: 0; right: 0; bottom: 30%; text-align: center;
   color: var(--dim); font-style: italic; font-size: 0.8em; z-index: 100; }
 
+/* An apprentice's portrait on their card — trainees are drawn in guild-issue
+   kit with every accessory layer stripped (crucible generatePlainAppearance). */
+.app-face { display: inline-flex; align-items: center; margin-right: 6px; }
+.app-face canvas { display: block; width: 46px; height: 46px; image-rendering: pixelated;
+  filter: drop-shadow(0 2px 2px rgba(0, 0, 0, 0.55)); }
+
 .plan-title { font-family: 'Cinzel', serif; color: var(--gold); font-size: 0.94em; letter-spacing: 0.12em; margin-bottom: 10px; text-transform: uppercase; }
 .plan-title .pt-cur { color: var(--text); text-transform: none; letter-spacing: 0; }
 .opt-list { display: flex; flex-direction: column; gap: 6px; margin-bottom: 18px; }

@@ -587,6 +587,22 @@ function elementsPickPart(rng, layer, prime){
   return { name: part.name, c: c };
 }
 
+/**
+ * A PLAIN appearance: the same generator, then every accessory stripped.
+ * Apprentices are unnamed trainees in guild-issue kit — they have not earned a
+ * cape, a hat or a sash, and stripping them is what makes a graduate visibly
+ * become somebody. Back/front extras and the hat are the three cosmetic-only
+ * layers (ELEMENTS_LAYER_ORDER), so clearing them leaves body, clothes and hair.
+ */
+function generatePlainAppearance(seed, prime){
+  var ap = generateAppearance(seed, prime || 'salt');
+  ap.backextra = null;
+  ap.frontextra = null;
+  ap.hat = null;
+  ap.plain = true;   // so a later re-roll knows this was deliberate, not empty
+  return ap;
+}
+
 // Generate a complete appearance object from a seed and prime.
 function generateAppearance(seed, prime){
   var rng = elementsRng(seed);
@@ -1641,6 +1657,12 @@ function guildCosmeticGear(archetype, stats){
 function renderGuildSprite(canvas, person, facing){
   if (!canvas || !person) return;
   var prime = person.prime || person.bodyType || GUILD_ARCH_PRIME[person.archetype] || 'salt';
+  // An apprentice is an unnamed trainee in guild-issue kit: clothes and hair,
+  // no cape, no hat, no sash. `plainLook` marks them; the stripped appearance is
+  // cached on the person like any other, so it stays stable week to week.
+  if (person.plainLook && person.appearance == null && person.appearanceSeed != null){
+    person.appearance = generatePlainAppearance(person.appearanceSeed | 0, prime);
+  }
   // Seed the appearance from the UNIQUE id (+name), not name alone — recruits draw
   // from only ~60 name combos, so name-only seeds give look-alike twins. Set it
   // before ensureAppearance so it takes this seed; it persists with the save.
@@ -1993,9 +2015,12 @@ function renderBuilderControls(){
   var html = '';
   // Skin tone. The alchemical BODY TYPE spinner (Salt / Sulfur / Mercury) that
   // used to share this row is retired — it was Athanor flavour that the guild
-  // game has no use for. The field itself lives on internally (it still seeds
-  // the palette bias and the sprite base, and old saves carry it), so restoring
-  // the choice is just putting this block back:
+  // game has no use for. The field lives on internally, but be clear about what
+  // it actually does: `prime` is a GENERATION-TIME PALETTE BIAS and nothing
+  // else. compositeCharacter never reads it, there is no base-body layer keyed
+  // off it, and it has no stat effect — same seed under a different prime picks
+  // byte-identical parts, only different colour variants (plus a small exotic-
+  // skin nudge for mercury). Restoring the choice is just putting this back:
   //
   //   var bt = builderState.bodyType;
   //   ... '<div class="b-label">Body</div>'
