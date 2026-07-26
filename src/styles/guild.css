@@ -244,6 +244,28 @@
 .rdi-empty { position: absolute; left: 0; right: 0; bottom: 30%; text-align: center;
   color: var(--dim); font-style: italic; font-size: 0.8em; z-index: 100; }
 
+/* ═══ Applications — the Academy's letter board (applications.js) ═══
+   Qualifications on the left, the haggle on the right. The applicant's real
+   price is never printed; only their family's means and, after a refusal, that
+   it was refused. */
+.ap-list { display: flex; flex-direction: column; gap: 7px; }
+.ap-card { background: rgba(255, 255, 255, 0.03); border: 1px solid var(--border); border-radius: 9px; padding: 8px 11px; }
+.ap-head { display: flex; align-items: center; gap: 8px; }
+.ap-who { flex: 1; min-width: 0; }
+.ap-dim { color: var(--muted); font-size: 0.86em; }
+.ap-refuse { color: #e0864f; font-size: 0.86em; }
+.ap-meta { margin: 3px 0 6px 54px; }
+.ap-offer { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-left: 54px; }
+.ap-step, .ap-send {
+  font: inherit; cursor: pointer; background: var(--card); color: inherit;
+  border: 1px solid var(--border); border-radius: 7px; padding: 4px 10px;
+}
+.ap-step:hover, .ap-send:hover { border-color: var(--gold); }
+.ap-send { border-color: var(--gold); color: var(--gold); }
+.ap-send:disabled { opacity: 0.4; cursor: default; border-color: var(--border); color: var(--muted); }
+.ap-num { min-width: 132px; text-align: center; font-family: 'Cinzel', serif; color: var(--gold); }
+.ap-num.sch { color: #7fd1a6; }   /* a scholarship is money going OUT */
+
 /* An apprentice's portrait on their card — trainees are drawn in guild-issue
    kit with every accessory layer stripped (crucible generatePlainAppearance). */
 .app-face { display: inline-flex; align-items: center; margin-right: 6px; }

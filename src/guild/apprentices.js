@@ -72,6 +72,12 @@ export function normalizeApprentice(a) {
     appearanceSeed: typeof a.appearanceSeed === 'number' ? a.appearanceSeed : (Math.random() * 0x7fffffff) | 0,
     plainLook: true,
     name: a.name || null,
+    // Signed weekly tuition agreed at intake (applications.js): positive is what
+    // the family pays the guild, negative is a scholarship the guild pays them.
+    // Trainees taken in before tuition existed simply pay nothing.
+    tuition: typeof a.tuition === 'number' ? a.tuition : 0,
+    origin: a.origin || null,
+    place: a.place || null,
   };
 }
 
