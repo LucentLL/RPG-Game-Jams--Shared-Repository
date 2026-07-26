@@ -308,6 +308,7 @@ function ensureAssignment(h) {
     // The week this smith already swung at the Forge's own anvil, if any —
     // stops Advance Week rolling a second attempt on top of the one they made.
     struckWeek: typeof a.struckWeek === 'number' ? a.struckWeek : null,
+    brewedWeek: typeof a.brewedWeek === 'number' ? a.brewedWeek : null,
     refineGuard: REFINE_GUARDS[a.refineGuard] ? a.refineGuard : 'none', // reagent guarding the refine attempt
     potionId: getPotionRecipe(a.potionId) ? a.potionId : 'minor_heal',
     discipline: BOOK_SUBJECTS[a.discipline] ? a.discipline : 'blacksmithing', // study subject — all four trades
@@ -602,6 +603,7 @@ const WALKABLE = {
   kitchen: ['kitchen', 'the kitchen'],
   forge: ['forge', 'the forge floor'],
   armory: ['armory', 'the armory'],
+  apothecary: ['apothecary', 'the apothecary'],
   quarters: ['dormitory', 'the bunkrooms'],
   academy: ['classroom', 'the classroom'],
 };
@@ -681,6 +683,62 @@ async function walkGuild() {
  */
 async function useStation(h, id, api) {
   if (id === 'anvil') return anvilRefine(h, api);
+  if (id === 'cauldron') return cauldronBrew(h, api);
+}
+
+/**
+ * Brew at the Apothecary's cauldron, in the world, by hand — the Forge anvil's
+ * sibling. Same `brew()` the weekly advance calls, same ingredients and
+ * stamina; a latch keeps it to one batch a week.
+ */
+async function cauldronBrew(h, api) {
+  const week = guild.calendar.week;
+  const a = h.assignment;
+  if (a.type !== 'brew') {
+    api.toast(`${h.name.split(' ')[0]} isn't the brewer this week — the cauldron isn't theirs to work.`);
+    return;
+  }
+  if (a.brewedWeek === week) { api.toast('Already brewed this week. Let the pot cool.'); return; }
+
+  const prof = h.professions.alchemy || { theory: 0, practice: 0, field: 0 };
+  const options = POTION_RECIPES.map((r) => {
+    const enough = Object.keys(r.cost).every((k) => (guild.inventory.materials[k] || 0) >= r.cost[k]);
+    const locked = !potionUnlocked(h, r);
+    return {
+      value: r.id,
+      label: `${r.glyph} ${r.name}`,
+      desc: locked ? 'study alchemy to unlock'
+        : Object.keys(r.cost).map((k) => `${MATERIALS[k].name} ×${r.cost[k]}`).join(', '),
+      note: `~p${previewPotency(r, prof.practice, prof.field)} ×${previewBrewYield(r, prof.practice, prof.field)}`,
+      dim: locked || !enough || h.condition.stamina < r.staminaCost,
+    };
+  });
+  const pick = await api.choose({
+    title: '⚗ Brew at the cauldron',
+    sub: `${h.name.split(' ')[0]} · Alchemy Practice ${prof.practice}`,
+    options,
+  });
+  if (!pick) return;
+  const recipe = getPotionRecipe(pick);
+  if (!recipe) return;
+
+  await api.workAt('cauldron', {
+    // No hammer at a cauldron — the brewer works the pot with both hands, so
+    // this is the 'cast' gesture rather than a tool swing.
+    beats: 3, anim: 'cast',
+    finish: () => {
+      const res = brew(h, recipe, guild.inventory, week);
+      if (!res.ok) {
+        const why = res.reason === 'materials' ? 'the ingredients are short'
+          : res.reason === 'locked' ? 'that formula is beyond their theory' : 'not enough left in them';
+        return { txt: `The pot goes still — ${why}.` };
+      }
+      a.brewedWeek = week;
+      save();
+      return { ok: true, txt: `${res.glyph} ${res.name} ×${res.qty} — potency ${res.potency}.` };
+    },
+  });
+  render();
 }
 
 /**
@@ -779,6 +837,7 @@ const INTERIOR_FOLK = {
   kitchen: (r) => r.filter((h) => h.assignment.type === 'cook'),
   forge: (r) => r.filter((h) => h.assignment.type === 'forge'),
   armory: (r) => r.filter((h) => h.assignment.type === 'enchant'),
+  apothecary: (r) => r.filter((h) => h.assignment.type === 'brew'),
   classroom: (r) => r.filter((h) => h.assignment.type === 'train'),
   dormitory: (r) => r.filter((h) => h.condition.injury),
 };
@@ -1286,9 +1345,14 @@ async function advanceAll() {
       entry.learned = learnOnTheJob(h, 'blacksmithing', guild.inventory); // the shelf teaches the shop floor
     } else if (a.type === 'brew') {
       const recipe = getPotionRecipe(a.potionId) || POTION_RECIPES[0];
-      entry.brew = brew(h, recipe, guild.inventory, week);
+      // Already worked the Apothecary's own cauldron this week (cauldronBrew) —
+      // the ingredients and the stamina are spent. Don't brew a second batch.
+      entry.brew = a.brewedWeek === week
+        ? { ok: false, reason: 'brewed' }
+        : brew(h, recipe, guild.inventory, week);
       entry.recipeName = recipe.name;
-      entry.conduct = entry.brew.ok ? (entry.brew.potency >= (recipe.ceil || 100) - 4 ? 'exceeded' : 'solid') : 'failed';
+      entry.conduct = entry.brew.reason === 'brewed' ? 'solid'
+        : entry.brew.ok ? (entry.brew.potency >= (recipe.ceil || 100) - 4 ? 'exceeded' : 'solid') : 'failed';
       entry.learned = learnOnTheJob(h, 'alchemy', guild.inventory);
     } else if (a.type === 'cook') {
       const recipe = getRation(a.cookRecipeId) || RATION_RECIPES[0];
@@ -2228,6 +2292,7 @@ function recapPanel() {
       const b = r.brew;
       if (b.ok && b.material) return `<div class="r-line"><b>${r.name}</b> distilled <span class="up">${b.qty}× ${b.glyph} ${b.name}</span> <span class="dim">· to the Forge stockroom · +${b.practiceGain} practice</span>${learned}</div>`;
       if (b.ok) return `<div class="r-line"><b>${r.name}</b> brewed <span class="up">${b.qty}× ${b.batch.name} (p${b.potency})</span> <span class="dim">· +${b.practiceGain} practice</span>${learned}</div>`;
+      if (b.reason === 'brewed') return `<div class="r-line"><b>${r.name}</b> <span class="dim">worked the cauldron in person this week — that batch is already bottled</span>${learned}</div>`;
       const why = b.reason === 'materials' ? 'out of herbs' : (b.reason === 'locked' ? 'recipe not yet unlocked' : 'too tired to brew');
       return `<div class="r-line"><b>${r.name}</b> <span class="down">couldn't brew — ${why}</span>${learned}</div>`;
     }
@@ -2358,6 +2423,7 @@ function assemblyOutcome(r) {
   if (r.type === 'brew') {
     const b = r.brew;
     if (b.ok && b.material) return `distilled <span class="up">${b.qty}× ${b.glyph} ${b.name}</span>`;
+    if (b.reason === 'brewed') return '<span class="dim">brewed it at the cauldron in person</span>';
     return b.ok ? `brewed <span class="up">${b.qty}× ${b.batch.name} (p${b.potency})</span>`
       : `<span class="down">couldn't brew — ${b.reason === 'materials' ? 'out of herbs' : b.reason === 'locked' ? 'recipe locked' : 'too tired'}</span>`;
   }

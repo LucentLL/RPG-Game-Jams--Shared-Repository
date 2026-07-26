@@ -105,6 +105,9 @@ export const THEMES = {
       kitchen: room('floors', 16, [[4, 2], [5, 2], [6, 2], [7, 2]], 'stonewall', 696),
       // the darkest floor in the sheet · sooty blue-grey stone
       forge: room('floors', 16, [[4, 1], [5, 1], [6, 1], [7, 1]], 'stonewall', 312),
+      // herb-cellar green flagstone under warm tan stone — the one wall palette
+      // on the sheet nothing else had claimed
+      apothecary: room('floors', 16, [[0, 6], [1, 6], [2, 6], [3, 6]], 'stonewall', 600),
       // warm brown brick · keep-grey ashlar
       armory: room('floors', 16, [[2, 1], [3, 1]], 'stonewall', 120),
       // plank floor AND plank walls off the one wood A4 sheet
@@ -286,8 +289,9 @@ export const DELVE_MAPS = {
       { to: 'forge',     art: 'bldgForge',     name: 'Forge',      x: 3,  px: 285, base: 27, frac: 0.45 },
       { to: 'classroom', art: 'bldgAcademy',   name: 'Academy',    x: 11, px: 238, base: 27, frac: 0.50 },
       { to: 'armory',    art: 'bldgArmory',    name: 'Armory',     x: 19, px: 288, base: 27, frac: 0.27 },
-      { to: 'dormitory', art: 'bldgDormitory', name: 'Dormitory',  x: 4,  px: 267, base: 40, frac: 0.50 },
-      { to: 'arena',     art: 'bldgArena',     name: 'Arena',      x: 16, px: 228, base: 40, frac: 0.50 },
+      { to: 'dormitory',  art: 'bldgDormitory',  name: 'Dormitory',  x: 4,  px: 267, base: 40, frac: 0.50 },
+      { to: 'apothecary', art: 'bldgApothecary', name: 'Apothecary', x: 11, px: 144, base: 40, frac: 0.50 },
+      { to: 'arena',      art: 'bldgArena',      name: 'Arena',      x: 16, px: 228, base: 40, frac: 0.50 },
     ];
     const buildings = PLAN.map((b) => {
       const w = Math.max(1, Math.round(b.px / 48));
@@ -403,6 +407,40 @@ export const DELVE_MAPS = {
       { art: 'anvilWork', x: 12.5, y: 4, w: 84 },
       { art: 'forgeFurnace', x: 3.6, y: 6, w: 90 }, { art: 'quenchBarrel', x: 15.5, y: 6, w: 36 },
       { art: 'forgeTwin', x: 12.5, y: 10, w: 96 }, { art: 'tools', x: 8, y: 2.02, w: 44 },
+    ],
+  },
+  //             0123456789012345678
+  apothecary: {
+    id: 'apothecary', theme: 'apothecary', name: 'The Apothecary',
+    grid: [
+      '###################', //  0
+      '#BBBBBBBBBBBBBBBBB#', //  1
+      '#B...............B#', //  2
+      '#B.ff..f...ff....B#', //  3  ← jar cabinet · the cauldron · the jar counter
+      '#B...............B#', //  4
+      '#B.f...........f.B#', //  5  ← alchemy bench · the dresser
+      '#B...............B#', //  6
+      '#BBBBBB....BBBBBBB#', //  7
+      '#B...............B#', //  8
+      '#B.ff.......ff...B#', //  9  ← specimen jars · the sales counter
+      '#B...............B#', // 10
+      '#BBBBBBBBdBBBBBBBB#', // 11
+      '###################', // 12
+    ],
+    entry: [9.5, 10.3],
+    props: [
+      { art: 'jarCabinet', x: 4, y: 4, w: 96 },
+      // The cauldron is the WORKABLE station: walk up and brew the week's
+      // potion at it, the way the Forge's middle anvil takes a refine.
+      { art: 'cauldronBoil', x: 7.5, y: 4, w: 63, cls: 'apoth-boil', use: 'cauldron', label: 'Work the cauldron' },
+      { art: 'jarCounter', x: 12, y: 4, w: 138 },
+      { art: 'alchBench', x: 3.5, y: 6, w: 102 }, { art: 'apothDresser', x: 15.5, y: 6, w: 90 },
+      { art: 'specimenJars', x: 4, y: 10, w: 144 }, { art: 'potionCounter', x: 13, y: 10, w: 138 },
+      // Wall and floor dressing — no grid cell, so nothing here blocks a walk.
+      { art: 'recipeBanner', x: 9.5, y: 2.04, w: 120 },
+      { art: 'herbBasket', x: 6.2, y: 6.9, w: 40 }, { art: 'herbBasket', x: 11.4, y: 8.9, w: 40 },
+      { art: 'potionGreen', x: 8.6, y: 9.9, w: 22 }, { art: 'potionRed', x: 9.1, y: 9.95, w: 22 },
+      { art: 'cauldronGreen', x: 14.4, y: 3.98, w: 52 },
     ],
   },
   //             0123456789012345678
