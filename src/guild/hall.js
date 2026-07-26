@@ -3040,9 +3040,11 @@ function groundsRoom() {
         <span class="gm-body">
           <input class="gm-name" value="${(m.name || '').replace(/"/g, '&quot;')}" maxlength="28"
                  oninput="__guild.masterName(this.value)" onchange="__guild.masterName(this.value)" />
-          <span class="gm-note">Build: <b>${m.prime}</b> — this is you. Walk the grounds and step through any door.</span>
+          <span class="gm-note">This is you. Walk the grounds and step through any door.</span>
           <span class="gm-btns">
-            <button class="tourney-play" onclick="__guild.masterBuild()">◑ Build</button>
+            <!-- The alchemical build cycler (Salt/Sulfur/Mercury) is retired with
+                 the rest of that flavour; masterBuild() is kept if it ever returns.
+                 <button class="tourney-play" onclick="__guild.masterBuild()">◑ Build</button> -->
             <button class="tourney-play" onclick="__guild.masterReroll()">🎲 New look</button>
           </span>
         </span>
