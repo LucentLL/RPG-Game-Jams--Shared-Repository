@@ -12,6 +12,7 @@ import { createGuild, FACILITIES, maxRoster, facilityTier, fedCapacity } from '.
 import { HERO_STATS, heroPower, STAT_CAP, lifeStage, lifeFrac, TRAITS, traitMult } from './hero.js';
 import { generateRecruit, hireCost, rollRecruitPool } from './recruiting.js';
 import { makeApprentice, normalizeApprentice, dormCapacity, academyBoard, developApprentice, developmentRate, graduate, potentialStars, LEAN_GLYPH, APPRENTICE_INTAKE } from './apprentices.js';
+import { ensureApplications, tickApplications, offerTuition, closeApplication, reservation, suggestedOffer, wealthBand, academyTuition, BOARD_SIZE, PATIENCE } from './applications.js';
 import { DRILLS, REST, getDrill, applyTraining, applySpar, injuryLabel, previewInjuryChance, inflictInjury, rollInjurySeverity, rollConduct } from './training.js';
 import { stationBonusFor } from './stations.js';
 import { DIET_PLANS, getDietPlan, applyDiet, consumeDietFood } from './diet.js';
@@ -410,6 +411,7 @@ function load() {
   }
   if (!Array.isArray(guild.stations)) guild.stations = []; // ranch training equipment (Guild Academy Pillar A)
   guild.apprentices = Array.isArray(guild.apprentices) ? guild.apprentices.map(normalizeApprentice).filter(Boolean) : []; // academy pool
+  ensureApplications(guild); // the Academy's letter board — hopefuls waiting on terms
   if (!Array.isArray(guild.hallOfFame)) guild.hallOfFame = [];
   if (guild.trainer === undefined) guild.trainer = null;
   if (!Array.isArray(guild.schedule)) guild.schedule = []; // tournament calendar (added with the season loop)
@@ -1037,7 +1039,10 @@ async function advanceAll() {
   try {
   const income = guildIncome(guild);            // patron retainer (stopgap until quest income)
   addGold(guild, income);
-  const upkeep = weeklyUpkeep(guild, getDietPlan) + academyBoard(guild); // wages/diet + apprentice board (food)
+  // Tuition is signed: a paying merchant's son offsets board, a scholarship adds
+  // to it. Netting it here is what makes a hall full of 5-stars genuinely cost.
+  const tuition = academyTuition(guild);
+  const upkeep = weeklyUpkeep(guild, getDietPlan) + academyBoard(guild) - tuition; // wages/diet + board − tuition
   const shortfall = Math.max(0, upkeep - guild.gold); // can't fully pay wages this week?
   addGold(guild, -upkeep);
   const week = guild.calendar.week;
@@ -1585,6 +1590,8 @@ async function advanceAll() {
   refreshMarket(guild.market, fedCapacity(guild)); // Mess Hall contracts scale the weekly food supply
   guild.questBoard = generateQuestBoard(guild, 3);
   guild.recruits = rollRecruitPool(3);
+  // Applications age out and fresh letters arrive.
+  const leftBoard = tickApplications(guild);
   generateSeason(guild); // drop the just-resolved event(s) and keep the season paced ahead
   ensureWorldCup(guild); // re-book the next World Cup once one resolves
   for (const t of guild.schedule) ensureField(guild, t); // freshly booked events draw their rival fields now
@@ -2918,37 +2925,108 @@ function apprenticeCard(a) {
   return `<div class="app-card ${ready ? 'ready' : ''}">
       <div class="app-head"><span class="app-face">${personSprite(a, 46)}</span><span class="app-lean">${LEAN_GLYPH[a.lean] || '🎓'} ${a.name || 'Leans ' + a.lean}</span><span class="app-stars" title="scouted potential">${starStr}</span></div>
       <div class="app-bar"><span style="width:${pct}%"></span></div>
-      <div class="app-meta">${ready ? '<b>Ready to graduate</b>' : `week ${a.weeks} in the academy`}</div>
+      <div class="app-meta">${ready ? '<b>Ready to graduate</b>' : `week ${a.weeks} in the academy`}${a.tuition ? ` · <span class="${a.tuition < 0 ? 'ap-refuse' : 'ap-dim'}">${a.tuition < 0 ? `scholarship ☉${-a.tuition}/wk` : `pays ☉${a.tuition}/wk`}</span>` : ''}</div>
       <div class="app-actions">
         <button class="app-grad" ${ready && !rosterFull ? '' : 'disabled'} onclick="__guild.promoteApprentice('${a.id}')">${gradLabel}</button>
         <button class="app-drop" title="Release this apprentice" onclick="__guild.dismissApprentice('${a.id}')">✕</button>
       </div>
     </div>`;
 }
+/**
+ * One application: qualifications on the left, the haggle on the right.
+ * The applicant's RESERVATION is never shown — only their family's means and,
+ * after a refusal, which way the last offer missed. Reading them is the game.
+ */
+function applicationCard(a) {
+  const stars = potentialStars(a.potential);
+  const starStr = '★'.repeat(stars) + '☆'.repeat(5 - stars);
+  const band = wealthBand(a.wealth);
+  const offer = applicationOffers[a.id] != null ? applicationOffers[a.id] : suggestedOffer(a, guild);
+  const scholarship = offer < 0;
+  const money = scholarship ? `scholarship ☉${Math.abs(offer)}/wk` : offer === 0 ? 'free place' : `tuition ☉${offer}/wk`;
+  const hint = a.lastVerdict === 'high'
+    ? `<span class="ap-refuse">Refused ☉${a.lastOffer}/wk — they want better terms. ${a.patience} refusal${a.patience === 1 ? '' : 's'} left.</span>`
+    : `<span class="ap-dim">${band.glyph} ${band.label} · week ${a.weeks} on the board</span>`;
+  const full = (guild.apprentices || []).length >= dormCapacity(guild);
+  return `<div class="ap-card">
+      <div class="ap-head">
+        <span class="app-face">${personSprite(a, 46)}</span>
+        <span class="ap-who"><b>${a.origin}</b> of ${a.place}<span class="ap-dim"> · leans ${LEAN_GLYPH[a.lean] || ''} ${a.lean}</span></span>
+        <span class="app-stars" title="scouted qualifications">${starStr}</span>
+      </div>
+      <div class="ap-meta">${hint}</div>
+      <div class="ap-offer">
+        <button class="ap-step" onclick="__guild.bidTuition('${a.id}',-25)">−25</button>
+        <span class="ap-num ${scholarship ? 'sch' : ''}">${money}</span>
+        <button class="ap-step" onclick="__guild.bidTuition('${a.id}',25)">+25</button>
+        <button class="ap-send" ${full ? 'disabled' : ''} onclick="__guild.sendOffer('${a.id}')">${full ? 'Dormitory full' : 'Send terms'}</button>
+        <button class="app-drop" title="Reject this application" onclick="__guild.rejectApplication('${a.id}')">✕</button>
+      </div>
+    </div>`;
+}
+
 function academyRoom() {
   const apps = guild.apprentices || [];
   const cap = dormCapacity(guild);
-  const board = apps.length * 6;
-  const canTake = apps.length < cap;
+  const board = academyBoard(guild);
+  const tuition = academyTuition(guild);
+  const net = board - tuition;
   const rate = Math.round(developmentRate(guild) * 100);
+  const letters = ensureApplications(guild);
   const cards = apps.length
     ? apps.map(apprenticeCard).join('')
-    : '<div class="hint">No apprentices yet. Take one in to start your farm system — house them, feed them, and graduate the best into named heroes.</div>';
+    : '<div class="hint">No apprentices yet — answer one of the applications below.</div>';
+  const netTxt = net > 0 ? `costs ☉${net}/wk` : net < 0 ? `earns ☉${-net}/wk` : 'pays for itself';
   return `<div class="plan-card">
-      <div class="plan-title">🎓 Academy · ${apps.length}/${cap} bunks · board ${board}g/wk</div>
+      <div class="plan-title">📜 Applications · ${letters.length} on the board</div>
+      <div class="hint" style="text-align:left">Hopefuls write in with their qualifications. You name the tuition; they accept or refuse.
+        A poor prospect from a <b>wealthy house</b> will gladly pay their way — a <b>five-star</b> has every hall in the
+        circuit writing back, and will only come on a scholarship the guild pays every week. Their exact price is never
+        stated; their family's means are your only read on it.</div>
+      <div class="ap-list">${letters.map(applicationCard).join('')}</div>
+    </div>
+    <div class="plan-card">
+      <div class="plan-title">🎓 Academy · ${apps.length}/${cap} bunks · board ☉${board}/wk · tuition ☉${tuition}/wk · ${netTxt}</div>
       <div class="hint" style="text-align:left">Apprentices develop ~${rate}%/week${guild.trainer ? ' (your trainer mentors the class)' : ' — appoint a trainer to teach faster'}. When one is ready, graduate them into a named hero — a draft shaped by their lean &amp; potential. Bunks = the 🎓 Dormitory (expand in 🏕 Grounds).</div>
-      <button class="app-take" ${canTake ? '' : 'disabled'} onclick="__guild.takeApprentice()">${canTake ? `＋ Take in an apprentice · ☉${APPRENTICE_INTAKE}g` : 'Dormitory full — expand it in the Grounds'}</button>
       <div class="app-list">${cards}</div>
     </div>`;
 }
-function takeApprentice() {
-  if (!Array.isArray(guild.apprentices)) guild.apprentices = [];
-  if (guild.apprentices.length >= dormCapacity(guild)) { notice = 'The Dormitory is full — expand it in the 🏕 Grounds.'; render(); return; }
-  if (guild.gold < APPRENTICE_INTAKE) { notice = `Taking in an apprentice costs ${APPRENTICE_INTAKE}g.`; render(); return; }
-  addGold(guild, -APPRENTICE_INTAKE);
-  guild.apprentices.push(makeApprentice());
+
+/** The player's in-progress offer per application id (UI state, not saved). */
+const applicationOffers = {};
+/** Nudge the standing offer for one application. */
+function bidTuition(id, delta) {
+  const a = (guild.applications || []).find((x) => x.id === id); if (!a) return;
+  const cur = applicationOffers[id] != null ? applicationOffers[id] : suggestedOffer(a, guild);
+  applicationOffers[id] = Math.max(-400, Math.min(400, cur + delta));
+  render();
+}
+/** Put the standing offer to the applicant. They accept, refuse, or walk. */
+function sendOffer(id) {
+  const a = (guild.applications || []).find((x) => x.id === id); if (!a) return;
+  if ((guild.apprentices || []).length >= dormCapacity(guild)) { notice = 'The Dormitory is full — expand it in the 🏕 Grounds.'; render(); return; }
+  const offer = applicationOffers[id] != null ? applicationOffers[id] : suggestedOffer(a, guild);
+  const res = offerTuition(guild, a, offer);
+  if (res.ok) {
+    if (!Array.isArray(guild.apprentices)) guild.apprentices = [];
+    guild.apprentices.push(res.apprentice);
+    closeApplication(guild, id);
+    delete applicationOffers[id];
+    ensureApplications(guild);
+    const terms = offer < 0 ? `a ☉${Math.abs(offer)}/wk scholarship` : offer === 0 ? 'a free place' : `☉${offer}/wk tuition`;
+    notice = `📜 ${a.origin} of ${a.place} accepts ${terms} — ${potentialStars(a.potential)}★, leans ${a.lean}.`;
+  } else if (res.reason === 'withdrawn') {
+    closeApplication(guild, id);
+    delete applicationOffers[id];
+    ensureApplications(guild);
+    notice = `${a.origin} of ${a.place} has withdrawn their application — the terms were never going to work.`;
+  } else {
+    notice = `${a.origin} of ${a.place} refuses ☉${offer}/wk. They expect better.`;
+  }
   save(); render();
 }
+/** Bin an application unread. */
+function rejectApplication(id) { closeApplication(guild, id); delete applicationOffers[id]; ensureApplications(guild); save(); render(); }
 function promoteApprentice(id) {
   const i = (guild.apprentices || []).findIndex((a) => a.id === id);
   if (i < 0) return;
@@ -3549,7 +3627,7 @@ export function openGuild() {
 // Every handler no-ops while a week is advancing (a played battle can be mid-flight;
 // rail buttons still render behind the battle screen and would corrupt the in-flight
 // week). practiceBout/advanceAll keep their own internal checks as a second belt.
-const __guildApi = { selectHero, setActivity, setTraining, setIntensity, scheduleAdd, scheduleRemoveAt, scheduleClear, setRecipe, setForgeMode, setRefineItem, setRefineGuard, setStudyMode, setEnchantMode, setSpecialization, setPotion, setDiscipline, usePotion, setDiet, setQuest, setHunt, selectWildsLocale, scoutRegion, setPlayHunt, exploreLocale, strollRoom, walkGuild, masterName, masterBuild, masterReroll, sellMaterial, setElective, setTrackKind, setSecondDiscipline, setCookRecipe, setEnchantPlanet, slotOrb, assignTo, setSpar, equipItem, unequipSlot, setPolicy, provision, buyMaterial, sellItem, buyBook, hire, takeApprentice, promoteApprentice, dismissApprentice, advanceAll, back, openRoom, toggleFullscreen, upgradeFacility, enterTournament, leaveTournament, setPlayNext, setPlayQuest, setAskTournaments, toggleDraw, selectCalEvent, praiseHero, scoldHero, openAssembly, closeAssembly, appointTrainer, practiceBout, openRanch, enterRoomFromRanch, manageMemberFromRanch, ranchBuild: toggleBuild, ranchPick: pickStation, ranchPlace: placeStationAt, ranchRemoveStation: removeStationById, ranchZoomIn, ranchZoomOut, ranchZoomFit };
+const __guildApi = { selectHero, setActivity, setTraining, setIntensity, scheduleAdd, scheduleRemoveAt, scheduleClear, setRecipe, setForgeMode, setRefineItem, setRefineGuard, setStudyMode, setEnchantMode, setSpecialization, setPotion, setDiscipline, usePotion, setDiet, setQuest, setHunt, selectWildsLocale, scoutRegion, setPlayHunt, exploreLocale, strollRoom, walkGuild, masterName, masterBuild, masterReroll, sellMaterial, setElective, setTrackKind, setSecondDiscipline, setCookRecipe, setEnchantPlanet, slotOrb, assignTo, setSpar, equipItem, unequipSlot, setPolicy, provision, buyMaterial, sellItem, buyBook, hire, promoteApprentice, dismissApprentice, bidTuition, sendOffer, rejectApplication, advanceAll, back, openRoom, toggleFullscreen, upgradeFacility, enterTournament, leaveTournament, setPlayNext, setPlayQuest, setAskTournaments, toggleDraw, selectCalEvent, praiseHero, scoldHero, openAssembly, closeAssembly, appointTrainer, practiceBout, openRanch, enterRoomFromRanch, manageMemberFromRanch, ranchBuild: toggleBuild, ranchPick: pickStation, ranchPlace: placeStationAt, ranchRemoveStation: removeStationById, ranchZoomIn, ranchZoomOut, ranchZoomFit };
 window.__guild = {};
 for (const k in __guildApi) {
   window.__guild[k] = (...args) => {
