@@ -36,11 +36,13 @@ import { qualityTier, itemLabel } from './item.js';
 import { MATERIAL_PRICE, buyPrice, sellPriceMat, itemSellValue, createMarket, refreshMarket, HUNT_MATERIALS } from './market.js';
 import { saveGame, loadGame } from '../platform/storage.js';
 import { playTournamentMatch, playQuestBout, playHuntBout, battleEngineReady } from './battle-bridge.js';
-import { renderRanch, stopRanchLoop, toggleBuild, pickStation, placeStationAt, removeStationById, ranchZoomIn, ranchZoomOut, ranchZoomFit } from './ranch.js';
+import { stopRanchLoop } from './ranch.js';
+import { renderBuild, setTool as buildTool, armBuilding, armProp, cellClick as buildCell, buildZoomIn, buildZoomOut, buildZoomFit } from './build-view.js';
 import { artSprite, itemSprite, hasItemSprite } from './art.js';
 import { hasDiorama, roomSceneHTML, bindRoomScene, stopRoomLoop } from './rooms.js';
 import { openDelve, hasDelveMap, isDelveOpen } from './delve.js';
-import { ORE_KINDS } from './delve-maps.js';
+import { ORE_KINDS, setCampusGuild } from './delve-maps.js';
+import { ensureCampus } from './campus.js';
 
 const SLOT = 'guild';
 // The roster cap is no longer a constant — it's derived from the Living Quarters
@@ -60,7 +62,7 @@ let currentRoom = 'hub'; // UI-only: which room the stage shows. Never saved —
 // The play opt-in now lives ON the guild (guild.playPlan = {kind,id,mode}) so it
 // survives reload and can arm quests as well as tournaments. `planFor` reads it.
 let advancing = false; // re-entrancy guard — a played battle makes advanceAll async & minutes-long.
-let ranchView = true; // UI-only: the guild opens on the RANCH (home view); rooms are drill-in detail.
+let ranchView = true; // UI-only: the guild opens on the BUILD plan (home view); rooms are drill-in detail.
 let wildsSelId = null; // UI-only: the Wilds locale whose prey are open for dispatch (defaults to nearest).
 
 // The guild hall's rooms, in the sketch's row-major order. `tag` = work vs storage vs
@@ -411,6 +413,7 @@ function load() {
   }
   if (!Array.isArray(guild.stations)) guild.stations = []; // ranch training equipment (Guild Academy Pillar A)
   guild.apprentices = Array.isArray(guild.apprentices) ? guild.apprentices.map(normalizeApprentice).filter(Boolean) : []; // academy pool
+  ensureCampus(guild); setCampusGuild(guild); // the grounds are player-built now
   ensureApplications(guild); // the Academy's letter board — hopefuls waiting on terms
   if (!Array.isArray(guild.hallOfFame)) guild.hallOfFame = [];
   if (guild.trainer === undefined) guild.trainer = null;
@@ -1037,12 +1040,17 @@ async function advanceAll() {
   if (advancing) return; // a played battle is mid-flight — ignore repeat Advance clicks
   advancing = true;
   try {
-  const income = guildIncome(guild);            // patron retainer (stopgap until quest income)
-  addGold(guild, income);
-  // Tuition is signed: a paying merchant's son offsets board, a scholarship adds
-  // to it. Netting it here is what makes a hall full of 5-stars genuinely cost.
+  // Tuition is SIGNED per apprentice, but it must not be netted into upkeep:
+  // a hall of paying students would drive upkeep negative and the recap would
+  // read "upkeep −−117g". Split it into the two honest halves instead — fees are
+  // income, scholarships are a bill — so both numbers stay positive and the
+  // insolvency test below sees the fees already banked (a guild carried by rich
+  // students must never be flagged insolvent).
   const tuition = academyTuition(guild);
-  const upkeep = weeklyUpkeep(guild, getDietPlan) + academyBoard(guild) - tuition; // wages/diet + board − tuition
+  const fees = Math.max(0, tuition), scholarships = Math.max(0, -tuition);
+  const income = guildIncome(guild) + fees;     // patron retainer + tuition paid in
+  addGold(guild, income);
+  const upkeep = weeklyBill(guild); // wages/diet + apprentice board + scholarships
   const shortfall = Math.max(0, upkeep - guild.gold); // can't fully pay wages this week?
   addGold(guild, -upkeep);
   const week = guild.calendar.week;
@@ -3129,11 +3137,22 @@ function compoundScene() {
     </div>`;
 }
 
+/**
+ * What the coming week will actually cost: wages + diet + apprentice board +
+ * any scholarships the guild pledged. Tuition PAID IN is income, not a negative
+ * cost, so it is deliberately excluded here — see advanceAll, which banks fees
+ * and bills this. Used by every place that quotes upkeep, so the number the
+ * player is shown is the number they are charged.
+ */
+function weeklyBill(g) {
+  return weeklyUpkeep(g, getDietPlan) + academyBoard(g) + Math.max(0, -academyTuition(g));
+}
+
 function groundsRoom() {
   const roster = guild.roster;
   const housed = roster.length, cap = maxRoster(guild), fed = fedCapacity(guild);
   const training = roster.filter((h) => h.assignment.type === 'train').length;
-  const upkeep = weeklyUpkeep(guild, getDietPlan);
+  const upkeep = weeklyBill(guild);
   const named = roster.length; // every roster member is a named hero today
   const trainees = 0;          // generic trainees (the Phase-5 minor league) — counted here, none yet
   const facGrid = Object.keys(FACILITIES).map(facilityCard).join(''); // derived — new facilities appear for free
@@ -3363,7 +3382,7 @@ async function practiceBout(myId, oppId, mode) {
       : `${me.name} lost the bout vs ${opp.name} — no harm done, just practice.`;
   } finally { advancing = false; }
   showScreen('guildScreen'); render();
-  if (ranchView) { renderRanch(guild, save); applyViewToggle(); } // restart the ranch loop after a bout
+  if (ranchView) { renderBuild(guild, save); applyViewToggle(); } // the plan re-renders after a bout
 }
 
 /** The Arena — jump straight into a live, playable bout (no Advance Week needed).
@@ -3513,7 +3532,7 @@ function roomChip(room) {
     </button>`;
 }
 function railHTML() {
-  const upkeep = weeklyUpkeep(guild, getDietPlan);
+  const upkeep = weeklyBill(guild);
   const inFs = typeof document !== 'undefined' && (document.fullscreenElement || document.webkitFullscreenElement);
   return `<div class="rail-top">
       <div class="rail-title">
@@ -3525,7 +3544,7 @@ function railHTML() {
       </div>
       <div class="guild-meta"><span>☉ <b>${guild.gold}</b>g</span><span>✦ <b>${guild.reputation}</b></span><span>${formatDate(guild.calendar)}</span></div>
     </div>
-    <button class="room-chip hub-chip" onclick="__guild.openRanch()"><span class="rc-glyph">⌂</span><span class="rc-body"><span class="rc-name">Ranch</span></span></button>
+    <button class="room-chip hub-chip" onclick="__guild.openRanch()"><span class="rc-glyph">🏗</span><span class="rc-body"><span class="rc-name">Build</span></span></button>
     <button class="room-chip hub-chip ${currentRoom === 'hub' ? 'on' : ''}" onclick="__guild.openRoom('hub')"><span class="rc-glyph">🏰</span><span class="rc-body"><span class="rc-name">Hub</span></span></button>
     <div class="rail-rooms">${ROOMS.map(roomChip).join('')}</div>
     <button class="advance-btn rail-advance" onclick="__guild.advanceAll()">▶ ADVANCE WEEK <span class="ra-cost">−${upkeep}g</span></button>`;
@@ -3566,12 +3585,12 @@ function render({ top = false } = {}) {
 function applyViewToggle() {
   const screen = document.getElementById('guildScreen');
   const host = screen.querySelector('.guild-hall-host');
-  const view = screen.querySelector('.ranch-view');
+  const view = screen.querySelector('.build-view');
   if (host) host.hidden = ranchView;
   if (view) view.hidden = !ranchView;
 }
 /** Go home to the ranch. */
-function openRanch() { ranchView = true; stopRoomLoop(); renderRanch(guild, save); applyViewToggle(); }
+function openRanch() { ranchView = true; stopRoomLoop(); stopRanchLoop(); renderBuild(guild, save); applyViewToggle(); }
 /** Drill from the ranch into a room's menus. */
 function enterRoomFromRanch(roomId) { stopRanchLoop(); ranchView = false; applyViewToggle(); openRoom(roomId); }
 /** Tap a member on the ranch → open their Roster card. */
@@ -3620,14 +3639,14 @@ export function openGuild() {
     document.addEventListener('webkitfullscreenchange', onFs);
   }
   render({ top: true });        // build the room-hub host (hidden while on the ranch)
-  ranchView = true; renderRanch(guild, save); applyViewToggle(); // open ON the ranch (home)
+  ranchView = true; renderBuild(guild, save); applyViewToggle(); // open ON the build plan (home)
   showScreen('guildScreen');
 }
 
 // Every handler no-ops while a week is advancing (a played battle can be mid-flight;
 // rail buttons still render behind the battle screen and would corrupt the in-flight
 // week). practiceBout/advanceAll keep their own internal checks as a second belt.
-const __guildApi = { selectHero, setActivity, setTraining, setIntensity, scheduleAdd, scheduleRemoveAt, scheduleClear, setRecipe, setForgeMode, setRefineItem, setRefineGuard, setStudyMode, setEnchantMode, setSpecialization, setPotion, setDiscipline, usePotion, setDiet, setQuest, setHunt, selectWildsLocale, scoutRegion, setPlayHunt, exploreLocale, strollRoom, walkGuild, masterName, masterBuild, masterReroll, sellMaterial, setElective, setTrackKind, setSecondDiscipline, setCookRecipe, setEnchantPlanet, slotOrb, assignTo, setSpar, equipItem, unequipSlot, setPolicy, provision, buyMaterial, sellItem, buyBook, hire, promoteApprentice, dismissApprentice, bidTuition, sendOffer, rejectApplication, advanceAll, back, openRoom, toggleFullscreen, upgradeFacility, enterTournament, leaveTournament, setPlayNext, setPlayQuest, setAskTournaments, toggleDraw, selectCalEvent, praiseHero, scoldHero, openAssembly, closeAssembly, appointTrainer, practiceBout, openRanch, enterRoomFromRanch, manageMemberFromRanch, ranchBuild: toggleBuild, ranchPick: pickStation, ranchPlace: placeStationAt, ranchRemoveStation: removeStationById, ranchZoomIn, ranchZoomOut, ranchZoomFit };
+const __guildApi = { selectHero, setActivity, setTraining, setIntensity, scheduleAdd, scheduleRemoveAt, scheduleClear, setRecipe, setForgeMode, setRefineItem, setRefineGuard, setStudyMode, setEnchantMode, setSpecialization, setPotion, setDiscipline, usePotion, setDiet, setQuest, setHunt, selectWildsLocale, scoutRegion, setPlayHunt, exploreLocale, strollRoom, walkGuild, masterName, masterBuild, masterReroll, sellMaterial, setElective, setTrackKind, setSecondDiscipline, setCookRecipe, setEnchantPlanet, slotOrb, assignTo, setSpar, equipItem, unequipSlot, setPolicy, provision, buyMaterial, sellItem, buyBook, hire, promoteApprentice, dismissApprentice, bidTuition, sendOffer, rejectApplication, advanceAll, back, openRoom, toggleFullscreen, upgradeFacility, enterTournament, leaveTournament, setPlayNext, setPlayQuest, setAskTournaments, toggleDraw, selectCalEvent, praiseHero, scoldHero, openAssembly, closeAssembly, appointTrainer, practiceBout, openRanch, enterRoomFromRanch, manageMemberFromRanch, buildTool, buildArm: armBuilding, buildArmProp: armProp, buildCell, buildZoomIn, buildZoomOut, buildZoomFit };
 window.__guild = {};
 for (const k in __guildApi) {
   window.__guild[k] = (...args) => {
