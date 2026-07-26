@@ -14,7 +14,9 @@
 .delve-stage {
   position: absolute; inset: 0;
   overflow: hidden;
-  perspective: 1150px; perspective-origin: 50% 30%;
+  /* The lens. Scaled to the plane's own depth by delve.js — a fixed distance
+     cannot serve a 13-row room and a 46-row estate at once. See mountScene. */
+  perspective: var(--dvpersp, 1150px); perspective-origin: 50% 30%;
   touch-action: none;
 }
 /* The ground plane. Centered in the stage (inline margins from JS); the JS
