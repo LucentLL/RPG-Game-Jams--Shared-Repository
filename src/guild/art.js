@@ -14,7 +14,7 @@
  * against the real sheets; sheet dims are part of the registry because the
  * percentage math needs them at render time.
  */
-import { ART_BASE } from '../config/assets.js';
+import { ART_BASE, SPRITE_BASES } from '../config/assets.js';
 
 /** Sheet dimensions (px) — required by the percentage crop math. */
 const SHEETS = {
@@ -145,8 +145,13 @@ export const ART = {
   // The forge
   forgeFurnace: { sheet: 'forge_3x',  x: 171, y: 12,  w: 90, h: 144 },
   forgeTwin:    { sheet: 'forge_3x',  x: 144, y: 363, w: 96, h: 126 },
-  anvilWork:    { sheet: 'anvils_3x', x: 264, y: 138, w: 84, h: 54 },
+  anvilWork:    { sheet: 'anvils_3x', x: 264, y: 138, w: 84, h: 54 },  // struck: hammer down, chips flying
   anvilFront:   { sheet: 'anvils_3x', x: 192, y: 0,   w: 48, h: 48 },
+  // The workable anvil's two states. Same sprite, same pedestal, same pixels
+  // under the face — so swapping between them on the strike frame reads as one
+  // anvil being hit rather than two anvils cross-fading.
+  anvilBare:    { sheet: 'anvils_3x', x: 264, y: 0,   w: 84, h: 48 },  // side view, empty face
+  anvilHot:     { sheet: 'anvils_3x', x: 264, y: 48,  w: 84, h: 48 },  // side view, workpiece on the face
   quenchBarrel: { sheet: 'ruins_3x',  x: 6,   y: 213, w: 36, h: 54 },
   // The armory
   armorPlate:     { sheet: 'armorshop_3x', x: 150, y: 57, w: 39, h: 84 },
@@ -180,6 +185,51 @@ export const ART = {
   lampPost:      { sheet: 'lamppost_3x',  x: 102, y: 36,  w: 87,  h: 105 },
   statue:        { sheet: 'statues_3x',   x: 342, y: 3,   w: 135, h: 225 },
 };
+
+// ─── Item art: one cell off an Elements weapon sheet ─────────────────────────
+// Armory items have never had a picture — only a KIND_GLYPH emoji. But the
+// compositor's weapon overlays are real art, and one cell of them is a real
+// weapon on transparency. Column 11 is the mid-swing frame, where the weapon is
+// fully extended and clear of the (absent) body; row 2 is the east facing, so
+// the blade lies up-and-right with its hilt at the lower left. That single cell
+// is a weapon lying on its side — which is exactly a piece waiting on an anvil.
+const WEAPON_SHEET = { w: 1104, h: 192, cell: 48, cols: 23, rows: 4 };
+const LAID_COL = 11, LAID_ROW = 2;
+
+/** Item kind → the weapon sheet that stands in for it. `pack` indexes
+ *  SPRITE_BASES (0 core · 1 ce1 · 2 ce2), matching where each PNG really is. */
+const ITEM_WEAPON = {
+  sword:  { pack: 0, stem: 'sword1',  maxC: 3 },
+  dagger: { pack: 2, stem: 'daggerR', maxC: 3 },
+  axe:    { pack: 1, stem: 'axe1',    maxC: 3 },
+  bow:    { pack: 0, stem: 'bow1',    maxC: 0 },
+  mace:   { pack: 0, stem: 'mace1',   maxC: 5 },
+  hammer: { pack: 2, stem: 'hammer',  maxC: 3 },
+};
+/** Material → colour variant, so a mithril blade reads finer than an iron one.
+ *  Mirrors crucible.js weaponTierToColor: variant 0 is the base file. */
+const MAT_COLOR = { leather: 0, iron: 0, steel: 2, mithril: 3 };
+
+/**
+ * The item as a laid-down weapon sprite, or '' when the kind has no sheet
+ * (armor — the caller falls back to an armour-stand crop).
+ * @param {{kind:string, material:string}} item
+ * @param {string} [cls] @param {string} [style]
+ */
+export function itemSprite(item, cls = '', style = '') {
+  const w = item && ITEM_WEAPON[item.kind];
+  if (!w) return '';
+  const c = Math.min(MAT_COLOR[item.material] || 0, w.maxC);
+  const file = w.stem + (c ? '_c' + c : '');
+  const S = WEAPON_SHEET;
+  return `<span class="px-art ${cls}" style="aspect-ratio:1;` +
+    `background-image:url(${SPRITE_BASES[w.pack]}weapon/${file}.png);` +
+    `background-size:${(S.w / S.cell * 100).toFixed(4)}% ${(S.h / S.cell * 100).toFixed(4)}%;` +
+    `background-position:${(LAID_COL / (S.cols - 1) * 100).toFixed(4)}% ${(LAID_ROW / (S.rows - 1) * 100).toFixed(4)}%;${style}"></span>`;
+}
+
+/** Does this item have laid-weapon art? (armor and unknown kinds do not) */
+export function hasItemSprite(item) { return !!(item && ITEM_WEAPON[item.kind]); }
 
 /**
  * A cropped sheet sprite as an HTML string. Size it from CSS/inline style

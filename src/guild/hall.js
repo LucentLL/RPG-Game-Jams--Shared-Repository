@@ -21,7 +21,7 @@ import { orbCost, orbReqTheory, orbUnlocked, previewOrbLevel, craftMateria, slot
 import { PLANETS } from '../game/data/progression.js';
 import { advanceWeek, formatDate } from './calendar.js';
 import { weeklyUpkeep, addGold, guildIncome } from './economy.js';
-import { RECIPES, getRecipe, previewQuality, forge, study, recipeUnlocked, rework, previewRework, refine, refineChance, recipeForItem, materialOreCost, MATERIAL_META, MAX_PLUS, REFINE_GUARDS } from './smithing.js';
+import { RECIPES, getRecipe, previewQuality, forge, study, recipeUnlocked, rework, previewRework, refine, refineChance, recipeForItem, materialOreCost, MATERIAL_META, MAX_PLUS, REFINE_GUARDS, REFINE_STAMINA } from './smithing.js';
 import { POTION_RECIPES, getPotionRecipe, previewPotency, previewBrewYield, brew, potionUnlocked, applyPotion } from './alchemy.js';
 import { MATERIALS, createInventory, armoryItems, findItem, addMaterial, gearBonus, itemPower, EQUIP_SLOTS, findPotion, consumePotion, potionCount, roomMaterialIds, materialCount } from './inventory.js';
 import { BOOK_SUBJECTS, BOOK_SUBJECT_IDS, mintBook, addBook, bestBook, bookStudyMult, bookPrice, writeBook, previewBookTier, learnOnTheJob, WRITE_MIN_THEORY } from './books.js';
@@ -36,7 +36,7 @@ import { MATERIAL_PRICE, buyPrice, sellPriceMat, itemSellValue, createMarket, re
 import { saveGame, loadGame } from '../platform/storage.js';
 import { playTournamentMatch, playQuestBout, playHuntBout, battleEngineReady } from './battle-bridge.js';
 import { renderRanch, stopRanchLoop, toggleBuild, pickStation, placeStationAt, removeStationById, ranchZoomIn, ranchZoomOut, ranchZoomFit } from './ranch.js';
-import { artSprite } from './art.js';
+import { artSprite, itemSprite, hasItemSprite } from './art.js';
 import { hasDiorama, roomSceneHTML, bindRoomScene, stopRoomLoop } from './rooms.js';
 import { openDelve, hasDelveMap, isDelveOpen } from './delve.js';
 import { ORE_KINDS } from './delve-maps.js';
@@ -305,6 +305,9 @@ function ensureAssignment(h) {
     // rev-2 migration maps legacy 'refine' — which meant the rework — to 'rework'.)
     forgeMode: ['new', 'rework', 'refine'].includes(a.forgeMode) ? a.forgeMode : 'new',
     refineItemId: a.refineItemId || null,
+    // The week this smith already swung at the Forge's own anvil, if any —
+    // stops Advance Week rolling a second attempt on top of the one they made.
+    struckWeek: typeof a.struckWeek === 'number' ? a.struckWeek : null,
     refineGuard: REFINE_GUARDS[a.refineGuard] ? a.refineGuard : 'none', // reagent guarding the refine attempt
     potionId: getPotionRecipe(a.potionId) ? a.potionId : 'minor_heal',
     discipline: BOOK_SUBJECTS[a.discipline] ? a.discipline : 'blacksmithing', // study subject — all four trades
@@ -671,6 +674,101 @@ async function walkGuild() {
   }
 }
 
+/**
+ * Working a station inside a walkable room. The room's art decides what a
+ * station IS; this decides what working it MEANS. `api` is the delve's
+ * (toast · choose · workAt) — see delve.js workAt for the animation contract.
+ */
+async function useStation(h, id, api) {
+  if (id === 'anvil') return anvilRefine(h, api);
+}
+
+/**
+ * Strike a refine at the Forge's anvil, in the world, by hand.
+ *
+ * This IS the smith's refine for the week — the same `refine()` the weekly
+ * advance calls, with the same ore, fee, stamina and risk. Doing it here just
+ * means watching it happen and choosing the moment. A latch on the assignment
+ * stops Advance Week rolling a second attempt for the same smith.
+ */
+async function anvilRefine(h, api) {
+  const week = guild.calendar.week;
+  const a = h.assignment;
+  if (a.type !== 'forge') {
+    api.toast(`${h.name.split(' ')[0]} isn't the smith this week — the anvil isn't theirs to work.`);
+    return;
+  }
+  if (a.struckWeek === week) { api.toast('Already struck this week. The steel needs to rest.'); return; }
+  if (h.condition.stamina < REFINE_STAMINA) { api.toast(`${h.name.split(' ')[0]} is too spent to swing.`); return; }
+
+  const shelf = armoryItems(guild.inventory);
+  const guard = REFINE_GUARDS[a.refineGuard] || REFINE_GUARDS.none;
+  const options = shelf.map((it) => {
+    const rec = recipeForItem(it);
+    const meta = MATERIAL_META[it.material] || MATERIAL_META.iron;
+    const next = (it.plus || 0) + 1;
+    const cost = materialOreCost(it.material);
+    const costTxt = Object.keys(cost).map((k) => `${MATERIALS[k].name} ×${cost[k]}`).join(', ');
+    const enough = Object.keys(cost).every((k) => (guild.inventory.materials[k] || 0) >= cost[k]) && guild.gold >= meta.fee;
+    const locked = !recipeUnlocked(h, rec);
+    const maxed = (it.plus || 0) >= MAX_PLUS;
+    const risky = next > meta.safe;
+    return {
+      value: it.id,
+      label: `${KIND_GLYPH[it.kind] || '▪'} ${itemLabel(it)}`,
+      desc: locked ? `study ${it.material} theory first`
+        : maxed ? 'a finished masterpiece — it can climb no higher'
+        : `${costTxt} · ${meta.fee}g · ${refineChance(it, h)}% for +${next}${risky ? ' ⚠' : ''}`,
+      note: maxed ? 'MAX' : `+${it.plus || 0} → +${next}`,
+      dim: locked || maxed || !enough,
+    };
+  });
+  const guardTxt = guard.id === 'none' ? 'Bare — a failure past the safe line destroys it'
+    : `${guard.glyph} ${guard.name} — ${guard.id === 'oil' ? 'a failure only drops it −1' : 'a failure keeps the level'}`;
+  const pick = await api.choose({
+    title: '✨ Refine at the anvil',
+    sub: `${h.name.split(' ')[0]} · Practice ${h.professions.blacksmithing.practice} · ${guardTxt}`,
+    options,
+  });
+  if (!pick) return;
+
+  const it = findItem(guild.inventory, pick);
+  if (!it) { api.toast('That piece is no longer on the shelf.'); return; }
+  const meta = MATERIAL_META[it.material] || MATERIAL_META.iron;
+  const name = itemLabel(it);
+  // Art for the piece on the anvil: real weapon art where the kind has a
+  // sheet, an armour stand where it doesn't (armor has no held sprite).
+  const itemHTML = hasItemSprite(it) ? itemSprite(it) : artSprite('armorPlate');
+
+  await api.workAt('anvil', {
+    tool: 'Hammer', beats: 3, itemHTML, struckArt: 'anvilWork',
+    // Fires ON the last strike, so the roll and the impact land together.
+    finish: () => {
+      const res = refine(h, it, guild.inventory, week, a.refineGuard);
+      if (!res.ok) {
+        const why = res.reason === 'materials' ? 'no ore for it' : res.reason === 'guard' ? 'no reagent in stock'
+          : res.reason === 'locked' ? 'that metal is beyond their theory' : res.reason === 'maxed' ? 'already at +10' : 'not enough left in them';
+        return { txt: `The hammer stays down — ${why}.` };
+      }
+      addGold(guild, -meta.fee);
+      a.struckWeek = week; // the week's attempt is spent, here, by hand
+      if (res.broke) guild.inventory.items = guild.inventory.items.filter((x) => x.id !== it.id);
+      // A struck piece is no longer the standing plan: clear dead jobs the same
+      // way the weekly path does, so the Forge card doesn't offer a ghost.
+      if (res.broke || (res.success && res.to >= MAX_PLUS)) { a.refineItemId = null; a.forgeMode = 'new'; }
+      save();
+      return {
+        ok: res.success, broke: res.broke,
+        txt: res.success ? `⚒ ${name} rings true — +${res.to}!`
+          : res.broke ? `💥 ${name} shatters on the anvil.`
+          : res.downgraded ? `The oil saves it — ${name} slips to +${res.to}.`
+          : `The blessing holds — ${name} keeps +${res.to}.`,
+      };
+    },
+  });
+  render();
+}
+
 /** Who is at work in each interior — they populate the room as you walk it.
  *  Capped by the caller; a handful of animated bodies is the budget. */
 const INTERIOR_FOLK = {
@@ -700,6 +798,7 @@ async function strollRoom(mapId, glyph) {
       onKill: () => null,
       onOre: () => null,
       companions: (mid) => (INTERIOR_FOLK[mid] ? INTERIOR_FOLK[mid](guild.roster) : []).slice(0, 5),
+      use: (stationId, api) => useStation(h, stationId, api),
       onEnd: () => { showScreen('guildScreen'); render({ top: true }); },
     });
   } catch (e) {
@@ -1132,7 +1231,11 @@ async function advanceAll() {
         // a bare failure past the safe line DESTROYS the piece, story and all.
         const it = a.refineItemId ? findItem(guild.inventory, a.refineItemId) : null;
         const meta = it ? (MATERIAL_META[it.material] || MATERIAL_META.iron) : null;
-        if (!it) {
+        if (a.struckWeek === week) {
+          // Already swung at the Forge's own anvil this week (anvilRefine) —
+          // the ore, the fee and the risk are all spent. Don't roll it twice.
+          entry.refinePlus = { ok: false, reason: 'struck' };
+        } else if (!it) {
           entry.refinePlus = { ok: false, reason: 'gone' }; // destroyed/sold — truly dead
         } else if (it.location !== 'armory') {
           entry.refinePlus = { ok: false, reason: 'equipped' }; // someone carries it — transient, retry when it's shelved
@@ -1150,7 +1253,8 @@ async function advanceAll() {
         }
         entry.recipeName = it ? itemLabel(it) : 'a missing piece';
         const rp = entry.refinePlus;
-        entry.conduct = !rp.ok ? 'failed'
+        entry.conduct = rp.reason === 'struck' ? 'solid' // they did the work, at the anvil, by hand
+          : !rp.ok ? 'failed'
           : rp.success ? (rp.to > (meta.safe || 7) ? 'exceeded' : 'solid')
           : 'failed';
         // Dead jobs clear back to forging fresh: the piece is gone (or shattered),
@@ -2100,6 +2204,7 @@ function recapPanel() {
       if (f.ok && f.broke) return `<div class="r-line"><b>${r.name}</b> <span class="down">💥 pushed ${r.recipeName} past +${f.from} — it SHATTERED on the anvil</span> <span class="dim">· ${f.chance}% missed</span>${learned}</div>`;
       if (f.ok && f.downgraded) return `<div class="r-line"><b>${r.name}</b> <span class="down">failed the refine — the Tempering Oil held the piece together at +${f.to}</span>${learned}</div>`;
       if (f.ok && f.kept) return `<div class="r-line"><b>${r.name}</b> <span class="down">failed the refine — the Smith's Blessing kept it at +${f.from}</span>${learned}</div>`;
+      if (f.reason === 'struck') return `<div class="r-line"><b>${r.name}</b> <span class="dim">worked the anvil in person this week — that attempt is already spent</span>${learned}</div>`;
       const why = f.reason === 'materials' ? 'out of ore' : f.reason === 'fee' ? `the coffers can't cover the ${f.fee}g fee` : f.reason === 'guard' ? 'no protective reagent in stock'
         : f.reason === 'locked' ? 'theory not yet studied' : f.reason === 'stamina' ? 'too tired to work' : f.reason === 'maxed' ? 'the piece is already +10'
         : f.reason === 'equipped' ? 'the piece is off the shelf — a member carries it (unequip it to continue)' : 'the piece left the armory';
@@ -2237,6 +2342,7 @@ function assemblyOutcome(r) {
     if (f.ok && f.broke) return `<span class="down">💥 shattered ${r.recipeName} at the anvil</span>`;
     if (f.ok && f.downgraded) return `<span class="down">failed — the oil held it at +${f.to}</span>`;
     if (f.ok && f.kept) return `<span class="down">failed — the blessing kept +${f.from}</span>`;
+    if (f.reason === 'struck') return `<span class="dim">struck it at the anvil in person</span>`;
     return `<span class="down">couldn't refine — ${f.reason === 'materials' ? 'out of ore' : f.reason === 'fee' ? 'coffers short' : f.reason === 'guard' ? 'no reagent' : f.reason === 'locked' ? 'theory unstudied' : f.reason === 'stamina' ? 'too tired' : f.reason === 'maxed' ? 'already +10' : f.reason === 'equipped' ? 'the piece is being carried' : 'piece gone'}</span>`;
   }
   if (r.type === 'forge' && r.refine) {

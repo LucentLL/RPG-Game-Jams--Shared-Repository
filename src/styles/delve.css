@@ -154,6 +154,98 @@
   100% { opacity: 0; transform: translateY(-10px); }
 }
 
+/* ── Workable props ─────────────────────────────────────────────────────── */
+/* The action button. Appears the moment a workable prop is in reach; tapping
+   it is the touch equivalent of the E key. Sits above the joystick's corner. */
+.dv-use {
+  position: absolute; left: 50%; bottom: 8%; transform: translateX(-50%);
+  font: inherit; font-family: 'Cinzel', serif; letter-spacing: .06em; cursor: pointer;
+  background: rgba(14,11,8,.9); color: var(--gold);
+  border: 1px solid var(--gold); border-radius: 9px;
+  padding: 8px 18px; z-index: 620;
+  box-shadow: 0 3px 14px rgba(0,0,0,.6);
+  animation: dvUsePop .18s ease;
+}
+.dv-use:hover { background: rgba(212,168,67,.16); }
+@keyframes dvUsePop { from { opacity: 0; transform: translate(-50%, 8px); } }
+
+/* The piece being worked, laid on the station's face. Lives inside .dv-up, so
+   it is already counter-rotated upright with the prop it sits on. The offsets
+   put it on the anvil's top plate rather than its pedestal. */
+.dv-onanvil {
+  position: absolute; left: 50%; top: 6%;
+  width: 42%; transform: translateX(-58%) rotate(-8deg);
+  filter: drop-shadow(0 2px 2px rgba(0,0,0,.55));
+  transition: transform .07s ease-out;
+}
+.dv-onanvil .px-art { display: block; width: 100%; }
+.dv-onanvil.hit { transform: translateX(-58%) rotate(-8deg) translateY(2px) scale(1.04); }
+.dv-onanvil.lift { animation: dvLift .4s ease forwards; }
+.dv-onanvil.shatter { animation: dvShatter .5s ease forwards; }
+@keyframes dvLift {
+  to { transform: translate(-58%, -22px) rotate(-8deg) scale(1.15); opacity: 0; }
+}
+@keyframes dvShatter {
+  30% { filter: drop-shadow(0 0 6px #ff5a3c) brightness(2.4); transform: translateX(-58%) rotate(-8deg) scale(1.12); }
+  100% { transform: translateX(-58%) rotate(26deg) scale(.4); opacity: 0; }
+}
+
+/* A vein taking the pickaxe: it jolts on each strike, then caves in. */
+.dv-ore .dv-up { transition: transform .07s ease-out; }
+.dv-ore.hit .dv-up { transform: rotateX(calc(-1 * var(--dvtilt))) translate(1.5px, 2px) scale(.97); }
+.dv-ore.broken { animation: dvOreBreak .38s ease-in forwards; }
+@keyframes dvOreBreak {
+  40% { transform: translate(-50%, -100%) scale(1.1, .86); }
+  100% { transform: translate(-50%, -96%) scale(.5, .3); opacity: 0; }
+}
+
+/* Struck sparks — thrown off the face and falling back down. */
+.dv-spark {
+  position: absolute; left: 50%; top: 18%;
+  width: 3px; height: 3px; border-radius: 50%;
+  background: #ffd98a; box-shadow: 0 0 4px #ffb43c;
+  pointer-events: none;
+  animation: dvSpark .55s ease-out forwards;
+}
+/* Rock gives grit, not sparks. */
+.dv-spark.grit { background: #b9ab93; box-shadow: none; width: 4px; height: 4px; border-radius: 1px; }
+@keyframes dvSpark {
+  0% { opacity: 1; transform: translate(0, 0) scale(1); }
+  100% { opacity: 0; transform: translate(var(--sx), calc(var(--sy) * -1 + 18px)) scale(.4); }
+}
+
+/* The in-world chooser — what to spend the work on. */
+.dv-choose {
+  position: absolute; inset: 0; z-index: 700;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(0,0,0,.58);
+}
+.dvc-card {
+  background: var(--card); border: 1px solid var(--border); border-radius: 12px;
+  padding: 16px 18px; width: min(460px, 92vw); max-height: 82%; overflow: auto;
+}
+.dvc-title { font-family: 'Cinzel', serif; color: var(--gold); font-size: 1.05em; letter-spacing: .08em; text-transform: uppercase; }
+.dvc-sub { color: var(--muted); font-style: italic; font-size: .84em; margin: 2px 0 10px; }
+.dvc-list { display: flex; flex-direction: column; gap: 5px; }
+.dvc-opt {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  font: inherit; text-align: left; cursor: pointer;
+  background: rgba(255,255,255,.03); color: inherit;
+  border: 1px solid var(--border); border-radius: 8px; padding: 7px 11px;
+}
+.dvc-opt:hover:not(:disabled) { border-color: var(--gold); background: rgba(212,168,67,.1); }
+.dvc-opt.dim { opacity: .45; cursor: not-allowed; }
+.dvc-name { display: block; }
+.dvc-desc { display: block; color: var(--muted); font-size: .78em; }
+.dvc-note { color: var(--gold); white-space: nowrap; font-size: .86em; }
+.dvc-empty { color: var(--dim); font-style: italic; padding: 10px 2px; }
+.dvc-cancel {
+  font: inherit; cursor: pointer; margin-top: 12px; width: 100%;
+  background: var(--card); color: inherit;
+  border: 1px solid var(--border); border-radius: 8px; padding: 6px 14px;
+}
+.dvc-cancel:hover { border-color: var(--gold); }
+
 /* --- touch stick (lower-left quadrant; base appears under the thumb) --- */
 .delve-joy { position: absolute; left: 0; bottom: 0; width: 50%; height: 55%; z-index: 550; touch-action: none; }
 .dj-base {

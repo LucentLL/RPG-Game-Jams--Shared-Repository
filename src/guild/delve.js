@@ -34,6 +34,24 @@ const BLOCK_H = 48;            // raised-block height in px (1 tile of face art)
 const PLAYER_SPEED = 3.4;      // tiles/sec — brisk but catchable by nothing
 const BODY_R = 0.28;           // collision half-width around the feet point
 const WALK_FRAMES = [0, 1, 2, 1];
+/**
+ * An upright prop is a paper standee: the ART is tall, but the thing itself
+ * only stands on a SHALLOW slice of floor at its base. Blocking the whole cell
+ * is what held a walker a full tile off an anvil approached from behind while
+ * letting them press right against the same anvil from the front — the art's
+ * base and the cell's south edge coincide, so only one side ever read right.
+ * Prop cells therefore block this deep, measured UP from the art's feet.
+ */
+const SOLID_DEPTH = 0.55;
+/**
+ * Walls are full height. A walker pressed against one has their standee drawn
+ * straight up its face, which reads as standing inside the stone, so hold them
+ * a little further off — but ONLY from the south, the one side where the
+ * sprite climbs the wall. Doorways run north–south, so this never narrows one.
+ */
+const WALL_BACK = 0.34;
+/** How close the feet must come before a workable prop offers itself. */
+const USE_RANGE = 1.5;
 
 /**
  * Painter's depth for anything STANDING on the plane (a walker, a creature, a
@@ -88,7 +106,13 @@ function loadImg(url) {
 // The bake — ASCII grid → one ground image + passability
 // ---------------------------------------------------------------------------
 
-const BLOCKING = { '#': 1, o: 1, r: 1, t: 1, m: 1, B: 1, b: 1, f: 1 };
+/** Full-height cells: chasm, veins, raised blocks, and a building's footprint.
+ *  Nothing stands in these, and a walker is held clear of them (WALL_BACK). */
+const BLOCKING = { '#': 1, o: 1, B: 1, b: 1, F: 1 };
+/** Upright props — boulders, stalagmites, the cart, furniture. These block only
+ *  the shallow floor slice their art actually rests on (SOLID_DEPTH), so you can
+ *  step in behind one and have it sort in front of you. */
+const FOOTED = { r: 1, t: 1, m: 1, f: 1 };
 // Well-mixed 2D hash — naive xor-of-primes checkerboards on % 2 variant picks.
 const hash2 = (x, y) => {
   let h = (x * 374761393 + y * 668265263) | 0;
@@ -326,13 +350,20 @@ async function bakeMap(map, theme) {
     }
   }
 
-  const pass = [];
+  // Passability comes in two grains. `pass`/`tall` are the full-height cells;
+  // `solids` are the shallow rectangles an upright prop really stands on.
+  const pass = [], tall = [], solids = [];
   for (let y = 0; y < rows; y++) {
-    pass.push([]);
-    for (let x = 0; x < cols; x++) pass[y].push(!BLOCKING[at(x, y)]);
+    pass.push([]); tall.push([]);
+    for (let x = 0; x < cols; x++) {
+      const ch = at(x, y);
+      pass[y].push(!BLOCKING[ch]);
+      tall[y].push(ch === '#' || ch === 'B' || ch === 'b' || ch === 'F');
+      if (FOOTED[ch]) solids.push({ x0: x, x1: x + 1, y0: y + 1 - SOLID_DEPTH, y1: y + 1 });
+    }
   }
   return {
-    url: cv.toDataURL('image/png'), pass, cols, rows, sheets,
+    url: cv.toDataURL('image/png'), pass, tall, solids, cols, rows, sheets,
     voidColor: sampleVoidColor(sheets.cliffs, theme),
     tex: cutWallTex(sheets, theme),
     ...extractGeometry(map.grid),
@@ -415,7 +446,11 @@ function mountScene(prep, entry) {
   stage.appendChild(field);
 
   D.map = map; D.theme = theme; D.field = field;
-  D.pass = baked.pass; D.cols = baked.cols; D.rows = baked.rows;
+  D.pass = baked.pass; D.tall = baked.tall; D.cols = baked.cols; D.rows = baked.rows;
+  // Fresh per scene: prop footprints are rebaked with the map, and the props
+  // you can work at are re-registered as they are placed below.
+  D.solids = baked.solids.slice();
+  D.uses = []; D.useNear = null; D.working = false;
   D.creatures = []; D.ores = [];
   D.exit = null; D.exitArmed = false;
   D.portals = []; D.portalArmed = false;
@@ -461,7 +496,11 @@ function mountScene(prep, entry) {
     }
   }
   // Authored furnishings — upright art.js standees (beds, anvils, counters…).
-  for (const p of (map.props || [])) addProp(artSprite(p.art, 'dv-furn'), p.x, p.y, p.w || 48);
+  // A prop with `use` is WORKABLE: walk into reach and it offers itself.
+  for (const p of (map.props || [])) {
+    const el = addProp(artSprite(p.art, 'dv-furn'), p.x, p.y, p.w || 48);
+    if (p.use) D.uses.push({ id: p.use, label: p.label || 'Use', x: p.x, y: p.y, art: p.art, el });
+  }
   // Buildings on the grounds: a facade standing on its footprint, and a door
   // you simply walk into. No menu, no button — the threshold IS the trigger.
   for (const b of (map.buildings || [])) {
@@ -514,11 +553,13 @@ export async function openDelve(localeId, member, hooks) {
       <span class="dv-title"></span>
       <span class="dv-haul"></span>
     </div>
-    <div class="delve-toasts"></div>`;
+    <div class="delve-toasts"></div>
+    <button class="dv-use" hidden onclick="__delve.use()"></button>`;
 
     D = {
       map: null, theme: null, hooks, member, gfx, field: null, host,
-      pass: null, cols: 0, rows: 0,
+      pass: null, tall: null, solids: [], uses: [], useNear: null, working: false,
+      cols: 0, rows: 0,
       keys: {}, joy: null, joyEl: null,
       cam: { x: 0, y: 0, snap: true }, zoom: window.innerHeight < 520 ? 1.4 : 1.8,
       last: 0, raf: 0, ended: false, fighting: false, grace: false, transiting: false,
@@ -665,6 +706,7 @@ function addProp(html, x, y, w) {
   el.style.width = w + 'px';
   el.style.zIndex = standZ(y);
   D.field.appendChild(el);
+  return el;
 }
 
 /** Ground a decal cutout the same way sprites are grounded — a 48px cell crop
@@ -810,6 +852,9 @@ function wireInput() {
     if (!screenActive() || D.fighting) return;
     const k = e.key.toLowerCase();
     if (k === 'escape') { leave(); return; }
+    // The one action key. Only ever armed when a workable prop is in reach, so
+    // it can't collide with anything else the walk does.
+    if (k === 'e' || k === 'enter' || k === ' ') { e.preventDefault(); beginUse(); return; }
     if (['arrowup', 'arrowdown', 'arrowleft', 'arrowright', 'w', 'a', 's', 'd'].includes(k)) {
       D.keys[k] = true;
       e.preventDefault();
@@ -866,9 +911,26 @@ const passAt = (x, y) => {
   const tx = Math.floor(x), ty = Math.floor(y);
   return tx >= 0 && ty >= 0 && tx < D.cols && ty < D.rows && D.pass[ty][tx];
 };
+/** Is the cell under this point a full-height wall (as opposed to open floor
+ *  or a prop's shallow footprint)? Outside the grid counts as wall. */
+const tallAt = (x, y) => {
+  const tx = Math.floor(x), ty = Math.floor(y);
+  return tx < 0 || ty < 0 || tx >= D.cols || ty >= D.rows || D.tall[ty][tx];
+};
+/** Does the feet box clear every prop footprint? */
+const clearOfSolids = (x, y) => {
+  for (const s of D.solids) {
+    if (x > s.x0 - BODY_R && x < s.x1 + BODY_R && y > s.y0 - BODY_R && y < s.y1 + BODY_R) return false;
+  }
+  return true;
+};
 const canStand = (x, y) =>
   passAt(x - BODY_R, y - BODY_R) && passAt(x + BODY_R, y - BODY_R) &&
-  passAt(x - BODY_R, y + BODY_R) && passAt(x + BODY_R, y + BODY_R);
+  passAt(x - BODY_R, y + BODY_R) && passAt(x + BODY_R, y + BODY_R) &&
+  // The extra standoff from a wall to the NORTH — see WALL_BACK. Props are
+  // exempt (they use `solids`), so you can still tuck in behind an anvil.
+  !tallAt(x - BODY_R, y - BODY_R - WALL_BACK) && !tallAt(x + BODY_R, y - BODY_R - WALL_BACK) &&
+  clearOfSolids(x, y);
 
 /** Axis-separated move: slide along walls instead of sticking. Returns moved? */
 function tryMove(e, dx, dy) {
@@ -958,23 +1020,247 @@ function moveCompanions(dt) {
   }
 }
 
+/** Close on a vein and you work it — no menu, a vein is a resource, not a
+ *  decision. The swing is what changed: it used to vanish on contact. */
 function checkOres() {
+  if (D.working) return;
   const p = D.player;
-  for (let i = D.ores.length - 1; i >= 0; i--) {
-    const o = D.ores[i];
-    if (Math.hypot(o.x + 0.5 - p.x, o.y + 0.5 - p.y) < 0.95) {
-      D.ores.splice(i, 1);
-      o.el.remove();
-      D.pass[o.y][o.x] = true;
-      D.mined.add(D.map.id + ':' + o.x + ',' + o.y);
-      const kind = ORE_KINDS[o.kind];
-      const r = D.hooks.onOre(o.kind);
-      D.haul.gold += kind.gold;
-      if (kind.mat) D.haul.mats[kind.mat] = (D.haul.mats[kind.mat] || 0) + 1;
-      updateHaul();
-      toast(r && r.txt ? r.txt : `⛏ ${kind.name} · +${kind.gold}g`);
-    }
+  for (const o of D.ores) {
+    if (Math.hypot(o.x + 0.5 - p.x, o.y + 0.5 - p.y) < 0.95) { mineOre(o); return; }
   }
+}
+
+/** How many pickaxe strikes a vein takes. Richer rock is harder rock. */
+const ORE_HITS = { iron: 3, silver: 3, copper: 4, crystal: 4 };
+
+/**
+ * Break a vein with the pickaxe. Freezes the walk (as a bout does), swings
+ * until the rock gives, then runs the haul bookkeeping exactly as before —
+ * the spoils, the toast and the `mined` latch are unchanged.
+ */
+async function mineOre(o) {
+  const S = D;
+  if (S.working || S.ores.indexOf(o) < 0) return;
+  S.working = true;
+  S.keys = {}; S.joy = null;
+  try {
+    await swingLoop({
+      tool: 'Club', tx: o.x + 0.5, ty: o.y + 0.5, beats: ORE_HITS[o.kind] || 3,
+      onStrike: () => {
+        o.el.classList.add('hit');
+        setTimeout(() => o.el.classList.remove('hit'), 150);
+        sparkBurst(o.el, 'grit');
+      },
+    });
+    if (D !== S || S.ended || S.ores.indexOf(o) < 0) return;
+    S.ores.splice(S.ores.indexOf(o), 1);
+    o.el.classList.add('broken');
+    setTimeout(() => o.el.remove(), 380);
+    S.pass[o.y][o.x] = true;
+    S.mined.add(S.map.id + ':' + o.x + ',' + o.y);
+    const kind = ORE_KINDS[o.kind];
+    const r = S.hooks.onOre(o.kind);
+    S.haul.gold += kind.gold;
+    if (kind.mat) S.haul.mats[kind.mat] = (S.haul.mats[kind.mat] || 0) + 1;
+    updateHaul();
+    toast(r && r.txt ? r.txt : `⛏ ${kind.name} · +${kind.gold}g`);
+  } finally {
+    if (D === S) S.working = false;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Workable props — walk up to a thing and do the work at it
+// ---------------------------------------------------------------------------
+
+/** The nearest workable prop within reach of the feet, or null. Props are
+ *  approached from the FRONT (south) or from behind; either counts. */
+function nearestUse() {
+  const p = D.player;
+  let best = null, bestD = USE_RANGE;
+  for (const u of D.uses) {
+    const d = Math.hypot(u.x - p.x, u.y - 0.5 - p.y);
+    if (d < bestD) { bestD = d; best = u; }
+  }
+  return best;
+}
+
+/** Show/hide the action button as the walker moves in and out of reach. */
+function updateUsePrompt() {
+  const btn = D.host.querySelector('.dv-use');
+  if (!btn) return;
+  const u = (D.working || D.fighting || D.transiting) ? null : nearestUse();
+  D.useNear = u;
+  if (!u) { btn.hidden = true; return; }
+  btn.hidden = false;
+  btn.textContent = `E · ${u.label}`;
+}
+
+/** Hand the station to the caller (hall.js), which decides what working it
+ *  means. The sim is frozen for the duration, exactly as a bout freezes it. */
+async function beginUse() {
+  if (!D || D.working || D.fighting || D.transiting || D.ended) return;
+  const u = D.useNear || nearestUse();
+  if (!u || !D.hooks.use) return;
+  const S = D;
+  S.working = true;
+  S.keys = {}; S.joy = null;
+  D.gfx.setAnim(S.player.actor, 'idle'); S.player.moving = false;
+  updateUsePrompt();
+  try {
+    await S.hooks.use(u.id, { member: S.member, toast, workAt, choose });
+  } catch (e) {
+    console.error('delve: work failed', e);
+    if (D === S && !S.ended) toast('The work goes nowhere.');
+  } finally {
+    if (D === S) { S.working = false; updateUsePrompt(); }
+  }
+}
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+/**
+ * An in-world chooser: a card over the scene listing what the work could be
+ * spent on. Resolves with the chosen value, or null if the walker backs out.
+ * @param {{title:string, sub?:string, options:{value:string,label:string,desc?:string,note?:string,dim?:boolean}[]}} spec
+ */
+function choose(spec) {
+  return new Promise((resolve) => {
+    const S = D;
+    const box = document.createElement('div');
+    box.className = 'dv-choose';
+    const rows = (spec.options || []).map((o, i) =>
+      `<button class="dvc-opt ${o.dim ? 'dim' : ''}" data-i="${i}" ${o.dim ? 'disabled' : ''}>
+         <span><span class="dvc-name">${o.label}</span>${o.desc ? `<span class="dvc-desc">${o.desc}</span>` : ''}</span>
+         ${o.note ? `<span class="dvc-note">${o.note}</span>` : ''}</button>`).join('')
+      || '<div class="dvc-empty">Nothing here to work on.</div>';
+    box.innerHTML = `<div class="dvc-card">
+        <div class="dvc-title">${spec.title}</div>
+        ${spec.sub ? `<div class="dvc-sub">${spec.sub}</div>` : ''}
+        <div class="dvc-list">${rows}</div>
+        <button class="dvc-cancel">Step away</button>
+      </div>`;
+    S.host.appendChild(box);
+    const done = (v) => { box.remove(); resolve(v); };
+    box.querySelectorAll('.dvc-opt').forEach((b) => {
+      b.onclick = () => done(spec.options[+b.dataset.i].value);
+    });
+    box.querySelector('.dvc-cancel').onclick = () => done(null);
+  });
+}
+
+/** Debris off a struck face, in the plane's upright frame. `kind` picks the
+ *  look: hot sparks off steel, cold grit off rock. */
+function sparkBurst(el, kind = '') {
+  const up = el.querySelector('.dv-up');
+  if (!up) return;
+  for (let i = 0; i < 7; i++) {
+    const s = document.createElement('span');
+    s.className = 'dv-spark ' + kind;
+    s.style.setProperty('--sx', (Math.random() * 44 - 22).toFixed(1) + 'px');
+    s.style.setProperty('--sy', (-14 - Math.random() * 20).toFixed(1) + 'px');
+    s.style.animationDelay = (Math.random() * 40).toFixed(0) + 'ms';
+    up.appendChild(s);
+    setTimeout(() => s.remove(), 620);
+  }
+}
+
+/**
+ * The shared swing: take up a tool, square up to a point on the plane, and
+ * strike it `beats` times, calling `onStrike(i, isLast)` at each contact.
+ *
+ * The tool is a real compositor weapon swapped into the actor's hand for the
+ * duration ('Hammer' → hammer.png, 'Club' → pickaxe1.png). Those tool sheets
+ * paint ONLY the Attack/Tool columns, and the compositor HIDES a weapon whose
+ * passive cells are blank — so the tool appears on the swing and is gone again
+ * afterwards without anything here having to hide it. The member's own weapon
+ * is put back at the end.
+ */
+async function swingLoop({ tool, tx, ty, beats = 3, onStrike }) {
+  const S = D, p = S.player;
+  const gearWas = p.actor.gear, sheatheWas = p.actor.sheatheWhenIdle;
+  if (tool) {
+    p.actor.gear = { RHand: { type: tool, tier: 1 }, LHand: null };
+    p.actor.sheatheWhenIdle = false;
+  }
+  p.actor.facing = Math.atan2(tx - p.x, -(ty - p.y));
+  await sleep(170);
+  let out = null;
+  for (let i = 0; i < beats && D === S && !S.ended; i++) {
+    S.gfx.setAnim(p.actor, 'slash');
+    await sleep(210);            // ≈60% through the 5×70ms swing — contact
+    if (D !== S || S.ended) break;
+    if (onStrike) { const v = onStrike(i, i === beats - 1); if (v !== undefined) out = v; }
+    await sleep(330);            // the follow-through, then wind up again
+  }
+  if (D === S && !S.ended) {
+    S.gfx.setAnim(p.actor, 'idle');
+    p.actor.gear = gearWas; p.actor.sheatheWhenIdle = sheatheWas;
+  }
+  return out;
+}
+
+/**
+ * Work a station: step in, turn to it, and swing a tool at it `beats` times.
+ *
+ * The tool is a real compositor weapon swapped into the actor's hand for the
+ * duration (`Hammer` → hammer.png, `Club` → pickaxe1.png). Those tool sheets
+ * paint ONLY the Attack/Tool columns, and the compositor hides a weapon whose
+ * passive cells are blank — so the tool appears on the swing and vanishes
+ * afterwards without any extra work here.
+ *
+ * `finish` fires on the LAST strike, so the outcome lands with the impact
+ * rather than after it; its return value picks the flourish.
+ * @param {string} useId
+ * @param {{tool?:string, beats?:number, itemHTML?:string, struckArt?:string,
+ *          finish?:function():{ok?:boolean, broke?:boolean, txt?:string}}} opts
+ */
+async function workAt(useId, opts = {}) {
+  const S = D;
+  const u = S.uses.find((q) => q.id === useId);
+  if (!u) return null;
+  const p = S.player;
+  const restArt = u.art;
+
+  // Lay the piece on the face before the first swing, so you SEE what is being
+  // worked. It rides inside .dv-up, already counter-rotated upright with the
+  // anvil, so it stays glued to the face at any camera angle.
+  let piece = null;
+  if (opts.itemHTML) {
+    piece = document.createElement('span');
+    piece.className = 'dv-onanvil';
+    piece.innerHTML = opts.itemHTML;
+    u.el.querySelector('.dv-up').appendChild(piece);
+  }
+  // Step in to the station and square up to it.
+  const standY = u.y + 0.58;
+  if (canStand(u.x, standY)) { p.x = u.x; p.y = standY; }
+
+  const result = await swingLoop({
+    tool: opts.tool, tx: u.x, ty: u.y, beats: opts.beats || 3,
+    onStrike: (i, last) => {
+      // The roll happens ON the last strike, so the outcome and the impact
+      // land together instead of the result arriving after the animation.
+      let r;
+      if (last && opts.finish) { try { r = opts.finish(); } catch (e) { console.error('delve: finish threw', e); } }
+      if (opts.struckArt) {
+        u.el.querySelector('.px-art').outerHTML = artSprite(opts.struckArt, 'dv-furn');
+        setTimeout(() => { if (D === S && !S.ended) u.el.querySelector('.px-art').outerHTML = artSprite(restArt, 'dv-furn'); }, 150);
+      }
+      sparkBurst(u.el);
+      if (piece) { piece.classList.add('hit'); setTimeout(() => piece.classList.remove('hit'), 150); }
+      return r;
+    },
+  });
+
+  if (D === S && !S.ended) {
+    if (piece) {
+      if (result && result.broke) { piece.classList.add('shatter'); setTimeout(() => piece.remove(), 520); }
+      else { piece.classList.add('lift'); setTimeout(() => piece.remove(), 420); }
+    }
+    if (result && result.txt) toast(result.txt);
+  } else if (piece) piece.remove();
+  return result;
 }
 
 function checkExit() {
@@ -1110,15 +1396,17 @@ function render(now) {
     `rotateX(${TILT}deg) translateZ(-120px) scale(${D.zoom}) translate(${D.cam.x}px,${D.cam.y}px)`;
 }
 
-function tick(now) {
-  if (!D || D.ended) return;
-  if (!screenActive()) { D.raf = 0; return; } // a bout borrowed the screen — resumed on return
+/** One simulation + render step. Split out of `tick` so a hidden window — which
+ *  never fires rAF — can still be driven frame by frame (see __delve.step). */
+function stepSim(now) {
   const dt = Math.min(0.08, (now - (D.last || now)) / 1000);
   // A freshly mounted room settles for a beat: the room lives (people potter
   // about) but the walker holds still, so input left over from the doorway
   // can't walk them back through it.
   const settling = now < D.settleUntil;
-  if (!D.fighting && !D.transiting) {
+  // `working` freezes the walk the same way a bout does — the work animation
+  // owns the actor while it runs.
+  if (!D.fighting && !D.transiting && !D.working) {
     if (!settling) movePlayer(dt);
     moveCreatures(dt);
     moveCompanions(dt);
@@ -1130,9 +1418,17 @@ function tick(now) {
       if (D.creatures.every((c) => Math.hypot(c.x - D.player.x, c.y - D.player.y) > 0.75 + (c.fw / TILE) * 0.28)) D.grace = false;
     } else if (!D.ended) checkEncounters();
   }
-  if (!D || D.ended) return;
+  if (!D || D.ended) return false;
+  updateUsePrompt();
   render(now);
   D.last = now;
+  return true;
+}
+
+function tick(now) {
+  if (!D || D.ended) return;
+  if (!screenActive()) { D.raf = 0; return; } // a bout borrowed the screen — resumed on return
+  if (!stepSim(now)) return;
   D.raf = requestAnimationFrame(tick);
 }
 
@@ -1199,4 +1495,26 @@ function close() {
   hooks.onEnd(summary);
 }
 
-window.__delve = { leave, close };
+window.__delve = { leave, close, use: beginUse };
+
+// Dev probe (headless verification: a hidden window never fires rAF — step the
+// sim by hand). Mirrors rooms.js __roomDebug/__roomStep.
+if (typeof window !== 'undefined') {
+  window.__delveDebug = () => D && ({
+    map: D.map && D.map.id, working: D.working, fighting: D.fighting,
+    player: { x: +D.player.x.toFixed(3), y: +D.player.y.toFixed(3), anim: D.player.actor.anim.name, facing: +D.player.actor.facing.toFixed(2), gear: D.player.actor.gear },
+    useNear: D.useNear && D.useNear.id, uses: D.uses.map((u) => ({ id: u.id, x: u.x, y: u.y })),
+    solids: D.solids.length, ores: D.ores.length,
+  });
+  // Walk `steps` frames of `ms`, optionally holding keys ('w','a','s','d').
+  window.__delveStep = (steps = 1, keys = '', ms = 16) => {
+    if (!D || D.ended) return null;
+    for (const k of keys) D.keys[k] = true;
+    for (let i = 0; i < steps; i++) {
+      if (!D || D.ended) break;
+      stepSim((D.last || performance.now()) + ms);
+    }
+    for (const k of keys) D.keys[k] = false;
+    return window.__delveDebug();
+  };
+}
