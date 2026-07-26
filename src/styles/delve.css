@@ -88,6 +88,17 @@
   background: radial-gradient(ellipse, rgba(0,0,0,.42), transparent 68%);
 }
 
+/* --- See-through occluders ---------------------------------------------- */
+/* Anything over a tile tall hides ground behind it — a 96px shelf wall covers
+   three rows of floor, a facade sixteen — so a walker who steps behind one
+   simply vanishes. Octopath fades the occluder rather than moving the camera;
+   delve.js decides who is hiding whom (updateXray) and toggles this class.
+   The fade goes on `.dv-up`, NEVER on `.dv-prop`: opacity below 1 forces
+   transform-style:flat, and flattening that wrapper would collapse the
+   standee's counter-rotation and squash it back into the floor. */
+.dv-up, .dv-block-top, .dv-face { transition: opacity 0.14s linear; }
+.dv-xray { opacity: 0.36; }
+
 /* --- Campus buildings: upright facades you walk into through the door --- */
 .dv-bldg { display: block; width: 100%; position: relative; }
 .dv-bldg .bl-roof {

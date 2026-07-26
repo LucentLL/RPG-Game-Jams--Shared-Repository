@@ -63,6 +63,19 @@ const USE_RANGE = 1.5;
  */
 const standZ = (y) => 10 + (Math.floor(y) + 1) * TILE + 2 + Math.round((y - Math.floor(y)) * 3);
 
+/**
+ * How many GROUND ROWS a thing `px` tall hides behind itself.
+ *
+ * A standee is upright while the ground recedes at cos(TILT), so one tile of
+ * floor is only TILE·cos(52°) ≈ 30px of screen height. That is the whole reason
+ * tall scenery swallows people: a 96px shelf wall covers three rows of floor
+ * behind it, and a ten-tile facade covers sixteen — far more ground than the
+ * two-row footprint it actually stands on.
+ */
+const rowsHidden = (px) => px / (TILE * Math.cos(TILT * Math.PI / 180));
+/** Sideways slack on the hide test, so the fade starts before a shoulder is eaten. */
+const XRAY_PAD = 0.4;
+
 /** @type {?Object} the active session (null when no delve is running) */
 let D = null;
 /** Synchronous latch for openDelve's async window — set before the first await
@@ -463,6 +476,7 @@ function mountScene(prep, entry) {
   // Fresh per scene: prop footprints are rebaked with the map, and the props
   // you can work at are re-registered as they are placed below.
   D.solids = baked.solids.slice();
+  D.occluders = []; // rebuilt below as the room's tall scenery is placed
   D.uses = []; D.useNear = null; D.working = false;
   D.creatures = []; D.ores = [];
   D.exit = null; D.exitArmed = false;
@@ -474,7 +488,13 @@ function mountScene(prep, entry) {
   D.keys = {}; D.joy = null;
   D.settleUntil = performance.now() + 350;
 
-  attachTerrain(field, baked, { zMode: 'y' });
+  // Raised blocks over a tile high hide people too — a room-height shelf wall
+  // ('B', 96px) covers three rows of floor behind it. A 'b' aisle stack is
+  // exactly one tile and covers nothing, so counters stay solid.
+  for (const b of attachTerrain(field, baked, { zMode: 'y' })) {
+    if (b.h <= TILE) continue;
+    D.occluders.push({ els: b.els, x0: b.x, x1: b.x + 1, y: b.y + 1, rows: rowsHidden(b.h), on: false });
+  }
 
   // --- the walker: a fresh element per scene, the SAME actor across rooms ---
   const actor = D.player ? D.player.actor : D.gfx.makeActor(D.member);
@@ -574,7 +594,7 @@ export async function openDelve(localeId, member, hooks) {
     D = {
       map: null, theme: null, hooks, member, gfx, field: null, host,
       pass: null, tall: null, solids: [], uses: [], useNear: null, working: false,
-      cols: 0, rows: 0,
+      cols: 0, rows: 0, occluders: [],
       keys: {}, joy: null, joyEl: null,
       cam: { x: 0, y: 0, snap: true }, zoom: window.innerHeight < 520 ? 1.4 : 1.8,
       last: 0, raf: 0, ended: false, fighting: false, grace: false, transiting: false,
@@ -656,7 +676,12 @@ export function attachTerrain(parent, baked, opts = {}) {
     d.className = cls;
     d.style.cssText = css;
     parent.appendChild(d);
+    return d;
   };
+  /** The quads of each raised block, so a caller can fade a whole block at once
+   *  when someone walks behind it (see trackOccluder). Faces are not listed —
+   *  a cliff hangs BELOW the plane and can never cover anyone standing on it. */
+  const blocks = [];
   for (const f of baked.faces) {
     const z = zMode === 'under' ? 1 : (f.kind === 's' ? 10 + f.y * TILE - 1 : 10 + (f.y + f.len) * TILE - 1);
     if (f.kind === 's') {
@@ -690,25 +715,74 @@ export function attachTerrain(parent, baked, opts = {}) {
     const base = 10 + (b.y + 1) * TILE;
     const zTop = zMode === 'under' ? 2 : base - 6;
     const zFace = zMode === 'under' ? 1 : base - 2;
-    el('dv-block-top', `left:${b.x / cols * 100}%;top:${b.y / rows * 100}%;width:${100 / cols}%;height:${100 / rows}%;` +
-      `background-image:url(${K.top});background-size:100% 100%;transform:translateZ(${h}px);z-index:${zTop};`);
+    const els = [el('dv-block-top', `left:${b.x / cols * 100}%;top:${b.y / rows * 100}%;width:${100 / cols}%;height:${100 / rows}%;` +
+      `background-image:url(${K.top});background-size:100% 100%;transform:translateZ(${h}px);z-index:${zTop};`)];
     if (hOf(b.x, b.y + 1) < h) { // a block to the south hides this face
-      el('dv-face', `left:${b.x / cols * 100}%;top:${(b.y + 1) / rows * 100}%;width:${100 / cols}%;height:${hT / rows * 100}%;` +
+      els.push(el('dv-face', `left:${b.x / cols * 100}%;top:${(b.y + 1) / rows * 100}%;width:${100 / cols}%;height:${hT / rows * 100}%;` +
         `background-image:url(${K.face});background-size:100% 100%;` +
-        `transform-origin:50% 0;transform:translateZ(${h}px) rotateX(-90deg);z-index:${zFace};`);
+        `transform-origin:50% 0;transform:translateZ(${h}px) rotateX(-90deg);z-index:${zFace};`));
     }
     // End panels, so a run doesn't read as a hollow cutout from the side. They
     // are safe now that anyone standing in this row sorts above them (standZ).
     if (hOf(b.x + 1, b.y) < h) {
-      el('dv-face', `left:${(b.x + 1) / cols * 100}%;top:${b.y / rows * 100}%;width:${hT / cols * 100}%;height:${100 / rows}%;` +
+      els.push(el('dv-face', `left:${(b.x + 1) / cols * 100}%;top:${b.y / rows * 100}%;width:${hT / cols * 100}%;height:${100 / rows}%;` +
         `background-image:url(${K.sideE});background-size:100% 100%;` +
-        `transform-origin:0 50%;transform:translateZ(${h}px) rotateY(90deg);z-index:${zFace};`);
+        `transform-origin:0 50%;transform:translateZ(${h}px) rotateY(90deg);z-index:${zFace};`));
     }
     if (hOf(b.x - 1, b.y) < h) {
-      el('dv-face', `left:${(b.x - hT) / cols * 100}%;top:${b.y / rows * 100}%;width:${hT / cols * 100}%;height:${100 / rows}%;` +
+      els.push(el('dv-face', `left:${(b.x - hT) / cols * 100}%;top:${b.y / rows * 100}%;width:${hT / cols * 100}%;height:${100 / rows}%;` +
         `background-image:url(${K.sideW});background-size:100% 100%;` +
-        `transform-origin:100% 50%;transform:translateZ(${h}px) rotateY(-90deg);z-index:${zFace};`);
+        `transform-origin:100% 50%;transform:translateZ(${h}px) rotateY(-90deg);z-index:${zFace};`));
     }
+    blocks.push({ x: b.x, y: b.y, h, els });
+  }
+  return blocks;
+}
+
+/**
+ * Register a standee as a SEE-THROUGH OCCLUDER if it is tall enough to hide a
+ * person. Anything over a tile high can; below that it cannot, so counters,
+ * aisle stacks and low furniture stay solid and keep their weight.
+ *
+ * The height is measured after the element is in the document on purpose —
+ * art.js sprites carry only an aspect-ratio and a width, so their height does
+ * not exist until the layout does.
+ *
+ * The fade is put on `.dv-up`, never on `.dv-prop`: opacity below 1 forces
+ * `transform-style: flat`, and flattening the wrapper would collapse the
+ * counter-rotation and squash the standee back into the floor. `.dv-up` already
+ * flattens its own children, so it has nothing left to lose.
+ */
+function trackOccluder(el, x, y, w) {
+  const up = el.querySelector('.dv-up');
+  if (!up) return;
+  // `rows: 0` means NOT YET MEASURED. Height cannot be taken here: mountScene
+  // runs while #delveScreen is still hidden — showScreen comes after it — so
+  // offsetHeight is 0 for every prop, and art.js sprites carry only an
+  // aspect-ratio, so there is no number to compute from either. updateXray
+  // resolves each one on the first frame its layout exists, and drops the ones
+  // that turn out to be a tile or less.
+  D.occluders.push({ els: [up], x0: x - w / TILE / 2, x1: x + w / TILE / 2, y, rows: 0, on: false });
+}
+
+/** Fade whatever the walker has stepped behind, and un-fade whatever they left.
+ *  Only the walker counts — creatures and companions are a tile tall and hide
+ *  nobody, and fading for them would set the whole room blinking. */
+function updateXray() {
+  const p = D.player;
+  for (let i = D.occluders.length - 1; i >= 0; i--) {
+    const o = D.occluders[i];
+    if (!o.rows) {                                  // a standee awaiting its first layout
+      const h = o.els[0].offsetHeight;
+      if (!h) continue;                             // screen still hidden — try next frame
+      if (h <= TILE) { D.occluders.splice(i, 1); continue; } // too short to hide anyone
+      o.rows = rowsHidden(h);
+    }
+    const hides = p.y < o.y && (o.y - p.y) <= o.rows
+      && p.x > o.x0 - XRAY_PAD && p.x < o.x1 + XRAY_PAD;
+    if (hides === o.on) continue;
+    o.on = hides;
+    for (const el of o.els) el.classList.toggle('dv-xray', hides);
   }
 }
 
@@ -721,6 +795,7 @@ function addProp(html, x, y, w) {
   el.style.width = w + 'px';
   el.style.zIndex = standZ(y);
   D.field.appendChild(el);
+  trackOccluder(el, x, y, w);
   return el;
 }
 
@@ -752,6 +827,7 @@ function addPropCanvas(decalName, sheets, x, y) {
   el.style.width = d.w + 'px';
   el.style.zIndex = standZ(y);
   D.field.appendChild(el);
+  trackOccluder(el, x, y, d.w);
 }
 
 function addOre(x, y, oresImg) {
@@ -1381,6 +1457,7 @@ function render(now) {
   p.el.style.left = (p.x * TILE) + 'px';
   p.el.style.top = (p.y * TILE) + 'px';
   p.el.style.zIndex = standZ(p.y);
+  updateXray(); // the walker is placed — fade whatever they are standing behind
   for (const c of D.creatures) {
     drawCreature(c, now);
     c.el.style.left = (c.x * TILE) + 'px';
