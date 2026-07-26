@@ -253,11 +253,11 @@
 .bv-title { font-family: 'Cinzel', serif; color: var(--gold); letter-spacing: 0.1em; }
 .bv-gold { color: var(--gold); font-weight: 600; }
 .bv-zoom { margin-left: auto; display: flex; gap: 4px; }
-.bv-zoom button, .bv-walk {
+.bv-zoom button, .bv-walk, .bv-back {
   font: inherit; cursor: pointer; background: var(--card); color: inherit;
   border: 1px solid var(--border); border-radius: 7px; padding: 4px 10px;
 }
-.bv-zoom button:hover, .bv-walk:hover { border-color: var(--gold); }
+.bv-zoom button:hover, .bv-walk:hover, .bv-back:hover { border-color: var(--gold); }
 .bv-walk { border-color: var(--gold); color: var(--gold); }
 .bv-tools { display: flex; gap: 6px; flex-wrap: wrap; padding: 7px 12px 0; flex: 0 0 auto; }
 .bv-tool { font: inherit; cursor: pointer; background: var(--card); color: inherit;

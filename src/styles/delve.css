@@ -23,7 +23,9 @@
 .delve-field {
   position: absolute; left: 50%; top: 50%;
   transform-origin: 50% 50%;
-  transform: rotateX(var(--dvtilt)) translateZ(-120px) scale(1.4); /* pre-JS default */
+  /* scale3d, not scale — a 2D scale between this tilt and the standees' counter-
+     tilt stops the two cancelling and squashes every sprite. See delve.js render. */
+  transform: rotateX(var(--dvtilt)) translateZ(-120px) scale3d(1.4, 1.4, 1.4); /* pre-JS default */
   transform-style: preserve-3d;
   background-size: 100% 100%;
   background-repeat: no-repeat;

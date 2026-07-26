@@ -1394,8 +1394,19 @@ function render(now) {
     D.cam.x += (tx - D.cam.x) * k;
     D.cam.y += (ty - D.cam.y) * k;
   }
+  // scale3d, NOT scale. A 2D scale leaves Z alone, so it is not a similarity in
+  // 3D — and it sits BETWEEN this plane's rotateX and every standee's counter-
+  // rotateX, which means the counter-rotation can no longer cancel the tilt.
+  // With scale(1.8) at TILT 52° every standee came out 25% too short and leaning
+  // 17° back: characters read as sunk to the shins in the floor, and a "one tile
+  // tall" raised block drew barely half a tile. Scaling Z with X and Y makes the
+  // two rotations cancel exactly (standees perfectly upright, uniformly scaled)
+  // and gives cliff DEPTH and BLOCK_H their authored size in tiles. The ground
+  // plane is untouched by the third factor — its points have z = 0 — so framing
+  // and perspective are identical either way. (The action arena gets this right
+  // by putting its scale outside the rotate; here the pan has to stay inside.)
   D.field.style.transform =
-    `rotateX(${TILT}deg) translateZ(-120px) scale(${D.zoom}) translate(${D.cam.x}px,${D.cam.y}px)`;
+    `rotateX(${TILT}deg) translateZ(-120px) scale3d(${D.zoom},${D.zoom},${D.zoom}) translate(${D.cam.x}px,${D.cam.y}px)`;
 }
 
 /** One simulation + render step. Split out of `tick` so a hidden window — which
@@ -1491,6 +1502,25 @@ function endDelve(reason, beaten = false) {
 function close() {
   if (!D) return;
   const hooks = D.hooks, summary = D.haul;
+  if (D.joyEl) D.joyEl.remove();
+  D.host.innerHTML = '';
+  D = null;
+  hooks.onEnd(summary);
+}
+
+/**
+ * End the walk at once, with no summary card, because a workable prop is handing
+ * the player to another screen — the Great Hall's estate plans open the Build
+ * tab, and you cannot stand in a room and rearrange the estate at the same time.
+ * Tears down in `endDelve` order (park the loop, unwire input) before releasing
+ * the session, then hands back through `onEnd` like any other ending.
+ */
+export function exitDelve() {
+  if (!D) return;
+  const hooks = D.hooks, summary = D.haul;
+  D.ended = true;
+  if (D.raf) cancelAnimationFrame(D.raf);
+  unwireInput();
   if (D.joyEl) D.joyEl.remove();
   D.host.innerHTML = '';
   D = null;
