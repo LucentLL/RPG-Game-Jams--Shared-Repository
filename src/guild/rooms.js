@@ -47,7 +47,7 @@ const ROOM_SET = {
     ],
   },
   forge: {
-    theme: 'forge', gesture: 'slash',
+    theme: 'forge', gesture: 'slash', tool: 'Hammer',
     props: [
       { art: 'counterLong', x: 24, bottom: 42, w: 30, z: 6 },
       { art: 'anvil',   x: 52, bottom: 14, w: 15, z: 40 },
@@ -168,7 +168,13 @@ export function bindRoomScene(roomId, workers) {
     const cv = el ? el.querySelector('canvas.rdi-cv') : null;
     if (keep) { keep.cv = cv; keep.station = st; keep.gesture = gesture; return keep; }
     const actor = gfx.makeActor(h);
-    actor.gear = { RHand: null, LHand: null }; // a trade is hands-on — no weapon at the bench
+    // A trade is hands-on, so the member's own WEAPON never comes to the bench
+    // (a Mage rostered to the Kitchen shouldn't chop with a staff). A room with
+    // a `tool` puts the right implement in their hand instead — the smith
+    // swings a real hammer. Those tool sheets paint only the Attack/Tool
+    // columns, so the compositor shows the hammer on the gesture and hides it
+    // between reps, which is exactly the read we want at a bench.
+    actor.gear = set.tool ? { RHand: { type: set.tool, tier: 1 }, LHand: null } : { RHand: null, LHand: null };
     actor.sheatheWhenIdle = false;
     actor.facing = FACE[st.f] != null ? FACE[st.f] : Math.PI;
     gfx.setAnim(actor, 'idle');

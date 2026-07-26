@@ -292,7 +292,9 @@ export const DELVE_MAPS = {
     const buildings = PLAN.map((b) => {
       const w = Math.max(1, Math.round(b.px / 48));
       for (let y = b.base - 2; y < b.base; y++) {
-        for (let x = b.x; x < b.x + w; x++) if (g[y] && g[y][x] === '.') g[y][x] = 'f';
+        // 'F', not 'f': a facade is a full-height solid you can never step into,
+        // where furniture ('f') blocks only the shallow floor slice it rests on.
+        for (let x = b.x; x < b.x + w; x++) if (g[y] && g[y][x] === '.') g[y][x] = 'F';
       }
       const dx = b.x + Math.min(w - 1, Math.floor(w * b.frac));
       g[b.base - 1][dx] = '+'; // the threshold: walk onto it and you're inside
@@ -393,7 +395,11 @@ export const DELVE_MAPS = {
     ],
     entry: [9.5, 10.3],
     props: [
-      { art: 'anvilWork', x: 4.5, y: 4, w: 84 }, { art: 'anvilFront', x: 8.5, y: 4, w: 48 },
+      { art: 'anvilWork', x: 4.5, y: 4, w: 84 },
+      // The middle anvil is the one you WORK: bare-faced (so the piece being
+      // refined can be laid on it) and flagged `use`, which makes the walker
+      // offer to strike when they come within reach.
+      { art: 'anvilBare', x: 8.5, y: 4, w: 84, use: 'anvil', label: 'Work the anvil' },
       { art: 'anvilWork', x: 12.5, y: 4, w: 84 },
       { art: 'forgeFurnace', x: 3.6, y: 6, w: 90 }, { art: 'quenchBarrel', x: 15.5, y: 6, w: 36 },
       { art: 'forgeTwin', x: 12.5, y: 10, w: 96 }, { art: 'tools', x: 8, y: 2.02, w: 44 },
@@ -550,7 +556,7 @@ export function validateMap(map) {
   }
   for (const p of (map.portals || [])) {
     const ch = at(p.x, p.y);
-    if (!ch || ch === '#' || 'Bbfrtmo'.includes(ch)) console.warn(`delve map ${map.id}: portal at ${p.x},${p.y} sits on '${ch}' — unreachable`);
+    if (!ch || ch === '#' || 'BbFfrtmo'.includes(ch)) console.warn(`delve map ${map.id}: portal at ${p.x},${p.y} sits on '${ch}' — unreachable`);
     if (!DELVE_MAPS[p.to]) console.warn(`delve map ${map.id}: portal leads to unknown map '${p.to}'`);
   }
   return true;
