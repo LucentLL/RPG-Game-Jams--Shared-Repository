@@ -30,7 +30,7 @@ import { artSprite } from './art.js';
 const TILE = 48;
 const TILT = 52;               // plane tilt in degrees — matches the ranch's diorama
 const DEPTH = 96;              // cliff drop in px (2 tiles of face art)
-const BLOCK_H = 48;            // raised-block height in px (1 tile of face art)
+export const BLOCK_H = 48;     // raised-block height in px (1 tile of face art)
 const PLAYER_SPEED = 3.4;      // tiles/sec — brisk but catchable by nothing
 const BODY_R = 0.28;           // collision half-width around the feet point
 const WALK_FRAMES = [0, 1, 2, 1];
@@ -498,7 +498,9 @@ function mountScene(prep, entry) {
   // Authored furnishings — upright art.js standees (beds, anvils, counters…).
   // A prop with `use` is WORKABLE: walk into reach and it offers itself.
   for (const p of (map.props || [])) {
-    const el = addProp(artSprite(p.art, 'dv-furn'), p.x, p.y, p.w || 48);
+    // `cls` lets a furnishing carry its own behaviour — the apothecary's
+    // cauldron uses it to step through the sheet's four boiling frames.
+    const el = addProp(artSprite(p.art, 'dv-furn ' + (p.cls || '')), p.x, p.y, p.w || 48);
     if (p.use) D.uses.push({ id: p.use, label: p.label || 'Use', x: p.x, y: p.y, art: p.art, el });
   }
   // Buildings on the grounds: a facade standing on its footprint, and a door
@@ -1176,18 +1178,18 @@ function sparkBurst(el, kind = '') {
  * afterwards without anything here having to hide it. The member's own weapon
  * is put back at the end.
  */
-async function swingLoop({ tool, tx, ty, beats = 3, onStrike }) {
+async function swingLoop({ tool, tx, ty, beats = 3, anim = 'slash', onStrike }) {
   const S = D, p = S.player;
   const gearWas = p.actor.gear, sheatheWas = p.actor.sheatheWhenIdle;
-  if (tool) {
-    p.actor.gear = { RHand: { type: tool, tier: 1 }, LHand: null };
-    p.actor.sheatheWhenIdle = false;
-  }
+  // A tool goes in hand; a bare-handed trade (stirring a pot) empties them, so
+  // a Ranger brewing doesn't wave a bow over the cauldron.
+  p.actor.gear = tool ? { RHand: { type: tool, tier: 1 }, LHand: null } : { RHand: null, LHand: null };
+  p.actor.sheatheWhenIdle = false;
   p.actor.facing = Math.atan2(tx - p.x, -(ty - p.y));
   await sleep(170);
   let out = null;
   for (let i = 0; i < beats && D === S && !S.ended; i++) {
-    S.gfx.setAnim(p.actor, 'slash');
+    S.gfx.setAnim(p.actor, anim);
     await sleep(210);            // ≈60% through the 5×70ms swing — contact
     if (D !== S || S.ended) break;
     if (onStrike) { const v = onStrike(i, i === beats - 1); if (v !== undefined) out = v; }
@@ -1237,7 +1239,7 @@ async function workAt(useId, opts = {}) {
   if (canStand(u.x, standY)) { p.x = u.x; p.y = standY; }
 
   const result = await swingLoop({
-    tool: opts.tool, tx: u.x, ty: u.y, beats: opts.beats || 3,
+    tool: opts.tool, tx: u.x, ty: u.y, beats: opts.beats || 3, anim: opts.anim,
     onStrike: (i, last) => {
       // The roll happens ON the last strike, so the outcome and the impact
       // land together instead of the result arriving after the animation.

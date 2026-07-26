@@ -12,7 +12,15 @@
 // screens} and a shared src/game/state.js — done incrementally so the game
 // keeps running at every step.
 // ═══════════════════════════════════════════════════════════════════════════
-import { SPRITE_BASES, MATERIA_BASE, FX_BASE } from '../config/assets.js';
+import { SPRITE_BASES, MATERIA_BASE, FX_BASE, TILES_BASE } from '../config/assets.js';
+// The action arena's real 3D ground — heights, cover, climb points and the
+// geometry mount. Everything here degrades gracefully when the bake fails.
+import {
+  ARENA_FIELDS as _ARENA_FIELDS, pickField as pickArenaField, readField as readArenaField,
+  mountArenaTerrain, heightAt as arenaHeightAt, onClimb as arenaOnClimb, liftAt as arenaLiftAt,
+  canStandAt as arenaCanStand, slideMove as arenaSlide, hasLineOfSight as arenaLOS,
+  stepToward as arenaStepToward, CLIMB_SPEED, HIGH_GROUND_RANGE, HIGH_GROUND_TOHIT,
+} from './arena-terrain.js';
 import { facingToRow, facingAngle, faceBothFighters, angleDiff, getZone, getAdjacentTilesByZone, isRearTile, isFrontTile } from './engine/facing.js';
 import './state.js'; // shared mutable game state (bridged onto window for legacy bare-name access)
 import {
@@ -2887,6 +2895,7 @@ function startActionArena(){
   showScreen('actionScreen');
   actZoomReset();
   renderActionTiles();
+  beginArenaTerrain();
   buildActionAttackBar();
   var fb0 = document.getElementById('actForfeitBtn'); if (fb0) fb0.textContent = '↩ Forfeit Run';
   document.getElementById('actionLog').innerHTML = '';
@@ -2919,6 +2928,127 @@ function renderActionTiles(){
     }
   }
   arena.style.backgroundImage = 'url(' + cv.toDataURL() + ')';
+}
+
+// ─── The battlefield's real terrain (src/game/arena-terrain.js) ──────────────
+// `_arenaT` is the live field: heights, passability, climb cells and sight
+// blockers. Null means "flat plane", and every rule below degrades to the old
+// behaviour when it is null — so a failed bake costs scenery, never a battle.
+var _arenaT = null;
+
+/** Choose a battlefield, clear the last one, and start the terrain bake. */
+function beginArenaTerrain(){
+  var arena = document.getElementById('actionArena');
+  if (!arena) return;
+  arena.querySelectorAll('.dv-face, .dv-block-top, .at-prop').forEach(function(e){ e.remove(); });
+  _arenaT = readArenaField(pickArenaField());
+  fitActionArena();
+  // Spawns are fixed corners set before this runs, so a new battlefield could
+  // drop a fighter inside rock. Walk each one to the nearest legal footing.
+  [p1, p2].forEach(function(f){ if (f) placeOnOpenGround(f); });
+  // The procedural grass above is already on screen; the real ground swaps in
+  // when the cliff kit has loaded (the ranch's pattern — never block the loop).
+  mountArenaTerrain(arena, _arenaT, TILES_BASE).catch(function(e){
+    console.warn('arena: terrain bake failed — flat plane stands', e);
+  });
+}
+
+/** The plane is authored at 48px tiles like every other 3D ground in the game,
+ *  so its extruded geometry (translateZ has no percent form) keeps its
+ *  proportions. Screen size therefore comes from a scale, not from a width. */
+function fitActionArena(){
+  var arena = document.getElementById('actionArena');
+  var stage = arena && arena.parentElement;
+  if (!arena || !stage) return;
+  var native = ACTION_GS * 48;
+  var want = Math.min(stage.clientWidth * 1.15, Math.max(240, stage.clientHeight * 1.18));
+  arena.style.setProperty('--afit', (want / native).toFixed(4));
+}
+
+/** Surface height (whole steps) under a fighter. */
+function fighterHeight(f){ return arenaHeightAt(_arenaT, f.ax, f.ay); }
+
+// Dev probe — the battlefield's state, in the same spirit as __delveDebug.
+// Set window.__arenaPin to a field name to force it on the next battle.
+if (typeof window !== 'undefined'){
+  window.__arenaDebug = function(){
+    if (!_arenaT) return { terrain: null };
+    var f = function(x){ return x ? {
+      x:+x.ax.toFixed(2), y:+x.ay.toFixed(2), h:fighterHeight(x), climbing:!!x._climbing,
+      lift:arenaLiftAt(_arenaT, x.ax, x.ay) } : null; };
+    return {
+      field: _arenaT.name, grid: _arenaT.bakeGrid,
+      p1: f(p1), p2: f(p2),
+      los: (p1 && p2) ? arenaLOS(_arenaT, p1.ax, p1.ay, p2.ax, p2.ay) : null,
+      dist: (p1 && p2) ? +Math.hypot(p2.ax-p1.ax, p2.ay-p1.ay).toFixed(2) : null,
+      faces: document.querySelectorAll('#actionArena .dv-face').length,
+      tops: document.querySelectorAll('#actionArena .dv-block-top').length,
+      props: document.querySelectorAll('#actionArena .at-prop').length,
+    };
+  };
+  // Would an attack of this reach land right now, and why/why not?
+  window.__arenaTestAttack = function(range){
+    if (!p1 || !p2) return null;
+    var atk = { name: 'probe', range: range };
+    var hA = fighterHeight(p1), hB = fighterHeight(p2);
+    var d = Math.hypot(p2.ax - p1.ax, p2.ay - p1.ay);
+    return {
+      range: range, dist: +d.toFixed(2), hAtk: hA, hDef: hB,
+      effRange: +((range || 1) + Math.max(0, hA - hB) * HIGH_GROUND_RANGE).toFixed(2),
+      highGroundBonusRange: +(Math.max(0, hA - hB) * HIGH_GROUND_RANGE).toFixed(2),
+      toHitBonus: hA > hB ? HIGH_GROUND_TOHIT : 0,
+      losClear: arenaLOS(_arenaT, p1.ax, p1.ay, p2.ax, p2.ay),
+      meleeBlockedByLevel: (range || 1) <= 1 && hA !== hB,
+      viable: actionAttackViable(p1, p2, atk),
+    };
+  };
+  // Place the opponent for a rule test.
+  window.__arenaPutP2 = function(x, y){ if (p2){ p2.ax = x; p2.ay = y; } return window.__arenaDebug(); };
+  // Walk the player a step in tile space, ignoring the input layer.
+  window.__arenaNudge = function(dx, dy){
+    if (!p1) return null;
+    if (_arenaT) arenaSlide(_arenaT, p1, dx, dy); else { p1.ax += dx; p1.ay += dy; }
+    p1._climbing = arenaOnClimb(_arenaT, p1.ax, p1.ay);
+    return window.__arenaDebug();
+  };
+}
+
+/** Nudge a fighter to the nearest spot they can legally stand, spiralling out
+ *  from where they were put. Keeps a fixed spawn corner honest on any field. */
+function placeOnOpenGround(f){
+  if (!_arenaT || arenaCanStand(_arenaT, f.ax, f.ay)) return;
+  for (var r = 0.5; r <= 6; r += 0.5){
+    for (var a = 0; a < 16; a++){
+      var th = a / 16 * Math.PI * 2;
+      var nx = f.ax + Math.cos(th) * r, ny = f.ay + Math.sin(th) * r;
+      if (arenaCanStand(_arenaT, nx, ny)){ f.ax = nx; f.ay = ny; return; }
+    }
+  }
+}
+
+/** The longest reach in this fighter's kit — how far the AI wants to stand off. */
+function aiBestReach(f){
+  var best = 1;
+  for (var i = 0; i < (f.attacks||[]).length; i++){
+    var r = f.attacks[i] && f.attacks[i].range;
+    if (r > best) best = r;
+  }
+  return best;
+}
+
+/**
+ * Would this attack actually land right now? Mirrors the gate in
+ * tryActionAttack so the AI stops burning cooldowns on shots the terrain has
+ * already refused (out of range · wrong level for a blade · rock in the way).
+ */
+function actionAttackViable(attacker, defender, atk){
+  if (!atk || atk.special) return !!atk; // heals/teleports have their own rules
+  var d = Math.hypot(defender.ax - attacker.ax, defender.ay - attacker.ay);
+  var hA = fighterHeight(attacker), hD = fighterHeight(defender);
+  var reach = (atk.range || 1) + Math.max(0, hA - hD) * HIGH_GROUND_RANGE;
+  if (d > reach + 0.3) return false;
+  if ((atk.range || 1) <= 1 && hA !== hD) return false;
+  return arenaLOS(_arenaT, attacker.ax, attacker.ay, defender.ax, defender.ay);
 }
 
 function buildActionAttackBar(){
@@ -3122,14 +3252,20 @@ function actionTick(dt){
   if (_actionKeys.a || _actionKeys.arrowleft) dx -= 1;
   if (_actionKeys.d || _actionKeys.arrowright) dx += 1;
   dx += _touchMove.x; dy += _touchMove.y;   // virtual joystick (touch) adds to keyboard input
+  // Rungs cost time: crossing a ladder or a vine is deliberately slow, which is
+  // what makes a ledge worth holding and a climber worth shooting at.
+  p1._climbing = arenaOnClimb(_arenaT, p1.ax, p1.ay);
+  if (p1._climbing) sp1 *= CLIMB_SPEED;
   if (dx || dy){
     var L = Math.sqrt(dx*dx + dy*dy);
     dx /= L; dy /= L;
-    var nx = p1.ax + dx * sp1 * dt;
-    var ny = p1.ay + dy * sp1 * dt;
-    // Bounds + simple body-collision with opponent (push gently)
-    p1.ax = Math.max(0.5, Math.min(ACTION_GS - 0.5, nx));
-    p1.ay = Math.max(0.5, Math.min(ACTION_GS - 0.5, ny));
+    // Terrain-aware step: slides along rocks, and only changes level over a
+    // climb cell. Falls back to the old bounds clamp on a flat plane.
+    if (_arenaT) arenaSlide(_arenaT, p1, dx * sp1 * dt, dy * sp1 * dt);
+    else {
+      p1.ax = Math.max(0.5, Math.min(ACTION_GS - 0.5, p1.ax + dx * sp1 * dt));
+      p1.ay = Math.max(0.5, Math.min(ACTION_GS - 0.5, p1.ay + dy * sp1 * dt));
+    }
     p1.facing = Math.atan2(dx, -dy);  // same convention as facingToRow
     if (!p1.anim || p1.anim.name !== 'move') setFighterAnim(p1, 'move');
   } else if (p1.anim && p1.anim.name === 'move'){
@@ -3139,21 +3275,39 @@ function actionTick(dt){
   var oa = p1.ax - p2.ax, ob = p1.ay - p2.ay;
   var od = Math.sqrt(oa*oa + ob*ob);
   var sp2 = ((p2.speed||4) * 0.75);
-  if (od > 1.0){
+  p2._climbing = arenaOnClimb(_arenaT, p2.ax, p2.ay);
+  if (p2._climbing) sp2 *= CLIMB_SPEED;
+  // How close the AI wants to be: a bow holds its distance, a blade closes.
+  var reach2 = aiBestReach(p2);
+  var wantD = reach2 > 1.5 ? Math.max(1.6, reach2 - 1.2) : 1.0;
+  if (od > wantD){
     var ux = oa/od, uy = ob/od;
-    p2.ax = Math.max(0.5, Math.min(ACTION_GS - 0.5, p2.ax + ux * sp2 * dt));
-    p2.ay = Math.max(0.5, Math.min(ACTION_GS - 0.5, p2.ay + uy * sp2 * dt));
+    // On real terrain a beeline walks into rock and stalls there forever, so
+    // steer by a breadth-first step whenever the direct line is blocked.
+    if (_arenaT && !arenaCanStand(_arenaT, p2.ax + ux * sp2 * dt, p2.ay + uy * sp2 * dt, p2.ax, p2.ay)){
+      var st = arenaStepToward(_arenaT, p2.ax, p2.ay, p1.ax, p1.ay);
+      if (st){ var sl = Math.hypot(st.dx, st.dy) || 1; ux = st.dx/sl; uy = st.dy/sl; }
+    }
+    if (_arenaT) arenaSlide(_arenaT, p2, ux * sp2 * dt, uy * sp2 * dt);
+    else {
+      p2.ax = Math.max(0.5, Math.min(ACTION_GS - 0.5, p2.ax + ux * sp2 * dt));
+      p2.ay = Math.max(0.5, Math.min(ACTION_GS - 0.5, p2.ay + uy * sp2 * dt));
+    }
     p2.facing = Math.atan2(ux, -uy);
     if (!p2.anim || p2.anim.name !== 'move') setFighterAnim(p2, 'move');
   } else {
     if (p2.anim && p2.anim.name === 'move') setFighterAnim(p2, 'idle');
     p2.facing = Math.atan2(oa, -ob); // face player even when stationary
   }
-  // Opponent auto-attacks on its own cooldown.
-  if (p2._aiAtkCD <= 0 && p2.attacks && p2.attacks.length && od < 5){
-    var pick2 = p2.attacks[Math.floor(Math.random() * p2.attacks.length)];
-    tryActionAttack(p2, p1, pick2);
-    p2._aiAtkCD = _guildBattle ? 0.9 : 1.6; // guild battles tighten the AI cadence so playing isn't structurally easy vs the sim odds
+  // Opponent auto-attacks on its own cooldown — but only with something that
+  // can actually land. Picking blind made it swing a sword from four tiles out;
+  // with terrain it would also fire into rock all match.
+  if (p2._aiAtkCD <= 0 && p2.attacks && p2.attacks.length && od < 6 && !p2._climbing){
+    var usable = p2.attacks.filter(function(a){ return actionAttackViable(p2, p1, a); });
+    if (usable.length){
+      tryActionAttack(p2, p1, usable[Math.floor(Math.random() * usable.length)]);
+      p2._aiAtkCD = _guildBattle ? 0.9 : 1.6; // guild battles tighten the AI cadence so playing isn't structurally easy vs the sim odds
+    }
   }
   // A wilful hero swings on their own sometimes (K5): low discipline+bond leaks
   // unrequested attacks in guild action battles — obedience felt in real time.
@@ -3191,8 +3345,21 @@ function tryActionAttack(attacker, defender, atkName, opts){
     // Step toward player facing direction by teleportRange tiles.
     var tr = atk.teleportRange || 3;
     var dx = Math.sin(attacker.facing), dy = -Math.cos(attacker.facing);
-    attacker.ax = Math.max(0.5, Math.min(ACTION_GS - 0.5, attacker.ax + dx * tr));
-    attacker.ay = Math.max(0.5, Math.min(ACTION_GS - 0.5, attacker.ay + dy * tr));
+    var tx = Math.max(0.5, Math.min(ACTION_GS - 0.5, attacker.ax + dx * tr));
+    var ty = Math.max(0.5, Math.min(ACTION_GS - 0.5, attacker.ay + dy * tr));
+    // Never blink INTO rock, and never use the blink to skip a climb: walk the
+    // line back until it lands somewhere legal at the same level.
+    if (_arenaT){
+      var okX = attacker.ax, okY = attacker.ay;
+      for (var s = 1; s <= 12; s++){
+        var t = s / 12;
+        var cx = attacker.ax + (tx - attacker.ax) * t, cy = attacker.ay + (ty - attacker.ay) * t;
+        if (!arenaCanStand(_arenaT, cx, cy, okX, okY)) break;
+        okX = cx; okY = cy;
+      }
+      tx = okX; ty = okY;
+    }
+    attacker.ax = tx; attacker.ay = ty;
     actionLog('☿ '+(attacker===p1?'You':'Opp')+' '+atk.name);
     return;
   }
@@ -3204,12 +3371,30 @@ function tryActionAttack(attacker, defender, atkName, opts){
     actionLog('☽ '+(attacker===p1?'You':'Opp')+' '+atk.name+' heal '+healed, 'hit');
     return;
   }
-  // Damaging attack — range check uses Euclidean dist + extraRange.
+  // You cannot fight from a ladder — both hands are on the rungs.
+  if (attacker._climbing){
+    if (attacker === p1) actionLog('⚔ '+atk.name+' — both hands on the climb', 'miss');
+    return;
+  }
+  // Damaging attack — range check uses Euclidean dist + extraRange, now with
+  // the terrain's say: height extends reach, a ledge puts you out of a blade's
+  // way, and rock between you eats the shot. Each rejection says which, so the
+  // rule is learnable instead of mysterious.
   var ddx = defender.ax - attacker.ax, ddy = defender.ay - attacker.ay;
   var dist = Math.sqrt(ddx*ddx + ddy*ddy);
-  var effRange = (atk.range || 1) + (atk.range > 0 ? matB.extraRange : 0);
+  var hAtk = fighterHeight(attacker), hDef = fighterHeight(defender);
+  var effRange = (atk.range || 1) + (atk.range > 0 ? matB.extraRange : 0)
+    + Math.max(0, hAtk - hDef) * HIGH_GROUND_RANGE;
   if (dist > effRange + 0.3){
     if (attacker === p1) actionLog('⚔ '+atk.name+' — out of range', 'miss');
+    return;
+  }
+  if ((atk.range || 1) <= 1 && hAtk !== hDef){
+    if (attacker === p1) actionLog('⚔ '+atk.name+' — '+(hDef > hAtk ? 'they are above you' : 'they are below you')+', climb to reach', 'miss');
+    return;
+  }
+  if (!arenaLOS(_arenaT, attacker.ax, attacker.ay, defender.ax, defender.ay)){
+    if (attacker === p1) actionLog('⚔ '+atk.name+' — no line of sight', 'miss');
     return;
   }
   // Face the target as we swing.
@@ -3225,7 +3410,8 @@ function tryActionAttack(attacker, defender, atkName, opts){
   // Roll-to-hit reuses the same stat → modifier → +prof + materia chain.
   // A charged release lands more reliably (+2 to-hit — SS2's "charges connect").
   var sMod = Math.floor((attacker.stats[atk.stat] - 10) / 2);
-  var toHit = sMod + attacker.prof + (matB.toHit||0) + (chargeTier ? 2 : 0);
+  var toHit = sMod + attacker.prof + (matB.toHit||0) + (chargeTier ? 2 : 0)
+    + (hAtk > hDef ? HIGH_GROUND_TOHIT : 0); // shooting downhill
   var roll = Math.floor(Math.random() * 20) + 1;
   var total = roll + toHit;
   var aName = attacker === p1 ? 'You' : 'Opp';
@@ -3357,8 +3543,14 @@ function actionRender(){
     var f = (i === 0) ? p1 : p2;
     wrap.style.left = (f.ax / ACTION_GS * 100) + '%';
     wrap.style.top  = (f.ay / ACTION_GS * 100) + '%';
-    // Z-stack backstop: whoever is lower on the field draws on top (3D depth leads).
-    wrap.style.zIndex = String(2 + Math.round(f.ay * 10));
+    // Stand ON the surface: a ledge lifts the standee by exactly the height of
+    // the drawn shelf, a climber sits halfway up the rungs.
+    var lift = arenaLiftAt(_arenaT, f.ax, f.ay);
+    wrap.style.setProperty('--alift', lift ? lift + 'px' : '0px');
+    // Depth: match the delve's standZ so a fighter on a shelf sorts ABOVE the
+    // face they are standing on rather than behind it. The lift term keeps a
+    // raised fighter over the terrain in front of them.
+    wrap.style.zIndex = String(10 + (Math.floor(f.ay) + 1) * 48 + 2 + Math.round(lift));
     renderActionFighter(cv, f);
   });
   // Charge ring — blooms at the player's feet while an attack is held. Gold fills
@@ -3534,6 +3726,7 @@ function startGuildBattle(p1Spec, p2Spec, config){
     showScreen('actionScreen');
     actZoomReset();
     renderActionTiles();
+    beginArenaTerrain();
     buildActionAttackBar();
     var fb = document.getElementById('actForfeitBtn'); if (fb) fb.textContent = '↩ Forfeit Match';
     var logEl = document.getElementById('actionLog'); if (logEl) logEl.innerHTML = '';

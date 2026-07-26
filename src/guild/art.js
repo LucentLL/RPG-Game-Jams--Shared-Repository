@@ -66,6 +66,14 @@ const SHEETS = {
   interior_3x: { w: 768, h: 768 },
   chests_3x: { w: 936, h: 864 },
   candles_3x: { w: 576, h: 480 },
+  // The apothecary. The cauldron sheet is an RPG-Maker object charset whose
+  // outer columns are flat filler — only column 1 carries art, and it carries
+  // FOUR frames down the rows, which .apoth-boil steps through in CSS.
+  cauldron_3x: { w: 288, h: 576 },
+  witchtiles_3x: { w: 384, h: 192 },
+  alchjars_3x: { w: 384, h: 336 },
+  shopextras_3x: { w: 336, h: 384 },
+  alchbench_3x: { w: 384, h: 144 },
   // Campus exteriors — whole buildings you walk up to and enter.
   guildhall_3x: { w: 816, h: 576 },
   tower_3x: { w: 768, h: 768 },
@@ -169,6 +177,26 @@ export const ART = {
   footlocker: { sheet: 'chests_3x',   x: 87,  y: 54,  w: 57,  h: 51 },
   bedCandle:  { sheet: 'candles_3x',  x: 159, y: 249, w: 21,  h: 45 },
 
+  // ── The apothecary ───────────────────────────────────────────────────────
+  // Frame 0 of the witch-hatted cauldron; the other three sit below it at a
+  // 144px row pitch and .apoth-boil walks them (see delve.css apothBoil).
+  cauldronBoil:  { sheet: 'cauldron_3x',   x: 111, y: 24,  w: 63,  h: 120 },
+  cauldronGreen: { sheet: 'witchtiles_3x', x: 114, y: 24,  w: 63,  h: 63 },  // stone pot, paddle standing in it
+  cauldronBlue:  { sheet: 'witchtiles_3x', x: 18,  y: 33,  w: 63,  h: 54 },  // a still vat
+  potionGreen:   { sheet: 'witchtiles_3x', x: 249, y: 102, w: 27,  h: 36 },
+  potionRed:     { sheet: 'witchtiles_3x', x: 297, y: 102, w: 27,  h: 36 },
+  potionBlue:    { sheet: 'witchtiles_3x', x: 345, y: 102, w: 27,  h: 36 },
+  recipeBanner:  { sheet: 'witchtiles_3x', x: 6,   y: 99,  w: 135, h: 90 },  // scrolls + hanging banner
+  jarCounter:    { sheet: 'alchjars_3x',   x: 147, y: 198, w: 138, h: 138 }, // worktop over four tiers of specimen jars
+  jarCabinet:    { sheet: 'alchjars_3x',   x: 288, y: 144, w: 96,  h: 192 }, // the tall showpiece wall unit
+  jarShelf:      { sheet: 'alchjars_3x',   x: 147, y: 144, w: 138, h: 48 },
+  specimenJars:  { sheet: 'alchjars_3x',   x: 0,   y: 159, w: 144, h: 117 }, // three floor-standing jars
+  alchBench:     { sheet: 'alchbench_3x',  x: 261, y: 42,  w: 102, h: 54 },  // retort, vials, pot rack
+  alchBenchSmall:{ sheet: 'alchbench_3x',  x: 192, y: 45,  w: 48,  h: 51 },
+  potionCounter: { sheet: 'shopextras_3x', x: 3,   y: 240, w: 138, h: 42 },  // counter lined with potions
+  herbBasket:    { sheet: 'shopextras_3x', x: 192, y: 336, w: 45,  h: 42 },
+  apothDresser:  { sheet: 'shopextras_3x', x: 147, y: 21,  w: 90,  h: 99 },
+
   // ── Campus exteriors (delve-maps.js campus `buildings`) ─────────────────
   // Every one is a front-facing facade with its door on the centre line
   // unless noted; the fraction is where the doorway sits across its width.
@@ -179,6 +207,7 @@ export const ART = {
   bldgKitchen:   { sheet: 'huts_3x',      x: 369, y: 42,  w: 285, h: 294 }, // its autumn sibling · .45
   bldgDormitory: { sheet: 'cottage_3x',   x: 0,   y: 0,   w: 267, h: 300 }, // the bunk cottage · .50
   bldgArmory:    { sheet: 'shopfront_3x', x: 240, y: 192, w: 288, h: 96 },  // a shop front · door .27
+  bldgApothecary:{ sheet: 'shopfront_3x', x: 48,  y: 48,  w: 144, h: 297 }, // tall timber shop, open front · .50
   bldgArena:     { sheet: 'colosseum_3x', x: 15,  y: 192, w: 114, h: 141 }, // tiered amphitheatre · .50
   gateArch:      { sheet: 'gate_3x',      x: 144, y: 0,   w: 144, h: 123 }, // the estate gate
   trainDummy:    { sheet: 'dummy_3x',     x: 87,  y: 228, w: 75,  h: 96 },

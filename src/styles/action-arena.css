@@ -9,11 +9,17 @@
 .action-stage{position:relative;width:100%;display:flex;justify-content:center;overflow:hidden;
   perspective:1050px;perspective-origin:50% 14%;
   background:linear-gradient(180deg,#0b0e1a 0%,#1a2036 40%,#4a3438 47%,#c08050 50%,#302028 53%,#0e1118 60%)}
-.action-arena{position:relative;width:min(120vw,calc(1.25*(100dvh - 260px)));aspect-ratio:1;
+/* The plane is authored at the game's native 48px tiles (9 x 48 = 432) rather
+   than sized from the viewport, because its extruded terrain lifts in PIXELS —
+   translateZ has no percentage form, so a responsive width would shear every
+   ledge. Screen size comes from --afit (computed in fitActionArena) times the
+   player's --azoom. */
+.action-arena{position:relative;width:432px;height:432px;flex:0 0 auto;
   margin-top:calc(-0.3*(100dvh - 260px));
   background:#1a2418;border:2px solid rgba(60,46,32,0.9);border-radius:10px;image-rendering:pixelated;background-size:100% 100%;
   box-shadow:inset 0 0 80px rgba(0,0,0,0.5),0 24px 60px rgba(0,0,0,0.55);
-  transform:scale(var(--azoom,1)) rotateX(50deg) translateZ(-120px);transform-style:preserve-3d;transition:transform 0.18s ease-out}
+  transform:scale(calc(var(--afit,1.6) * var(--azoom,1))) rotateX(50deg) translateZ(-120px);
+  transform-style:preserve-3d;transition:transform 0.18s ease-out}
 
 /* ═══ MOBILE ACTION OVERLAY — HP + attacks float over a larger battlefield ═══ */
 #actionScreen{position:relative;min-height:100dvh;height:100dvh;padding:0;gap:0;overflow:hidden}
@@ -23,7 +29,7 @@
 #actionScreen .action-hp-row .hp-bar{flex:1}
 /* Stage fills the screen; more of the field reads, HP/attacks float on top. */
 #actionScreen .action-stage{position:absolute;inset:0;width:100%;height:100%;align-items:center}
-#actionScreen .action-arena{width:min(150vw,calc(1.18*(100dvh - 96px)));margin-top:calc(-0.24*(100dvh - 96px))}
+#actionScreen .action-arena{margin-top:calc(-0.24*(100dvh - 96px))}
 #actionScreen .action-help{display:none}
 #actionScreen .action-attacks{position:absolute;left:0;right:0;bottom:0;z-index:20;max-width:none;
   padding:8px 8px calc(10px + env(safe-area-inset-bottom,0));
@@ -35,9 +41,30 @@
 #actionScreen .action-joystick{bottom:calc(104px + env(safe-area-inset-bottom,0))}
 
 /* Fighter standees: flat wrapper on the plane (shadow lives here), upright inner
-   cutout, oversized sprite (96/720 tile cell, sprite drawn 165% of it). */
-.action-actor{position:absolute;width:13.333%;height:13.333%;transform:translate(-50%,-100%);
-  transform-style:preserve-3d;pointer-events:none}
+   cutout, oversized sprite (96/720 tile cell, sprite drawn 165% of it).
+   --alift raises the whole standee onto whatever surface it stands on, in the
+   plane's own pixels — the same translateZ the terrain's ledges are built with,
+   so a fighter on a shelf lands exactly on the drawn top. */
+.action-actor{position:absolute;width:13.333%;height:13.333%;
+  transform:translateZ(var(--alift,0px)) translate(-50%,-100%);
+  transform-style:preserve-3d;pointer-events:none;transition:none}
+
+/* ═══ Battlefield dressing (src/game/arena-terrain.js) ═══ */
+/* Bottom-anchored on their ground point, counter-rotated upright like every
+   other standee in the game's 3D grounds. */
+.at-prop{position:absolute;transform:translate(-50%,-100%) rotateX(-50deg);transform-origin:50% 100%;
+  pointer-events:none;filter:drop-shadow(0 3px 3px rgba(0,0,0,0.5))}
+.at-prop canvas{display:block;image-rendering:pixelated}
+/* A ladder leaning on the shelf it serves: rungs you can read at a glance. */
+.at-ladder{width:26px;height:56px;
+  background:repeating-linear-gradient(180deg,#8a6033 0 4px,transparent 4px 12px),
+    linear-gradient(90deg,#6b4a26 0 5px,transparent 5px calc(100% - 5px),#6b4a26 calc(100% - 5px) 100%);
+  border-radius:2px}
+/* A vine doing the same job, greener and looser. */
+.at-vine{width:22px;height:58px;
+  background:repeating-linear-gradient(200deg,#3f6b2c 0 3px,#5d8f3c 3px 7px,transparent 7px 11px),
+    linear-gradient(90deg,transparent 0 6px,#38612a 6px 11px,transparent 11px 100%);
+  border-radius:0 0 6px 6px}
 .aa-standee{position:absolute;inset:0;transform:rotateX(-50deg);transform-origin:50% 100%;
   display:flex;align-items:flex-end;justify-content:center}
 .action-fighter{width:165%;height:165%;margin-bottom:-4%;image-rendering:pixelated;pointer-events:none;flex:0 0 auto}
