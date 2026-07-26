@@ -437,6 +437,19 @@ async function prepMap(mapId) {
 function mountScene(prep, entry) {
   const { map, theme, baked, spawns } = prep;
   const W = baked.cols * TILE, H = baked.rows * TILE;
+  // ONE LENS PER MAP. `perspective` is a fixed distance in px, so the 1150px the
+  // 13-row rooms were tuned at is a wide-angle lens on a 46-row estate: the camera
+  // centres the walker, which puts half the plane's ~3100px of projected depth in
+  // FRONT of the eye point. Measured on the grounds with the walker at row 11 —
+  // row 27's tile drew 649px wide and rows 40/44 drew NEGATIVE, folded through the
+  // eye. A building standing there is a ten-tile billboard, so it smeared across
+  // the view and slid over ground moving at a different rate: bases pinned, the
+  // whole storey above them shifting. Scale the lens with the plane's own depth and
+  // every map gets the rooms' proportions, whatever its size. The 1.3 is that
+  // calibration — it reproduces 1150px exactly at 13 rows — and the floor keeps
+  // every shipped interior pixel-identical.
+  const depth = baked.rows * TILE * D.zoom * Math.sin(TILT * Math.PI / 180);
+  D.host.style.setProperty('--dvpersp', Math.round(Math.max(1150, depth * 1.3)) + 'px');
   const stage = D.host.querySelector('.delve-stage');
   stage.style.background = baked.voidColor;
   const field = document.createElement('div');
