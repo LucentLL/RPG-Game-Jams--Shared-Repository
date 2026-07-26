@@ -40,7 +40,7 @@ import { stopRanchLoop } from './ranch.js';
 import { renderBuild, setTool as buildTool, armBuilding, armProp, cellClick as buildCell, buildZoomIn, buildZoomOut, buildZoomFit } from './build-view.js';
 import { artSprite, itemSprite, hasItemSprite } from './art.js';
 import { hasDiorama, roomSceneHTML, bindRoomScene, stopRoomLoop } from './rooms.js';
-import { openDelve, hasDelveMap, isDelveOpen } from './delve.js';
+import { openDelve, hasDelveMap, isDelveOpen, exitDelve } from './delve.js';
 import { ORE_KINDS, setCampusGuild } from './delve-maps.js';
 import { ensureCampus } from './campus.js';
 
@@ -62,7 +62,10 @@ let currentRoom = 'hub'; // UI-only: which room the stage shows. Never saved —
 // The play opt-in now lives ON the guild (guild.playPlan = {kind,id,mode}) so it
 // survives reload and can arm quests as well as tournaments. `planFor` reads it.
 let advancing = false; // re-entrancy guard — a played battle makes advanceAll async & minutes-long.
-let ranchView = true; // UI-only: the guild opens on the BUILD plan (home view); rooms are drill-in detail.
+// UI-only: is the Build plan taking the screen instead of the room hub? The guild
+// opens on its ROOMS — Build is not a tab. It is the Guildmaster's estate plan, and
+// you reach it by walking to the plans in the Great Hall (or the desk in his study).
+let buildView = false;
 let wildsSelId = null; // UI-only: the Wilds locale whose prey are open for dispatch (defaults to nearest).
 
 // The guild hall's rooms, in the sketch's row-major order. `tag` = work vs storage vs
@@ -673,6 +676,9 @@ async function walkGuild() {
       onKill: () => null,
       onOre: () => null,
       companions: (mid) => (INTERIOR_FOLK[mid] ? INTERIOR_FOLK[mid](guild.roster) : []).slice(0, 5),
+      // The Guildmaster works stations too — and the estate plans in his own hall
+      // are the one station only this walk can reach the interesting way.
+      use: (stationId, api) => useStation(m, stationId, api),
       onEnd: () => { showScreen('guildScreen'); render({ top: true }); },
     });
   } catch (e) {
@@ -690,6 +696,20 @@ async function walkGuild() {
 async function useStation(h, id, api) {
   if (id === 'anvil') return anvilRefine(h, api);
   if (id === 'cauldron') return cauldronBrew(h, api);
+  if (id === 'estatePlan') return readEstatePlan();
+}
+
+/**
+ * Unroll the estate plans — the Guildmaster's table in the Great Hall, and the
+ * great desk in his study. This IS the Build tab, and it is the only door to it:
+ * `guild.campus` is the same object the plan edits and the grounds are walked
+ * from (campus.js), so the drawing you read here and the ground under your feet
+ * cannot disagree. The walk ends first — you can't stand in a room and move the
+ * room at the same time — and Build's own Leave puts you back in the guild.
+ */
+function readEstatePlan() {
+  exitDelve();       // hands back through onEnd → the guild screen
+  openBuild();
 }
 
 /**
@@ -1608,7 +1628,7 @@ async function advanceAll() {
   guild.lastReport = report; // persist the recap — it used to vanish on reload
   notice = '';
   currentRoom = 'hub'; // land on the hub so the weekly recap is always seen
-  ranchView = false; stopRanchLoop(); // land on the hub recap after a week resolves
+  buildView = false; stopRanchLoop(); // land on the hub recap after a week resolves
   save(); showScreen('guildScreen'); applyViewToggle(); render({ top: true });
   showAssembly(); // the Weekly Assembly: every member's week on one screen, praise/scold in hand
   } finally { advancing = false; }
@@ -3177,6 +3197,7 @@ function groundsRoom() {
         </span>
       </div>
       <div class="tourney-lens quest-lens"><button class="tourney-play" onclick="__guild.walkGuild()">🚶 Walk the grounds — enter any building through its door</button></div>
+      <div class="fac-note">The estate plans are spread on the table in the Great Hall (and on the desk in your study). Read them to raise, move or pull down a building.</div>
     </div>
     <div class="plan-card">
       <div class="plan-title">🏕 The Grounds · capacity</div>
@@ -3382,7 +3403,7 @@ async function practiceBout(myId, oppId, mode) {
       : `${me.name} lost the bout vs ${opp.name} — no harm done, just practice.`;
   } finally { advancing = false; }
   showScreen('guildScreen'); render();
-  if (ranchView) { renderBuild(guild, save); applyViewToggle(); } // the plan re-renders after a bout
+  if (buildView) { renderBuild(guild, save); applyViewToggle(); } // the plan re-renders after a bout
 }
 
 /** The Arena — jump straight into a live, playable bout (no Advance Week needed).
@@ -3544,7 +3565,6 @@ function railHTML() {
       </div>
       <div class="guild-meta"><span>☉ <b>${guild.gold}</b>g</span><span>✦ <b>${guild.reputation}</b></span><span>${formatDate(guild.calendar)}</span></div>
     </div>
-    <button class="room-chip hub-chip" onclick="__guild.openRanch()"><span class="rc-glyph">🏗</span><span class="rc-body"><span class="rc-name">Build</span></span></button>
     <button class="room-chip hub-chip ${currentRoom === 'hub' ? 'on' : ''}" onclick="__guild.openRoom('hub')"><span class="rc-glyph">🏰</span><span class="rc-body"><span class="rc-name">Hub</span></span></button>
     <div class="rail-rooms">${ROOMS.map(roomChip).join('')}</div>
     <button class="advance-btn rail-advance" onclick="__guild.advanceAll()">▶ ADVANCE WEEK <span class="ra-cost">−${upkeep}g</span></button>`;
@@ -3552,8 +3572,8 @@ function railHTML() {
 
 // --- render -----------------------------------------------------------------
 // Re-renders the room-hub (rail + stage) into a CHILD `.guild-hall-host` div, NOT
-// #guildScreen itself — so the ranch view (a sibling `.ranch-view` with its own
-// animated canvas subtree + RAF loop) is never wiped by a room re-render. Snapshots
+// #guildScreen itself — so the Build plan (a sibling `.build-view` with its own
+// tool state) is never wiped by a room re-render. Snapshots
 // .room-stage scrollTop so an in-room menu tap doesn't jump to the top; navigation
 // that should start fresh (switching rooms, Advance Week) passes { top: true }.
 function render({ top = false } = {}) {
@@ -3575,26 +3595,29 @@ function render({ top = false } = {}) {
   paintSprites(); // canvases exist now — draw the Elements sprites into them
   // Living room interior: rebind the freshly-rendered diorama canvases to the
   // animation loop (or stop it if this room has no interior). Skipped while the
-  // ranch view owns the screen (its own loop is running there instead).
-  if (!ranchView && hasDiorama(currentRoom)) bindRoomScene(currentRoom, roomWorkers(currentRoom).slice(0, 6));
+  // Build plan owns the screen (nothing of this room is visible behind it).
+  if (!buildView && hasDiorama(currentRoom)) bindRoomScene(currentRoom, roomWorkers(currentRoom).slice(0, 6));
   else stopRoomLoop();
 }
 
-// --- ranch (home view) ------------------------------------------------------
-/** Show exactly one of the ranch view or the room-hub host (they're siblings in #guildScreen). */
+// --- the Build plan ---------------------------------------------------------
+/** Show exactly one of the Build plan or the room-hub host (siblings in #guildScreen). */
 function applyViewToggle() {
   const screen = document.getElementById('guildScreen');
   const host = screen.querySelector('.guild-hall-host');
   const view = screen.querySelector('.build-view');
-  if (host) host.hidden = ranchView;
-  if (view) view.hidden = !ranchView;
+  if (host) host.hidden = buildView;
+  if (view) view.hidden = !buildView;
 }
-/** Go home to the ranch. */
-function openRanch() { ranchView = true; stopRoomLoop(); stopRanchLoop(); renderBuild(guild, save); applyViewToggle(); }
-/** Drill from the ranch into a room's menus. */
-function enterRoomFromRanch(roomId) { stopRanchLoop(); ranchView = false; applyViewToggle(); openRoom(roomId); }
-/** Tap a member on the ranch → open their Roster card. */
-function manageMemberFromRanch(id) { stopRanchLoop(); ranchView = false; selectedId = id; applyViewToggle(); openRoom('roster'); }
+/** Open the estate plan. Reached from the plans in the Great Hall (and the desk in
+ *  the Guildmaster's study) — see useStation's 'estatePlan' — never from the rail. */
+function openBuild() { buildView = true; stopRoomLoop(); stopRanchLoop(); renderBuild(guild, save); applyViewToggle(); }
+/** Roll the plan back up and go back to the guild's rooms. */
+function closeBuild() { buildView = false; applyViewToggle(); render({ top: true }); }
+/** Drill from a home view into a room's menus. */
+function enterRoomFromRanch(roomId) { stopRanchLoop(); buildView = false; applyViewToggle(); openRoom(roomId); }
+/** Tap a member on a home view → open their Roster card. */
+function manageMemberFromRanch(id) { stopRanchLoop(); buildView = false; selectedId = id; applyViewToggle(); openRoom('roster'); }
 
 // --- room / fullscreen controls ---------------------------------------------
 const ROOM_JOB = { forge: 'forge', library: 'study', laboratory: 'brew', kitchen: 'cook', armory: 'enchant' };
@@ -3638,15 +3661,16 @@ export function openGuild() {
     document.addEventListener('fullscreenchange', onFs);
     document.addEventListener('webkitfullscreenchange', onFs);
   }
-  render({ top: true });        // build the room-hub host (hidden while on the ranch)
-  ranchView = true; renderBuild(guild, save); applyViewToggle(); // open ON the build plan (home)
+  buildView = false;            // the guild opens on its ROOMS; Build lives in the Great Hall
+  render({ top: true });
+  applyViewToggle();            // a Build plan left open from a previous session steps aside
   showScreen('guildScreen');
 }
 
 // Every handler no-ops while a week is advancing (a played battle can be mid-flight;
 // rail buttons still render behind the battle screen and would corrupt the in-flight
 // week). practiceBout/advanceAll keep their own internal checks as a second belt.
-const __guildApi = { selectHero, setActivity, setTraining, setIntensity, scheduleAdd, scheduleRemoveAt, scheduleClear, setRecipe, setForgeMode, setRefineItem, setRefineGuard, setStudyMode, setEnchantMode, setSpecialization, setPotion, setDiscipline, usePotion, setDiet, setQuest, setHunt, selectWildsLocale, scoutRegion, setPlayHunt, exploreLocale, strollRoom, walkGuild, masterName, masterBuild, masterReroll, sellMaterial, setElective, setTrackKind, setSecondDiscipline, setCookRecipe, setEnchantPlanet, slotOrb, assignTo, setSpar, equipItem, unequipSlot, setPolicy, provision, buyMaterial, sellItem, buyBook, hire, promoteApprentice, dismissApprentice, bidTuition, sendOffer, rejectApplication, advanceAll, back, openRoom, toggleFullscreen, upgradeFacility, enterTournament, leaveTournament, setPlayNext, setPlayQuest, setAskTournaments, toggleDraw, selectCalEvent, praiseHero, scoldHero, openAssembly, closeAssembly, appointTrainer, practiceBout, openRanch, enterRoomFromRanch, manageMemberFromRanch, buildTool, buildArm: armBuilding, buildArmProp: armProp, buildCell, buildZoomIn, buildZoomOut, buildZoomFit };
+const __guildApi = { selectHero, setActivity, setTraining, setIntensity, scheduleAdd, scheduleRemoveAt, scheduleClear, setRecipe, setForgeMode, setRefineItem, setRefineGuard, setStudyMode, setEnchantMode, setSpecialization, setPotion, setDiscipline, usePotion, setDiet, setQuest, setHunt, selectWildsLocale, scoutRegion, setPlayHunt, exploreLocale, strollRoom, walkGuild, masterName, masterBuild, masterReroll, sellMaterial, setElective, setTrackKind, setSecondDiscipline, setCookRecipe, setEnchantPlanet, slotOrb, assignTo, setSpar, equipItem, unequipSlot, setPolicy, provision, buyMaterial, sellItem, buyBook, hire, promoteApprentice, dismissApprentice, bidTuition, sendOffer, rejectApplication, advanceAll, back, openRoom, toggleFullscreen, upgradeFacility, enterTournament, leaveTournament, setPlayNext, setPlayQuest, setAskTournaments, toggleDraw, selectCalEvent, praiseHero, scoldHero, openAssembly, closeAssembly, appointTrainer, practiceBout, openBuild, closeBuild, enterRoomFromRanch, manageMemberFromRanch, buildTool, buildArm: armBuilding, buildArmProp: armProp, buildCell, buildZoomIn, buildZoomOut, buildZoomFit };
 window.__guild = {};
 for (const k in __guildApi) {
   window.__guild[k] = (...args) => {

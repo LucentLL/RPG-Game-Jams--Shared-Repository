@@ -494,7 +494,7 @@ export const DELVE_MAPS = {
       '#B...............B#', //  4
       '#B.bb.......bb...B#', //  5
       '#B...............B#', //  6
-      '#B.f...........f.B#', //  7  ← the hearth · the notice board
+      '#B.f........ff.f.B#', //  7  ← the banner · the plans table · the bookshelf
       '#B...............B#', //  8
       '#BBBBBBBBdBBBBBBBB#', //  9
       '###################', // 10
@@ -502,6 +502,11 @@ export const DELVE_MAPS = {
     entry: [9.5, 8.3],
     props: [
       { art: 'gmBanner', x: 3.5, y: 8, w: 45 }, { art: 'gmBookshelf', x: 15.5, y: 8, w: 100 },
+      // The plans table. Reading what is spread on it opens the Build tab — the
+      // estate's only door, and the one place the drawing and the ground you
+      // walk are the same object (hall.js readEstatePlan → campus.js).
+      { art: 'gmDesk', x: 13, y: 8, w: 130, use: 'estatePlan', label: 'Read the estate plans' },
+      { art: 'gmLedgers', x: 12.3, y: 8.12, w: 40 },
       { art: 'gmPortrait', x: 6.5, y: 2.02, w: 78 }, { art: 'gmPortrait', x: 12.5, y: 2.02, w: 78 },
       { art: 'gmBust', x: 4.5, y: 2.02, w: 36 }, { art: 'gmBust', x: 14.5, y: 2.02, w: 36 },
     ],
@@ -526,7 +531,10 @@ export const DELVE_MAPS = {
     entry: [6.5, 8.3],
     props: [
       { art: 'gmBookshelf', x: 4, y: 4, w: 96 }, { art: 'gmBookshelf', x: 13, y: 4, w: 96 },
-      { art: 'gmDesk', x: 8, y: 4, w: 130 }, { art: 'gmLedgers', x: 7.2, y: 4.12, w: 40 },
+      // The great desk keeps its own copy of the plans — the study is his room,
+      // and the hall's table should not be the only place he can think.
+      { art: 'gmDesk', x: 8, y: 4, w: 130, use: 'estatePlan', label: 'Read the estate plans' },
+      { art: 'gmLedgers', x: 7.2, y: 4.12, w: 40 },
       { art: 'gmThrone', x: 8.5, y: 6, w: 36 },
       { art: 'gmStrongbox', x: 3.5, y: 8, w: 66 }, { art: 'gmBanner', x: 15.5, y: 8, w: 45 },
       { art: 'gmPortrait', x: 11.5, y: 2.02, w: 78 }, { art: 'gmBust', x: 5.5, y: 2.02, w: 36 },

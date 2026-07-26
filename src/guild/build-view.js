@@ -174,6 +174,7 @@ export function renderBuild(guild, save) {
 
   view.innerHTML = `
     <div class="bv-bar">
+      <button class="bv-back" onclick="__guild.closeBuild()">⬅ Roll it up</button>
       <span class="bv-title">🏗 Build · The Grounds</span>
       <span class="bv-gold">☉${guild.gold}</span>
       <span class="bv-zoom">
