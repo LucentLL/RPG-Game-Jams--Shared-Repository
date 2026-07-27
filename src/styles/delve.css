@@ -381,12 +381,14 @@
 .fp-floor { filter: brightness(0.92); }
 .fp-ceil  { filter: brightness(0.6); }
 /* Standing things: bottom-anchored on their ground point, turned to the walker. */
+/* The drop-shadow lives INLINE (see place() in delve-fp.js), because the same
+   filter property carries the distance dimming and the two must be written
+   together or one erases the other. */
 .fp-bb {
   position: absolute; left: 0; bottom: 0;
   transform-origin: 50% 100%;
   image-rendering: pixelated;
   pointer-events: none;
-  filter: drop-shadow(0 4px 5px rgba(0,0,0,0.6));
 }
 .fp-bb canvas { display: block; image-rendering: pixelated; }
 /* Depth cueing. A crawler lives or dies on not being able to see the far end of
@@ -451,11 +453,14 @@
    near corner and the blade rises across the view, which is what a held weapon
    looks like from behind it. The MIRROR is on the canvas so the swing's
    rotation on the wrapper still reads clockwise. */
-.fp-hand-weapon { right: -2%; transform: rotate(-6deg); }
-.fp-hand-weapon canvas { transform: scaleX(-1); }
+.fp-hand-weapon, .fp-hand-pick { right: -2%; transform: rotate(-6deg); }
+.fp-hand-weapon canvas, .fp-hand-pick canvas { transform: scaleX(-1); }
 .fp-hand-shield { left: -3%; bottom: -16%; transform: rotate(7deg); }
+/* The hand that isn't leading drops out of frame rather than vanishing — you
+   put the pick away, you don't teleport it. */
+.fp-hand.fp-stowed { transform: rotate(-6deg) translateY(112%); transition: transform 180ms ease-in; }
 
-.fp-hand-weapon.fp-swinging { animation: fp-swing 380ms cubic-bezier(.3,.7,.3,1); }
+.fp-hand-weapon.fp-swinging, .fp-hand-pick.fp-swinging { animation: fp-swing 380ms cubic-bezier(.3,.7,.3,1); }
 .fp-hand-shield.fp-bracing  { animation: fp-brace 380ms ease-out; }
 @keyframes fp-swing {
   0%   { transform: rotate(-6deg)  translate(0, 0); }

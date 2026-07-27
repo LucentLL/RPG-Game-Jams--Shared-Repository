@@ -26,7 +26,7 @@ import { ART_BASE } from '../config/assets.js';
 import { THEMES, DECALS, ORE_KINDS, oreKindAt, mapForLocale, validateMap } from './delve-maps.js';
 import { preyById } from './locales.js';
 import { loadImg, SHEET_URLS } from './delve.js';
-import { ART, artSprite, gearIcon } from './art.js';
+import { ART, artSprite, gearIcon, PICK_ICON } from './art.js';
 
 /**
  * World scale. These look arbitrary and are not: what a surface MEASURES on
@@ -47,8 +47,24 @@ const LOW_H = 560;       // 'b' — waist-high, seen over
 const EYE = 690;         // eye height above the floor
 const STEP_PX = 430;     // one level of ledge, in world px
 const STEP_MS = 200, TURN_MS = 160;
-const VIEW_R = 9;        // tiles of geometry built around the walker
+const VIEW_R = 8;        // tiles of geometry built around the walker
 const REACH = 0.75;      // how close a creature must be to engage
+
+/**
+ * DEPTH. Without it the far end of the map is drawn as brightly as the wall you
+ * are touching: the corridor reads flat, every surface in the chart is painted
+ * at once, and the fill cost is the whole map every frame. The vignette darkens
+ * the screen's EDGES, which is not the same thing and never was.
+ *
+ * Fog is a fraction of the way to FOG_RGB, by distance in tiles. Past FOG_CULL
+ * a surface is indistinguishable from the stage's own background, so it is not
+ * emitted at all — which is the draw distance, arrived at honestly rather than
+ * as a hard circle you can see the edge of.
+ */
+const FOG_NEAR = 1.4, FOG_FAR = 6.4, FOG_CULL = 0.97;
+/** The dark itself. Matches #delveFpScreen's own background, so a surface that
+ *  has faded out entirely and one that was never drawn are the same colour. */
+const fogRgba = (a) => `rgba(6,6,10,${a.toFixed(3)})`;
 
 /**
  * How tall a creature STANDS, in world px, by rank — the one number that
@@ -108,15 +124,24 @@ const screenActive = () => {
 // Textures — one panel per surface, cut from the theme the map already names
 // ---------------------------------------------------------------------------
 
-/** Draw a source rect onto a canvas of its own size and hand back a data URI.
- *  `dim` darkens it, which is how the ceiling is made out of the floor. */
-function panel(img, sx, sy, sw, sh, dw, dh, dim) {
+/**
+ * Draw a source rect onto a canvas OF THE SOURCE'S OWN SIZE and hand back a
+ * data URI. `dim` darkens it, which is how the ceiling is made out of the floor.
+ *
+ * Native size, deliberately. The first cut baked every surface out at WORLD
+ * size — a 48×96 rock face blown up to 900×1260 — which buys nothing, because
+ * the quads are `background-size: 100% 100%` under `image-rendering: pixelated`
+ * and the browser does exactly the same nearest-neighbour upscale for free.
+ * What it cost was 29.7MB of texture against 1.17MB for the identical pixels,
+ * on a scene that is already several hundred composited 3D layers.
+ */
+function panel(img, sx, sy, sw, sh, dim) {
   const c = document.createElement('canvas');
-  c.width = dw; c.height = dh;
+  c.width = sw; c.height = sh;
   const g = c.getContext('2d');
   g.imageSmoothingEnabled = false;
-  g.drawImage(img, sx, sy, sw, sh, 0, 0, dw, dh);
-  if (dim) { g.globalCompositeOperation = 'source-atop'; g.fillStyle = `rgba(0,0,0,${dim})`; g.fillRect(0, 0, dw, dh); }
+  g.drawImage(img, sx, sy, sw, sh, 0, 0, sw, sh);
+  if (dim) { g.globalCompositeOperation = 'source-atop'; g.fillStyle = `rgba(0,0,0,${dim})`; g.fillRect(0, 0, sw, sh); }
   return c.toDataURL();
 }
 
@@ -128,11 +153,15 @@ function panel(img, sx, sy, sw, sh, dw, dh, dim) {
  * theme without one (the mine, the meadow) has its cliff FACE tiles instead, and
  * those are head-on rock, which is the same thing by another name.
  */
-/** Where the seams sit on an ore face: [across, down, size], all in world px
- *  once multiplied out. Three clusters, off-centre, so no two faces line up. */
-const VEIN = [[0.50, 0.50, 300], [0.23, 0.74, 200], [0.76, 0.28, 180]];
+/** Where the seams sit on an ore face: [across, down, size], as FRACTIONS of
+ *  the face. Three clusters, off-centre, so no two faces line up. */
+const VEIN = [[0.50, 0.50, 0.333], [0.23, 0.74, 0.222], [0.76, 0.28, 0.200]];
 /** The light each ore throws — a seam has to be findable from down a corridor. */
 const ORE_GLOW = { iron: '200,178,140', copper: '224,138,60', silver: '206,224,236', crystal: '110,231,200' };
+/** The ore face is baked at 4× the rock's own resolution: an integer multiple,
+ *  so the wall behind the seam stays pixel-identical to every other wall, while
+ *  the vein and its glow have somewhere to live. */
+const ORE_SCALE = 4;
 
 /** One ore face: the wall, with the vein you are actually going to be paid for
  *  worked into it at a size the eye can find. The first cut pasted a single
@@ -140,14 +169,15 @@ const ORE_GLOW = { iron: '200,178,140', copper: '224,138,60', silver: '206,224,2
  *  tile — and pasted the IRON cluster whatever the cell really paid. */
 function bakeOreFace(wallCv, ores, kind) {
   const d = DECALS[ORE_KINDS[kind].decal];
+  const W = wallCv.width * ORE_SCALE, H = wallCv.height * ORE_SCALE;
   const cv = document.createElement('canvas');
-  cv.width = T; cv.height = WALL_H;
+  cv.width = W; cv.height = H;
   const g = cv.getContext('2d');
   g.imageSmoothingEnabled = false;
-  g.drawImage(wallCv, 0, 0);
+  g.drawImage(wallCv, 0, 0, wallCv.width, wallCv.height, 0, 0, W, H);
   const glow = ORE_GLOW[kind] || ORE_GLOW.iron;
-  for (const [fx, fy, size] of VEIN) {
-    const cx = fx * T, cy = fy * WALL_H;
+  for (const [fx, fy, fs] of VEIN) {
+    const cx = fx * W, cy = fy * H, size = fs * W;
     g.save();
     g.globalCompositeOperation = 'lighter';
     const grd = g.createRadialGradient(cx, cy, 0, cx, cy, size);
@@ -168,20 +198,19 @@ async function cutSurfaces(theme) {
   const src = theme.src || 48;
   const fill = theme.fill[0];
   const floorImg = sheets[theme.sheet || 'cliffs'];
-  const floor = panel(floorImg, fill[0] * src, fill[1] * src, src, src, T, T);
-  const ceil = panel(floorImg, fill[0] * src, fill[1] * src, src, src, T, T, 0.55);
+  const floor = panel(floorImg, fill[0] * src, fill[1] * src, src, src);
+  const ceil = panel(floorImg, fill[0] * src, fill[1] * src, src, src, 0.55);
 
   // Kept as CANVASES, not data URIs: the ore faces are the wall with a seam in
   // it, and re-decoding a data URI four times to paint on it is a round trip
   // through the image loader for no reason.
   const wallCv = document.createElement('canvas');
-  wallCv.width = T; wallCv.height = WALL_H;
   const lowCv = document.createElement('canvas');
-  lowCv.width = T; lowCv.height = LOW_H;
   const paint = (cv, img, sx, sy, sw, sh) => {
+    cv.width = sw; cv.height = sh;
     const g = cv.getContext('2d');
     g.imageSmoothingEnabled = false;
-    g.drawImage(img, sx, sy, sw, sh, 0, 0, cv.width, cv.height);
+    g.drawImage(img, sx, sy, sw, sh, 0, 0, sw, sh);
   };
   if (theme.walls) {
     const w = sheets[theme.walls.sheet], r = theme.walls.tall, l = theme.walls.low;
@@ -212,11 +241,10 @@ async function cutSurfaces(theme) {
     const railImg = await loadImg(SHEET_URLS.rails);
     const d = DECALS.railH;
     const cv = document.createElement('canvas');
-    cv.width = T; cv.height = T;
+    cv.width = d.w; cv.height = d.w;             // a square tile at the rail's own resolution
     const g = cv.getContext('2d');
     g.imageSmoothingEnabled = false;
-    const rh = T * (d.h / d.w);
-    g.drawImage(railImg, d.x, d.y, d.w, d.h, 0, (T - rh) / 2, T, rh);
+    g.drawImage(railImg, d.x, d.y, d.w, d.h, 0, (d.w - d.h) / 2, d.w, d.h);
     rail = cv.toDataURL();
   } catch (e) { /* a map without rails simply has none */ }
   return { floor, ceil, wall, low, ores, rail, ladder: ladderTexture() };
@@ -259,6 +287,12 @@ function canStep(fx, fy, tx, ty) {
   return heightAt(fx, fy) === heightAt(tx, ty) || onClimb(fx, fy) || onClimb(tx, ty);
 }
 
+/** How far into the dark a point is, 0 (right here) to 1 (gone). */
+function fogAt(x, y) {
+  const d = Math.hypot(x - F.px, y - F.py);
+  return Math.min(1, Math.max(0, (d - FOG_NEAR) / (FOG_FAR - FOG_NEAR)));
+}
+
 /** Facing 0=north(-y) 1=east(+x) 2=south(+y) 3=west(-x). */
 const DIRS = [[0, -1], [1, 0], [0, 1], [-1, 0]];
 const COMPASS = ['N', 'E', 'S', 'W'];
@@ -285,10 +319,19 @@ function openestDir(x, y) {
 // Geometry — rebuilt on a change of cell, never per frame
 // ---------------------------------------------------------------------------
 
-/** One quad. `cls` only carries styling; the transform does all the placing. */
-function quad(tex, w, h, tx, ty, tz, rot, cls) {
+/**
+ * One quad. `cls` only carries styling; the transform does all the placing.
+ *
+ * `fog` is painted as a flat colour layer OVER the texture rather than applied
+ * as a filter, because `filter` on hundreds of quads is hundreds of GPU passes
+ * — and on any wrapper it would flatten `preserve-3d` and collapse the scene.
+ * A second background layer costs nothing and is baked in with the geometry.
+ */
+function quad(tex, w, h, tx, ty, tz, rot, cls, fog) {
+  const c = fogRgba(fog > 0 ? fog : 0);
+  const veil = fog > 0.004 ? `linear-gradient(${c},${c}),` : '';
   return `<div class="fp-q ${cls}" style="width:${w}px;height:${h}px;margin-left:${-w / 2}px;margin-top:${-h / 2}px;` +
-    `background-image:url(${tex});transform:translate3d(${tx}px,${ty}px,${tz}px) ${rot}"></div>`;
+    `background-image:${veil}url(${tex});transform:translate3d(${tx}px,${ty}px,${tz}px) ${rot}"></div>`;
 }
 
 function buildGeometry() {
@@ -297,6 +340,8 @@ function buildGeometry() {
   const out = [];
   for (let y = cy - VIEW_R; y <= cy + VIEW_R; y++) {
     for (let x = cx - VIEW_R; x <= cx + VIEW_R; x++) {
+      const fog = fogAt(x + 0.5, y + 0.5);
+      if (fog >= FOG_CULL) continue;   // solid dark already — emitting it is pure overdraw
       const ch = at(x, y);
       const wx = (x + 0.5) * T, wz = (y + 0.5) * T;
       if (WALL[ch] || LOW[ch]) {
@@ -306,30 +351,33 @@ function buildGeometry() {
         const yc = -h / 2;
         // A face is emitted only where it meets somewhere you could stand, so a
         // solid block of rock costs nothing and no face is ever seen from behind.
-        if (!WALL[at(x, y + 1)] && !LOW[at(x, y + 1)]) out.push(quad(tex, T, h, wx, yc, (y + 1) * T, '', 'fp-wall'));
-        if (!WALL[at(x, y - 1)] && !LOW[at(x, y - 1)]) out.push(quad(tex, T, h, wx, yc, y * T, 'rotateY(180deg)', 'fp-wall'));
-        if (!WALL[at(x + 1, y)] && !LOW[at(x + 1, y)]) out.push(quad(tex, T, h, (x + 1) * T, yc, wz, 'rotateY(90deg)', 'fp-wall'));
-        if (!WALL[at(x - 1, y)] && !LOW[at(x - 1, y)]) out.push(quad(tex, T, h, x * T, yc, wz, 'rotateY(-90deg)', 'fp-wall'));
+        // A face is fogged by ITS OWN distance, not the cell's — the two sides
+        // of a block a tile apart should not be equally dark.
+        const wf = (fx, fy) => fogAt(fx, fy);
+        if (!WALL[at(x, y + 1)] && !LOW[at(x, y + 1)]) out.push(quad(tex, T, h, wx, yc, (y + 1) * T, '', 'fp-wall', wf(x + 0.5, y + 1)));
+        if (!WALL[at(x, y - 1)] && !LOW[at(x, y - 1)]) out.push(quad(tex, T, h, wx, yc, y * T, 'rotateY(180deg)', 'fp-wall', wf(x + 0.5, y)));
+        if (!WALL[at(x + 1, y)] && !LOW[at(x + 1, y)]) out.push(quad(tex, T, h, (x + 1) * T, yc, wz, 'rotateY(90deg)', 'fp-wall', wf(x + 1, y + 0.5)));
+        if (!WALL[at(x - 1, y)] && !LOW[at(x - 1, y)]) out.push(quad(tex, T, h, x * T, yc, wz, 'rotateY(-90deg)', 'fp-wall', wf(x, y + 0.5)));
         // A waist-high run needs a lid, or you look down into an open box.
-        if (LOW[ch]) out.push(quad(S.ceil, T, T, wx, -h, wz, 'rotateX(90deg)', 'fp-floor'));
+        if (LOW[ch]) out.push(quad(S.ceil, T, T, wx, -h, wz, 'rotateX(90deg)', 'fp-floor', fog));
         continue;
       }
       if (ch === '#') continue;
       const lift = -heightAt(x, y) * STEP_PX;
-      out.push(quad(S.floor, T, T, wx, lift, wz, 'rotateX(90deg)', 'fp-floor'));
-      out.push(quad(S.ceil, T, T, wx, -WALL_H, wz, 'rotateX(-90deg)', 'fp-ceil'));
+      out.push(quad(S.floor, T, T, wx, lift, wz, 'rotateX(90deg)', 'fp-floor', fog));
+      out.push(quad(S.ceil, T, T, wx, -WALL_H, wz, 'rotateX(-90deg)', 'fp-ceil', fog));
       // Rails lie ON the floor, a hair above it so the two don't fight for depth.
-      if (ch === '=' && S.rail) out.push(quad(S.rail, T, T, wx, lift - 1, wz, 'rotateX(90deg)', 'fp-floor'));
+      if (ch === '=' && S.rail) out.push(quad(S.rail, T, T, wx, lift - 1, wz, 'rotateX(90deg)', 'fp-floor', fog));
       // A ledge's own riser, so a step up reads as a step and not a slope.
-      if (heightAt(x, y) && !heightAt(x, y + 1)) out.push(quad(S.low, T, STEP_PX, wx, -STEP_PX / 2, (y + 1) * T, '', 'fp-wall'));
+      if (heightAt(x, y) && !heightAt(x, y + 1)) out.push(quad(S.low, T, STEP_PX, wx, -STEP_PX / 2, (y + 1) * T, '', 'fp-wall', fog));
       // The rungs. A climb cell is the ONLY place the level may change, so the
       // ladder is drawn flat against whichever neighbouring face it serves —
       // a thing you can see and aim at, not a square that silently lifts you.
       if (S.ladder && onClimb(x, y)) {
-        if (heightAt(x, y + 1)) out.push(quad(S.ladder, T * 0.42, STEP_PX, wx, -STEP_PX / 2, (y + 1) * T - 6, 'rotateY(180deg)', 'fp-ladder'));
-        if (heightAt(x, y - 1)) out.push(quad(S.ladder, T * 0.42, STEP_PX, wx, -STEP_PX / 2, y * T + 6, '', 'fp-ladder'));
-        if (heightAt(x + 1, y)) out.push(quad(S.ladder, T * 0.42, STEP_PX, (x + 1) * T - 6, -STEP_PX / 2, wz, 'rotateY(-90deg)', 'fp-ladder'));
-        if (heightAt(x - 1, y)) out.push(quad(S.ladder, T * 0.42, STEP_PX, x * T + 6, -STEP_PX / 2, wz, 'rotateY(90deg)', 'fp-ladder'));
+        if (heightAt(x, y + 1)) out.push(quad(S.ladder, T * 0.42, STEP_PX, wx, -STEP_PX / 2, (y + 1) * T - 6, 'rotateY(180deg)', 'fp-ladder', fog));
+        if (heightAt(x, y - 1)) out.push(quad(S.ladder, T * 0.42, STEP_PX, wx, -STEP_PX / 2, y * T + 6, '', 'fp-ladder', fog));
+        if (heightAt(x + 1, y)) out.push(quad(S.ladder, T * 0.42, STEP_PX, (x + 1) * T - 6, -STEP_PX / 2, wz, 'rotateY(-90deg)', 'fp-ladder', fog));
+        if (heightAt(x - 1, y)) out.push(quad(S.ladder, T * 0.42, STEP_PX, x * T + 6, -STEP_PX / 2, wz, 'rotateY(90deg)', 'fp-ladder', fog));
       }
     }
   }
@@ -369,6 +417,29 @@ function decalBillboard(sheets, decalName, x, y, worldH) {
  *  a billboard is a flat plane, and a flat plane seen edge-on is nothing. */
 function standDecor(el, x, y) {
   F.decor.push({ el, x, y, lift: -heightAt(Math.floor(x), Math.floor(y)) * STEP_PX });
+}
+
+/**
+ * Put a billboard where it stands, turned to the walker and dimmed by its
+ * distance — the same fog the geometry is baked with, or a creature would come
+ * at you out of the dark at full brightness like a sticker on the screen.
+ *
+ * Brightness is QUANTISED to twentieths and every write is compared first: a
+ * filter change re-rasterises the layer, and paying that per sprite per frame
+ * for a difference nobody can see is most of what a fog costs.
+ */
+function place(b, x, y, lift) {
+  const fog = fogAt(x, y);
+  const hidden = fog >= FOG_CULL;
+  if (hidden !== b._hidden) { b.el.style.display = (b._hidden = hidden) ? 'none' : ''; }
+  if (hidden) return;
+  const tf = `translate3d(${(x * T).toFixed(1)}px,${lift}px,${(y * T).toFixed(1)}px) rotateY(${-F.yaw}deg)`;
+  if (tf !== b._tf) b.el.style.transform = (b._tf = tf);
+  const lit = Math.round((1 - fog) * 20) / 20;
+  if (lit !== b._lit) {
+    b._lit = lit;
+    b.el.style.filter = `drop-shadow(0 4px 5px rgba(0,0,0,0.6)) brightness(${lit})`;
+  }
 }
 
 /** A sign you can read from down the corridor — the only honest way to tell a
@@ -554,55 +625,74 @@ async function mountHands() {
   // a 122-unit path, and the arc came out as three disconnected chunks.)
   host.innerHTML = '<svg class="fp-slash" viewBox="0 0 100 100" preserveAspectRatio="xMidYMid meet">'
     + '<path d="M92 6 C 60 34, 34 60, 8 94" /></svg>';
-  const hands = { el: host, weapon: null, shield: null };
+  const hands = { el: host, weapon: null, shield: null, pick: null };
   F.hands = hands;
   const gear = F.hooks.gear || {};
   // Sheet loads are slow enough to outlive the delve that asked for them, so
   // every await is followed back into a session that may already be gone.
   const live = () => !!F && F.hands === hands;
-  const put = async (slot, cls) => {
-    const g = gear[slot];
-    const icon = g && gearIcon(g.kind, g.material);
+  const put = async (icon, cls, title) => {
     if (!icon) return null;
     try {
       const img = await loadImg(icon.url);
       if (!live()) return null;
       const cv = document.createElement('canvas');
-      cv.width = icon.s; cv.height = icon.s;
+      cv.width = icon.sw; cv.height = icon.sh;
       const c = cv.getContext('2d');
       c.imageSmoothingEnabled = false;
-      c.drawImage(img, icon.sx, icon.sy, icon.s, icon.s, 0, 0, icon.s, icon.s);
+      c.drawImage(img, icon.sx, icon.sy, icon.sw, icon.sh, 0, 0, icon.sw, icon.sh);
       const el = document.createElement('div');
       el.className = 'fp-hand ' + cls;
-      el.title = g.name || '';
+      el.title = title || '';
       el.appendChild(cv);
       host.appendChild(el);
       return el;
     } catch (e) {
-      console.warn('delve-fp: gear icon missing', g, e);
+      console.warn('delve-fp: hand art missing', cls, e);
       return null;
     }
   };
-  hands.weapon = await put('weapon', 'fp-hand-weapon');
+  const w = gear.weapon, b = gear.body;
+  hands.weapon = await put(w && gearIcon(w.kind, w.material), 'fp-hand-weapon', w && w.name);
   // A bow is two-handed: nothing braces an off-hand shield behind it.
-  if (live() && !(gear.weapon && gear.weapon.kind === 'bow')) hands.shield = await put('body', 'fp-hand-shield');
+  if (live() && !(w && w.kind === 'bow')) {
+    hands.shield = await put(b && gearIcon(b.kind, b.material), 'fp-hand-shield', b && b.name);
+  }
+  // The PICK is not equipment — it is what a delver walks in carrying. It comes
+  // out for a seam whatever else is in hand, and when the weapon slot is empty
+  // it is the only thing there, so the hands are never simply blank.
+  if (live()) hands.pick = await put(PICK_ICON, 'fp-hand-pick' + (hands.weapon ? ' fp-stowed' : ''), 'Delver’s pick');
 }
 
-/** Throw the swing. Retriggering needs the class off, a reflow, and the class
- *  back on, or a second swing inside the first simply doesn't play. */
-function playSwing() {
-  if (!F.hands) return;
-  for (const el of [F.hands.weapon, F.hands.el.querySelector('.fp-slash')]) {
+/**
+ * Throw the swing. `mining` brings the pick out and stows the blade for the
+ * duration, because you do not open a vein with a sword.
+ *
+ * Retriggering needs the class off, a reflow, and the class back on, or a
+ * second swing inside the first simply doesn't play.
+ */
+function playSwing(mining) {
+  const H = F.hands;
+  if (!H) return;
+  const lead = mining ? (H.pick || H.weapon) : (H.weapon || H.pick);
+  // One hand leads and the other stows. The stowed hand must also DROP its
+  // swing class: an animation outranks a plain transform, so a pick left
+  // mid-swing would keep swinging from inside the holster.
+  for (const el of [H.weapon, H.pick]) {
     if (!el) continue;
-    el.classList.remove('fp-swinging');
+    const off = el !== lead;
+    el.classList.toggle('fp-stowed', off);
+    if (off) el.classList.remove('fp-swinging');
+  }
+  const fire = (el, cls) => {
+    if (!el) return;
+    el.classList.remove(cls);
     void el.getBoundingClientRect();
-    el.classList.add('fp-swinging');
-  }
-  if (F.hands.shield) {
-    F.hands.shield.classList.remove('fp-bracing');
-    void F.hands.shield.getBoundingClientRect();
-    F.hands.shield.classList.add('fp-bracing');
-  }
+    el.classList.add(cls);
+  };
+  fire(lead, 'fp-swinging');
+  fire(H.el.querySelector('.fp-slash'), 'fp-swinging');
+  fire(H.shield, 'fp-bracing');
 }
 
 // ---------------------------------------------------------------------------
@@ -855,10 +945,11 @@ function trySwing() {
   const now = performance.now();
   if (!F || F.ended || F.fighting || F.transiting || now < F.swingUntil) return;
   F.swingUntil = now + SWING_MS;
-  playSwing();
   const [dx, dy] = DIRS[F.dir];
   const ax = Math.floor(F.px) + dx, ay = Math.floor(F.py) + dy;
-  if (at(ax, ay) === 'o') { mineOre(ax, ay); return; }
+  const seam = at(ax, ay) === 'o';
+  playSwing(seam);
+  if (seam) { mineOre(ax, ay); return; }
   let best = null, bd = SWING_REACH;
   for (const c of F.creatures) {
     const vx = c.x - F.px, vy = c.y - F.py, d = Math.hypot(vx, vy) || 1e-6;
@@ -1079,13 +1170,12 @@ function render() {
   // world +X to view −Z, which needs +90. The negative sign put east BEHIND the
   // camera and left you staring at the wall you had just walked away from.
   F.world.style.transform = `rotateY(${F.yaw}deg) translate3d(${-ex}px,${-ey}px,${-ez}px)`;
-  // Billboards stand on the floor and counter-rotate to face the walker.
-  for (const c of F.creatures) {
-    c.el.style.transform = `translate3d(${c.x * T}px,${-heightAt(Math.floor(c.x), Math.floor(c.y)) * STEP_PX}px,${c.y * T}px) rotateY(${-F.yaw}deg)`;
-  }
-  for (const d of F.decor) {
-    d.el.style.transform = `translate3d(${d.x * T}px,${d.lift}px,${d.y * T}px) rotateY(${-F.yaw}deg)`;
-  }
+  // Billboards stand on the floor and counter-rotate to face the walker. Every
+  // write is guarded by the value it would write: standing still, this loop
+  // touches no style at all, which is the difference between a scene that
+  // re-rasterises 30 layers a frame and one that does nothing.
+  for (const c of F.creatures) place(c, c.x, c.y, -heightAt(Math.floor(c.x), Math.floor(c.y)) * STEP_PX);
+  for (const d of F.decor) place(d, d.x, d.y, d.lift);
   // The hands ride the stride and lag the turn — the whole reason to draw them
   // is that they are the only thing on screen that moves WITH you.
   if (F.hands) {

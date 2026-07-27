@@ -298,7 +298,7 @@ export const GEAR_ICON_SIZE = 32;
  * Where a piece of gear's big icon lives — enough for a caller to `drawImage`
  * it onto a canvas of its own. Null for a kind with no sheet.
  * @param {string} kind @param {string} material
- * @returns {?{url:string, sx:number, sy:number, s:number}}
+ * @returns {?{url:string, sx:number, sy:number, sw:number, sh:number}}
  */
 export function gearIcon(kind, material) {
   const g = GEAR_ICON[kind];
@@ -306,8 +306,21 @@ export function gearIcon(kind, material) {
   const sh = GEAR_SHEETS[g.sheet];
   const i = g.by[material] != null ? g.by[material] : g.by.iron;
   const S = GEAR_ICON_SIZE;
-  return { url: ART_BASE + sh.file, sx: (i % sh.cols) * S, sy: Math.floor(i / sh.cols) * S, s: S };
+  return { url: ART_BASE + sh.file, sx: (i % sh.cols) * S, sy: Math.floor(i / sh.cols) * S, sw: S, sh: S };
 }
+
+/**
+ * The delver's PICK — the one tool that is not a piece of equipment.
+ *
+ * It comes off the compositor's own `pickaxe1` weapon sheet rather than an icon
+ * sheet, because no icon sheet in the library has a pick and this one is drawn
+ * far larger than its neighbours: the sword there measures 8×11, the pick 16×24,
+ * with the tool-swing streak already painted in. Cell (row 3, col 11) is the
+ * north-facing strike — the pose seen from BEHIND the swinger, which is exactly
+ * where a first-person camera stands — cropped to its own alpha box so it fills
+ * the hand instead of floating in a mostly-empty 48px cell.
+ */
+export const PICK_ICON = { url: SPRITE_BASES[0] + 'weapon/pickaxe1.png', sx: 11 * 48 + 18, sy: 3 * 48 + 1, sw: 16, sh: 24 };
 
 /**
  * A cropped sheet sprite as an HTML string. Size it from CSS/inline style
