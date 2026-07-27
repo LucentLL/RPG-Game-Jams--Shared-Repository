@@ -260,67 +260,51 @@ export function itemSprite(item, cls = '', style = '') {
 /** Does this item have laid-weapon art? (armor and unknown kinds do not) */
 export function hasItemSprite(item) { return !!(item && ITEM_WEAPON[item.kind]); }
 
-// ─── Gear icons: the piece seen BIG ─────────────────────────────────────────
-// The compositor's weapon cells are ~10 source pixels of blade (measured: the
-// sword in sword1.png r0c1 has an 8×11 alpha box). That is right for a 48px
-// battle sprite and useless for anything held up close — the first-person
-// delve wants a weapon that fills a corner of the screen. These are the item
-// ICON sheets from the same art family: 32px cells, one weapon each, drawn
-// hilt-at-lower-left so a mirrored copy reads as a blade rising into frame.
-const GEAR_SHEETS = {
-  swords:  { file: 'gear_swords32.png',  cols: 13 },  // mswords_icon32
-  axes:    { file: 'gear_axes32.png',    cols: 13 },  // mspears_icon32 — 0..6 spears, 7..12 axes
-  hammers: { file: 'gear_hammers32.png', cols: 16 },  // icons_hammers_32_fc
-  bows:    { file: 'gear_bows32.png',    cols: 16 },  // marrows_icon32 — 3..6 bows, 7..9 crossbows
-  shields: { file: 'gear_shields32.png', cols: 15 },  // mshields_icon32 — two rows of 15
+// ─── Gear as WORN, seen from behind ─────────────────────────────────────────
+// A first-person camera stands exactly where a camera behind the character
+// stands, so the right art for a viewmodel is the art the compositor already
+// draws for the NORTH facing — row 3 of the weapon sheet. That row is also the
+// only one where a right-hand weapon lands right-of-centre and a left-hand
+// shield left-of-centre, so neither needs mirroring into place.
+//
+// And it ANIMATES: columns 10-14 are the compositor's own `slash`, arc painted
+// in, at its own 70ms. The viewmodel plays the same swing the character plays.
+export const WORN = {
+  cell: 48,
+  row: 3,               // north — the wielder's back
+  rest: 1,              // the walk-cycle stand frame, painted in every row
+  swing: [10, 11, 12, 13, 14],
+  frameMs: 70,          // ELEMENTS_ANIMS.slash speed
+  // Shields paint nothing in the slash columns and stand edge-on (5px) in the
+  // stand frame; 15-17 are the cells that show the face.
+  shieldRest: 16,
+  shieldBrace: [15, 16, 17],
 };
-/**
- * Item kind → icon sheet + the cell each MATERIAL wears, so a mithril blade
- * reads finer than an iron one (the same idea as MAT_COLOR, one level up).
- *
- * `armor` resolves to a SHIELD: the body slot is the guard kit, and a shield
- * is what a guard kit looks like from behind your own arm. It is the only way
- * the off-hand has anything to show — there is no shield slot (EQUIP_SLOTS).
- */
-const GEAR_ICON = {
-  sword:  { sheet: 'swords',  by: { leather: 0,  iron: 3,  steel: 9,  mithril: 11 } },
-  dagger: { sheet: 'swords',  by: { leather: 0,  iron: 0,  steel: 2,  mithril: 2 } },
-  axe:    { sheet: 'axes',    by: { leather: 12, iron: 12, steel: 11, mithril: 8 } },
-  mace:   { sheet: 'hammers', by: { leather: 2,  iron: 0,  steel: 6,  mithril: 14 } },
-  hammer: { sheet: 'hammers', by: { leather: 2,  iron: 0,  steel: 6,  mithril: 14 } },
-  bow:    { sheet: 'bows',    by: { leather: 4,  iron: 4,  steel: 5,  mithril: 6 } },
-  armor:  { sheet: 'shields', by: { leather: 0,  iron: 13, steel: 10, mithril: 24 } },
-};
-/** Icon cell size, in sheet pixels. Every sheet above is on this grid. */
-export const GEAR_ICON_SIZE = 32;
+
+/** The sheet URL for a weapon stem + colour variant. */
+const weaponUrl = (pack, stem, c) => SPRITE_BASES[pack] + 'weapon/' + stem + (c ? '_c' + c : '') + '.png';
 
 /**
- * Where a piece of gear's big icon lives — enough for a caller to `drawImage`
- * it onto a canvas of its own. Null for a kind with no sheet.
- * @param {string} kind @param {string} material
- * @returns {?{url:string, sx:number, sy:number, sw:number, sh:number}}
+ * The sheet a member's WEAPON is drawn from, or null for a kind with no sheet.
+ * Same stem/variant rule the battle compositor uses, so the blade you see in
+ * the corridor is the blade the sprite carries in the arena.
  */
-export function gearIcon(kind, material) {
-  const g = GEAR_ICON[kind];
-  if (!g) return null;
-  const sh = GEAR_SHEETS[g.sheet];
-  const i = g.by[material] != null ? g.by[material] : g.by.iron;
-  const S = GEAR_ICON_SIZE;
-  return { url: ART_BASE + sh.file, sx: (i % sh.cols) * S, sy: Math.floor(i / sh.cols) * S, sw: S, sh: S };
+export function wornWeapon(kind, material) {
+  const w = ITEM_WEAPON[kind];
+  if (!w) return null;
+  return { url: weaponUrl(w.pack, w.stem, Math.min(MAT_COLOR[material] || 0, w.maxC)) };
 }
+/** The off-hand shield. `slotSuffix` sheets ship an L and an R; the off hand is L. */
+export function wornShield(material) {
+  const tier = MAT_COLOR[material] || 0;
+  return tier >= 2
+    ? { url: weaponUrl(1, 'shield2L', Math.min(tier, 6)) }   // ce1 carries shield2 + variants
+    : { url: weaponUrl(0, 'shield1L', 0) };                  // core carries the plain pair
+}
+/** The delver's pick — a Club in the compositor's ladder, and the one sheet in
+ *  the kit drawn large enough to read held up close (16×24 against a sword's 8×11). */
+export function wornPick() { return { url: weaponUrl(0, 'pickaxe1', 0) }; }
 
-/**
- * The delver's PICK — the one tool that is not a piece of equipment.
- *
- * It comes off the compositor's own `pickaxe1` weapon sheet rather than an icon
- * sheet, because no icon sheet in the library has a pick and this one is drawn
- * far larger than its neighbours: the sword there measures 8×11, the pick 16×24,
- * with the tool-swing streak already painted in. Cell (row 3, col 11) is the
- * north-facing strike — the pose seen from BEHIND the swinger, which is exactly
- * where a first-person camera stands — cropped to its own alpha box so it fills
- * the hand instead of floating in a mostly-empty 48px cell.
- */
-export const PICK_ICON = { url: SPRITE_BASES[0] + 'weapon/pickaxe1.png', sx: 11 * 48 + 18, sy: 3 * 48 + 1, sw: 16, sh: 24 };
 
 /**
  * A cropped sheet sprite as an HTML string. Size it from CSS/inline style

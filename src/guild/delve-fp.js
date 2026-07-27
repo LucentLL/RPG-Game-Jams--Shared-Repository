@@ -26,7 +26,7 @@ import { ART_BASE } from '../config/assets.js';
 import { THEMES, DECALS, ORE_KINDS, oreKindAt, mapForLocale, validateMap } from './delve-maps.js';
 import { preyById } from './locales.js';
 import { loadImg, SHEET_URLS } from './delve.js';
-import { ART, artSprite, gearIcon, PICK_ICON } from './art.js';
+import { ART, artSprite, WORN, wornWeapon, wornShield, wornPick } from './art.js';
 
 /**
  * World scale. These look arbitrary and are not: what a surface MEASURES on
@@ -46,8 +46,30 @@ const WALL_H = 1260;     // full wall height — 1.4 tiles reads best
 const LOW_H = 560;       // 'b' — waist-high, seen over
 const EYE = 690;         // eye height above the floor
 const STEP_PX = 430;     // one level of ledge, in world px
-const STEP_MS = 200, TURN_MS = 160;
-const VIEW_R = 8;        // tiles of geometry built around the walker
+const STEP_MS = 250, TURN_MS = 185;
+
+/**
+ * THE LENS, AND WHY IT HAS TO MOVE WITH THE WINDOW.
+ *
+ * `perspective` is a distance in CSS pixels, but the stage's height is not
+ * fixed — so a lens tuned at 720px tall opens up on every larger screen.
+ * Vertical FOV is 2·atan((stageH/2)/d): at 720 the shipped 470 gave 75°, and at
+ * 1030 the SAME 470 gives 95.5°. That is the "warp speed" — a fisheye that
+ * arrives purely because the window got bigger, and with it every surface
+ * losing a third of its screen share.
+ *
+ * Fixing the FOV alone is not enough: hold d constant against the world and the
+ * apparent size of the dungeon changes with the window instead. Both stay put
+ * only if the whole world scales with the stage TOO, so the projection is a
+ * similarity — d, T, WALL_H and every offset multiplied by the same s. Then
+ * `WALL_H·d/((d+D)·stageH)` has s in both halves and cancels.
+ *
+ * PERSP is measured against PERSP_AT. 500 is a slightly longer lens than the
+ * 470 this shipped with (71.6° rather than 75.1°) — the corridor still opens
+ * out ahead of you, with less of the rush past the walls.
+ */
+const PERSP = 500, PERSP_AT = 720;
+const VIEW_R = 7;        // tiles of geometry built around the walker (fog culls well inside this)
 const REACH = 0.75;      // how close a creature must be to engage
 
 /**
@@ -61,7 +83,12 @@ const REACH = 0.75;      // how close a creature must be to engage
  * emitted at all — which is the draw distance, arrived at honestly rather than
  * as a hard circle you can see the edge of.
  */
-const FOG_NEAR = 1.4, FOG_FAR = 6.4, FOG_CULL = 0.97;
+const FOG_NEAR = 1.2, FOG_FAR = 5.2, FOG_CULL = 0.96;
+/** Creatures go into the dark BEFORE the room does. A monster is the one thing
+ *  you can pick out of a dim corridor at any distance, so it needs to be taken
+ *  by the fog sooner than the walls it stands between, or the mine reads as a
+ *  lit diorama with things loitering at the back of it. */
+const FOG_SPRITE = 0.78;
 /** The dark itself. Matches #delveFpScreen's own background, so a surface that
  *  has faded out entirely and one that was never drawn are the same colour. */
 const fogRgba = (a) => `rgba(6,6,10,${a.toFixed(3)})`;
@@ -89,6 +116,42 @@ const CREATURE_H = { 1: 320, 2: 470, 3: 760, 4: 900, 5: 1080 };
 const DECOR_H = { boulder: 700, boulderGray: 700, stalagTall: 1100, cart: 780, tree: 1150 };
 /** One swing, and how far in front of you it reaches (tiles). */
 const SWING_MS = 380, SWING_REACH = 1.9, SWING_CONE = 0.3;
+
+/**
+ * FIRST-PERSON COMBAT — Morrowind's contract, not the arena's.
+ *
+ * You aim and time the blow yourself; whether it LANDS is a roll, and the roll
+ * is made of the same numbers the rest of the game already uses. `hooks.power`
+ * is the member's ⚡ (heroPower + gear) and `prey.power` is the recommended
+ * party power — the very ratio `huntOdds` prints on the hunt card — so a fight
+ * the Wilds room calls Grim rolls Grim, and no second economy is invented here.
+ * A kill still pays through `hooks.onKill`, which still runs `resolveHuntPlayed`
+ * in hall.js: the spoils are byte-identical to the arena's, because they always
+ * were the arena's only contribution.
+ *
+ * Health is on a flat 0..100 scale for both sides so the ratio is the only
+ * thing that varies. It does NOT come back fully between fights: out of contact
+ * you recover to a ceiling that drops with every bout, which is what makes a
+ * delve a question of how deep to push rather than a corridor you farm.
+ */
+const HP_MAX = 100;
+const HIT_FLOOR = 0.20, HIT_CEIL = 0.92;   // no fight is ever certain, either way
+const DMG_BASE = 10;                        // ~10 landed blows at an even match
+const FOE_SWING_MS = 1150;                  // how often a creature in reach tries
+/**
+ * A creature swings about three times slower than you can, so its blow carries
+ * that rate difference or the fight is decided by cooldowns rather than by ⚡.
+ * Without this an EVEN match on the hunt card — where huntOdds prints 50% — was
+ * a walkover in the corridor at nearly four times the damage per second, which
+ * would have made delving strictly better than hunting the same quarry.
+ *
+ * The 0.7 is a deliberate edge left to the delver: alone, a long way in, and the
+ * only one of the two who can retreat, guard, or drink.
+ */
+const FOE_DMG = DMG_BASE * (FOE_SWING_MS / SWING_MS) * 0.7;
+const BLOCK_CUT = 0.55, BLOCK_EVADE = 0.22; // a raised shield: less damage, more misses
+const REGEN_PER_S = 7, REGEN_DELAY = 2.2;   // out of contact, you catch your breath
+const REGEN_COST = 8, REGEN_FLOOR = 40;     // and every bout lowers the ceiling
 
 /** Cells that are a full wall you cannot see over. 'o' is an ore face — a wall
  *  made of the thing you want, which is why you mine it by walking into it. */
@@ -287,6 +350,22 @@ function canStep(fx, fy, tx, ty) {
   return heightAt(fx, fy) === heightAt(tx, ty) || onClimb(fx, fy) || onClimb(tx, ty);
 }
 
+/** Re-fit the lens to the window. Called on mount and on every resize, because
+ *  a fullscreen toggle is a resize and the whole framing hangs off this. */
+function fitLens() {
+  if (!F) return;
+  const stage = F.host.querySelector('.fp-stage');
+  const h = stage && stage.clientHeight;
+  // Measured LAZILY, and skipped when it measures nothing: mount() runs while
+  // #delveFpScreen is still display:none, where clientHeight is 0 — take that
+  // as an answer and the whole map is built through a 720px lens whatever the
+  // window is. The caller re-fits once the screen is up. (Same trap the
+  // top-down view hit measuring prop heights before showScreen.)
+  if (!h) return;
+  F.lens = h / PERSP_AT;
+  stage.style.perspective = (PERSP * F.lens).toFixed(1) + 'px';
+}
+
 /** How far into the dark a point is, 0 (right here) to 1 (gone). */
 function fogAt(x, y) {
   const d = Math.hypot(x - F.px, y - F.py);
@@ -429,16 +508,29 @@ function standDecor(el, x, y) {
  * for a difference nobody can see is most of what a fog costs.
  */
 function place(b, x, y, lift) {
-  const fog = fogAt(x, y);
-  const hidden = fog >= FOG_CULL;
+  const fog = Math.min(1, fogAt(x, y) / FOG_SPRITE);
+  const hidden = fog >= 0.995;
   if (hidden !== b._hidden) { b.el.style.display = (b._hidden = hidden) ? 'none' : ''; }
   if (hidden) return;
   const tf = `translate3d(${(x * T).toFixed(1)}px,${lift}px,${(y * T).toFixed(1)}px) rotateY(${-F.yaw}deg)`;
   if (tf !== b._tf) b.el.style.transform = (b._tf = tf);
+  // A struck creature flashes white — the one piece of feedback that has to
+  // arrive before the number does.
   const lit = Math.round((1 - fog) * 20) / 20;
-  if (lit !== b._lit) {
-    b._lit = lit;
-    b.el.style.filter = `drop-shadow(0 4px 5px rgba(0,0,0,0.6)) brightness(${lit})`;
+  const hurt = b.hurtUntil > performance.now();
+  if (lit !== b._lit || hurt !== b._hurt) {
+    b._lit = lit; b._hurt = hurt;
+    b.el.style.filter = `drop-shadow(0 4px 5px rgba(0,0,0,0.6)) brightness(${hurt ? lit + 1.6 : lit})`
+      + (hurt ? ' saturate(0.2)' : '');
+  }
+  // The bar only exists while the thing is hurt, so an untouched room is clean.
+  if (b.bar) {
+    const show = b.hp != null && b.hp < HP_MAX;
+    if (show !== b._bar) { b.bar.style.display = (b._bar = show) ? 'block' : 'none'; }
+    if (show) {
+      const w = Math.max(0, b.hp) + '%';
+      if (w !== b._bw) { b.bar.firstChild.style.width = (b._bw = w); }
+    }
   }
 }
 
@@ -586,13 +678,14 @@ function spawnCreature(prey, img, x, y) {
   if (h * aspect > maxW) h = maxW / aspect;
   const cv = document.createElement('canvas');
   cv.width = box.w; cv.height = box.h;
-  const el = addBillboard('fp-creature', '', h * aspect, h);
-  el.appendChild(cv);
+  const el = addBillboard('fp-creature', '<div class="fp-hp"><i></i></div>', h * aspect, h);
+  el.insertBefore(cv, el.firstChild);
   cv.style.width = '100%'; cv.style.height = '100%';
   const c = {
     prey, img, el, cv, fw, fh, box, x, y, home: { x, y },
     mode: 'idle', t: 1 + Math.random() * 2, tx: x, ty: y,
     row: 0, col: 1, drawn: -1, phase: Math.random() * 4,
+    hp: HP_MAX, atkAt: 0, hurtUntil: 0, bar: el.querySelector('.fp-hp'),
   };
   drawCreature(c);
   F.creatures.push(c);
@@ -631,37 +724,99 @@ async function mountHands() {
   // Sheet loads are slow enough to outlive the delve that asked for them, so
   // every await is followed back into a session that may already be gone.
   const live = () => !!F && F.hands === hands;
-  const put = async (icon, cls, title) => {
-    if (!icon) return null;
+  const put = async (src, frames, cls, title) => {
+    if (!src) return null;
     try {
-      const img = await loadImg(icon.url);
+      const img = await loadImg(src.url);
       if (!live()) return null;
+      // Cropped to the UNION of the frames it will show, so the art fills the
+      // hand instead of floating in a mostly-empty 48px cell — and so nothing
+      // shifts as the swing steps through.
+      const box = cellUnion(img, WORN.row, frames);
+      if (!box) return null;
       const cv = document.createElement('canvas');
-      cv.width = icon.sw; cv.height = icon.sh;
-      const c = cv.getContext('2d');
-      c.imageSmoothingEnabled = false;
-      c.drawImage(img, icon.sx, icon.sy, icon.sw, icon.sh, 0, 0, icon.sw, icon.sh);
+      cv.width = box.w; cv.height = box.h;
       const el = document.createElement('div');
       el.className = 'fp-hand ' + cls;
       el.title = title || '';
+      el.style.aspectRatio = box.w + ' / ' + box.h;
       el.appendChild(cv);
       host.appendChild(el);
-      return el;
+      const hand = { el, cv, img, box, frames, at: -1, timer: 0 };
+      handFrame(hand, frames[0]);
+      return hand;
     } catch (e) {
       console.warn('delve-fp: hand art missing', cls, e);
       return null;
     }
   };
   const w = gear.weapon, b = gear.body;
-  hands.weapon = await put(w && gearIcon(w.kind, w.material), 'fp-hand-weapon', w && w.name);
+  const SW = [WORN.rest].concat(WORN.swing);
+  hands.weapon = await put(w && wornWeapon(w.kind, w.material), SW, 'fp-hand-weapon', w && w.name);
   // A bow is two-handed: nothing braces an off-hand shield behind it.
   if (live() && !(w && w.kind === 'bow')) {
-    hands.shield = await put(b && gearIcon(b.kind, b.material), 'fp-hand-shield', b && b.name);
+    hands.shield = await put(b && wornShield(b.material), WORN.shieldBrace, 'fp-hand-shield', b && b.name);
   }
   // The PICK is not equipment — it is what a delver walks in carrying. It comes
   // out for a seam whatever else is in hand, and when the weapon slot is empty
   // it is the only thing there, so the hands are never simply blank.
-  if (live()) hands.pick = await put(PICK_ICON, 'fp-hand-pick' + (hands.weapon ? ' fp-stowed' : ''), 'Delver’s pick');
+  if (live()) hands.pick = await put(wornPick(), SW, 'fp-hand-pick' + (hands.weapon ? ' fp-stowed' : ''), 'Delver’s pick');
+  if (live()) for (const h of [hands.weapon, hands.shield, hands.pick]) if (h) h.el.classList.add('fp-ready');
+}
+
+/** The tight box a set of frames occupies inside one row of a 48px sheet, in
+ *  cell-local coordinates. Union, not per-frame, or the art jumps as it plays. */
+function cellUnion(img, row, cols) {
+  const S = WORN.cell;
+  try {
+    const c = document.createElement('canvas');
+    c.width = img.naturalWidth; c.height = img.naturalHeight;
+    const g = c.getContext('2d', { willReadFrequently: true });
+    g.drawImage(img, 0, 0);
+    const d = g.getImageData(0, 0, c.width, c.height).data;
+    let x0 = S, y0 = S, x1 = -1, y1 = -1;
+    for (const col of cols) {
+      for (let y = 0; y < S; y++) {
+        for (let x = 0; x < S; x++) {
+          const px = col * S + x, py = row * S + y;
+          if (px >= c.width || py >= c.height) continue;
+          if (d[(py * c.width + px) * 4 + 3] < 12) continue;
+          if (x < x0) x0 = x;
+          if (y < y0) y0 = y;
+          if (x > x1) x1 = x;
+          if (y > y1) y1 = y;
+        }
+      }
+    }
+    return x1 < 0 ? null : { x: x0, y: y0, w: x1 - x0 + 1, h: y1 - y0 + 1 };
+  } catch (e) {
+    console.warn('delve-fp: could not measure hand art', e);
+    return null;
+  }
+}
+
+/** Paint one sheet column into a hand's canvas. */
+function handFrame(hand, col) {
+  if (hand.at === col) return;
+  hand.at = col;
+  const S = WORN.cell, b = hand.box;
+  const g = hand.cv.getContext('2d');
+  g.imageSmoothingEnabled = false;
+  g.clearRect(0, 0, b.w, b.h);
+  g.drawImage(hand.img, col * S + b.x, WORN.row * S + b.y, b.w, b.h, 0, 0, b.w, b.h);
+}
+
+/** Step a hand through its frames and settle back on the first. */
+function playFrames(hand, cols) {
+  if (!hand) return;
+  clearInterval(hand.timer);
+  let i = 0;
+  handFrame(hand, cols[0]);
+  hand.timer = setInterval(() => {
+    i++;
+    if (i >= cols.length) { clearInterval(hand.timer); hand.timer = 0; handFrame(hand, hand.frames[0]); return; }
+    handFrame(hand, cols[i]);
+  }, WORN.frameMs);
 }
 
 /**
@@ -678,11 +833,11 @@ function playSwing(mining) {
   // One hand leads and the other stows. The stowed hand must also DROP its
   // swing class: an animation outranks a plain transform, so a pick left
   // mid-swing would keep swinging from inside the holster.
-  for (const el of [H.weapon, H.pick]) {
-    if (!el) continue;
-    const off = el !== lead;
-    el.classList.toggle('fp-stowed', off);
-    if (off) el.classList.remove('fp-swinging');
+  for (const h of [H.weapon, H.pick]) {
+    if (!h) continue;
+    const off = h !== lead;
+    h.el.classList.toggle('fp-stowed', off);
+    if (off) { h.el.classList.remove('fp-swinging'); clearInterval(h.timer); handFrame(h, h.frames[0]); }
   }
   const fire = (el, cls) => {
     if (!el) return;
@@ -690,9 +845,9 @@ function playSwing(mining) {
     void el.getBoundingClientRect();
     el.classList.add(cls);
   };
-  fire(lead, 'fp-swinging');
+  if (lead) { fire(lead.el, 'fp-swinging'); playFrames(lead, WORN.swing); }
   fire(H.el.querySelector('.fp-slash'), 'fp-swinging');
-  fire(H.shield, 'fp-bracing');
+  if (H.shield) { fire(H.shield.el, 'fp-bracing'); playFrames(H.shield, WORN.shieldBrace); }
 }
 
 // ---------------------------------------------------------------------------
@@ -750,6 +905,7 @@ function mount(prep, entry) {
   const stage = F.host.querySelector('.fp-stage');
   stage.innerHTML = '<div class="fp-world"><div class="fp-geo"></div><div class="fp-bbs"></div></div>';
   F.world = stage.querySelector('.fp-world');
+  fitLens();
   buildGeometry();
   buildDecor(props || {});
   for (const sp of spawns) spawnCreature(sp.prey, sp.img, sp.s.x + 0.5, sp.s.y + 0.5);
@@ -777,6 +933,7 @@ export async function openDelveFp(localeId, member, hooks) {
       <div class="fp-stage"></div>
       <div class="fp-hands"></div>
       <div class="fp-vignette"></div>
+      <div class="fp-blood"></div>
       <div class="delve-hud">
         <button class="dv-leave" onclick="__delveFp.leave()">⬅ Leave</button>
         <span class="fp-title dv-title"></span>
@@ -786,28 +943,36 @@ export async function openDelveFp(localeId, member, hooks) {
       </div>
       <canvas class="fp-map" width="150" height="150"></canvas>
       <div class="delve-toasts fp-toasts"></div>
+      <div class="fp-vitals">
+        <span class="fp-vitals-fill"></span>
+        <span class="fp-vitals-cap"></span>
+        <b class="fp-vitals-n">100</b>
+      </div>
       <div class="fp-keys">
         <b>W</b> forward · <b>S</b> back · <b>A</b>/<b>D</b> sidestep
         · <b>←</b>/<b>→</b> turn · <b>Space</b> or <b>click</b> to strike
-        · <b>Esc</b> leave
+        · hold <b>Shift</b> to guard · <b>R</b> drink · <b>Esc</b> leave
       </div>
       <div class="fp-pad">
         <button data-k="turnL" aria-label="Turn left">◀<i>←</i></button>
         <button data-k="fwd" aria-label="Forward">▲<i>W</i></button>
         <button data-k="turnR" aria-label="Turn right">▶<i>→</i></button>
+        <button data-k="block" class="fp-block" aria-label="Guard">🛡<i>Shift</i></button>
         <button data-k="back" aria-label="Back">▼<i>S</i></button>
         <button data-k="attack" class="fp-attack" aria-label="Strike">⚔<i>Space</i></button>
+        <button data-k="drink" class="fp-drink" aria-label="Drink a draught">🧪<b>0</b><i>R</i></button>
       </div>`;
 
     F = {
       map: null, theme: null, surf: null, hooks, member, host, world: null,
       grid: null, cols: 0, rows: 0,
       px: 0, py: 0, dir: 2, yaw: 180, turning: null, stepping: null,
-      keys: {}, latched: {}, last: 0, raf: 0, ended: false, fighting: false, grace: false, transiting: false,
+      keys: {}, latched: {}, last: 0, raf: 0, ended: false, transiting: false,
       creatures: [], decor: [], doors: [], armed: false,
       seen: new Set(), mined: new Set(), settleUntil: 0,
-      hands: null, swingUntil: 0, helpTimer: 0,
-      haul: { kills: {}, gold: 0, mats: {}, field: 0, bouts: 0 },
+      hands: null, swingUntil: 0, helpTimer: 0, lens: 1,
+      hp: HP_MAX, hpCeil: HP_MAX, contactAt: 0, hurtUntil: 0,
+      haul: { kills: {}, gold: 0, mats: {}, field: 0, bouts: 0, swings: 0 },
       stack: [],
     };
     try {
@@ -815,6 +980,7 @@ export async function openDelveFp(localeId, member, hooks) {
       wireInput();
       updateHaul();
       showScreen('delveFpScreen');
+      fitLens();               // now that the stage has a height to measure
       startLoop();
     } catch (e) {
       if (F && F.raf) cancelAnimationFrame(F.raf);
@@ -827,6 +993,8 @@ export async function openDelveFp(localeId, member, hooks) {
     // The hands come up after the screen does: a missing icon sheet must cost
     // the delve nothing but its viewmodel.
     mountHands().catch((e) => console.warn('delve-fp: hands', e));
+    updateVitals();
+    updatePotions();
     const first = member.name.split(' ')[0];
     toast(`${first} descends into ${p.map.name || hooks.locale.name}.`);
     if (!(hooks.gear && hooks.gear.weapon)) toast(`${first} goes in bare-handed — nothing in the weapon slot.`);
@@ -847,6 +1015,7 @@ const KEYMAP = {
   arrowleft: 'turnL', arrowright: 'turnR', a: 'strafeL', d: 'strafeR',
   q: 'turnL', e: 'turnR',
   ' ': 'attack', spacebar: 'attack', f: 'attack', enter: 'attack',
+  shift: 'block', control: 'block', r: 'drink',
 };
 
 function wireInput() {
@@ -854,7 +1023,7 @@ function wireInput() {
   // session behind it, and an unguarded handler then raises on every keypress
   // for the rest of the page's life.
   F.onKeyDown = (e) => {
-    if (!F || !screenActive() || F.fighting) return;
+    if (!F || !screenActive()) return;
     const k = e.key.toLowerCase();
     if (k === 'escape') { leave(); return; }
     if (k === '?' || k === 'h') { e.preventDefault(); helpUntil(9000); return; }
@@ -881,18 +1050,21 @@ function wireInput() {
   // Clicking into the world strikes at it. The most discoverable control there
   // is: the thing you can see is the thing you can hit.
   F.onStagePointer = (e) => {
-    if (!F || F.fighting || F.ended) return;
+    if (!F || F.ended) return;
     e.preventDefault();
     trySwing();
   };
   const stage = F.host.querySelector('.fp-stage');
   if (stage) stage.addEventListener('pointerdown', F.onStagePointer);
+  F.onResize = () => fitLens();
+  window.addEventListener('resize', F.onResize);
 }
 function unwireInput() {
   window.removeEventListener('keydown', F.onKeyDown);
   window.removeEventListener('keyup', F.onKeyUp);
   const stage = F.host.querySelector('.fp-stage');
   if (stage && F.onStagePointer) stage.removeEventListener('pointerdown', F.onStagePointer);
+  if (F.onResize) window.removeEventListener('resize', F.onResize);
 }
 
 /** Show the control strip for a while. Shown on entry, and on ? or the HUD's
@@ -943,7 +1115,7 @@ function tryTurn(sign) {
  */
 function trySwing() {
   const now = performance.now();
-  if (!F || F.ended || F.fighting || F.transiting || now < F.swingUntil) return;
+  if (!F || F.ended || F.transiting || now < F.swingUntil) return;
   F.swingUntil = now + SWING_MS;
   const [dx, dy] = DIRS[F.dir];
   const ax = Math.floor(F.px) + dx, ay = Math.floor(F.py) + dy;
@@ -957,7 +1129,7 @@ function trySwing() {
     if ((vx * dx + vy * dy) / d < SWING_CONE) continue;   // it has to be in front
     best = c; bd = d;
   }
-  if (best) engage(best);
+  if (best) strike(best);
 }
 
 /**
@@ -976,10 +1148,11 @@ function took(k) {
 }
 
 function readInput() {
-  if (F.fighting || F.transiting) return;
+  if (F.transiting) return;
   // Striking is allowed mid-stride: a stride is 200ms, and a crawler that
   // swallows your attack because you are still walking feels broken.
   if (took('attack')) trySwing();
+  if (took('drink')) drink();
   if (F.turning || F.stepping) return;
   if (performance.now() < F.settleUntil) return;
   if (took('turnL')) { tryTurn(-1); return; }
@@ -1056,7 +1229,12 @@ function moveCreatures(dt) {
     const dist = Math.hypot(c.x - F.px, c.y - F.py);
     const rank = c.prey.rank || 1;
     let speed = 0.9;
-    if (rank <= 1 && dist < 2.6) { c.mode = 'flee'; c.tx = c.x + (c.x - F.px) / (dist || 1) * 2; c.ty = c.y + (c.y - F.py) / (dist || 1) * 2; speed = 1.8; }
+    // Anything you have hit comes for you, whatever its rank says it does when
+    // left alone. Without this the rank rules re-decide the mode every tick and
+    // a struck squirrel goes straight back to foraging — which reads as a fight
+    // you are having by yourself.
+    if (c.aggro) { c.mode = 'chase'; c.tx = F.px; c.ty = F.py; speed = 1 + rank * 0.16; }
+    else if (rank <= 1 && dist < 2.6) { c.mode = 'flee'; c.tx = c.x + (c.x - F.px) / (dist || 1) * 2; c.ty = c.y + (c.y - F.py) / (dist || 1) * 2; speed = 1.8; }
     else if (rank >= 3 && dist < 4) { c.mode = 'chase'; c.tx = F.px; c.ty = F.py; speed = rank >= 4 ? 1.5 : 1.2; }
     else if (c.mode === 'chase' || c.mode === 'flee') { c.mode = 'idle'; c.t = 0.6; }
     if (c.mode === 'idle') {
@@ -1093,52 +1271,168 @@ function poseCreature(c, walking) {
   drawCreature(c);
 }
 
-function checkEncounters() {
-  for (const c of F.creatures) {
-    if (Math.hypot(c.x - F.px, c.y - F.py) < REACH) { engage(c); return; }
+
+// ---------------------------------------------------------------------------
+// Combat — fought HERE, in the corridor, at the size the corridor draws it
+// ---------------------------------------------------------------------------
+
+/** The matchup, as one number: the member's ⚡ over what the prey is worth. */
+const oddsVs = (prey) => (F.hooks.power || 100) / Math.max(1, prey.power || 100);
+
+/** Morrowind's question — you swung and connected, but did you HIT? Stats say.
+ *  Tiredness is the delve's own tax: a spent delver flails. */
+function rollHit(ratio, tired) {
+  const base = 0.30 + 0.55 * Math.min(1, Math.max(0, (ratio - 0.55) / 0.9));
+  const fit = tired ? 0.65 + 0.35 * (1 - Math.min(100, tired) / 100) : 1;
+  return Math.random() < Math.min(HIT_CEIL, Math.max(HIT_FLOOR, base * fit));
+}
+const spread = (n) => Math.max(1, Math.round(n * (0.8 + Math.random() * 0.4)));
+
+/** A word or a number that rises off whatever it happened to. */
+function floater(host, txt, cls) {
+  const el = document.createElement('span');
+  el.className = 'fp-float ' + (cls || '');
+  el.textContent = txt;
+  host.appendChild(el);
+  setTimeout(() => el.remove(), 900);
+}
+
+/** Your blow. Aimed by you, resolved by the numbers. */
+function strike(c) {
+  F.haul.swings = (F.haul.swings || 0) + 1;
+  c.aggro = true;                                  // anything you hit turns on you
+  F.contactAt = performance.now();
+  if (!rollHit(oddsVs(c.prey), F.hooks.fatigue)) {
+    F.haul.missed = (F.haul.missed || 0) + 1;
+    floater(c.el, 'miss', 'fp-miss');
+    return;
+  }
+  F.haul.landed = (F.haul.landed || 0) + 1;
+  const dmg = spread(DMG_BASE * Math.min(2, Math.max(0.5, oddsVs(c.prey))));
+  c.hp -= dmg;
+  c.hurtUntil = performance.now() + 160;
+  floater(c.el, '−' + dmg, 'fp-hit');
+  if (c.hp <= 0) slay(c);
+}
+
+/** Its blow, on its own clock, once it is close enough to land one. */
+function foeSwing(c, now) {
+  c.atkAt = now + FOE_SWING_MS * (0.85 + Math.random() * 0.4);
+  F.contactAt = now;
+  const guard = F.keys.block ? 1 - BLOCK_EVADE : 1;
+  if (!rollHit((1 / oddsVs(c.prey)) * guard, 0)) {
+    F.haul.dodged = (F.haul.dodged || 0) + 1;
+    floater(c.el, 'miss', 'fp-miss');
+    return;
+  }
+  F.haul.taken = (F.haul.taken || 0) + 1;
+  let dmg = spread(FOE_DMG / Math.min(2, Math.max(0.5, oddsVs(c.prey))));
+  if (F.keys.block) { dmg = Math.max(1, Math.round(dmg * BLOCK_CUT)); braceShield(); }
+  F.hp -= dmg;
+  F.hurtUntil = now + 260;
+  floater(F.host.querySelector('.fp-hands'), '−' + dmg, 'fp-hurt');
+  const blood = F.host.querySelector('.fp-blood');
+  if (blood) { blood.classList.remove('on'); void blood.getBoundingClientRect(); blood.classList.add('on'); }
+  updateVitals();
+  if (F.hp <= 0) {
+    F.hp = 0;
+    endDelve(`cut down by the ${c.prey.name}`, true);
   }
 }
 
-async function engage(c) {
-  if (F.fighting || F.ended) return;
-  F.fighting = true;
-  F.keys = {}; F.latched = {};
-  let bout = null;
-  try { bout = await F.hooks.fight(c.prey.id); }
-  catch (e) { console.error('delve-fp: bout failed', e); }
-  if (!F || F.ended) return;
-  showScreen('delveFpScreen');
+/** It falls, and the ledger is the same ledger the arena fed. */
+function slay(c) {
+  F.creatures = F.creatures.filter((x) => x !== c);
+  c.el.remove();
   F.haul.bouts++;
-  if (bout && bout.won) {
-    F.creatures = F.creatures.filter((x) => x !== c);
-    c.el.remove();
-    // Banking the spoils must not be able to strand the session. The loop only
-    // restarts from here and from open, so a throw inside onKill would leave
-    // the screen up with `fighting` stuck true and no rAF — a delve you can
-    // look at and not play. Ledger first, loop always.
-    try {
-      const r = F.hooks.onKill(c.prey.id);
-      F.haul.kills[c.prey.id] = (F.haul.kills[c.prey.id] || 0) + 1;
-      if (r) {
-        F.haul.gold += r.gold || 0;
-        F.haul.field += r.field || 0;
-        if (r.meat) F.haul.mats.game_meat = (F.haul.mats.game_meat || 0) + r.meat;
-        if (r.pelt) F.haul.mats.pelt = (F.haul.mats.pelt || 0) + r.pelt;
-        if (r.loot) F.haul.mats[r.loot] = (F.haul.mats[r.loot] || 0) + 1;
-        toast(`${c.prey.glyph} ${c.prey.name} felled! ${r.txt || ''}`);
-      }
-      updateHaul();
-    } catch (e) {
-      console.error('delve-fp: spoils failed', e);
-    } finally {
-      F.grace = true;
-      F.fighting = false;
-      startLoop();
+  // Banking must not be able to strand the session: a throw inside onKill used
+  // to leave the delve up with no way on. Ledger first, loop always.
+  try {
+    const r = F.hooks.onKill(c.prey.id);
+    F.haul.kills[c.prey.id] = (F.haul.kills[c.prey.id] || 0) + 1;
+    if (r) {
+      F.haul.gold += r.gold || 0;
+      F.haul.field += r.field || 0;
+      if (r.meat) F.haul.mats.game_meat = (F.haul.mats.game_meat || 0) + r.meat;
+      if (r.pelt) F.haul.mats.pelt = (F.haul.mats.pelt || 0) + r.pelt;
+      if (r.loot) F.haul.mats[r.loot] = (F.haul.mats[r.loot] || 0) + 1;
+      toast(`${c.prey.glyph} ${c.prey.name} felled! ${r.txt || ''}`);
     }
-  } else {
-    F.fighting = false;
-    endDelve(`driven out by the ${c.prey.name}`, true);
+    updateHaul();
+  } catch (e) {
+    console.error('delve-fp: spoils failed', e);
   }
+  updateVitals();
+}
+
+/**
+ * Everything the creatures do to you, and what standing clear buys back.
+ *
+ * Combat runs on the WALL CLOCK, not on the simulation's `now` — the same clock
+ * `trySwing` already cools down against. Mixing the two means a swing cooldown
+ * and a creature's cooldown drift apart under any stepped or throttled frame,
+ * and the fight quietly changes speed.
+ */
+function fightTick(dt) {
+  const now = performance.now();
+  for (const c of F.creatures) {
+    if (Math.hypot(c.x - F.px, c.y - F.py) > REACH + 0.35) continue;
+    if (!c.atkAt) { c.atkAt = now + FOE_SWING_MS * 0.5; continue; }
+    if (now >= c.atkAt) foeSwing(c, now);
+    if (!F || F.ended) return;
+  }
+  // A breather, but never the whole of it back. Each bout lowers the ceiling,
+  // so the question a delve asks is how much further you can afford to go.
+  if (now - (F.contactAt || 0) > REGEN_DELAY * 1000 && F.hp < F.hpCeil) {
+    F.hp = Math.min(F.hpCeil, F.hp + REGEN_PER_S * dt);
+    updateVitals();
+  }
+  F.hpCeil = Math.max(REGEN_FLOOR, HP_MAX - REGEN_COST * F.haul.bouts);
+}
+
+/** Drink. Real Apothecary stock, spent through hall.js — the delve cannot
+ *  conjure a bottle the guild does not have, and it never drinks two at once. */
+function drink() {
+  const now = performance.now();
+  if (!F || F.ended || now < (F.drinkUntil || 0)) return;
+  if (F.hp >= F.hpCeil) { toast('No need — still hale.'); return; }
+  const p = F.hooks.drink && F.hooks.drink();
+  if (!p) { toast('No draughts in the satchel.'); return; }
+  F.drinkUntil = now + 900;
+  F.hp = Math.min(F.hpCeil, F.hp + (p.potency || 20));
+  floater(F.host.querySelector('.fp-hands'), '+' + (p.potency || 20), 'fp-heal');
+  toast(`${p.glyph || '🧪'} ${p.name} — ${Math.ceil(F.hp)} left in you.`);
+  updateVitals();
+  updatePotions();
+}
+
+/** How many draughts are left, on the pad's own button. */
+function updatePotions() {
+  const b = F.host.querySelector('.fp-drink b');
+  if (!b) return;
+  const n = F.hooks.potions ? F.hooks.potions() : 0;
+  b.textContent = n;
+  const btn = F.host.querySelector('.fp-drink');
+  if (btn) btn.classList.toggle('fp-dry', !n);
+}
+
+function braceShield() {
+  const s = F.hands && F.hands.shield;
+  if (!s) return;
+  s.el.classList.remove('fp-bracing');
+  void s.el.getBoundingClientRect();
+  s.el.classList.add('fp-bracing');
+  playFrames(s, WORN.shieldBrace);
+}
+
+/** The one bar that matters, plus the red edge of being hurt. */
+function updateVitals() {
+  const el = F.host.querySelector('.fp-vitals-fill');
+  if (el) el.style.width = Math.max(0, Math.min(100, (F.hp / HP_MAX) * 100)).toFixed(1) + '%';
+  const cap = F.host.querySelector('.fp-vitals-cap');
+  if (cap) cap.style.left = Math.max(0, Math.min(100, (F.hpCeil / HP_MAX) * 100)).toFixed(1) + '%';
+  const n = F.host.querySelector('.fp-vitals-n');
+  if (n) n.textContent = Math.ceil(F.hp);
 }
 
 /** Work a vein out of the wall in front of you. The face becomes floor, so the
@@ -1169,7 +1463,10 @@ function render() {
   // (x·cosθ + z·sinθ, y, −x·sinθ + z·cosθ) — so facing east (yaw 90) has to send
   // world +X to view −Z, which needs +90. The negative sign put east BEHIND the
   // camera and left you staring at the wall you had just walked away from.
-  F.world.style.transform = `rotateY(${F.yaw}deg) translate3d(${-ex}px,${-ey}px,${-ez}px)`;
+  // scale3d, never scale(): a 2D scale between a rotate and the billboards'
+  // counter-rotate leaves Z alone, which is not a similarity in 3D and squashes
+  // every standee (the top-down view learned this the hard way).
+  F.world.style.transform = `scale3d(${F.lens},${F.lens},${F.lens}) rotateY(${F.yaw}deg) translate3d(${-ex}px,${-ey}px,${-ez}px)`;
   // Billboards stand on the floor and counter-rotate to face the walker. Every
   // write is guarded by the value it would write: standing still, this loop
   // touches no style at all, which is the difference between a scene that
@@ -1223,25 +1520,18 @@ function drawMap() {
 function stepSim(now) {
   const dt = Math.min(0.08, (now - (F.last || now)) / 1000);
   /**
-   * Re-asked between every stage, not once at the top. A strike may now be
-   * thrown MID-STRIDE, and engage() raises `fighting` and the battle screen
-   * synchronously — so a single test up front would let the stride it
-   * interrupted finish underneath the bout. Landing that stride on the stairs
-   * ran endDelve while the fight was still out: the summary card was injected
-   * into a hidden screen, onEnd never fired, and the only way back to the guild
-   * was a page reload. onArrive can also fire usePortal, which swaps the map out
-   * from under a fight that is about to pay spoils for a creature you left behind.
+   * Re-asked between every stage, not once at the top. Any stage can end the
+   * session or start a door: a strike can drop the last creature and a stride
+   * can land on the stairs, and `onArrive` fires `usePortal`, which swaps the
+   * whole map out. Testing once up front let the stride that a portal
+   * interrupted finish inside the room it had already left.
    */
-  const busy = () => F.fighting || F.transiting;
+  const busy = () => F.transiting || F.ended;
   if (!busy()) readInput();
   if (!busy()) advanceMotion(dt);
-  if (!busy()) {
-    moveCreatures(dt);
-    checkArmed();
-    if (F.grace) {
-      if (F.creatures.every((c) => Math.hypot(c.x - F.px, c.y - F.py) > REACH + 0.5)) F.grace = false;
-    } else if (!F.ended) checkEncounters();
-  }
+  if (!busy()) moveCreatures(dt);
+  if (!busy()) checkArmed();
+  if (!busy()) fightTick(dt);
   if (!F || F.ended) return false;
   render();
   F.last = now;
@@ -1280,7 +1570,7 @@ function updateHaul() {
   el.textContent = `☠ ${kills} · ${F.haul.gold}g`;
 }
 
-function leave() { if (F && !F.fighting && !F.ended) endDelve('called it a day'); }
+function leave() { if (F && !F.ended) endDelve('called it a day'); }
 
 function endDelve(reason, beaten = false) {
   if (!F || F.ended) return;
@@ -1321,9 +1611,10 @@ window.__delveFp = { leave, close, help: () => helpUntil(9000) };
 if (typeof window !== 'undefined') {
   window.__fpDebug = () => F && ({
     map: F.map && F.map.id, x: +F.px.toFixed(2), y: +F.py.toFixed(2), dir: COMPASS[F.dir], yaw: F.yaw,
-    moving: !!(F.stepping || F.turning), fighting: F.fighting, armed: F.armed,
+    moving: !!(F.stepping || F.turning), hp: Math.ceil(F.hp), hpCeil: F.hpCeil, armed: F.armed,
     quads: F.world.querySelectorAll('.fp-q').length, creatures: F.creatures.length,
-    haul: F.haul.gold, seen: F.seen.size,
+    haul: F.haul.gold, seen: F.seen.size, power: F.hooks.power, fatigue: F.hooks.fatigue,
+    fight: { swings: F.haul.swings|0, landed: F.haul.landed|0, missed: F.haul.missed|0, foeHits: F.haul.taken|0, foeMisses: F.haul.dodged|0, bouts: F.haul.bouts },
     // The three numbers that decide whether a swing lands: how far the nearest
     // creature is, and how far in front of you it is.
     near: F.creatures.map((c) => {

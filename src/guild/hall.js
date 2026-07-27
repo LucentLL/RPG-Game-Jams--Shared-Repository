@@ -572,6 +572,25 @@ async function exploreLocale(localeId, fp) {
       // up in front of you; the top-down view ignores it (you see the sprite's
       // own composited weapon there). Kind + material is all the art needs.
       gear: gearOf(h),
+      // The two numbers first-person combat rolls against. ⚡ against the prey's
+      // recommended power is the SAME ratio huntOdds shows on the hunt card, so
+      // a fight you are told is Grim is a fight that rolls Grim; and tiredness
+      // costs you accuracy, which is the one thing a delve can spend that the
+      // weekly hunt cannot. All balance stays here — delve-fp.js only rolls.
+      power: combatPower(h),
+      fatigue: (h.condition && h.condition.fatigue) || 0,
+      // Potions. The arena took a satchel of two and reported what it drank;
+      // first-person combat drinks one at a time, so the hook both SPENDS the
+      // real Apothecary stock and says what is left — the same bottles either
+      // way, and the delver cannot carry a bottle the guild does not have.
+      potions: () => withdrawPotions().reduce((n, b) => n + b.qty, 0),
+      drink: () => {
+        const b = withdrawPotions()[0];
+        if (!b) return null;
+        consumePotion(guild.inventory, b.batchId);
+        save();
+        return { name: b.name, glyph: b.glyph, potency: b.potency || 20 };
+      },
       fight: async (preyId) => {
         const prey = preyById(preyId); if (!prey) return null;
         const bout = await playHuntBout(h, prey, 1, { mode: 'action', items: withdrawPotions() });
@@ -2798,7 +2817,7 @@ function wildsRoom() {
     // A charted locale can be WALKED — the Delve (delve.js): live 2.5D exploration.
     const delveRow = hasDelveMap(open.id)
       ? `<div class="tourney-lens quest-lens"><button class="tourney-play" ${hCanMarch ? '' : 'disabled'} onclick="__guild.exploreLocale('${open.id}')">⛏ ${hCanMarch ? `Walk ${open.name} — take ${subject.name.split(' ')[0]} in on foot` : `${subject.name.split(' ')[0]} can't march right now`}</button>${hCanMarch ? `<button class="tourney-play" onclick="__guild.exploreLocale('${open.id}', true)">👁 Descend in first person</button>` : ''}</div>
-        <div class="hint" style="text-align:left;padding:0 2px 6px">The area is charted, and there are two ways to walk it. <b>From above</b>: move with WASD or the stick, close with a creature to fight it, bump a vein to mine it. <b>First person</b>: WASD steps and sidesteps, ←/→ turn, <b>Space</b> or a click strikes at what is in front of you — a creature within reach, or the seam in the wall. Entering costs ${QUEST_STAMINA} stamina and kills pay real spoils on the spot (repeat marches the same week find thinner pickings) — losing a bout sends ${subject.name.split(' ')[0]} home.</div>`
+        <div class="hint" style="text-align:left;padding:0 2px 6px">The area is charted, and there are two ways to walk it. <b>From above</b>: move with WASD or the stick, close with a creature to fight it, bump a vein to mine it. <b>First person</b>: WASD steps and sidesteps, ←/→ turn, <b>Space</b> or a click strikes at what is in front of you — a creature within reach, or the seam in the wall. Fights happen <b>there, in the corridor</b>: you aim and time the blow, whether it lands is rolled from ⚡ against the creature (tiredness costs you accuracy), <b>Shift</b> guards and <b>R</b> drinks a draught from the Apothecary. Health only comes back part way between fights, so how deep you push is the question. Entering costs ${QUEST_STAMINA} stamina and kills pay real spoils on the spot (repeat marches the same week find thinner pickings) — losing a bout sends ${subject.name.split(' ')[0]} home.</div>`
       : '';
     preyPanel = `<div class="plan-title">${open.glyph} ${open.name} <span class="dim" style="font-weight:400;text-transform:none">— ${open.biome}</span></div>
       <div class="opt-list">${rows}</div>${delveRow}${lensBar}`;
