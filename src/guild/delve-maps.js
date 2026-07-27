@@ -292,7 +292,10 @@ export const DELVE_MAPS = {
       '#B.bbb.B#', //  5  ← the shelved wall
       '#B.....B#', //  6
       '#B.....B#', //  7
-      '#BBB+BBB#', //  8  ← the stair back down
+      // 'd', not '+': DOWN is an EXIT. The floor below is not a map any more —
+      // it is a room stamped into the estate — so the way back is to pop the
+      // step you climbed from, which is exactly what an exit does.
+      '#BBBdBBB#', //  8  ← the stair back down
       '#########', //  9
     ],
     entry: [4.5, 7.3],
@@ -300,7 +303,6 @@ export const DELVE_MAPS = {
       { art: 'teacherDesk', x: 3.5, y: 4, w: 84 }, { art: 'globe', x: 5.5, y: 4, w: 36 },
       { art: 'gmPortrait', x: 4.5, y: 2.02, w: 64 },
     ],
-    portals: [{ x: 4.5, y: 8.5, to: 'library', at: [4.5, 2.3] }],
   },
 
   // ── The grounds ──────────────────────────────────────────────────────────
@@ -508,7 +510,7 @@ export const DELVE_MAPS = {
       '#B.f.f.B#', //  5
       '#B.....B#', //  6
       '#B.....B#', //  7
-      '#BBB+BBB#', //  8  ← down to the First Form
+      '#BBBdBBB#', //  8  ← down to the First Form (an exit — pops the step up)
       '#########', //  9
     ],
     entry: [4.5, 7.3],
@@ -517,10 +519,8 @@ export const DELVE_MAPS = {
       { art: 'classDesk', x: 3.5, y: 6, w: 42 }, { art: 'classDesk', x: 5.5, y: 6, w: 42 },
       { art: 'globe', x: 6.4, y: 2.02, w: 36 },
     ],
-    portals: [
-      { x: 4.5, y: 1.5, to: 'classroom3', at: [4.5, 7.3] },
-      { x: 4.5, y: 8.5, to: 'classroom', at: [4.5, 2.3] },
-    ],
+    // `enter` so the Third Form remembers THIS floor to come back down to.
+    portals: [{ x: 4.5, y: 1.5, to: 'classroom3', at: [4.5, 7.3], enter: true }],
   },
   //             012345678
   classroom3: {
@@ -534,7 +534,7 @@ export const DELVE_MAPS = {
       '#B.f.f.B#', //  5
       '#B.....B#', //  6
       '#B.....B#', //  7
-      '#BBB+BBB#', //  8  ← down to the Second Form
+      '#BBBdBBB#', //  8  ← down to the Second Form
       '#########', //  9
     ],
     entry: [4.5, 7.3],
@@ -543,7 +543,6 @@ export const DELVE_MAPS = {
       { art: 'classDesk', x: 3.5, y: 6, w: 42 }, { art: 'classDesk', x: 5.5, y: 6, w: 42 },
       { art: 'abacus', x: 6.4, y: 7, w: 38 },
     ],
-    portals: [{ x: 4.5, y: 8.5, to: 'classroom2', at: [4.5, 2.3] }],
   },
   //             012345678
   guildhall: {
@@ -584,7 +583,7 @@ export const DELVE_MAPS = {
       '#B.f...B#', //  5  ← the chair
       '#B.....B#', //  6
       '#B.....B#', //  7
-      '#BBB+BBB#', //  8  ← the stair back down; the hall below is the way out
+      '#BBBdBBB#', //  8  ← the stair back down to the hall
       '#########', //  9
     ],
     entry: [4.5, 7.3],
@@ -596,7 +595,6 @@ export const DELVE_MAPS = {
       { art: 'gmThrone', x: 3.5, y: 6, w: 32 },
       { art: 'gmPortrait', x: 2.6, y: 2.02, w: 60 }, { art: 'gmBust', x: 6.4, y: 2.02, w: 30 },
     ],
-    portals: [{ x: 4.5, y: 8.5, to: 'guildhall', at: [4.5, 2.3] }],
   },
 };
 

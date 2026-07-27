@@ -169,6 +169,13 @@ const SHEET_URLS = {
  *  actually uses that prop. Interiors never pay for the mine's rails. */
 async function loadSheets(map, theme) {
   const keys = new Set(['cliffs', theme.sheet, theme.rimSheet, theme.walls && theme.walls.sheet].filter(Boolean));
+  // Every theme standing on this plane, not just its base — a campus with rooms
+  // carved into it needs the parquet and the shelf faces of all of them.
+  for (const r of (map.regions || [])) {
+    const t = THEMES[r.theme];
+    if (!t) continue;
+    for (const k of [t.sheet, t.rimSheet, t.walls && t.walls.sheet]) if (k) keys.add(k);
+  }
   const chars = map.grid.join('');
   if (chars.includes('s')) keys.add('stairs');
   if (chars.includes('o')) keys.add('ores');
@@ -203,19 +210,23 @@ function sampleVoidColor(cliffs, theme) {
  * may come from a different sheet than the rim (interiors lay 16px parquet
  * on a 48px rock foundation — theme.src scales the fill source).
  */
-function paintGround(g, grid, theme, sheets) {
+function paintGround(g, grid, theme, sheets, themeAt) {
   const { rows, cols, isFloor, isVoid } = gridFns(grid);
-  const fillImg = sheets[theme.sheet || 'cliffs'];
   const rimImg = sheets[theme.rimSheet || theme.sheet || 'cliffs'];
-  const src = theme.src || TILE;
-  const tile = (t, dx, dy) => g.drawImage(fillImg, t[0] * src, t[1] * src, src, src, dx * TILE, dy * TILE, TILE, TILE);
   // A sub-rect of a rim tile, drawn at the same offset inside the destination cell.
+  // The RIM always comes from the base theme: a rim only exists where the plane
+  // meets its own void, which is the map's outer edge, never a room inside it.
   const part = (t, ox, oy, w, h, dx, dy) =>
     g.drawImage(rimImg, t[0] * TILE + ox, t[1] * TILE + oy, w, h, dx * TILE + ox, dy * TILE + oy, w, h);
   for (let y = 0; y < rows; y++) {
     for (let x = 0; x < cols; x++) {
       if (!isFloor(x, y)) continue;
-      tile(theme.fill[hash2(x, y) % theme.fill.length], x, y);
+      // The FILL is per cell, so one plane can carry a meadow and the parquet of
+      // nine rooms standing in it (see `regions`).
+      const t = themeAt ? themeAt(x, y) : theme;
+      const fillImg = sheets[t.sheet || 'cliffs'], src = t.src || TILE;
+      const f = t.fill[hash2(x, y) % t.fill.length];
+      g.drawImage(fillImg, f[0] * src, f[1] * src, src, src, x * TILE, y * TILE, TILE, TILE);
       const vN = isVoid(x, y - 1), vS = isVoid(x, y + 1), vW = isVoid(x - 1, y), vE = isVoid(x + 1, y);
       if (vN) part(theme.rim.n, 0, 0, TILE, 24, x, y);
       if (vS) part(theme.rim.s, 0, 24, TILE, 24, x, y);
@@ -314,7 +325,7 @@ function cutWallTex(sheets, theme) {
  * kind 'e': wall faces east (+x), boundary at the void cell's west edge.
  * kind 'w': wall faces west (−x), boundary at the void cell's east edge.
  */
-function extractGeometry(grid) {
+function extractGeometry(grid, themeNameAt) {
   const { rows, cols, at, isFloor, isVoid } = gridFns(grid);
   const faces = [];
   for (let y = 0; y <= rows; y++) {
@@ -346,7 +357,9 @@ function extractGeometry(grid) {
   for (let y = 0; y < rows; y++) {
     for (let x = 0; x < cols; x++) {
       const ch = at(x, y);
-      if (ch === 'B' || ch === 'b') blocks.push({ x, y, kind: ch });
+      // A block carries the NAME of the theme whose wall it is, so a room's
+      // shelves and the estate's rock can stand on one plane.
+      if (ch === 'B' || ch === 'b') blocks.push({ x, y, kind: ch, theme: themeNameAt ? themeNameAt(x, y) : null });
     }
   }
   return { faces, blocks };
@@ -364,11 +377,20 @@ async function bakeMap(map, theme) {
   // translated into the block language they already speak.
   const rgrid = map.grid.map((row) => Array.from(row, bakeChar).join(''));
   const { rows, cols, at } = gridFns(map.grid);
+  // REGIONS are rooms standing on this plane with a floor and walls of their
+  // own — the campus carries one per building. A cell inside a region is painted
+  // and walled in that region's theme; everything else is the map's base theme.
+  const regions = map.regions || [];
+  const themeNameAt = (x, y) => {
+    for (const r of regions) if (x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h) return r.theme;
+    return null;
+  };
+  const themeAt = (x, y) => THEMES[themeNameAt(x, y)] || theme;
   const cv = document.createElement('canvas');
   cv.width = cols * TILE; cv.height = rows * TILE;
   const g = cv.getContext('2d');
   g.imageSmoothingEnabled = false;
-  paintGround(g, rgrid, theme, sheets);
+  paintGround(g, rgrid, theme, sheets, regions.length ? themeAt : null);
 
   // Flat floor decals that belong ON the plane (holes and track). Boulders,
   // stalagmites and the cart are upright standees — see openDelve.
@@ -404,11 +426,19 @@ async function bakeMap(map, theme) {
       if (FOOTED[ch]) solids.push({ x0: x, x1: x + 1, y0: y + 1 - SOLID_DEPTH, y1: y + 1 });
     }
   }
+  // One texture set per theme on the plane. attachTerrain picks by the name each
+  // block carries; the cliff faces stay the base theme's, since a face only ever
+  // hangs off the map's own rim.
+  const tex = cutWallTex(sheets, theme);
+  tex.byTheme = {};
+  for (const name of new Set(regions.map((r) => r.theme))) {
+    if (THEMES[name]) tex.byTheme[name] = cutWallTex(sheets, THEMES[name]).block;
+  }
   return {
     url: cv.toDataURL('image/png'), pass, tall, solids, height, climb, cols, rows, sheets,
     voidColor: sampleVoidColor(sheets.cliffs, theme),
-    tex: cutWallTex(sheets, theme),
-    ...extractGeometry(rgrid),
+    tex,
+    ...extractGeometry(rgrid, regions.length ? themeNameAt : null),
   };
 }
 
@@ -456,8 +486,14 @@ async function prepMap(mapId) {
   // Bake once per map per session — walking back through a door shouldn't
   // re-rasterise a plane and re-cut its wall textures. Everything cached is
   // immutable except `pass`, which movement mutates, so hand out a copy.
-  let baked = _bakeCache[map.id];
-  if (!baked) baked = _bakeCache[map.id] = await bakeMap(map, theme);
+  // The campus is never cached: it is DERIVED from a layout the player edits, so
+  // a bake kept from before a building moved would draw the estate they used to
+  // have. Every other map is a constant.
+  let baked = map.id === 'campus' ? null : _bakeCache[map.id];
+  if (!baked) {
+    baked = await bakeMap(map, theme);
+    if (map.id !== 'campus') _bakeCache[map.id] = baked;
+  }
   baked = { ...baked, pass: baked.pass.map((row) => row.slice()) };
   const spawns = [];
   for (const s of (map.spawns || [])) {
@@ -568,15 +604,14 @@ function mountScene(prep, entry) {
     const el = addProp(artSprite(p.art, 'dv-furn ' + (p.cls || '')), p.x, p.y, p.w || 48);
     if (p.use) D.uses.push({ id: p.use, label: p.label || 'Use', x: p.x, y: p.y, art: p.art, el });
   }
-  // Buildings on the grounds: a facade standing on its footprint, and a door
-  // you simply walk into. No menu, no button — the threshold IS the trigger.
-  for (const b of (map.buildings || [])) {
-    const facade = b.art
-      ? artSprite(b.art)
-      : `<span class="bl-roof"></span><span class="bl-wall"><span class="bl-glyph">${b.glyph || ''}</span><span class="bl-door"></span></span>`;
-    addProp(`<span class="dv-bldg">${facade}<span class="bl-name">${b.name}</span></span>`,
-      b.x + b.w / 2, b.y + b.h, b.px || b.w * TILE);
-    D.portals.push({ x: b.door[0] + 0.5, y: b.door[1] + 0.5, to: b.to, at: null, enter: true });
+  // Facades on the grounds. A facade is a STANDEE over the room it contains —
+  // drawn at the room's own width so it really covers it — and not a door: the
+  // room is part of this plane, so walking in is just walking, and the
+  // see-through rule takes the facade away the moment you step under it. That
+  // is the cutaway, and it costs nothing extra because the town was never left.
+  for (const b of (map.facades || [])) {
+    addProp(`<span class="dv-bldg">${artSprite(b.art)}<span class="bl-name">${b.name}</span></span>`,
+      b.x + b.w / 2, b.y + b.h, b.w * TILE);
   }
   // Doors to other maps (the wall gap is the doorway; this is just the trigger).
   for (const p of (map.portals || [])) D.portals.push({ x: p.x, y: p.y, to: p.to, at: p.at, enter: p.enter });
@@ -732,13 +767,18 @@ export function attachTerrain(parent, baked, opts = {}) {
   }
   // Faces BETWEEN two blocks stay inside the joined wall — skip them so a run
   // of cells reads as one continuous shelf/rock wall with no seams poking out.
-  const bKind = new Map(baked.blocks.map((b) => [b.x + ',' + b.y, b.kind]));
+  /** The texture set for a block: its own region's, else the plane's base. */
+  const setFor = (b) => (b.theme && tex.byTheme && tex.byTheme[b.theme]) || tex.block;
+  const bBlock = new Map(baked.blocks.map((b) => [b.x + ',' + b.y, b]));
   const hOf = (x, y) => {
-    const k = bKind.get(x + ',' + y);
-    return k ? (tex.block[k] || tex.block.B).h : 0;
+    const q = bBlock.get(x + ',' + y);
+    if (!q) return 0;
+    const S = setFor(q);
+    return (S[q.kind] || S.B).h;
   };
   for (const b of baked.blocks) {
-    const K = tex.block[b.kind] || tex.block.B;
+    const S = setFor(b);
+    const K = S[b.kind] || S.B;
     const h = K.h, hT = h / TILE; // height in px and in tile units
     // Painter's depth = the block's NEAR (south) edge, kept strictly BELOW a
     // character standing at that edge (whose z is 10 + y*TILE). A positive

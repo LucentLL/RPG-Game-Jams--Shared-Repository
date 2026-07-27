@@ -13,7 +13,7 @@
  */
 import {
   CAMPUS_W, CAMPUS_H, BUILDING_KINDS, PROP_KINDS, ensureCampus, buildCampusMap,
-  kindWidth, canPlace, placeBuilding, moveBuilding, demolish, fellTree, placeProp, clearProp, doorOf,
+  kindWidth, kindHeight, canPlace, placeBuilding, moveBuilding, demolish, fellTree, placeProp, clearProp, doorOf,
 } from './campus.js';
 import { artSprite } from './art.js';
 import { addGold } from './economy.js';
@@ -52,7 +52,7 @@ export function cellClick(x, y) {
   const p = propAt(g, x, y);
 
   if (tool === 'select') {
-    _notice = b ? `${BUILDING_KINDS[b.kind].glyph} ${BUILDING_KINDS[b.kind].name} — ${kindWidth(b.kind)} tiles wide, door on row ${doorOf(b)[1]}.`
+    _notice = b ? `${BUILDING_KINDS[b.kind].glyph} ${BUILDING_KINDS[b.kind].name} — ${kindWidth(b.kind)}×${kindHeight(b.kind)} tiles, door on row ${doorOf(b)[1]}.`
       : p ? `${PROP_KINDS[p.kind].glyph} ${PROP_KINDS[p.kind].name}.`
       : treeAt(g, x, y) ? '🌳 A tree. The Fell tool clears it for building.'
       : `Open ground · ${x},${y}`;
@@ -101,7 +101,7 @@ export function cellClick(x, y) {
 
 const buildingAt = (g, x, y) => g.campus.buildings.find((b) => {
   const w = kindWidth(b.kind);
-  return x >= b.x && x < b.x + w && y >= b.base - 2 && y < b.base;
+  return x >= b.x && x < b.x + w && y >= b.base - kindHeight(b.kind) && y < b.base;
 });
 const propAt = (g, x, y) => g.campus.props.find((p) => Math.floor(p.x) === x && Math.round(p.y) - 1 === y);
 const treeAt = (g, x, y) => g.campus.trees.some((t) => t[0] === x && t[1] === y);
@@ -149,7 +149,7 @@ export function renderBuild(guild, save) {
   const bldgs = guild.campus.buildings.map((b) => {
     const k = BUILDING_KINDS[b.kind], w = kindWidth(b.kind);
     const sel = moving === b.id ? ' bv-moving' : '';
-    return `<div class="bv-bldg${sel}" style="left:${b.x * cell}px;top:${(b.base - 2) * cell}px;width:${w * cell}px">
+    return `<div class="bv-bldg${sel}" style="left:${b.x * cell}px;top:${(b.base - kindHeight(b.kind)) * cell}px;width:${w * cell}px">
         ${artSprite(k.art, 'bv-art')}<span class="bv-tag">${k.glyph} ${k.name}</span></div>`;
   }).join('');
   const props = guild.campus.props.map((p) => {
