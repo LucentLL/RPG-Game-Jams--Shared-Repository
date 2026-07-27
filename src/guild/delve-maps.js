@@ -253,25 +253,54 @@ export const DELVE_MAPS = {
       { prey: 'badger', x: 19, y: 12 },
     ],
   },
-  //             0123456789012345678
+  // ── The buildings, cut to the size of the buildings ──────────────────────
+  // Every room below stands on a plot the width of the facade that contains it,
+  // give or take a tile — you no longer walk into a shed and find a hall. Where
+  // that leaves too little floor for what a building does, the answer is a
+  // STOREY, not a wider room: a tower is tall, so it gets stairs and stacks its
+  // rooms up the way the art already implies. Template: 9 or 11 wide, five or
+  // seven walkable columns, furniture on rows 3 and 5, row 7 kept clear so the
+  // doorway is never blocked, '+' in a wall row is a stair.
+  //             012345678
   library: {
-    id: 'library', theme: 'interior', name: 'The Library',
+    id: 'library', theme: 'interior', name: 'The Stacks',
     grid: [
-      '##################', //  0
-      '#BBBBBBBBBBBBBBBB#', //  1  ← the back wall of the stacks
-      '#B..............B#', //  2
-      '#B.bbbbb..bbbbb.B#', //  3  ← aisle stacks (waist-high, seen over)
-      '#B..............B#', //  4
-      '#B.bbbbb..bbbbb.B#', //  5
-      '#B..............B#', //  6
-      '#B.bbbbb..bbbbb.B#', //  7
-      '#B..............B#', //  8
-      '#B..............B#', //  9
-      '#BBBBBBBBdBBBBBBB#', // 10  ← south wall; the gap is the door out
-      '##################', // 11
+      '#########', //  0
+      '#BBB+BBB#', //  1  ← the stair up to the reading room
+      '#B.....B#', //  2
+      '#B.bbb.B#', //  3  ← aisle stacks (waist-high, seen over)
+      '#B.....B#', //  4
+      '#B.bbb.B#', //  5
+      '#B.....B#', //  6
+      '#B.....B#', //  7
+      '#BBBdBBB#', //  8  ← the gap is the door out
+      '#########', //  9
     ],
-    entry: [9.5, 9.3],
+    entry: [4.5, 7.3],
     spawns: [],
+    portals: [{ x: 4.5, y: 1.5, to: 'libraryLoft', at: [4.5, 7.3] }],
+  },
+  //             012345678
+  libraryLoft: {
+    id: 'libraryLoft', theme: 'interior', name: 'The Reading Room',
+    grid: [
+      '#########', //  0
+      '#BBBBBBB#', //  1
+      '#B.....B#', //  2
+      '#B.f.f.B#', //  3  ← the reading desks
+      '#B.....B#', //  4
+      '#B.bbb.B#', //  5  ← the shelved wall
+      '#B.....B#', //  6
+      '#B.....B#', //  7
+      '#BBB+BBB#', //  8  ← the stair back down
+      '#########', //  9
+    ],
+    entry: [4.5, 7.3],
+    props: [
+      { art: 'teacherDesk', x: 3.5, y: 4, w: 84 }, { art: 'globe', x: 5.5, y: 4, w: 36 },
+      { art: 'gmPortrait', x: 4.5, y: 2.02, w: 64 },
+    ],
+    portals: [{ x: 4.5, y: 8.5, to: 'library', at: [4.5, 2.3] }],
   },
 
   // ── The grounds ──────────────────────────────────────────────────────────
@@ -314,31 +343,26 @@ export const DELVE_MAPS = {
   // Each is one building you walk THROUGH: an interior wall with a doorway
   // splits it into two rooms, so crossing the gap is crossing a threshold.
   // 19 tiles wide by convention: '#' margin, 'B' wall, 15 cells, 'B', '#'.
-  //             0123456789012345678
+  //             01234567890
   kitchen: {
     id: 'kitchen', theme: 'kitchen', name: 'The Kitchen',
     grid: [
-      '###################', //  0
-      '#BBBBBBBBBBBBBBBBB#', //  1
-      '#B..f........f...B#', //  2  ← the two stone ovens, against the wall
-      '#B.bbbb.....bbbb.B#', //  3  ← counter runs
-      '#B...............B#', //  4
-      '#B.bb.......bb...B#', //  5  ← prep tables
-      '#B...............B#', //  6
-      '#BBBBBBB...BBBBBBB#', //  7  ← the pantry door
-      '#B..f...........fB#', //  8  ← sacks of grain
-      '#B.bbb.....bbb...B#', //  9  ← provision shelves
-      '#B...............B#', // 10
-      '#BBBBBBBBdBBBBBBBB#', // 11  ← out to the yard
-      '###################', // 12
+      '###########', //  0
+      '#BBBBBBBBB#', //  1
+      '#B.......B#', //  2
+      '#B.f...f.B#', //  3  ← the stone oven · the stove
+      '#B.......B#', //  4
+      '#B.bbbbb.B#', //  5  ← the counter run
+      '#B.......B#', //  6
+      '#B.......B#', //  7
+      '#BBBBdBBBB#', //  8  ← out to the yard
+      '###########', //  9
     ],
-    entry: [9.5, 10.3],
+    entry: [5.5, 7.3],
     props: [
-      { art: 'stoneOven', x: 4.5, y: 3, w: 48 }, { art: 'kitchenStove', x: 13.5, y: 3, w: 48 },
-      { art: 'hangingHerbs', x: 8, y: 2.02, w: 96 }, { art: 'hangingMeat', x: 10.6, y: 2.02, w: 52 },
-      { art: 'hangingPot', x: 15.6, y: 2.02, w: 40 },
-      { art: 'breadPile', x: 3.5, y: 6, w: 44 }, { art: 'floppyfish', x: 11.5, y: 6, w: 22 },
-      { art: 'sackPile', x: 4.5, y: 9, w: 78 }, { art: 'provisionBarrel', x: 16.5, y: 9, w: 42 },
+      { art: 'stoneOven', x: 3.5, y: 4, w: 48 }, { art: 'kitchenStove', x: 7.5, y: 4, w: 48 },
+      { art: 'hangingHerbs', x: 5.5, y: 2.02, w: 90 },
+      { art: 'provisionBarrel', x: 2.6, y: 7, w: 40 }, { art: 'breadPile', x: 8.4, y: 7, w: 42 },
     ],
   },
   // ── A SCALE PROBE (2026-07-27) ───────────────────────────────────────────
@@ -373,182 +397,206 @@ export const DELVE_MAPS = {
       { art: 'tools', x: 5.5, y: 2.02, w: 44 },
     ],
   },
-  //             0123456789012345678
+  //             012345678
   apothecary: {
     id: 'apothecary', theme: 'apothecary', name: 'The Apothecary',
     grid: [
-      '###################', //  0
-      '#BBBBBBBBBBBBBBBBB#', //  1
-      '#B...............B#', //  2
-      '#B.ff..f...ff....B#', //  3  ← jar cabinet · the cauldron · the jar counter
-      '#B...............B#', //  4
-      '#B.f...........f.B#', //  5  ← alchemy bench · the dresser
-      '#B...............B#', //  6
-      '#BBBBBB....BBBBBBB#', //  7
-      '#B...............B#', //  8
-      '#B.ff.......ff...B#', //  9  ← specimen jars · the sales counter
-      '#B...............B#', // 10
-      '#BBBBBBBBdBBBBBBBB#', // 11
-      '###################', // 12
+      '#########', //  0
+      '#BBBBBBB#', //  1
+      '#B.....B#', //  2
+      '#B.f.f.B#', //  3  ← the jar cabinet · the cauldron
+      '#B.....B#', //  4
+      '#B.fff.B#', //  5  ← the sales counter
+      '#B.....B#', //  6
+      '#B.....B#', //  7
+      '#BBBdBBB#', //  8
+      '#########', //  9
     ],
-    entry: [9.5, 10.3],
+    entry: [4.5, 7.3],
     props: [
-      { art: 'jarCabinet', x: 4, y: 4, w: 96 },
+      { art: 'jarCabinet', x: 3.5, y: 4, w: 72 },
       // The cauldron is the WORKABLE station: walk up and brew the week's
-      // potion at it, the way the Forge's middle anvil takes a refine.
-      { art: 'cauldronBoil', x: 7.5, y: 4, w: 63, cls: 'apoth-boil', use: 'cauldron', label: 'Work the cauldron' },
-      { art: 'jarCounter', x: 12, y: 4, w: 138 },
-      { art: 'alchBench', x: 3.5, y: 6, w: 102 }, { art: 'apothDresser', x: 15.5, y: 6, w: 90 },
-      { art: 'specimenJars', x: 4, y: 10, w: 144 }, { art: 'potionCounter', x: 13, y: 10, w: 138 },
+      // potion at it, the way the Forge's anvil takes a refine.
+      { art: 'cauldronBoil', x: 5.5, y: 4, w: 60, cls: 'apoth-boil', use: 'cauldron', label: 'Work the cauldron' },
+      { art: 'potionCounter', x: 4.5, y: 6, w: 126 },
       // Wall and floor dressing — no grid cell, so nothing here blocks a walk.
-      { art: 'recipeBanner', x: 9.5, y: 2.04, w: 120 },
-      { art: 'herbBasket', x: 6.2, y: 6.9, w: 40 }, { art: 'herbBasket', x: 11.4, y: 8.9, w: 40 },
-      { art: 'potionGreen', x: 8.6, y: 9.9, w: 22 }, { art: 'potionRed', x: 9.1, y: 9.95, w: 22 },
-      { art: 'cauldronGreen', x: 14.4, y: 3.98, w: 52 },
+      { art: 'recipeBanner', x: 4.5, y: 2.04, w: 96 },
+      { art: 'herbBasket', x: 2.6, y: 7, w: 36 }, { art: 'potionGreen', x: 6.4, y: 6.95, w: 20 },
     ],
   },
-  //             0123456789012345678
+  //             01234567890
   armory: {
     id: 'armory', theme: 'armory', name: 'The Armory',
     grid: [
-      '###################', //  0
-      '#BBBBBBBBBBBBBBBBB#', //  1
-      '#B...............B#', //  2
-      '#B.bbbbb...bbbbb.B#', //  3  ← the racks along both walls
-      '#B...............B#', //  4
-      '#B...............B#', //  5
-      '#B.ff..........f.B#', //  6  ← the issue counter (two cells) · armour stand
-      '#BBBBBBB...BBBBBBB#', //  7  ← through to the vault
-      '#B...............B#', //  8
-      '#B..bb..f..bb..f.B#', //  9  ← crated stock
-      '#B...............B#', // 10
-      '#BBBBBBBBdBBBBBBBB#', // 11
-      '###################', // 12
+      '###########', //  0
+      '#BBBBBBBBB#', //  1
+      '#B.......B#', //  2
+      '#B.f...f.B#', //  3  ← the armour stands
+      '#B.......B#', //  4
+      '#B.bbbbb.B#', //  5  ← the racks
+      '#B.......B#', //  6
+      '#B.......B#', //  7
+      '#BBBBdBBBB#', //  8
+      '###########', //  9
     ],
-    entry: [9.5, 10.3],
+    entry: [5.5, 7.3],
     props: [
-      { art: 'issueCounter', x: 4.0, y: 7, w: 130 }, { art: 'armorPlate', x: 15.5, y: 7, w: 39 },
-      { art: 'armorKnight', x: 9.5, y: 2.02, w: 45 }, { art: 'armorSteel', x: 7, y: 2.02, w: 45 },
-      { art: 'practiceTarget', x: 12, y: 2.02, w: 39 },
-      { art: 'footlocker', x: 8.5, y: 10, w: 57 }, { art: 'storeBarrel', x: 15.5, y: 10, w: 36 },
-      { art: 'gearCubbies', x: 3.6, y: 11.02, w: 132 },
+      { art: 'armorKnight', x: 3.5, y: 4, w: 42 }, { art: 'armorSteel', x: 7.5, y: 4, w: 42 },
+      { art: 'gearCubbies', x: 5.5, y: 2.02, w: 120 },
+      { art: 'storeBarrel', x: 2.6, y: 7, w: 34 }, { art: 'footlocker', x: 8.4, y: 7, w: 50 },
     ],
   },
-  //             0123456789012345678
+  //             01234567890
   dormitory: {
     id: 'dormitory', theme: 'dormitory', name: 'The Dormitory',
     grid: [
-      '###################', //  0
-      '#BBBBBBBBBBBBBBBBB#', //  1
-      '#B...............B#', //  2
-      '#B.f.f.f...f.f.f.B#', //  3  ← the bunks, two rows of three
-      '#B...............B#', //  4
-      '#BBBBBB.....BBBBBB#', //  5  ← through to the second bunkroom
-      '#B...............B#', //  6
-      '#B.f.f.f...f.f.f.B#', //  7
-      '#B...............B#', //  8
-      '#BBBBBBBBdBBBBBBBB#', //  9
-      '###################', // 10
+      '###########', //  0
+      '#BBBBBBBBB#', //  1
+      '#B.......B#', //  2
+      '#B.f.f.f.B#', //  3  ← the bunks, two rows of three
+      '#B.......B#', //  4
+      '#B.f.f.f.B#', //  5
+      '#B.......B#', //  6
+      '#B.......B#', //  7
+      '#BBBBdBBBB#', //  8
+      '###########', //  9
     ],
-    entry: [9.5, 8.3],
+    entry: [5.5, 7.3],
     props: [
-      { art: 'bed', x: 3.5, y: 4, w: 44 }, { art: 'bunkIron', x: 5.5, y: 4, w: 44 }, { art: 'bed', x: 7.5, y: 4, w: 44 },
-      { art: 'bunkPosted', x: 11.5, y: 4, w: 48 }, { art: 'bunkIron', x: 13.5, y: 4, w: 44 }, { art: 'bed', x: 15.5, y: 4, w: 44 },
-      { art: 'bunkIron', x: 3.5, y: 8, w: 44 }, { art: 'bed', x: 5.5, y: 8, w: 44 }, { art: 'bunkPosted', x: 7.5, y: 8, w: 48 },
-      { art: 'bed', x: 11.5, y: 8, w: 44 }, { art: 'bunkIron', x: 13.5, y: 8, w: 44 }, { art: 'bed', x: 15.5, y: 8, w: 44 },
-      { art: 'wardrobe', x: 9.5, y: 2.02, w: 90 }, { art: 'washstand', x: 4.5, y: 6.02, w: 90 },
-      { art: 'footlocker', x: 4.5, y: 2.02, w: 52 }, { art: 'bedCandle', x: 14.5, y: 6.02, w: 20 },
+      { art: 'bed', x: 3.5, y: 4, w: 42 }, { art: 'bunkIron', x: 5.5, y: 4, w: 42 }, { art: 'bed', x: 7.5, y: 4, w: 42 },
+      { art: 'bunkPosted', x: 3.5, y: 6, w: 44 }, { art: 'bed', x: 5.5, y: 6, w: 42 }, { art: 'bunkIron', x: 7.5, y: 6, w: 42 },
+      { art: 'wardrobe', x: 5.5, y: 2.02, w: 80 }, { art: 'bedCandle', x: 8.4, y: 7, w: 18 },
     ],
   },
-  //             0123456789012345678
+  // THE ACADEMY IS A TOWER, so it is three rooms stacked, not one wide one —
+  // the facade was always ten tiles tall on a five-tile base and the interior
+  // never used the height. A storey per FORM: you climb as the students do, and
+  // each floor is small because a class is small. The stair is a '+' in the wall
+  // row, the same cell the Great Hall has always used for its back stair.
+  //             012345678
   classroom: {
-    id: 'classroom', theme: 'classroom', name: 'The Classroom',
+    id: 'classroom', theme: 'classroom', name: 'The Classroom · First Form',
     grid: [
-      '###################', //  0
-      '#BBBBBBBBBBBBBBBBB#', //  1
-      '#B......ff.......B#', //  2  ← the lectern
-      '#B...............B#', //  3
-      '#B.ff..ff..ff....B#', //  4  ← rows of desks
-      '#B...............B#', //  5
-      '#B.ff..ff..ff....B#', //  6
-      '#B...............B#', //  7
-      '#BBBBBBB...BBBBBBB#', //  8  ← through to the study nook
-      '#B...............B#', //  9
-      '#B.ff........f...B#', // 10  ← the master's desk (two cells) · the abacus
-      '#BBBBBBBBdBBBBBBBB#', // 11
-      '###################', // 12
+      '#########', //  0
+      '#BBB+BBB#', //  1  ← the stair up to the Second Form
+      '#B.....B#', //  2
+      '#B.f...B#', //  3  ← the lectern, clear of the stair's line
+      '#B.....B#', //  4
+      '#B.f.f.B#', //  5  ← the First Form's desks
+      '#B.....B#', //  6
+      '#B.....B#', //  7
+      '#BBBdBBB#', //  8
+      '#########', //  9
     ],
-    entry: [9.5, 10.3],
+    entry: [4.5, 7.3],
     props: [
-      { art: 'lectern', x: 9, y: 3, w: 110 },
-      { art: 'lessonBoard', x: 5, y: 2.02, w: 96 }, { art: 'globe', x: 12.5, y: 2.02, w: 42 },
-      { art: 'classDesk', x: 3.5, y: 5, w: 48 }, { art: 'classDesk', x: 4.5, y: 5, w: 48 },
-      { art: 'classDesk', x: 7.5, y: 5, w: 48 }, { art: 'classDesk', x: 8.5, y: 5, w: 48 },
-      { art: 'classDesk', x: 11.5, y: 5, w: 48 }, { art: 'classDesk', x: 12.5, y: 5, w: 48 },
-      { art: 'classDesk', x: 3.5, y: 7, w: 48 }, { art: 'classDesk', x: 4.5, y: 7, w: 48 },
-      { art: 'classDesk', x: 7.5, y: 7, w: 48 }, { art: 'classDesk', x: 8.5, y: 7, w: 48 },
-      { art: 'classDesk', x: 11.5, y: 7, w: 48 }, { art: 'classDesk', x: 12.5, y: 7, w: 48 },
-      { art: 'teacherDesk', x: 4, y: 11, w: 120 }, { art: 'abacus', x: 13.5, y: 11, w: 48 },
-      { art: 'classBench', x: 15.5, y: 10.02, w: 60 },
+      { art: 'lectern', x: 3.5, y: 4, w: 78 },
+      { art: 'classDesk', x: 3.5, y: 6, w: 42 }, { art: 'classDesk', x: 5.5, y: 6, w: 42 },
+      { art: 'lessonBoard', x: 2.6, y: 2.02, w: 66 },
+    ],
+    portals: [{ x: 4.5, y: 1.5, to: 'classroom2', at: [4.5, 7.3] }],
+  },
+  //             012345678
+  classroom2: {
+    id: 'classroom2', theme: 'classroom', name: 'The Classroom · Second Form',
+    grid: [
+      '#########', //  0
+      '#BBB+BBB#', //  1  ← up to the Third Form
+      '#B.....B#', //  2
+      '#B.f...B#', //  3
+      '#B.....B#', //  4
+      '#B.f.f.B#', //  5
+      '#B.....B#', //  6
+      '#B.....B#', //  7
+      '#BBB+BBB#', //  8  ← down to the First Form
+      '#########', //  9
+    ],
+    entry: [4.5, 7.3],
+    props: [
+      { art: 'lectern', x: 3.5, y: 4, w: 78 },
+      { art: 'classDesk', x: 3.5, y: 6, w: 42 }, { art: 'classDesk', x: 5.5, y: 6, w: 42 },
+      { art: 'globe', x: 6.4, y: 2.02, w: 36 },
+    ],
+    portals: [
+      { x: 4.5, y: 1.5, to: 'classroom3', at: [4.5, 7.3] },
+      { x: 4.5, y: 8.5, to: 'classroom', at: [4.5, 2.3] },
     ],
   },
-  //             0123456789012345678
+  //             012345678
+  classroom3: {
+    id: 'classroom3', theme: 'classroom', name: 'The Classroom · Third Form',
+    grid: [
+      '#########', //  0
+      '#BBBBBBB#', //  1
+      '#B.....B#', //  2
+      '#B.f...B#', //  3  ← the master of the senior form
+      '#B.....B#', //  4
+      '#B.f.f.B#', //  5
+      '#B.....B#', //  6
+      '#B.....B#', //  7
+      '#BBB+BBB#', //  8  ← down to the Second Form
+      '#########', //  9
+    ],
+    entry: [4.5, 7.3],
+    props: [
+      { art: 'teacherDesk', x: 3.5, y: 4, w: 90 },
+      { art: 'classDesk', x: 3.5, y: 6, w: 42 }, { art: 'classDesk', x: 5.5, y: 6, w: 42 },
+      { art: 'abacus', x: 6.4, y: 7, w: 38 },
+    ],
+    portals: [{ x: 4.5, y: 8.5, to: 'classroom2', at: [4.5, 2.3] }],
+  },
+  //             012345678
   guildhall: {
     id: 'guildhall', theme: 'guildhall', name: 'The Great Hall',
     grid: [
-      '###################', //  0
-      '#BBBBBBBB+BBBBBBBB#', //  1  ← the stair up to the Guildmaster's study
-      '#B...............B#', //  2
-      '#B.bb.......bb...B#', //  3  ← the long tables
-      '#B...............B#', //  4
-      '#B.bb.......bb...B#', //  5
-      '#B...............B#', //  6
-      '#B.f........ff.f.B#', //  7  ← the banner · the plans table · the bookshelf
-      '#B...............B#', //  8
-      '#BBBBBBBBdBBBBBBBB#', //  9
-      '###################', // 10
+      '#########', //  0
+      '#BBB+BBB#', //  1  ← the stair up to the Guildmaster's study
+      '#B.....B#', //  2
+      '#B.f.f.B#', //  3  ← the bookshelf · the banner
+      '#B.....B#', //  4
+      '#B..f..B#', //  5  ← the plans table
+      '#B.....B#', //  6
+      '#B.....B#', //  7
+      '#BBBdBBB#', //  8
+      '#########', //  9
     ],
-    entry: [9.5, 8.3],
+    entry: [4.5, 7.3],
     props: [
-      { art: 'gmBanner', x: 3.5, y: 8, w: 45 }, { art: 'gmBookshelf', x: 15.5, y: 8, w: 100 },
+      { art: 'gmBookshelf', x: 3.5, y: 4, w: 84 }, { art: 'gmBanner', x: 5.5, y: 4, w: 40 },
       // The plans table. Reading what is spread on it opens the Build tab — the
       // estate's only door, and the one place the drawing and the ground you
       // walk are the same object (hall.js readEstatePlan → campus.js).
-      { art: 'gmDesk', x: 13, y: 8, w: 130, use: 'estatePlan', label: 'Read the estate plans' },
-      { art: 'gmLedgers', x: 12.3, y: 8.12, w: 40 },
-      { art: 'gmPortrait', x: 6.5, y: 2.02, w: 78 }, { art: 'gmPortrait', x: 12.5, y: 2.02, w: 78 },
-      { art: 'gmBust', x: 4.5, y: 2.02, w: 36 }, { art: 'gmBust', x: 14.5, y: 2.02, w: 36 },
+      { art: 'gmDesk', x: 4.5, y: 6, w: 110, use: 'estatePlan', label: 'Read the estate plans' },
+      { art: 'gmLedgers', x: 4.0, y: 6.12, w: 34 },
+      { art: 'gmPortrait', x: 2.6, y: 2.02, w: 60 }, { art: 'gmBust', x: 6.4, y: 2.02, w: 30 },
     ],
-    portals: [{ x: 9.5, y: 1.5, to: 'guildmaster', at: [9.5, 8.3] }],
+    portals: [{ x: 4.5, y: 1.5, to: 'guildmaster', at: [4.5, 7.3] }],
   },
-  //             0123456789012345678
+  //             012345678
   guildmaster: {
     id: 'guildmaster', theme: 'guildmaster', name: "The Guildmaster's Study",
     grid: [
-      '###################', //  0
-      '#BBBBBBBBBBBBBBBBB#', //  1
-      '#B...............B#', //  2
-      '#B.ff..ff...ff...B#', //  3  ← shelved walls flanking the great desk
-      '#B...............B#', //  4
-      '#B......f........B#', //  5  ← the chair
-      '#B...............B#', //  6
-      '#B.f...........f.B#', //  7  ← the strongbox · the banner
-      '#B...............B#', //  8
-      '#BBBBBdBB+BBBBBBBB#', //  9  ← out · and the stair back down
-      '###################', // 10
+      '#########', //  0
+      '#BBBBBBB#', //  1
+      '#B.....B#', //  2
+      '#B.fff.B#', //  3  ← the great desk
+      '#B.....B#', //  4
+      '#B.f...B#', //  5  ← the chair
+      '#B.....B#', //  6
+      '#B.....B#', //  7
+      '#BBB+BBB#', //  8  ← the stair back down; the hall below is the way out
+      '#########', //  9
     ],
-    entry: [6.5, 8.3],
+    entry: [4.5, 7.3],
     props: [
-      { art: 'gmBookshelf', x: 4, y: 4, w: 96 }, { art: 'gmBookshelf', x: 13, y: 4, w: 96 },
       // The great desk keeps its own copy of the plans — the study is his room,
       // and the hall's table should not be the only place he can think.
-      { art: 'gmDesk', x: 8, y: 4, w: 130, use: 'estatePlan', label: 'Read the estate plans' },
-      { art: 'gmLedgers', x: 7.2, y: 4.12, w: 40 },
-      { art: 'gmThrone', x: 8.5, y: 6, w: 36 },
-      { art: 'gmStrongbox', x: 3.5, y: 8, w: 66 }, { art: 'gmBanner', x: 15.5, y: 8, w: 45 },
-      { art: 'gmPortrait', x: 11.5, y: 2.02, w: 78 }, { art: 'gmBust', x: 5.5, y: 2.02, w: 36 },
+      { art: 'gmDesk', x: 4.5, y: 4, w: 120, use: 'estatePlan', label: 'Read the estate plans' },
+      { art: 'gmLedgers', x: 3.7, y: 4.12, w: 34 },
+      { art: 'gmThrone', x: 3.5, y: 6, w: 32 },
+      { art: 'gmPortrait', x: 2.6, y: 2.02, w: 60 }, { art: 'gmBust', x: 6.4, y: 2.02, w: 30 },
     ],
-    portals: [{ x: 9.5, y: 9.5, to: 'guildhall', at: [9.5, 2.3] }],
+    portals: [{ x: 4.5, y: 8.5, to: 'guildhall', at: [4.5, 2.3] }],
   },
 };
 

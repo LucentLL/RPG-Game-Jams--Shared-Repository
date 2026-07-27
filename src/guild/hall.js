@@ -864,7 +864,12 @@ const INTERIOR_FOLK = {
   forge: (r) => r.filter((h) => h.assignment.type === 'forge'),
   armory: (r) => r.filter((h) => h.assignment.type === 'enchant'),
   apothecary: (r) => r.filter((h) => h.assignment.type === 'brew'),
+  // The Academy's three forms and the Library's loft: an upper storey is a room
+  // like any other, so whoever belongs to that trade is up there too.
   classroom: (r) => r.filter((h) => h.assignment.type === 'train'),
+  classroom2: (r) => r.filter((h) => h.assignment.type === 'train'),
+  classroom3: (r) => r.filter((h) => h.assignment.type === 'train'),
+  libraryLoft: (r) => r.filter((h) => h.assignment.type === 'study'),
   dormitory: (r) => r.filter((h) => h.condition.injury),
 };
 /**
