@@ -409,24 +409,37 @@
   background: rgba(8,6,4,0.82); border: 1px solid rgba(0,0,0,0.7); border-radius: 2px;
 }
 .fp-hp i { display: block; height: 100%; width: 100%; background: linear-gradient(#e0604a, #a3281c); }
+/* Combat numbers live in SCREEN space, on their own layer. Parented to the
+   creature they were sized in WORLD px — and every fight is fought at about a
+   tile, where the billboard fills the view, so "−9" arrived the height of the
+   corridor. They also died with their owner: `slay` removes the creature's
+   element in the same task that spawned the number, so the killing blow was
+   destroyed before a frame was painted. At a 1.25-tile reach inside a ±72°
+   cone, whatever you hit is near the middle of the screen anyway. */
+.fp-floats { position: absolute; inset: 0; z-index: 320; pointer-events: none; }
 .fp-float {
-  position: absolute; left: 50%; top: 4%;
-  font-family: 'Cinzel', serif; font-weight: 700; font-size: 190px; line-height: 1;
+  position: absolute; left: calc(50% + var(--fx, 0%)); top: 30%;
+  font-family: 'Cinzel', serif; font-weight: 700; line-height: 1;
+  font-size: clamp(22px, 3.4vmin, 54px);
   white-space: nowrap; pointer-events: none;
   animation: fp-rise 900ms ease-out forwards;
 }
-.fp-float.fp-hit  { color: #ffe9a8; text-shadow: 0 0 26px rgba(0,0,0,0.95), 0 5px 0 rgba(0,0,0,0.8); }
-.fp-float.fp-miss { color: #9aa4b4; font-size: 130px; text-shadow: 0 0 22px rgba(0,0,0,0.95); }
-/* The one that lands on YOU is screen-space, not world-space — it is not
-   happening somewhere in the room, it is happening to you. */
-.fp-float.fp-hurt {
-  left: 50%; top: 34%; font-size: 3.4em; color: #ff8a72;
-  text-shadow: 0 0 24px rgba(0,0,0,0.9), 0 3px 0 rgba(0,0,0,0.85);
-}
+.fp-float.fp-hit   { color: #ffe9a8; font-size: clamp(28px, 4.6vmin, 74px); text-shadow: 0 0 22px rgba(0,0,0,0.95), 0 3px 0 rgba(0,0,0,0.85); }
+.fp-float.fp-miss  { color: #9aa4b4; text-shadow: 0 0 18px rgba(0,0,0,0.95); }
+.fp-float.fp-parry { color: #a8c8ea; text-shadow: 0 0 18px rgba(0,0,0,0.95); }
+/* The one that lands on YOU sits lower and reads red — it is not happening
+   somewhere in the room, it is happening to you. */
+.fp-float.fp-hurt { top: 46%; color: #ff8a72; font-size: clamp(28px, 4.6vmin, 74px); text-shadow: 0 0 22px rgba(0,0,0,0.9), 0 3px 0 rgba(0,0,0,0.85); }
+.fp-float.fp-heal { top: 46%; color: #9be8ad; text-shadow: 0 0 22px rgba(0,0,0,0.9); }
 @keyframes fp-rise {
   0%   { transform: translate(-50%, 0) scale(0.7); opacity: 0; }
-  22%  { transform: translate(-50%, -28%) scale(1.1); opacity: 1; }
-  100% { transform: translate(-50%, -120%) scale(1); opacity: 0; }
+  22%  { transform: translate(-50%, -30%) scale(1.1); opacity: 1; }
+  100% { transform: translate(-50%, -150%) scale(1); opacity: 0; }
+}
+/* Shield up: pulled in front of you, and you cannot swing from behind it. */
+.fp-hand-shield.fp-guarding {
+  transform: rotate(-2deg) translate(24%, -16%) scale(1.12);
+  transition: transform 120ms ease-out;
 }
 /* Your own condition. Top-left under the bar: the bottom corners are hands and
    the top-right is the chart. `cap` is the ceiling this delve has left you —
@@ -616,5 +629,5 @@
 }
 .fp-pad button.fp-drink b { font-size: .72em; line-height: 1; }
 .fp-pad button.fp-drink.fp-dry { opacity: .42; }
-.fp-float.fp-heal { left: 50%; top: 34%; font-size: 3.4em; color: #9be8ad; text-shadow: 0 0 24px rgba(0,0,0,0.9); }
+
 @media (hover: hover) and (pointer: fine) { .fp-pad { opacity: 0.72; } .fp-pad:hover { opacity: 1; } }
