@@ -24,7 +24,7 @@
  */
 import { TILES_BASE, ART_BASE } from '../config/assets.js';
 import { preyById } from './locales.js';
-import { THEMES, DECALS, ORE_KINDS, mapForLocale, validateMap } from './delve-maps.js';
+import { THEMES, DECALS, ORE_KINDS, oreKindAt, mapForLocale, validateMap } from './delve-maps.js';
 import { artSprite } from './art.js';
 
 const TILE = 48;
@@ -906,8 +906,7 @@ function addPropCanvas(decalName, sheets, x, y) {
 }
 
 function addOre(x, y, oresImg) {
-  const kinds = Object.keys(ORE_KINDS);
-  const kind = kinds[hash2(x, y) % kinds.length];
+  const kind = oreKindAt(x, y);
   const d = DECALS[ORE_KINDS[kind].decal];
   const cv = document.createElement('canvas');
   cv.width = d.w; cv.height = d.h;

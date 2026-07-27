@@ -260,6 +260,55 @@ export function itemSprite(item, cls = '', style = '') {
 /** Does this item have laid-weapon art? (armor and unknown kinds do not) */
 export function hasItemSprite(item) { return !!(item && ITEM_WEAPON[item.kind]); }
 
+// ─── Gear icons: the piece seen BIG ─────────────────────────────────────────
+// The compositor's weapon cells are ~10 source pixels of blade (measured: the
+// sword in sword1.png r0c1 has an 8×11 alpha box). That is right for a 48px
+// battle sprite and useless for anything held up close — the first-person
+// delve wants a weapon that fills a corner of the screen. These are the item
+// ICON sheets from the same art family: 32px cells, one weapon each, drawn
+// hilt-at-lower-left so a mirrored copy reads as a blade rising into frame.
+const GEAR_SHEETS = {
+  swords:  { file: 'gear_swords32.png',  cols: 13 },  // mswords_icon32
+  axes:    { file: 'gear_axes32.png',    cols: 13 },  // mspears_icon32 — 0..6 spears, 7..12 axes
+  hammers: { file: 'gear_hammers32.png', cols: 16 },  // icons_hammers_32_fc
+  bows:    { file: 'gear_bows32.png',    cols: 16 },  // marrows_icon32 — 3..6 bows, 7..9 crossbows
+  shields: { file: 'gear_shields32.png', cols: 15 },  // mshields_icon32 — two rows of 15
+};
+/**
+ * Item kind → icon sheet + the cell each MATERIAL wears, so a mithril blade
+ * reads finer than an iron one (the same idea as MAT_COLOR, one level up).
+ *
+ * `armor` resolves to a SHIELD: the body slot is the guard kit, and a shield
+ * is what a guard kit looks like from behind your own arm. It is the only way
+ * the off-hand has anything to show — there is no shield slot (EQUIP_SLOTS).
+ */
+const GEAR_ICON = {
+  sword:  { sheet: 'swords',  by: { leather: 0,  iron: 3,  steel: 9,  mithril: 11 } },
+  dagger: { sheet: 'swords',  by: { leather: 0,  iron: 0,  steel: 2,  mithril: 2 } },
+  axe:    { sheet: 'axes',    by: { leather: 12, iron: 12, steel: 11, mithril: 8 } },
+  mace:   { sheet: 'hammers', by: { leather: 2,  iron: 0,  steel: 6,  mithril: 14 } },
+  hammer: { sheet: 'hammers', by: { leather: 2,  iron: 0,  steel: 6,  mithril: 14 } },
+  bow:    { sheet: 'bows',    by: { leather: 4,  iron: 4,  steel: 5,  mithril: 6 } },
+  armor:  { sheet: 'shields', by: { leather: 0,  iron: 13, steel: 10, mithril: 24 } },
+};
+/** Icon cell size, in sheet pixels. Every sheet above is on this grid. */
+export const GEAR_ICON_SIZE = 32;
+
+/**
+ * Where a piece of gear's big icon lives — enough for a caller to `drawImage`
+ * it onto a canvas of its own. Null for a kind with no sheet.
+ * @param {string} kind @param {string} material
+ * @returns {?{url:string, sx:number, sy:number, s:number}}
+ */
+export function gearIcon(kind, material) {
+  const g = GEAR_ICON[kind];
+  if (!g) return null;
+  const sh = GEAR_SHEETS[g.sheet];
+  const i = g.by[material] != null ? g.by[material] : g.by.iron;
+  const S = GEAR_ICON_SIZE;
+  return { url: ART_BASE + sh.file, sx: (i % sh.cols) * S, sy: Math.floor(i / sh.cols) * S, s: S };
+}
+
 /**
  * A cropped sheet sprite as an HTML string. Size it from CSS/inline style
  * (width + the intrinsic aspect-ratio keeps it true); it scales pixel-crisp.

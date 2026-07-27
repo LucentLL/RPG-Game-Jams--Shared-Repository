@@ -537,6 +537,16 @@ function setPlayHunt(localeId, preyId, mode) {
  * hunt pays: gold, rep, meat, pelt, loot, field insight). Losing a bout ends
  * the delve. All guild mutations stay HERE, passed to delve.js as hooks.
  */
+/** What a member is wearing, flattened to the two facts the art needs. */
+function gearOf(h) {
+  const out = {};
+  for (const slot of EQUIP_SLOTS) {
+    const it = h.equipped && h.equipped[slot] ? findItem(guild.inventory, h.equipped[slot]) : null;
+    if (it) out[slot] = { kind: it.kind, material: it.material, name: itemLabel(it) };
+  }
+  return out;
+}
+
 /**
  * March into a locale on foot. `fp` picks the VIEW — the top-down walk or the
  * first-person one. Both openers take the same hooks object built below, so the
@@ -558,6 +568,10 @@ async function exploreLocale(localeId, fp) {
   try {
     opened = await (fp ? openDelveFp : openDelve)(localeId, h, {
       locale,
+      // What the delver is visibly carrying. The first-person view holds this
+      // up in front of you; the top-down view ignores it (you see the sprite's
+      // own composited weapon there). Kind + material is all the art needs.
+      gear: gearOf(h),
       fight: async (preyId) => {
         const prey = preyById(preyId); if (!prey) return null;
         const bout = await playHuntBout(h, prey, 1, { mode: 'action', items: withdrawPotions() });
@@ -2784,7 +2798,7 @@ function wildsRoom() {
     // A charted locale can be WALKED — the Delve (delve.js): live 2.5D exploration.
     const delveRow = hasDelveMap(open.id)
       ? `<div class="tourney-lens quest-lens"><button class="tourney-play" ${hCanMarch ? '' : 'disabled'} onclick="__guild.exploreLocale('${open.id}')">⛏ ${hCanMarch ? `Walk ${open.name} — take ${subject.name.split(' ')[0]} in on foot` : `${subject.name.split(' ')[0]} can't march right now`}</button>${hCanMarch ? `<button class="tourney-play" onclick="__guild.exploreLocale('${open.id}', true)">👁 Descend in first person</button>` : ''}</div>
-        <div class="hint" style="text-align:left;padding:0 2px 6px">The area is charted. Explore it live: move with WASD or the stick, close with a creature to fight it for real, bump a vein to mine it. Entering costs ${QUEST_STAMINA} stamina and kills pay real spoils on the spot (repeat marches the same week find thinner pickings) — losing a bout sends ${subject.name.split(' ')[0]} home.</div>`
+        <div class="hint" style="text-align:left;padding:0 2px 6px">The area is charted, and there are two ways to walk it. <b>From above</b>: move with WASD or the stick, close with a creature to fight it, bump a vein to mine it. <b>First person</b>: WASD steps and sidesteps, ←/→ turn, <b>Space</b> or a click strikes at what is in front of you — a creature within reach, or the seam in the wall. Entering costs ${QUEST_STAMINA} stamina and kills pay real spoils on the spot (repeat marches the same week find thinner pickings) — losing a bout sends ${subject.name.split(' ')[0]} home.</div>`
       : '';
     preyPanel = `<div class="plan-title">${open.glyph} ${open.name} <span class="dim" style="font-weight:400;text-transform:none">— ${open.biome}</span></div>
       <div class="opt-list">${rows}</div>${delveRow}${lensBar}`;
