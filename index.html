@@ -210,6 +210,12 @@
       <button class="exec-btn" id="execBtn" onclick="executeTurn()">⚗ EXECUTE TURN</button>
       <button class="exec-btn btl-forfeit" id="tacAutoBtn" style="display:none" onclick="toggleTacticalAuto()">🤖 Watch</button>
       <button class="exec-btn btl-forfeit" id="btlForfeitBtn" style="display:none" onclick="forfeitTactical()">↩ Forfeit Match</button>
+      <!-- The same battle, from inside it. View only — every rule stays on the board. -->
+      <span class="tfp-btns" id="tacViewBtns" style="display:none">
+        <button id="tacViewBtn" onclick="tacViewToggle()" title="Stand in the fighter">👁 Board</button>
+        <button id="tacPovBtn" onclick="tacViewPov()" style="display:none" title="First person / over the shoulder">🙶 1st</button>
+        <button id="tacWhoBtn" onclick="tacViewWho()" style="display:none" title="Whose eyes">↔ Eyes</button>
+      </span>
     </div>
   </div>
   <div class="log" id="log"></div>
