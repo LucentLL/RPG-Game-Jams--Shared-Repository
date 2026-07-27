@@ -279,6 +279,10 @@ export const WORN = {
   // stand frame; 15-17 are the cells that show the face.
   shieldRest: 16,
   shieldBrace: [15, 16, 17],
+  // A BOW is blank everywhere but 15-18 — the nock/draw/loose block. It has no
+  // idle and no slash, which is why a bow drawn from the ordinary frames came
+  // out an empty canvas and the delver appeared to be carrying nothing.
+  bowDraw: [15, 16, 17, 18],
 };
 
 /** The sheet URL for a weapon stem + colour variant. */

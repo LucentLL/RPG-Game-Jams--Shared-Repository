@@ -409,6 +409,19 @@
   background: rgba(8,6,4,0.82); border: 1px solid rgba(0,0,0,0.7); border-radius: 2px;
 }
 .fp-hp i { display: block; height: 100%; width: 100%; background: linear-gradient(#e0604a, #a3281c); }
+/* A creature drawing back to strike. The tell has to be legible from across a
+   corridor and unmistakable up close — this is the window Shift exists for.
+   The wrapper's transform is rewritten every frame by place(), so the pulse
+   goes on the CANVAS, which nothing else touches. */
+.fp-creature.fp-winding canvas { animation: fp-wind 430ms ease-in forwards; }
+@keyframes fp-wind {
+  0%   { transform: scale(1, 1) translateY(0); filter: none; }
+  60%  { transform: scale(1.1, 0.94) translateY(-3%); filter: brightness(1.35) saturate(1.3); }
+  100% { transform: scale(0.94, 1.08) translateY(1%); filter: brightness(1.5) saturate(1.4); }
+}
+/* Dead. The fold-down itself is in the transform place() writes; this is only
+   what a body looks like once it is one. */
+.fp-corpse { filter: grayscale(0.55) brightness(0.62) !important; }
 /* Combat numbers live in SCREEN space, on their own layer. Parented to the
    creature they were sized in WORLD px — and every fight is fought at about a
    tile, where the billboard fills the view, so "−9" arrived the height of the
@@ -513,27 +526,34 @@
    HEIGHT is the given and width follows the art's own aspect-ratio (set inline
    from the sheet crop): fixing both squares a 19×34 sword into a 206×206 box
    and stretches it into something that is not the weapon at all. */
+/* Sized by the SWING, occupied by the REST.
+   Each hand is cropped to the UNION of the frames it plays, so nothing shifts
+   as it animates — but that union is set by the big slash cells, and the stand
+   frame is a small part of it (a sword measures 8×11 inside a 19×34 box). The
+   box must therefore be large enough that the SMALL pose still reads, which
+   makes the swing sweep right across the view. That is the right way round: a
+   weapon at rest sits at the corner of your eye, a weapon swung fills it. */
+/* Size and position are written by fitHands() in delve-fp.js, from the measured
+   REST frame — no sheet's art sits in the same place inside its cell, so this
+   cannot be a static rule. See the note there. */
 .fp-hand {
-  position: absolute; bottom: -14%;
-  height: clamp(120px, min(48vmin, 38vw), 560px); width: auto;
+  position: absolute;
   image-rendering: pixelated;
   filter: drop-shadow(-8px 10px 12px rgba(0,0,0,0.78));
   opacity: 0;                              /* until the sheet is measured */
 }
 .fp-hand.fp-ready { opacity: 1; }
 .fp-hand canvas { width: 100%; height: 100%; display: block; image-rendering: pixelated; }
-/* The icons are drawn hilt-at-lower-left; mirrored, the hilt falls into the
-   near corner and the blade rises across the view, which is what a held weapon
-   looks like from behind it. The MIRROR is on the canvas so the swing's
-   rotation on the wrapper still reads clockwise. */
-.fp-hand-weapon, .fp-hand-pick { right: -2%; transform: rotate(-6deg); }
-.fp-hand-weapon canvas, .fp-hand-pick canvas { transform: scaleX(-1); }
-/* The shield is broad rather than long, so it takes its own (shorter) height —
-   at the weapon's it would be half the screen wide. */
-.fp-hand-shield {
-  left: -1%; bottom: -12%; transform: rotate(7deg);
-  height: clamp(90px, min(34vmin, 27vw), 400px);
-}
+/* NO mirror. This is the compositor's NORTH row — the wielder seen from behind,
+   which is where a first-person camera stands — and in that row the weapon
+   already sits right of centre and the shield left of it, because that is where
+   the hands are when you are looking at someone's back. Flipping it would put
+   the sword in the wrong hand. (The 32px item icons this replaced were drawn
+   hilt-at-lower-left and DID need the flip; the rule is art-specific, not a
+   general truth about viewmodels.) */
+/* Only the tilt lives here — fitHands() owns size, left/right and bottom. */
+.fp-hand-weapon, .fp-hand-pick { transform: rotate(-6deg); }
+.fp-hand-shield { transform: rotate(7deg); }
 /* The hand that isn't leading drops out of frame rather than vanishing — you
    put the pick away, you don't teleport it. */
 .fp-hand.fp-stowed { transform: rotate(-6deg) translateY(112%); transition: transform 180ms ease-in; }
@@ -631,3 +651,12 @@
 .fp-pad button.fp-drink.fp-dry { opacity: .42; }
 
 @media (hover: hover) and (pointer: fine) { .fp-pad { opacity: 0.72; } .fp-pad:hover { opacity: 1; } }
+
+/* A thing in flight. No shadow (it is not on the floor) and no dimming beyond
+   the distance fade every billboard takes, so an arrow stays legible against a
+   dark wall for the whole of its short life. */
+.fp-shot {
+  background-size: 100% 100%; background-repeat: no-repeat;
+  image-rendering: pixelated;
+  filter: drop-shadow(0 0 10px rgba(0,0,0,0.55));
+}

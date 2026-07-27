@@ -43,8 +43,36 @@ import { buildCampusMap } from './campus.js';
  */
 
 /** Tile-coordinate tables into cliffs.png (units: 48px tiles on the sheet). */
+/**
+ * How a place is LIT — read only by the first-person view, which is the only
+ * one that has a horizon to lose things over.
+ *
+ * `dark` is a torch: you carry the light, it falls off fast into black, and
+ * what you cannot reach with it is not there. `open` is daylight haze: nothing
+ * near you is dim at all, and distance washes pale rather than going out. `lit`
+ * is a room someone else has already put lamps in.
+ *
+ * The distinction is not decoration. A meadow lit by torchlight reads as a cave
+ * with grass in it, and a mine lit by daylight has nowhere for anything to be.
+ * @typedef {{rgb:[number,number,number], near:number, far:number, ambient:number, sprite:number}} Light
+ */
+export const LIGHTS = {
+  // Underground: a lamp's worth of world, and black past it.
+  dark: { rgb: [6, 6, 10], near: 1.2, far: 5.2, sprite: 0.78 },
+  // Open air: pale distance rather than black, and you see half again as far —
+  // but it must still CLOSE, because the renderer only builds a few tiles
+  // around you and a haze that has not arrived by the edge of that leaves the
+  // world visibly stopping in mid-air. A meadow with weather in it, not a vista.
+  // `sky` means no ceiling is built at all: the background IS the sky, and the
+  // haze runs up into it. A meadow with a roof on it is a cave with grass in it.
+  open: { rgb: [150, 168, 186], near: 2.6, far: 7.4, sprite: 0.92, sky: true },
+  // Somebody else's lamps — dim at the edges, warmer than a cave.
+  lit: { rgb: [16, 14, 20], near: 2.2, far: 6.6, sprite: 0.86 },
+};
+
 export const THEMES = {
   mine: {
+    light: 'dark',
     fill: [[8, 3], [8, 4]],
     rim: { nw: [9, 2], n: [10, 2], ne: [11, 2], w: [9, 3], e: [11, 3], sw: [9, 4], s: [10, 4], se: [11, 4] },
     bandN: { w: [9, 1], m: [10, 1], e: [11, 1] },
@@ -57,6 +85,7 @@ export const THEMES = {
     grayProps: false, // warm-orange stairs/boulders
   },
   meadow: {
+    light: 'open',
     fill: [[1, 3], [1, 4], [5, 3], [5, 4]],
     rim: { nw: [2, 2], n: [3, 2], ne: [4, 2], w: [2, 3], e: [4, 3], sw: [2, 4], s: [3, 4], se: [4, 4] },
     bandN: { w: [2, 1], m: [3, 1], e: [4, 1] },
