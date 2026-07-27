@@ -101,7 +101,8 @@ const screenActive = () => {
 };
 
 const _imgCache = {};
-function loadImg(url) {
+/** Shared with the first-person view (delve-fp.js), which needs the same sheets. */
+export function loadImg(url) {
   if (!_imgCache[url]) {
     _imgCache[url] = new Promise((resolve, reject) => {
       const im = new Image();
@@ -150,7 +151,7 @@ const hash2 = (x, y) => {
 };
 
 /** Where each sheet key lives. THEMES and DECALS name sheets by these keys. */
-const SHEET_URLS = {
+export const SHEET_URLS = {
   cliffs: TILES_BASE + 'cliffs.png',
   stairs: TILES_BASE + 'stairs.png',
   ores: TILES_BASE + 'ores.png',

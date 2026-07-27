@@ -350,3 +350,72 @@
   padding: 7px 18px;
 }
 .dv-close:hover { background: rgba(212,168,67,.12); }
+
+/* ═══ The Delve in FIRST PERSON (src/guild/delve-fp.js) ═══════════════════
+   The same CSS-3D contract as the top-down view, turned to face the wall: a
+   perspective stage, one preserve-3d world, and every surface a textured quad
+   placed by a transform. The WORLD counter-moves about the walker — there is no
+   camera object, only a scene that steps aside. */
+#delveFpScreen { padding: 0; overflow: hidden; position: relative; background: #06060a; }
+.fp-stage {
+  position: absolute; inset: 0; overflow: hidden;
+  perspective: 470px; perspective-origin: 50% 50%; /* ~75° vertical — see delve-fp.js T */
+  touch-action: none;
+}
+/* Placed at the stage's centre so the walker's eye is the origin of the world. */
+.fp-world {
+  position: absolute; left: 50%; top: 50%;
+  transform-style: preserve-3d;
+  will-change: transform;
+}
+.fp-geo, .fp-bbs { transform-style: preserve-3d; }
+/* Every surface. Centred on its own transform, so a quad is placed by where its
+   MIDDLE goes — which is what makes the wall/floor/ceiling maths one line each. */
+.fp-q {
+  position: absolute; left: 0; top: 0;
+  background-size: 100% 100%; background-repeat: no-repeat;
+  image-rendering: pixelated;
+  backface-visibility: hidden;   /* a face is never seen from behind the rock */
+  transform-style: flat;
+}
+.fp-floor { filter: brightness(0.92); }
+.fp-ceil  { filter: brightness(0.6); }
+/* Standing things: bottom-anchored on their ground point, turned to the walker. */
+.fp-bb {
+  position: absolute; left: 0; bottom: 0;
+  transform-origin: 50% 100%;
+  image-rendering: pixelated;
+  pointer-events: none;
+  filter: drop-shadow(0 4px 5px rgba(0,0,0,0.6));
+}
+.fp-bb canvas { display: block; image-rendering: pixelated; }
+/* Depth cueing. A crawler lives or dies on not being able to see the far end of
+   the corridor, and a vignette is the cheapest honest dark. */
+.fp-vignette {
+  position: absolute; inset: 0; pointer-events: none; z-index: 200;
+  background: radial-gradient(ellipse at 50% 50%, transparent 30%, rgba(4,4,8,0.55) 78%, rgba(2,2,4,0.92) 100%);
+}
+.fp-compass { font-family: 'Cinzel', serif; color: var(--gold); letter-spacing: 0.14em; }
+/* The scrap of chart drawn so far. */
+.fp-map {
+  position: absolute; right: 10px; bottom: 10px; z-index: 500;
+  width: 150px; height: 150px;
+  background: rgba(8,7,5,0.66); border: 1px solid var(--border); border-radius: 8px;
+  image-rendering: pixelated;
+}
+/* Touch pad — a crawler only ever needs four buttons. */
+.fp-pad {
+  position: absolute; left: 12px; bottom: 12px; z-index: 500;
+  display: grid; grid-template-columns: repeat(3, 46px); grid-template-rows: 46px 46px; gap: 5px;
+}
+.fp-pad button {
+  font: inherit; font-size: 1.1em; cursor: pointer;
+  background: rgba(20,17,12,0.8); color: var(--gold);
+  border: 1px solid var(--border); border-radius: 9px;
+}
+.fp-pad button:active { background: rgba(212,168,67,0.25); }
+.fp-pad button[data-k="turnL"] { grid-area: 1 / 1; }
+.fp-pad button[data-k="fwd"]   { grid-area: 1 / 2; }
+.fp-pad button[data-k="turnR"] { grid-area: 1 / 3; }
+.fp-pad button[data-k="back"]  { grid-area: 2 / 2; }
+@media (hover: hover) and (pointer: fine) { .fp-pad { opacity: 0.5; } }
