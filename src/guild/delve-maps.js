@@ -341,34 +341,36 @@ export const DELVE_MAPS = {
       { art: 'sackPile', x: 4.5, y: 9, w: 78 }, { art: 'provisionBarrel', x: 16.5, y: 9, w: 42 },
     ],
   },
-  //             0123456789012345678
+  // ── A SCALE PROBE (2026-07-27) ───────────────────────────────────────────
+  // Every other interior is ~19x12 inside a building whose facade is 5-6 tiles
+  // wide: you walk into a shed and find a hall. The Forge is re-authored here at
+  // BUILDING scale — an 11x10 grid, so a 9-tile plot with 7 walkable columns —
+  // to answer the one question that decides how the rest are cut down: does a
+  // room this size still feel like a room to work in? Nothing else changes yet;
+  // it is still reached by its door on the grounds. If the size reads right, the
+  // other eight follow and the plots can be carved into the campus itself.
+  //             01234567890
   forge: {
     id: 'forge', theme: 'forge', name: 'The Forge',
     grid: [
-      '###################', //  0
-      '#BBBBBBBBBBBBBBBBB#', //  1
-      '#B...............B#', //  2
-      '#B..f...f...f....B#', //  3  ← three anvils on their stumps
-      '#B...............B#', //  4
-      '#B.f...........f.B#', //  5  ← quench barrel · tool bench
-      '#B...............B#', //  6
-      '#BBBBBB....BBBBBBB#', //  7  ← through to the coal store
-      '#B...............B#', //  8
-      '#B.bbb......f....B#', //  9  ← coal bins · the stock rack
-      '#B...............B#', // 10
-      '#BBBBBBBBdBBBBBBBB#', // 11
-      '###################', // 12
+      '###########', //  0
+      '#BBBBBBBBB#', //  1
+      '#B.......B#', //  2
+      '#B.f...f.B#', //  3  ← the furnace · the quench barrel
+      '#B.......B#', //  4
+      '#B...f...B#', //  5  ← the anvil you work, centre of the floor
+      '#B.......B#', //  6
+      '#B.b...b.B#', //  7  ← the coal bins
+      '#BBBBdBBBB#', //  8
+      '###########', //  9
     ],
-    entry: [9.5, 10.3],
+    entry: [5.5, 7.3],
     props: [
-      { art: 'anvilWork', x: 4.5, y: 4, w: 84 },
-      // The middle anvil is the one you WORK: bare-faced (so the piece being
-      // refined can be laid on it) and flagged `use`, which makes the walker
-      // offer to strike when they come within reach.
-      { art: 'anvilBare', x: 8.5, y: 4, w: 84, use: 'anvil', label: 'Work the anvil' },
-      { art: 'anvilWork', x: 12.5, y: 4, w: 84 },
-      { art: 'forgeFurnace', x: 3.6, y: 6, w: 90 }, { art: 'quenchBarrel', x: 15.5, y: 6, w: 36 },
-      { art: 'forgeTwin', x: 12.5, y: 10, w: 96 }, { art: 'tools', x: 8, y: 2.02, w: 44 },
+      // The anvil is bare-faced so the piece being refined can be laid on it,
+      // and flagged `use` — walk into reach and it offers to be struck.
+      { art: 'anvilBare', x: 5.5, y: 6, w: 84, use: 'anvil', label: 'Work the anvil' },
+      { art: 'forgeFurnace', x: 3.5, y: 4, w: 90 }, { art: 'quenchBarrel', x: 7.5, y: 4, w: 36 },
+      { art: 'tools', x: 5.5, y: 2.02, w: 44 },
     ],
   },
   //             0123456789012345678
