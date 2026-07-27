@@ -24,6 +24,13 @@ import { buildCampusMap } from './campus.js';
  *   f  furnishing (impassable, NO box geometry — a `props` standee stands here)
  *   d  doorway exit (floor; exit zone, no decal — the wall gap is the door)
  *   +  interior door (walkable; a `portals` entry carries you to another map)
+ *   ^  LEDGE — walkable floor ONE STEP UP (BLOCK_H). Drawn as the low block it
+ *      already is, but you stand on top of it, and you can only get up there
+ *      across a climb cell — so a shelf is a place you reach, not a place you
+ *      wander onto. Standees on it ride up by exactly the drawn height.
+ *   L  ladder · v  vine — the climb link. Ground you walk onto, dressed with
+ *      the thing you climb, and the ONLY cell a change of level is legal across.
+ *      Put one directly south of the ledge it serves so it leans on its face.
  *
  * Interiors may also carry:
  *   name    the room's title, shown in the HUD (and on arrival)
@@ -200,9 +207,9 @@ export const DELVE_MAPS = {
       '##..........###....BB...##', // 13  ← entry floor · east chamber
       '##..s.......###.....r...##', // 14
       '##....====m..........o..##', // 15
-      '##...o................t.##', // 16
-      '##.r........###.........##', // 17
-      '##..........###.........##', // 18
+      '##...o............^^^^t.##', // 16  ← the upper gallery, one step up
+      '##.r........###...^^^^..##', // 17
+      '##..........###....L....##', // 18  ← the ladder up to it
       '##########################', // 19
       '##########################', // 20
     ],
@@ -283,8 +290,8 @@ export const DELVE_MAPS = {
     grid: [
       '###################', //  0
       '#BBBBBBBBBBBBBBBBB#', //  1
-      '#B...............B#', //  2
-      '#B..f.........f..B#', //  3  ← the pells
+      '#B.^^^^^^^^^^^^^.B#', //  2  ← the spectators' tier, one step up
+      '#B.Lf.........fL.B#', //  3  ← the pells, and a ladder up at each end
       '#B...............B#', //  4
       '#B...............B#', //  5
       '#B.......f.......B#', //  6  ← the sword in the stone, centre ring
