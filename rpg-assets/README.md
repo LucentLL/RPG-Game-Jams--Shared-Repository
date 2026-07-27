@@ -38,15 +38,6 @@ been hand-picked into `public/assets/` (curated copies; crops are registered in
 | Staves (held) | `weapons/wizardstaff/staff1-3` | combat, generator, Mage heroes |
 | Crossbow, Bow2 (held) | `weapons/bow2_and_crossbow/` | combat, generator, Ranger tiers |
 | Sheathed weapons (back) | `weapons/backsheath*/`, `backquiver` | out-of-combat sprites + generator "Back" slot |
-| Gear icons (held big) | `2018patronbundle/.../{mswords,mspears,mshields}_icon32.png`, `.../marrows_icon32.png`, `2020patronbundle/2020/icons/icons_hammers_32_fc.png` | the first-person Delve's weapon + shield viewmodel (art.js `gearIcon`) |
-
-> **Why a second weapon art source.** The compositor's weapon cells carry about
-> ten pixels of blade (sword1.png r0c1 measures an 8×11 alpha box) — right for a
-> 48px battle sprite, useless held up to the screen. The 32px item icons are the
-> same art family at four times the ink, drawn hilt-at-lower-left, which mirrors
-> into a blade rising out of the near corner. `mspears_icon32` carries spears in
-> 0–6 and **axes in 7–12**; `marrows_icon32` carries bows in 3–6 and crossbows in
-> 7–9. Copies live at `public/assets/art/gear_*32.png`.
 
 Room set-pieces are cropped via `src/guild/art.js` (`artSprite('name')`).
 Character weapons instead go straight into the Elements compositor: copy the

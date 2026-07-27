@@ -359,7 +359,7 @@
 #delveFpScreen { padding: 0; overflow: hidden; position: relative; background: #06060a; }
 .fp-stage {
   position: absolute; inset: 0; overflow: hidden;
-  perspective: 470px; perspective-origin: 50% 50%; /* ~75° vertical — see delve-fp.js T */
+  perspective: 500px; perspective-origin: 50% 50%; /* re-fitted per window by fitLens() */
   touch-action: none;
 }
 /* Placed at the stage's centre so the walker's eye is the origin of the world. */
@@ -381,12 +381,14 @@
 .fp-floor { filter: brightness(0.92); }
 .fp-ceil  { filter: brightness(0.6); }
 /* Standing things: bottom-anchored on their ground point, turned to the walker. */
+/* The drop-shadow lives INLINE (see place() in delve-fp.js), because the same
+   filter property carries the distance dimming and the two must be written
+   together or one erases the other. */
 .fp-bb {
   position: absolute; left: 0; bottom: 0;
   transform-origin: 50% 100%;
   image-rendering: pixelated;
   pointer-events: none;
-  filter: drop-shadow(0 4px 5px rgba(0,0,0,0.6));
 }
 .fp-bb canvas { display: block; image-rendering: pixelated; }
 /* Depth cueing. A crawler lives or dies on not being able to see the far end of
@@ -396,6 +398,62 @@
   background: radial-gradient(ellipse at 50% 50%, transparent 30%, rgba(4,4,8,0.55) 78%, rgba(2,2,4,0.92) 100%);
 }
 .fp-compass { font-family: 'Cinzel', serif; color: var(--gold); letter-spacing: 0.14em; }
+
+/* ── Combat ───────────────────────────────────────────────────────────────
+   Fought in the corridor, so everything it needs to say is said in the
+   corridor: a bar over the thing you hit, a bar for you, a number that rises
+   off whichever of you took it, and a red edge when it was you. */
+.fp-hp {
+  position: absolute; left: 6%; right: 6%; top: -13%;
+  height: 5%; min-height: 5px; display: none;
+  background: rgba(8,6,4,0.82); border: 1px solid rgba(0,0,0,0.7); border-radius: 2px;
+}
+.fp-hp i { display: block; height: 100%; width: 100%; background: linear-gradient(#e0604a, #a3281c); }
+.fp-float {
+  position: absolute; left: 50%; top: 4%;
+  font-family: 'Cinzel', serif; font-weight: 700; font-size: 190px; line-height: 1;
+  white-space: nowrap; pointer-events: none;
+  animation: fp-rise 900ms ease-out forwards;
+}
+.fp-float.fp-hit  { color: #ffe9a8; text-shadow: 0 0 26px rgba(0,0,0,0.95), 0 5px 0 rgba(0,0,0,0.8); }
+.fp-float.fp-miss { color: #9aa4b4; font-size: 130px; text-shadow: 0 0 22px rgba(0,0,0,0.95); }
+/* The one that lands on YOU is screen-space, not world-space — it is not
+   happening somewhere in the room, it is happening to you. */
+.fp-float.fp-hurt {
+  left: 50%; top: 34%; font-size: 3.4em; color: #ff8a72;
+  text-shadow: 0 0 24px rgba(0,0,0,0.9), 0 3px 0 rgba(0,0,0,0.85);
+}
+@keyframes fp-rise {
+  0%   { transform: translate(-50%, 0) scale(0.7); opacity: 0; }
+  22%  { transform: translate(-50%, -28%) scale(1.1); opacity: 1; }
+  100% { transform: translate(-50%, -120%) scale(1); opacity: 0; }
+}
+/* Your own condition. Top-left under the bar: the bottom corners are hands and
+   the top-right is the chart. `cap` is the ceiling this delve has left you —
+   it drops with every bout, which is the whole tension of going deeper. */
+.fp-vitals {
+  position: absolute; left: 12px; top: 62px; z-index: 500;
+  width: clamp(140px, 20vw, 240px); height: 16px;
+  background: rgba(8,7,5,0.78); border: 1px solid var(--border); border-radius: 999px;
+  overflow: hidden;
+}
+.fp-vitals-fill {
+  position: absolute; left: 0; top: 0; bottom: 0; width: 100%;
+  background: linear-gradient(90deg, #8f2a1e, #d8574a);
+  transition: width 180ms ease-out;
+}
+.fp-vitals-cap { position: absolute; top: 0; bottom: 0; width: 2px; background: rgba(255,232,180,0.75); }
+.fp-vitals-n {
+  position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+  font-size: 0.72em; font-weight: 700; color: #ffe9d0; text-shadow: 0 1px 2px rgba(0,0,0,0.9);
+}
+/* Being hit, from the inside. */
+.fp-blood {
+  position: absolute; inset: 0; pointer-events: none; z-index: 260; opacity: 0;
+  background: radial-gradient(ellipse at 50% 50%, transparent 42%, rgba(150,20,14,0.55) 100%);
+}
+.fp-blood.on { animation: fp-blood 300ms ease-out; }
+@keyframes fp-blood { 0% { opacity: 0.95; } 100% { opacity: 0; } }
 /* Toasts sit ABOVE the pad, not on it. `.delve-toasts` is bottom:13% — fine
    over the top-down walk's cornered stick, but the first-person pad is centred,
    and 13% of a 720px stage put every toast across the forward button. */
@@ -438,24 +496,36 @@
 /* Sized to be HELD, not to be noted: about 45% of the screen height of blade,
    a viewmodel you read without looking for it. The `vw` term is not decoration
    — vmin alone plus a 260px floor made each hand two-thirds of a 390px phone,
-   and the two of them met in the middle of the screen over the pad. */
+   and the two of them met in the middle of the screen over the pad.
+   HEIGHT is the given and width follows the art's own aspect-ratio (set inline
+   from the sheet crop): fixing both squares a 19×34 sword into a 206×206 box
+   and stretches it into something that is not the weapon at all. */
 .fp-hand {
   position: absolute; bottom: -14%;
-  width: clamp(120px, min(48vmin, 38vw), 560px);
-  height: clamp(120px, min(48vmin, 38vw), 560px);
+  height: clamp(120px, min(48vmin, 38vw), 560px); width: auto;
   image-rendering: pixelated;
   filter: drop-shadow(-8px 10px 12px rgba(0,0,0,0.78));
+  opacity: 0;                              /* until the sheet is measured */
 }
+.fp-hand.fp-ready { opacity: 1; }
 .fp-hand canvas { width: 100%; height: 100%; display: block; image-rendering: pixelated; }
 /* The icons are drawn hilt-at-lower-left; mirrored, the hilt falls into the
    near corner and the blade rises across the view, which is what a held weapon
    looks like from behind it. The MIRROR is on the canvas so the swing's
    rotation on the wrapper still reads clockwise. */
-.fp-hand-weapon { right: -2%; transform: rotate(-6deg); }
-.fp-hand-weapon canvas { transform: scaleX(-1); }
-.fp-hand-shield { left: -3%; bottom: -16%; transform: rotate(7deg); }
+.fp-hand-weapon, .fp-hand-pick { right: -2%; transform: rotate(-6deg); }
+.fp-hand-weapon canvas, .fp-hand-pick canvas { transform: scaleX(-1); }
+/* The shield is broad rather than long, so it takes its own (shorter) height —
+   at the weapon's it would be half the screen wide. */
+.fp-hand-shield {
+  left: -1%; bottom: -12%; transform: rotate(7deg);
+  height: clamp(90px, min(34vmin, 27vw), 400px);
+}
+/* The hand that isn't leading drops out of frame rather than vanishing — you
+   put the pick away, you don't teleport it. */
+.fp-hand.fp-stowed { transform: rotate(-6deg) translateY(112%); transition: transform 180ms ease-in; }
 
-.fp-hand-weapon.fp-swinging { animation: fp-swing 380ms cubic-bezier(.3,.7,.3,1); }
+.fp-hand-weapon.fp-swinging, .fp-hand-pick.fp-swinging { animation: fp-swing 380ms cubic-bezier(.3,.7,.3,1); }
 .fp-hand-shield.fp-bracing  { animation: fp-brace 380ms ease-out; }
 @keyframes fp-swing {
   0%   { transform: rotate(-6deg)  translate(0, 0); }
@@ -517,7 +587,7 @@
    top of your own shield is a pad you read as part of the shield. */
 .fp-pad {
   position: absolute; left: 50%; bottom: 12px; transform: translateX(-50%); z-index: 500;
-  display: grid; grid-template-columns: repeat(3, 52px); grid-template-rows: 52px 52px; gap: 5px;
+  display: grid; grid-template-columns: repeat(4, 52px); grid-template-rows: 52px 52px; gap: 5px;
 }
 .fp-pad button {
   font: inherit; font-size: 1.05em; cursor: pointer;
@@ -535,4 +605,16 @@
   grid-area: 2 / 3; color: #ffe6a4;
   border-color: rgba(212,168,67,.62); background: rgba(74,52,18,0.86);
 }
+.fp-pad button.fp-block {
+  grid-area: 2 / 4; color: #bcd4ea;
+  border-color: rgba(150,190,230,.5); background: rgba(22,34,50,0.86);
+}
+.fp-pad button.fp-block:active { background: rgba(150,190,230,0.34); }
+.fp-pad button.fp-drink {
+  grid-area: 1 / 4; color: #b9e8c4;
+  border-color: rgba(140,220,160,.45); background: rgba(20,42,28,0.86);
+}
+.fp-pad button.fp-drink b { font-size: .72em; line-height: 1; }
+.fp-pad button.fp-drink.fp-dry { opacity: .42; }
+.fp-float.fp-heal { left: 50%; top: 34%; font-size: 3.4em; color: #9be8ad; text-shadow: 0 0 24px rgba(0,0,0,0.9); }
 @media (hover: hover) and (pointer: fine) { .fp-pad { opacity: 0.72; } .fp-pad:hover { opacity: 1; } }

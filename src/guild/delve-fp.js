@@ -26,7 +26,7 @@ import { ART_BASE } from '../config/assets.js';
 import { THEMES, DECALS, ORE_KINDS, oreKindAt, mapForLocale, validateMap } from './delve-maps.js';
 import { preyById } from './locales.js';
 import { loadImg, SHEET_URLS } from './delve.js';
-import { ART, artSprite, gearIcon } from './art.js';
+import { ART, artSprite, WORN, wornWeapon, wornShield, wornPick } from './art.js';
 
 /**
  * World scale. These look arbitrary and are not: what a surface MEASURES on
@@ -46,9 +46,52 @@ const WALL_H = 1260;     // full wall height — 1.4 tiles reads best
 const LOW_H = 560;       // 'b' — waist-high, seen over
 const EYE = 690;         // eye height above the floor
 const STEP_PX = 430;     // one level of ledge, in world px
-const STEP_MS = 200, TURN_MS = 160;
-const VIEW_R = 9;        // tiles of geometry built around the walker
+const STEP_MS = 250, TURN_MS = 185;
+
+/**
+ * THE LENS, AND WHY IT HAS TO MOVE WITH THE WINDOW.
+ *
+ * `perspective` is a distance in CSS pixels, but the stage's height is not
+ * fixed — so a lens tuned at 720px tall opens up on every larger screen.
+ * Vertical FOV is 2·atan((stageH/2)/d): at 720 the shipped 470 gave 75°, and at
+ * 1030 the SAME 470 gives 95.5°. That is the "warp speed" — a fisheye that
+ * arrives purely because the window got bigger, and with it every surface
+ * losing a third of its screen share.
+ *
+ * Fixing the FOV alone is not enough: hold d constant against the world and the
+ * apparent size of the dungeon changes with the window instead. Both stay put
+ * only if the whole world scales with the stage TOO, so the projection is a
+ * similarity — d, T, WALL_H and every offset multiplied by the same s. Then
+ * `WALL_H·d/((d+D)·stageH)` has s in both halves and cancels.
+ *
+ * PERSP is measured against PERSP_AT. 500 is a slightly longer lens than the
+ * 470 this shipped with (71.6° rather than 75.1°) — the corridor still opens
+ * out ahead of you, with less of the rush past the walls.
+ */
+const PERSP = 500, PERSP_AT = 720;
+const VIEW_R = 7;        // tiles of geometry built around the walker (fog culls well inside this)
 const REACH = 0.75;      // how close a creature must be to engage
+
+/**
+ * DEPTH. Without it the far end of the map is drawn as brightly as the wall you
+ * are touching: the corridor reads flat, every surface in the chart is painted
+ * at once, and the fill cost is the whole map every frame. The vignette darkens
+ * the screen's EDGES, which is not the same thing and never was.
+ *
+ * Fog is a fraction of the way to FOG_RGB, by distance in tiles. Past FOG_CULL
+ * a surface is indistinguishable from the stage's own background, so it is not
+ * emitted at all — which is the draw distance, arrived at honestly rather than
+ * as a hard circle you can see the edge of.
+ */
+const FOG_NEAR = 1.2, FOG_FAR = 5.2, FOG_CULL = 0.96;
+/** Creatures go into the dark BEFORE the room does. A monster is the one thing
+ *  you can pick out of a dim corridor at any distance, so it needs to be taken
+ *  by the fog sooner than the walls it stands between, or the mine reads as a
+ *  lit diorama with things loitering at the back of it. */
+const FOG_SPRITE = 0.78;
+/** The dark itself. Matches #delveFpScreen's own background, so a surface that
+ *  has faded out entirely and one that was never drawn are the same colour. */
+const fogRgba = (a) => `rgba(6,6,10,${a.toFixed(3)})`;
 
 /**
  * How tall a creature STANDS, in world px, by rank — the one number that
@@ -73,6 +116,42 @@ const CREATURE_H = { 1: 320, 2: 470, 3: 760, 4: 900, 5: 1080 };
 const DECOR_H = { boulder: 700, boulderGray: 700, stalagTall: 1100, cart: 780, tree: 1150 };
 /** One swing, and how far in front of you it reaches (tiles). */
 const SWING_MS = 380, SWING_REACH = 1.9, SWING_CONE = 0.3;
+
+/**
+ * FIRST-PERSON COMBAT — Morrowind's contract, not the arena's.
+ *
+ * You aim and time the blow yourself; whether it LANDS is a roll, and the roll
+ * is made of the same numbers the rest of the game already uses. `hooks.power`
+ * is the member's ⚡ (heroPower + gear) and `prey.power` is the recommended
+ * party power — the very ratio `huntOdds` prints on the hunt card — so a fight
+ * the Wilds room calls Grim rolls Grim, and no second economy is invented here.
+ * A kill still pays through `hooks.onKill`, which still runs `resolveHuntPlayed`
+ * in hall.js: the spoils are byte-identical to the arena's, because they always
+ * were the arena's only contribution.
+ *
+ * Health is on a flat 0..100 scale for both sides so the ratio is the only
+ * thing that varies. It does NOT come back fully between fights: out of contact
+ * you recover to a ceiling that drops with every bout, which is what makes a
+ * delve a question of how deep to push rather than a corridor you farm.
+ */
+const HP_MAX = 100;
+const HIT_FLOOR = 0.20, HIT_CEIL = 0.92;   // no fight is ever certain, either way
+const DMG_BASE = 10;                        // ~10 landed blows at an even match
+const FOE_SWING_MS = 1150;                  // how often a creature in reach tries
+/**
+ * A creature swings about three times slower than you can, so its blow carries
+ * that rate difference or the fight is decided by cooldowns rather than by ⚡.
+ * Without this an EVEN match on the hunt card — where huntOdds prints 50% — was
+ * a walkover in the corridor at nearly four times the damage per second, which
+ * would have made delving strictly better than hunting the same quarry.
+ *
+ * The 0.7 is a deliberate edge left to the delver: alone, a long way in, and the
+ * only one of the two who can retreat, guard, or drink.
+ */
+const FOE_DMG = DMG_BASE * (FOE_SWING_MS / SWING_MS) * 0.7;
+const BLOCK_CUT = 0.55, BLOCK_EVADE = 0.22; // a raised shield: less damage, more misses
+const REGEN_PER_S = 7, REGEN_DELAY = 2.2;   // out of contact, you catch your breath
+const REGEN_COST = 8, REGEN_FLOOR = 40;     // and every bout lowers the ceiling
 
 /** Cells that are a full wall you cannot see over. 'o' is an ore face — a wall
  *  made of the thing you want, which is why you mine it by walking into it. */
@@ -108,15 +187,24 @@ const screenActive = () => {
 // Textures — one panel per surface, cut from the theme the map already names
 // ---------------------------------------------------------------------------
 
-/** Draw a source rect onto a canvas of its own size and hand back a data URI.
- *  `dim` darkens it, which is how the ceiling is made out of the floor. */
-function panel(img, sx, sy, sw, sh, dw, dh, dim) {
+/**
+ * Draw a source rect onto a canvas OF THE SOURCE'S OWN SIZE and hand back a
+ * data URI. `dim` darkens it, which is how the ceiling is made out of the floor.
+ *
+ * Native size, deliberately. The first cut baked every surface out at WORLD
+ * size — a 48×96 rock face blown up to 900×1260 — which buys nothing, because
+ * the quads are `background-size: 100% 100%` under `image-rendering: pixelated`
+ * and the browser does exactly the same nearest-neighbour upscale for free.
+ * What it cost was 29.7MB of texture against 1.17MB for the identical pixels,
+ * on a scene that is already several hundred composited 3D layers.
+ */
+function panel(img, sx, sy, sw, sh, dim) {
   const c = document.createElement('canvas');
-  c.width = dw; c.height = dh;
+  c.width = sw; c.height = sh;
   const g = c.getContext('2d');
   g.imageSmoothingEnabled = false;
-  g.drawImage(img, sx, sy, sw, sh, 0, 0, dw, dh);
-  if (dim) { g.globalCompositeOperation = 'source-atop'; g.fillStyle = `rgba(0,0,0,${dim})`; g.fillRect(0, 0, dw, dh); }
+  g.drawImage(img, sx, sy, sw, sh, 0, 0, sw, sh);
+  if (dim) { g.globalCompositeOperation = 'source-atop'; g.fillStyle = `rgba(0,0,0,${dim})`; g.fillRect(0, 0, sw, sh); }
   return c.toDataURL();
 }
 
@@ -128,11 +216,15 @@ function panel(img, sx, sy, sw, sh, dw, dh, dim) {
  * theme without one (the mine, the meadow) has its cliff FACE tiles instead, and
  * those are head-on rock, which is the same thing by another name.
  */
-/** Where the seams sit on an ore face: [across, down, size], all in world px
- *  once multiplied out. Three clusters, off-centre, so no two faces line up. */
-const VEIN = [[0.50, 0.50, 300], [0.23, 0.74, 200], [0.76, 0.28, 180]];
+/** Where the seams sit on an ore face: [across, down, size], as FRACTIONS of
+ *  the face. Three clusters, off-centre, so no two faces line up. */
+const VEIN = [[0.50, 0.50, 0.333], [0.23, 0.74, 0.222], [0.76, 0.28, 0.200]];
 /** The light each ore throws — a seam has to be findable from down a corridor. */
 const ORE_GLOW = { iron: '200,178,140', copper: '224,138,60', silver: '206,224,236', crystal: '110,231,200' };
+/** The ore face is baked at 4× the rock's own resolution: an integer multiple,
+ *  so the wall behind the seam stays pixel-identical to every other wall, while
+ *  the vein and its glow have somewhere to live. */
+const ORE_SCALE = 4;
 
 /** One ore face: the wall, with the vein you are actually going to be paid for
  *  worked into it at a size the eye can find. The first cut pasted a single
@@ -140,14 +232,15 @@ const ORE_GLOW = { iron: '200,178,140', copper: '224,138,60', silver: '206,224,2
  *  tile — and pasted the IRON cluster whatever the cell really paid. */
 function bakeOreFace(wallCv, ores, kind) {
   const d = DECALS[ORE_KINDS[kind].decal];
+  const W = wallCv.width * ORE_SCALE, H = wallCv.height * ORE_SCALE;
   const cv = document.createElement('canvas');
-  cv.width = T; cv.height = WALL_H;
+  cv.width = W; cv.height = H;
   const g = cv.getContext('2d');
   g.imageSmoothingEnabled = false;
-  g.drawImage(wallCv, 0, 0);
+  g.drawImage(wallCv, 0, 0, wallCv.width, wallCv.height, 0, 0, W, H);
   const glow = ORE_GLOW[kind] || ORE_GLOW.iron;
-  for (const [fx, fy, size] of VEIN) {
-    const cx = fx * T, cy = fy * WALL_H;
+  for (const [fx, fy, fs] of VEIN) {
+    const cx = fx * W, cy = fy * H, size = fs * W;
     g.save();
     g.globalCompositeOperation = 'lighter';
     const grd = g.createRadialGradient(cx, cy, 0, cx, cy, size);
@@ -168,20 +261,19 @@ async function cutSurfaces(theme) {
   const src = theme.src || 48;
   const fill = theme.fill[0];
   const floorImg = sheets[theme.sheet || 'cliffs'];
-  const floor = panel(floorImg, fill[0] * src, fill[1] * src, src, src, T, T);
-  const ceil = panel(floorImg, fill[0] * src, fill[1] * src, src, src, T, T, 0.55);
+  const floor = panel(floorImg, fill[0] * src, fill[1] * src, src, src);
+  const ceil = panel(floorImg, fill[0] * src, fill[1] * src, src, src, 0.55);
 
   // Kept as CANVASES, not data URIs: the ore faces are the wall with a seam in
   // it, and re-decoding a data URI four times to paint on it is a round trip
   // through the image loader for no reason.
   const wallCv = document.createElement('canvas');
-  wallCv.width = T; wallCv.height = WALL_H;
   const lowCv = document.createElement('canvas');
-  lowCv.width = T; lowCv.height = LOW_H;
   const paint = (cv, img, sx, sy, sw, sh) => {
+    cv.width = sw; cv.height = sh;
     const g = cv.getContext('2d');
     g.imageSmoothingEnabled = false;
-    g.drawImage(img, sx, sy, sw, sh, 0, 0, cv.width, cv.height);
+    g.drawImage(img, sx, sy, sw, sh, 0, 0, sw, sh);
   };
   if (theme.walls) {
     const w = sheets[theme.walls.sheet], r = theme.walls.tall, l = theme.walls.low;
@@ -212,11 +304,10 @@ async function cutSurfaces(theme) {
     const railImg = await loadImg(SHEET_URLS.rails);
     const d = DECALS.railH;
     const cv = document.createElement('canvas');
-    cv.width = T; cv.height = T;
+    cv.width = d.w; cv.height = d.w;             // a square tile at the rail's own resolution
     const g = cv.getContext('2d');
     g.imageSmoothingEnabled = false;
-    const rh = T * (d.h / d.w);
-    g.drawImage(railImg, d.x, d.y, d.w, d.h, 0, (T - rh) / 2, T, rh);
+    g.drawImage(railImg, d.x, d.y, d.w, d.h, 0, (d.w - d.h) / 2, d.w, d.h);
     rail = cv.toDataURL();
   } catch (e) { /* a map without rails simply has none */ }
   return { floor, ceil, wall, low, ores, rail, ladder: ladderTexture() };
@@ -259,6 +350,28 @@ function canStep(fx, fy, tx, ty) {
   return heightAt(fx, fy) === heightAt(tx, ty) || onClimb(fx, fy) || onClimb(tx, ty);
 }
 
+/** Re-fit the lens to the window. Called on mount and on every resize, because
+ *  a fullscreen toggle is a resize and the whole framing hangs off this. */
+function fitLens() {
+  if (!F) return;
+  const stage = F.host.querySelector('.fp-stage');
+  const h = stage && stage.clientHeight;
+  // Measured LAZILY, and skipped when it measures nothing: mount() runs while
+  // #delveFpScreen is still display:none, where clientHeight is 0 — take that
+  // as an answer and the whole map is built through a 720px lens whatever the
+  // window is. The caller re-fits once the screen is up. (Same trap the
+  // top-down view hit measuring prop heights before showScreen.)
+  if (!h) return;
+  F.lens = h / PERSP_AT;
+  stage.style.perspective = (PERSP * F.lens).toFixed(1) + 'px';
+}
+
+/** How far into the dark a point is, 0 (right here) to 1 (gone). */
+function fogAt(x, y) {
+  const d = Math.hypot(x - F.px, y - F.py);
+  return Math.min(1, Math.max(0, (d - FOG_NEAR) / (FOG_FAR - FOG_NEAR)));
+}
+
 /** Facing 0=north(-y) 1=east(+x) 2=south(+y) 3=west(-x). */
 const DIRS = [[0, -1], [1, 0], [0, 1], [-1, 0]];
 const COMPASS = ['N', 'E', 'S', 'W'];
@@ -285,10 +398,19 @@ function openestDir(x, y) {
 // Geometry — rebuilt on a change of cell, never per frame
 // ---------------------------------------------------------------------------
 
-/** One quad. `cls` only carries styling; the transform does all the placing. */
-function quad(tex, w, h, tx, ty, tz, rot, cls) {
+/**
+ * One quad. `cls` only carries styling; the transform does all the placing.
+ *
+ * `fog` is painted as a flat colour layer OVER the texture rather than applied
+ * as a filter, because `filter` on hundreds of quads is hundreds of GPU passes
+ * — and on any wrapper it would flatten `preserve-3d` and collapse the scene.
+ * A second background layer costs nothing and is baked in with the geometry.
+ */
+function quad(tex, w, h, tx, ty, tz, rot, cls, fog) {
+  const c = fogRgba(fog > 0 ? fog : 0);
+  const veil = fog > 0.004 ? `linear-gradient(${c},${c}),` : '';
   return `<div class="fp-q ${cls}" style="width:${w}px;height:${h}px;margin-left:${-w / 2}px;margin-top:${-h / 2}px;` +
-    `background-image:url(${tex});transform:translate3d(${tx}px,${ty}px,${tz}px) ${rot}"></div>`;
+    `background-image:${veil}url(${tex});transform:translate3d(${tx}px,${ty}px,${tz}px) ${rot}"></div>`;
 }
 
 function buildGeometry() {
@@ -297,6 +419,8 @@ function buildGeometry() {
   const out = [];
   for (let y = cy - VIEW_R; y <= cy + VIEW_R; y++) {
     for (let x = cx - VIEW_R; x <= cx + VIEW_R; x++) {
+      const fog = fogAt(x + 0.5, y + 0.5);
+      if (fog >= FOG_CULL) continue;   // solid dark already — emitting it is pure overdraw
       const ch = at(x, y);
       const wx = (x + 0.5) * T, wz = (y + 0.5) * T;
       if (WALL[ch] || LOW[ch]) {
@@ -306,30 +430,33 @@ function buildGeometry() {
         const yc = -h / 2;
         // A face is emitted only where it meets somewhere you could stand, so a
         // solid block of rock costs nothing and no face is ever seen from behind.
-        if (!WALL[at(x, y + 1)] && !LOW[at(x, y + 1)]) out.push(quad(tex, T, h, wx, yc, (y + 1) * T, '', 'fp-wall'));
-        if (!WALL[at(x, y - 1)] && !LOW[at(x, y - 1)]) out.push(quad(tex, T, h, wx, yc, y * T, 'rotateY(180deg)', 'fp-wall'));
-        if (!WALL[at(x + 1, y)] && !LOW[at(x + 1, y)]) out.push(quad(tex, T, h, (x + 1) * T, yc, wz, 'rotateY(90deg)', 'fp-wall'));
-        if (!WALL[at(x - 1, y)] && !LOW[at(x - 1, y)]) out.push(quad(tex, T, h, x * T, yc, wz, 'rotateY(-90deg)', 'fp-wall'));
+        // A face is fogged by ITS OWN distance, not the cell's — the two sides
+        // of a block a tile apart should not be equally dark.
+        const wf = (fx, fy) => fogAt(fx, fy);
+        if (!WALL[at(x, y + 1)] && !LOW[at(x, y + 1)]) out.push(quad(tex, T, h, wx, yc, (y + 1) * T, '', 'fp-wall', wf(x + 0.5, y + 1)));
+        if (!WALL[at(x, y - 1)] && !LOW[at(x, y - 1)]) out.push(quad(tex, T, h, wx, yc, y * T, 'rotateY(180deg)', 'fp-wall', wf(x + 0.5, y)));
+        if (!WALL[at(x + 1, y)] && !LOW[at(x + 1, y)]) out.push(quad(tex, T, h, (x + 1) * T, yc, wz, 'rotateY(90deg)', 'fp-wall', wf(x + 1, y + 0.5)));
+        if (!WALL[at(x - 1, y)] && !LOW[at(x - 1, y)]) out.push(quad(tex, T, h, x * T, yc, wz, 'rotateY(-90deg)', 'fp-wall', wf(x, y + 0.5)));
         // A waist-high run needs a lid, or you look down into an open box.
-        if (LOW[ch]) out.push(quad(S.ceil, T, T, wx, -h, wz, 'rotateX(90deg)', 'fp-floor'));
+        if (LOW[ch]) out.push(quad(S.ceil, T, T, wx, -h, wz, 'rotateX(90deg)', 'fp-floor', fog));
         continue;
       }
       if (ch === '#') continue;
       const lift = -heightAt(x, y) * STEP_PX;
-      out.push(quad(S.floor, T, T, wx, lift, wz, 'rotateX(90deg)', 'fp-floor'));
-      out.push(quad(S.ceil, T, T, wx, -WALL_H, wz, 'rotateX(-90deg)', 'fp-ceil'));
+      out.push(quad(S.floor, T, T, wx, lift, wz, 'rotateX(90deg)', 'fp-floor', fog));
+      out.push(quad(S.ceil, T, T, wx, -WALL_H, wz, 'rotateX(-90deg)', 'fp-ceil', fog));
       // Rails lie ON the floor, a hair above it so the two don't fight for depth.
-      if (ch === '=' && S.rail) out.push(quad(S.rail, T, T, wx, lift - 1, wz, 'rotateX(90deg)', 'fp-floor'));
+      if (ch === '=' && S.rail) out.push(quad(S.rail, T, T, wx, lift - 1, wz, 'rotateX(90deg)', 'fp-floor', fog));
       // A ledge's own riser, so a step up reads as a step and not a slope.
-      if (heightAt(x, y) && !heightAt(x, y + 1)) out.push(quad(S.low, T, STEP_PX, wx, -STEP_PX / 2, (y + 1) * T, '', 'fp-wall'));
+      if (heightAt(x, y) && !heightAt(x, y + 1)) out.push(quad(S.low, T, STEP_PX, wx, -STEP_PX / 2, (y + 1) * T, '', 'fp-wall', fog));
       // The rungs. A climb cell is the ONLY place the level may change, so the
       // ladder is drawn flat against whichever neighbouring face it serves —
       // a thing you can see and aim at, not a square that silently lifts you.
       if (S.ladder && onClimb(x, y)) {
-        if (heightAt(x, y + 1)) out.push(quad(S.ladder, T * 0.42, STEP_PX, wx, -STEP_PX / 2, (y + 1) * T - 6, 'rotateY(180deg)', 'fp-ladder'));
-        if (heightAt(x, y - 1)) out.push(quad(S.ladder, T * 0.42, STEP_PX, wx, -STEP_PX / 2, y * T + 6, '', 'fp-ladder'));
-        if (heightAt(x + 1, y)) out.push(quad(S.ladder, T * 0.42, STEP_PX, (x + 1) * T - 6, -STEP_PX / 2, wz, 'rotateY(-90deg)', 'fp-ladder'));
-        if (heightAt(x - 1, y)) out.push(quad(S.ladder, T * 0.42, STEP_PX, x * T + 6, -STEP_PX / 2, wz, 'rotateY(90deg)', 'fp-ladder'));
+        if (heightAt(x, y + 1)) out.push(quad(S.ladder, T * 0.42, STEP_PX, wx, -STEP_PX / 2, (y + 1) * T - 6, 'rotateY(180deg)', 'fp-ladder', fog));
+        if (heightAt(x, y - 1)) out.push(quad(S.ladder, T * 0.42, STEP_PX, wx, -STEP_PX / 2, y * T + 6, '', 'fp-ladder', fog));
+        if (heightAt(x + 1, y)) out.push(quad(S.ladder, T * 0.42, STEP_PX, (x + 1) * T - 6, -STEP_PX / 2, wz, 'rotateY(-90deg)', 'fp-ladder', fog));
+        if (heightAt(x - 1, y)) out.push(quad(S.ladder, T * 0.42, STEP_PX, x * T + 6, -STEP_PX / 2, wz, 'rotateY(90deg)', 'fp-ladder', fog));
       }
     }
   }
@@ -369,6 +496,42 @@ function decalBillboard(sheets, decalName, x, y, worldH) {
  *  a billboard is a flat plane, and a flat plane seen edge-on is nothing. */
 function standDecor(el, x, y) {
   F.decor.push({ el, x, y, lift: -heightAt(Math.floor(x), Math.floor(y)) * STEP_PX });
+}
+
+/**
+ * Put a billboard where it stands, turned to the walker and dimmed by its
+ * distance — the same fog the geometry is baked with, or a creature would come
+ * at you out of the dark at full brightness like a sticker on the screen.
+ *
+ * Brightness is QUANTISED to twentieths and every write is compared first: a
+ * filter change re-rasterises the layer, and paying that per sprite per frame
+ * for a difference nobody can see is most of what a fog costs.
+ */
+function place(b, x, y, lift) {
+  const fog = Math.min(1, fogAt(x, y) / FOG_SPRITE);
+  const hidden = fog >= 0.995;
+  if (hidden !== b._hidden) { b.el.style.display = (b._hidden = hidden) ? 'none' : ''; }
+  if (hidden) return;
+  const tf = `translate3d(${(x * T).toFixed(1)}px,${lift}px,${(y * T).toFixed(1)}px) rotateY(${-F.yaw}deg)`;
+  if (tf !== b._tf) b.el.style.transform = (b._tf = tf);
+  // A struck creature flashes white — the one piece of feedback that has to
+  // arrive before the number does.
+  const lit = Math.round((1 - fog) * 20) / 20;
+  const hurt = b.hurtUntil > performance.now();
+  if (lit !== b._lit || hurt !== b._hurt) {
+    b._lit = lit; b._hurt = hurt;
+    b.el.style.filter = `drop-shadow(0 4px 5px rgba(0,0,0,0.6)) brightness(${hurt ? lit + 1.6 : lit})`
+      + (hurt ? ' saturate(0.2)' : '');
+  }
+  // The bar only exists while the thing is hurt, so an untouched room is clean.
+  if (b.bar) {
+    const show = b.hp != null && b.hp < HP_MAX;
+    if (show !== b._bar) { b.bar.style.display = (b._bar = show) ? 'block' : 'none'; }
+    if (show) {
+      const w = Math.max(0, b.hp) + '%';
+      if (w !== b._bw) { b.bar.firstChild.style.width = (b._bw = w); }
+    }
+  }
 }
 
 /** A sign you can read from down the corridor — the only honest way to tell a
@@ -515,13 +678,14 @@ function spawnCreature(prey, img, x, y) {
   if (h * aspect > maxW) h = maxW / aspect;
   const cv = document.createElement('canvas');
   cv.width = box.w; cv.height = box.h;
-  const el = addBillboard('fp-creature', '', h * aspect, h);
-  el.appendChild(cv);
+  const el = addBillboard('fp-creature', '<div class="fp-hp"><i></i></div>', h * aspect, h);
+  el.insertBefore(cv, el.firstChild);
   cv.style.width = '100%'; cv.style.height = '100%';
   const c = {
     prey, img, el, cv, fw, fh, box, x, y, home: { x, y },
     mode: 'idle', t: 1 + Math.random() * 2, tx: x, ty: y,
     row: 0, col: 1, drawn: -1, phase: Math.random() * 4,
+    hp: HP_MAX, atkAt: 0, hurtUntil: 0, bar: el.querySelector('.fp-hp'),
   };
   drawCreature(c);
   F.creatures.push(c);
@@ -554,55 +718,136 @@ async function mountHands() {
   // a 122-unit path, and the arc came out as three disconnected chunks.)
   host.innerHTML = '<svg class="fp-slash" viewBox="0 0 100 100" preserveAspectRatio="xMidYMid meet">'
     + '<path d="M92 6 C 60 34, 34 60, 8 94" /></svg>';
-  const hands = { el: host, weapon: null, shield: null };
+  const hands = { el: host, weapon: null, shield: null, pick: null };
   F.hands = hands;
   const gear = F.hooks.gear || {};
   // Sheet loads are slow enough to outlive the delve that asked for them, so
   // every await is followed back into a session that may already be gone.
   const live = () => !!F && F.hands === hands;
-  const put = async (slot, cls) => {
-    const g = gear[slot];
-    const icon = g && gearIcon(g.kind, g.material);
-    if (!icon) return null;
+  const put = async (src, frames, cls, title) => {
+    if (!src) return null;
     try {
-      const img = await loadImg(icon.url);
+      const img = await loadImg(src.url);
       if (!live()) return null;
+      // Cropped to the UNION of the frames it will show, so the art fills the
+      // hand instead of floating in a mostly-empty 48px cell — and so nothing
+      // shifts as the swing steps through.
+      const box = cellUnion(img, WORN.row, frames);
+      if (!box) return null;
       const cv = document.createElement('canvas');
-      cv.width = icon.s; cv.height = icon.s;
-      const c = cv.getContext('2d');
-      c.imageSmoothingEnabled = false;
-      c.drawImage(img, icon.sx, icon.sy, icon.s, icon.s, 0, 0, icon.s, icon.s);
+      cv.width = box.w; cv.height = box.h;
       const el = document.createElement('div');
       el.className = 'fp-hand ' + cls;
-      el.title = g.name || '';
+      el.title = title || '';
+      el.style.aspectRatio = box.w + ' / ' + box.h;
       el.appendChild(cv);
       host.appendChild(el);
-      return el;
+      const hand = { el, cv, img, box, frames, at: -1, timer: 0 };
+      handFrame(hand, frames[0]);
+      return hand;
     } catch (e) {
-      console.warn('delve-fp: gear icon missing', g, e);
+      console.warn('delve-fp: hand art missing', cls, e);
       return null;
     }
   };
-  hands.weapon = await put('weapon', 'fp-hand-weapon');
+  const w = gear.weapon, b = gear.body;
+  const SW = [WORN.rest].concat(WORN.swing);
+  hands.weapon = await put(w && wornWeapon(w.kind, w.material), SW, 'fp-hand-weapon', w && w.name);
   // A bow is two-handed: nothing braces an off-hand shield behind it.
-  if (live() && !(gear.weapon && gear.weapon.kind === 'bow')) hands.shield = await put('body', 'fp-hand-shield');
+  if (live() && !(w && w.kind === 'bow')) {
+    hands.shield = await put(b && wornShield(b.material), WORN.shieldBrace, 'fp-hand-shield', b && b.name);
+  }
+  // The PICK is not equipment — it is what a delver walks in carrying. It comes
+  // out for a seam whatever else is in hand, and when the weapon slot is empty
+  // it is the only thing there, so the hands are never simply blank.
+  if (live()) hands.pick = await put(wornPick(), SW, 'fp-hand-pick' + (hands.weapon ? ' fp-stowed' : ''), 'Delver’s pick');
+  if (live()) for (const h of [hands.weapon, hands.shield, hands.pick]) if (h) h.el.classList.add('fp-ready');
 }
 
-/** Throw the swing. Retriggering needs the class off, a reflow, and the class
- *  back on, or a second swing inside the first simply doesn't play. */
-function playSwing() {
-  if (!F.hands) return;
-  for (const el of [F.hands.weapon, F.hands.el.querySelector('.fp-slash')]) {
-    if (!el) continue;
-    el.classList.remove('fp-swinging');
+/** The tight box a set of frames occupies inside one row of a 48px sheet, in
+ *  cell-local coordinates. Union, not per-frame, or the art jumps as it plays. */
+function cellUnion(img, row, cols) {
+  const S = WORN.cell;
+  try {
+    const c = document.createElement('canvas');
+    c.width = img.naturalWidth; c.height = img.naturalHeight;
+    const g = c.getContext('2d', { willReadFrequently: true });
+    g.drawImage(img, 0, 0);
+    const d = g.getImageData(0, 0, c.width, c.height).data;
+    let x0 = S, y0 = S, x1 = -1, y1 = -1;
+    for (const col of cols) {
+      for (let y = 0; y < S; y++) {
+        for (let x = 0; x < S; x++) {
+          const px = col * S + x, py = row * S + y;
+          if (px >= c.width || py >= c.height) continue;
+          if (d[(py * c.width + px) * 4 + 3] < 12) continue;
+          if (x < x0) x0 = x;
+          if (y < y0) y0 = y;
+          if (x > x1) x1 = x;
+          if (y > y1) y1 = y;
+        }
+      }
+    }
+    return x1 < 0 ? null : { x: x0, y: y0, w: x1 - x0 + 1, h: y1 - y0 + 1 };
+  } catch (e) {
+    console.warn('delve-fp: could not measure hand art', e);
+    return null;
+  }
+}
+
+/** Paint one sheet column into a hand's canvas. */
+function handFrame(hand, col) {
+  if (hand.at === col) return;
+  hand.at = col;
+  const S = WORN.cell, b = hand.box;
+  const g = hand.cv.getContext('2d');
+  g.imageSmoothingEnabled = false;
+  g.clearRect(0, 0, b.w, b.h);
+  g.drawImage(hand.img, col * S + b.x, WORN.row * S + b.y, b.w, b.h, 0, 0, b.w, b.h);
+}
+
+/** Step a hand through its frames and settle back on the first. */
+function playFrames(hand, cols) {
+  if (!hand) return;
+  clearInterval(hand.timer);
+  let i = 0;
+  handFrame(hand, cols[0]);
+  hand.timer = setInterval(() => {
+    i++;
+    if (i >= cols.length) { clearInterval(hand.timer); hand.timer = 0; handFrame(hand, hand.frames[0]); return; }
+    handFrame(hand, cols[i]);
+  }, WORN.frameMs);
+}
+
+/**
+ * Throw the swing. `mining` brings the pick out and stows the blade for the
+ * duration, because you do not open a vein with a sword.
+ *
+ * Retriggering needs the class off, a reflow, and the class back on, or a
+ * second swing inside the first simply doesn't play.
+ */
+function playSwing(mining) {
+  const H = F.hands;
+  if (!H) return;
+  const lead = mining ? (H.pick || H.weapon) : (H.weapon || H.pick);
+  // One hand leads and the other stows. The stowed hand must also DROP its
+  // swing class: an animation outranks a plain transform, so a pick left
+  // mid-swing would keep swinging from inside the holster.
+  for (const h of [H.weapon, H.pick]) {
+    if (!h) continue;
+    const off = h !== lead;
+    h.el.classList.toggle('fp-stowed', off);
+    if (off) { h.el.classList.remove('fp-swinging'); clearInterval(h.timer); handFrame(h, h.frames[0]); }
+  }
+  const fire = (el, cls) => {
+    if (!el) return;
+    el.classList.remove(cls);
     void el.getBoundingClientRect();
-    el.classList.add('fp-swinging');
-  }
-  if (F.hands.shield) {
-    F.hands.shield.classList.remove('fp-bracing');
-    void F.hands.shield.getBoundingClientRect();
-    F.hands.shield.classList.add('fp-bracing');
-  }
+    el.classList.add(cls);
+  };
+  if (lead) { fire(lead.el, 'fp-swinging'); playFrames(lead, WORN.swing); }
+  fire(H.el.querySelector('.fp-slash'), 'fp-swinging');
+  if (H.shield) { fire(H.shield.el, 'fp-bracing'); playFrames(H.shield, WORN.shieldBrace); }
 }
 
 // ---------------------------------------------------------------------------
@@ -660,6 +905,7 @@ function mount(prep, entry) {
   const stage = F.host.querySelector('.fp-stage');
   stage.innerHTML = '<div class="fp-world"><div class="fp-geo"></div><div class="fp-bbs"></div></div>';
   F.world = stage.querySelector('.fp-world');
+  fitLens();
   buildGeometry();
   buildDecor(props || {});
   for (const sp of spawns) spawnCreature(sp.prey, sp.img, sp.s.x + 0.5, sp.s.y + 0.5);
@@ -687,6 +933,7 @@ export async function openDelveFp(localeId, member, hooks) {
       <div class="fp-stage"></div>
       <div class="fp-hands"></div>
       <div class="fp-vignette"></div>
+      <div class="fp-blood"></div>
       <div class="delve-hud">
         <button class="dv-leave" onclick="__delveFp.leave()">⬅ Leave</button>
         <span class="fp-title dv-title"></span>
@@ -696,28 +943,36 @@ export async function openDelveFp(localeId, member, hooks) {
       </div>
       <canvas class="fp-map" width="150" height="150"></canvas>
       <div class="delve-toasts fp-toasts"></div>
+      <div class="fp-vitals">
+        <span class="fp-vitals-fill"></span>
+        <span class="fp-vitals-cap"></span>
+        <b class="fp-vitals-n">100</b>
+      </div>
       <div class="fp-keys">
         <b>W</b> forward · <b>S</b> back · <b>A</b>/<b>D</b> sidestep
         · <b>←</b>/<b>→</b> turn · <b>Space</b> or <b>click</b> to strike
-        · <b>Esc</b> leave
+        · hold <b>Shift</b> to guard · <b>R</b> drink · <b>Esc</b> leave
       </div>
       <div class="fp-pad">
         <button data-k="turnL" aria-label="Turn left">◀<i>←</i></button>
         <button data-k="fwd" aria-label="Forward">▲<i>W</i></button>
         <button data-k="turnR" aria-label="Turn right">▶<i>→</i></button>
+        <button data-k="block" class="fp-block" aria-label="Guard">🛡<i>Shift</i></button>
         <button data-k="back" aria-label="Back">▼<i>S</i></button>
         <button data-k="attack" class="fp-attack" aria-label="Strike">⚔<i>Space</i></button>
+        <button data-k="drink" class="fp-drink" aria-label="Drink a draught">🧪<b>0</b><i>R</i></button>
       </div>`;
 
     F = {
       map: null, theme: null, surf: null, hooks, member, host, world: null,
       grid: null, cols: 0, rows: 0,
       px: 0, py: 0, dir: 2, yaw: 180, turning: null, stepping: null,
-      keys: {}, latched: {}, last: 0, raf: 0, ended: false, fighting: false, grace: false, transiting: false,
+      keys: {}, latched: {}, last: 0, raf: 0, ended: false, transiting: false,
       creatures: [], decor: [], doors: [], armed: false,
       seen: new Set(), mined: new Set(), settleUntil: 0,
-      hands: null, swingUntil: 0, helpTimer: 0,
-      haul: { kills: {}, gold: 0, mats: {}, field: 0, bouts: 0 },
+      hands: null, swingUntil: 0, helpTimer: 0, lens: 1,
+      hp: HP_MAX, hpCeil: HP_MAX, contactAt: 0, hurtUntil: 0,
+      haul: { kills: {}, gold: 0, mats: {}, field: 0, bouts: 0, swings: 0 },
       stack: [],
     };
     try {
@@ -725,6 +980,7 @@ export async function openDelveFp(localeId, member, hooks) {
       wireInput();
       updateHaul();
       showScreen('delveFpScreen');
+      fitLens();               // now that the stage has a height to measure
       startLoop();
     } catch (e) {
       if (F && F.raf) cancelAnimationFrame(F.raf);
@@ -737,6 +993,8 @@ export async function openDelveFp(localeId, member, hooks) {
     // The hands come up after the screen does: a missing icon sheet must cost
     // the delve nothing but its viewmodel.
     mountHands().catch((e) => console.warn('delve-fp: hands', e));
+    updateVitals();
+    updatePotions();
     const first = member.name.split(' ')[0];
     toast(`${first} descends into ${p.map.name || hooks.locale.name}.`);
     if (!(hooks.gear && hooks.gear.weapon)) toast(`${first} goes in bare-handed — nothing in the weapon slot.`);
@@ -757,6 +1015,7 @@ const KEYMAP = {
   arrowleft: 'turnL', arrowright: 'turnR', a: 'strafeL', d: 'strafeR',
   q: 'turnL', e: 'turnR',
   ' ': 'attack', spacebar: 'attack', f: 'attack', enter: 'attack',
+  shift: 'block', control: 'block', r: 'drink',
 };
 
 function wireInput() {
@@ -764,7 +1023,7 @@ function wireInput() {
   // session behind it, and an unguarded handler then raises on every keypress
   // for the rest of the page's life.
   F.onKeyDown = (e) => {
-    if (!F || !screenActive() || F.fighting) return;
+    if (!F || !screenActive()) return;
     const k = e.key.toLowerCase();
     if (k === 'escape') { leave(); return; }
     if (k === '?' || k === 'h') { e.preventDefault(); helpUntil(9000); return; }
@@ -791,18 +1050,21 @@ function wireInput() {
   // Clicking into the world strikes at it. The most discoverable control there
   // is: the thing you can see is the thing you can hit.
   F.onStagePointer = (e) => {
-    if (!F || F.fighting || F.ended) return;
+    if (!F || F.ended) return;
     e.preventDefault();
     trySwing();
   };
   const stage = F.host.querySelector('.fp-stage');
   if (stage) stage.addEventListener('pointerdown', F.onStagePointer);
+  F.onResize = () => fitLens();
+  window.addEventListener('resize', F.onResize);
 }
 function unwireInput() {
   window.removeEventListener('keydown', F.onKeyDown);
   window.removeEventListener('keyup', F.onKeyUp);
   const stage = F.host.querySelector('.fp-stage');
   if (stage && F.onStagePointer) stage.removeEventListener('pointerdown', F.onStagePointer);
+  if (F.onResize) window.removeEventListener('resize', F.onResize);
 }
 
 /** Show the control strip for a while. Shown on entry, and on ? or the HUD's
@@ -853,12 +1115,13 @@ function tryTurn(sign) {
  */
 function trySwing() {
   const now = performance.now();
-  if (!F || F.ended || F.fighting || F.transiting || now < F.swingUntil) return;
+  if (!F || F.ended || F.transiting || now < F.swingUntil) return;
   F.swingUntil = now + SWING_MS;
-  playSwing();
   const [dx, dy] = DIRS[F.dir];
   const ax = Math.floor(F.px) + dx, ay = Math.floor(F.py) + dy;
-  if (at(ax, ay) === 'o') { mineOre(ax, ay); return; }
+  const seam = at(ax, ay) === 'o';
+  playSwing(seam);
+  if (seam) { mineOre(ax, ay); return; }
   let best = null, bd = SWING_REACH;
   for (const c of F.creatures) {
     const vx = c.x - F.px, vy = c.y - F.py, d = Math.hypot(vx, vy) || 1e-6;
@@ -866,7 +1129,7 @@ function trySwing() {
     if ((vx * dx + vy * dy) / d < SWING_CONE) continue;   // it has to be in front
     best = c; bd = d;
   }
-  if (best) engage(best);
+  if (best) strike(best);
 }
 
 /**
@@ -885,10 +1148,11 @@ function took(k) {
 }
 
 function readInput() {
-  if (F.fighting || F.transiting) return;
+  if (F.transiting) return;
   // Striking is allowed mid-stride: a stride is 200ms, and a crawler that
   // swallows your attack because you are still walking feels broken.
   if (took('attack')) trySwing();
+  if (took('drink')) drink();
   if (F.turning || F.stepping) return;
   if (performance.now() < F.settleUntil) return;
   if (took('turnL')) { tryTurn(-1); return; }
@@ -965,7 +1229,12 @@ function moveCreatures(dt) {
     const dist = Math.hypot(c.x - F.px, c.y - F.py);
     const rank = c.prey.rank || 1;
     let speed = 0.9;
-    if (rank <= 1 && dist < 2.6) { c.mode = 'flee'; c.tx = c.x + (c.x - F.px) / (dist || 1) * 2; c.ty = c.y + (c.y - F.py) / (dist || 1) * 2; speed = 1.8; }
+    // Anything you have hit comes for you, whatever its rank says it does when
+    // left alone. Without this the rank rules re-decide the mode every tick and
+    // a struck squirrel goes straight back to foraging — which reads as a fight
+    // you are having by yourself.
+    if (c.aggro) { c.mode = 'chase'; c.tx = F.px; c.ty = F.py; speed = 1 + rank * 0.16; }
+    else if (rank <= 1 && dist < 2.6) { c.mode = 'flee'; c.tx = c.x + (c.x - F.px) / (dist || 1) * 2; c.ty = c.y + (c.y - F.py) / (dist || 1) * 2; speed = 1.8; }
     else if (rank >= 3 && dist < 4) { c.mode = 'chase'; c.tx = F.px; c.ty = F.py; speed = rank >= 4 ? 1.5 : 1.2; }
     else if (c.mode === 'chase' || c.mode === 'flee') { c.mode = 'idle'; c.t = 0.6; }
     if (c.mode === 'idle') {
@@ -1002,52 +1271,168 @@ function poseCreature(c, walking) {
   drawCreature(c);
 }
 
-function checkEncounters() {
-  for (const c of F.creatures) {
-    if (Math.hypot(c.x - F.px, c.y - F.py) < REACH) { engage(c); return; }
+
+// ---------------------------------------------------------------------------
+// Combat — fought HERE, in the corridor, at the size the corridor draws it
+// ---------------------------------------------------------------------------
+
+/** The matchup, as one number: the member's ⚡ over what the prey is worth. */
+const oddsVs = (prey) => (F.hooks.power || 100) / Math.max(1, prey.power || 100);
+
+/** Morrowind's question — you swung and connected, but did you HIT? Stats say.
+ *  Tiredness is the delve's own tax: a spent delver flails. */
+function rollHit(ratio, tired) {
+  const base = 0.30 + 0.55 * Math.min(1, Math.max(0, (ratio - 0.55) / 0.9));
+  const fit = tired ? 0.65 + 0.35 * (1 - Math.min(100, tired) / 100) : 1;
+  return Math.random() < Math.min(HIT_CEIL, Math.max(HIT_FLOOR, base * fit));
+}
+const spread = (n) => Math.max(1, Math.round(n * (0.8 + Math.random() * 0.4)));
+
+/** A word or a number that rises off whatever it happened to. */
+function floater(host, txt, cls) {
+  const el = document.createElement('span');
+  el.className = 'fp-float ' + (cls || '');
+  el.textContent = txt;
+  host.appendChild(el);
+  setTimeout(() => el.remove(), 900);
+}
+
+/** Your blow. Aimed by you, resolved by the numbers. */
+function strike(c) {
+  F.haul.swings = (F.haul.swings || 0) + 1;
+  c.aggro = true;                                  // anything you hit turns on you
+  F.contactAt = performance.now();
+  if (!rollHit(oddsVs(c.prey), F.hooks.fatigue)) {
+    F.haul.missed = (F.haul.missed || 0) + 1;
+    floater(c.el, 'miss', 'fp-miss');
+    return;
+  }
+  F.haul.landed = (F.haul.landed || 0) + 1;
+  const dmg = spread(DMG_BASE * Math.min(2, Math.max(0.5, oddsVs(c.prey))));
+  c.hp -= dmg;
+  c.hurtUntil = performance.now() + 160;
+  floater(c.el, '−' + dmg, 'fp-hit');
+  if (c.hp <= 0) slay(c);
+}
+
+/** Its blow, on its own clock, once it is close enough to land one. */
+function foeSwing(c, now) {
+  c.atkAt = now + FOE_SWING_MS * (0.85 + Math.random() * 0.4);
+  F.contactAt = now;
+  const guard = F.keys.block ? 1 - BLOCK_EVADE : 1;
+  if (!rollHit((1 / oddsVs(c.prey)) * guard, 0)) {
+    F.haul.dodged = (F.haul.dodged || 0) + 1;
+    floater(c.el, 'miss', 'fp-miss');
+    return;
+  }
+  F.haul.taken = (F.haul.taken || 0) + 1;
+  let dmg = spread(FOE_DMG / Math.min(2, Math.max(0.5, oddsVs(c.prey))));
+  if (F.keys.block) { dmg = Math.max(1, Math.round(dmg * BLOCK_CUT)); braceShield(); }
+  F.hp -= dmg;
+  F.hurtUntil = now + 260;
+  floater(F.host.querySelector('.fp-hands'), '−' + dmg, 'fp-hurt');
+  const blood = F.host.querySelector('.fp-blood');
+  if (blood) { blood.classList.remove('on'); void blood.getBoundingClientRect(); blood.classList.add('on'); }
+  updateVitals();
+  if (F.hp <= 0) {
+    F.hp = 0;
+    endDelve(`cut down by the ${c.prey.name}`, true);
   }
 }
 
-async function engage(c) {
-  if (F.fighting || F.ended) return;
-  F.fighting = true;
-  F.keys = {}; F.latched = {};
-  let bout = null;
-  try { bout = await F.hooks.fight(c.prey.id); }
-  catch (e) { console.error('delve-fp: bout failed', e); }
-  if (!F || F.ended) return;
-  showScreen('delveFpScreen');
+/** It falls, and the ledger is the same ledger the arena fed. */
+function slay(c) {
+  F.creatures = F.creatures.filter((x) => x !== c);
+  c.el.remove();
   F.haul.bouts++;
-  if (bout && bout.won) {
-    F.creatures = F.creatures.filter((x) => x !== c);
-    c.el.remove();
-    // Banking the spoils must not be able to strand the session. The loop only
-    // restarts from here and from open, so a throw inside onKill would leave
-    // the screen up with `fighting` stuck true and no rAF — a delve you can
-    // look at and not play. Ledger first, loop always.
-    try {
-      const r = F.hooks.onKill(c.prey.id);
-      F.haul.kills[c.prey.id] = (F.haul.kills[c.prey.id] || 0) + 1;
-      if (r) {
-        F.haul.gold += r.gold || 0;
-        F.haul.field += r.field || 0;
-        if (r.meat) F.haul.mats.game_meat = (F.haul.mats.game_meat || 0) + r.meat;
-        if (r.pelt) F.haul.mats.pelt = (F.haul.mats.pelt || 0) + r.pelt;
-        if (r.loot) F.haul.mats[r.loot] = (F.haul.mats[r.loot] || 0) + 1;
-        toast(`${c.prey.glyph} ${c.prey.name} felled! ${r.txt || ''}`);
-      }
-      updateHaul();
-    } catch (e) {
-      console.error('delve-fp: spoils failed', e);
-    } finally {
-      F.grace = true;
-      F.fighting = false;
-      startLoop();
+  // Banking must not be able to strand the session: a throw inside onKill used
+  // to leave the delve up with no way on. Ledger first, loop always.
+  try {
+    const r = F.hooks.onKill(c.prey.id);
+    F.haul.kills[c.prey.id] = (F.haul.kills[c.prey.id] || 0) + 1;
+    if (r) {
+      F.haul.gold += r.gold || 0;
+      F.haul.field += r.field || 0;
+      if (r.meat) F.haul.mats.game_meat = (F.haul.mats.game_meat || 0) + r.meat;
+      if (r.pelt) F.haul.mats.pelt = (F.haul.mats.pelt || 0) + r.pelt;
+      if (r.loot) F.haul.mats[r.loot] = (F.haul.mats[r.loot] || 0) + 1;
+      toast(`${c.prey.glyph} ${c.prey.name} felled! ${r.txt || ''}`);
     }
-  } else {
-    F.fighting = false;
-    endDelve(`driven out by the ${c.prey.name}`, true);
+    updateHaul();
+  } catch (e) {
+    console.error('delve-fp: spoils failed', e);
   }
+  updateVitals();
+}
+
+/**
+ * Everything the creatures do to you, and what standing clear buys back.
+ *
+ * Combat runs on the WALL CLOCK, not on the simulation's `now` — the same clock
+ * `trySwing` already cools down against. Mixing the two means a swing cooldown
+ * and a creature's cooldown drift apart under any stepped or throttled frame,
+ * and the fight quietly changes speed.
+ */
+function fightTick(dt) {
+  const now = performance.now();
+  for (const c of F.creatures) {
+    if (Math.hypot(c.x - F.px, c.y - F.py) > REACH + 0.35) continue;
+    if (!c.atkAt) { c.atkAt = now + FOE_SWING_MS * 0.5; continue; }
+    if (now >= c.atkAt) foeSwing(c, now);
+    if (!F || F.ended) return;
+  }
+  // A breather, but never the whole of it back. Each bout lowers the ceiling,
+  // so the question a delve asks is how much further you can afford to go.
+  if (now - (F.contactAt || 0) > REGEN_DELAY * 1000 && F.hp < F.hpCeil) {
+    F.hp = Math.min(F.hpCeil, F.hp + REGEN_PER_S * dt);
+    updateVitals();
+  }
+  F.hpCeil = Math.max(REGEN_FLOOR, HP_MAX - REGEN_COST * F.haul.bouts);
+}
+
+/** Drink. Real Apothecary stock, spent through hall.js — the delve cannot
+ *  conjure a bottle the guild does not have, and it never drinks two at once. */
+function drink() {
+  const now = performance.now();
+  if (!F || F.ended || now < (F.drinkUntil || 0)) return;
+  if (F.hp >= F.hpCeil) { toast('No need — still hale.'); return; }
+  const p = F.hooks.drink && F.hooks.drink();
+  if (!p) { toast('No draughts in the satchel.'); return; }
+  F.drinkUntil = now + 900;
+  F.hp = Math.min(F.hpCeil, F.hp + (p.potency || 20));
+  floater(F.host.querySelector('.fp-hands'), '+' + (p.potency || 20), 'fp-heal');
+  toast(`${p.glyph || '🧪'} ${p.name} — ${Math.ceil(F.hp)} left in you.`);
+  updateVitals();
+  updatePotions();
+}
+
+/** How many draughts are left, on the pad's own button. */
+function updatePotions() {
+  const b = F.host.querySelector('.fp-drink b');
+  if (!b) return;
+  const n = F.hooks.potions ? F.hooks.potions() : 0;
+  b.textContent = n;
+  const btn = F.host.querySelector('.fp-drink');
+  if (btn) btn.classList.toggle('fp-dry', !n);
+}
+
+function braceShield() {
+  const s = F.hands && F.hands.shield;
+  if (!s) return;
+  s.el.classList.remove('fp-bracing');
+  void s.el.getBoundingClientRect();
+  s.el.classList.add('fp-bracing');
+  playFrames(s, WORN.shieldBrace);
+}
+
+/** The one bar that matters, plus the red edge of being hurt. */
+function updateVitals() {
+  const el = F.host.querySelector('.fp-vitals-fill');
+  if (el) el.style.width = Math.max(0, Math.min(100, (F.hp / HP_MAX) * 100)).toFixed(1) + '%';
+  const cap = F.host.querySelector('.fp-vitals-cap');
+  if (cap) cap.style.left = Math.max(0, Math.min(100, (F.hpCeil / HP_MAX) * 100)).toFixed(1) + '%';
+  const n = F.host.querySelector('.fp-vitals-n');
+  if (n) n.textContent = Math.ceil(F.hp);
 }
 
 /** Work a vein out of the wall in front of you. The face becomes floor, so the
@@ -1078,14 +1463,16 @@ function render() {
   // (x·cosθ + z·sinθ, y, −x·sinθ + z·cosθ) — so facing east (yaw 90) has to send
   // world +X to view −Z, which needs +90. The negative sign put east BEHIND the
   // camera and left you staring at the wall you had just walked away from.
-  F.world.style.transform = `rotateY(${F.yaw}deg) translate3d(${-ex}px,${-ey}px,${-ez}px)`;
-  // Billboards stand on the floor and counter-rotate to face the walker.
-  for (const c of F.creatures) {
-    c.el.style.transform = `translate3d(${c.x * T}px,${-heightAt(Math.floor(c.x), Math.floor(c.y)) * STEP_PX}px,${c.y * T}px) rotateY(${-F.yaw}deg)`;
-  }
-  for (const d of F.decor) {
-    d.el.style.transform = `translate3d(${d.x * T}px,${d.lift}px,${d.y * T}px) rotateY(${-F.yaw}deg)`;
-  }
+  // scale3d, never scale(): a 2D scale between a rotate and the billboards'
+  // counter-rotate leaves Z alone, which is not a similarity in 3D and squashes
+  // every standee (the top-down view learned this the hard way).
+  F.world.style.transform = `scale3d(${F.lens},${F.lens},${F.lens}) rotateY(${F.yaw}deg) translate3d(${-ex}px,${-ey}px,${-ez}px)`;
+  // Billboards stand on the floor and counter-rotate to face the walker. Every
+  // write is guarded by the value it would write: standing still, this loop
+  // touches no style at all, which is the difference between a scene that
+  // re-rasterises 30 layers a frame and one that does nothing.
+  for (const c of F.creatures) place(c, c.x, c.y, -heightAt(Math.floor(c.x), Math.floor(c.y)) * STEP_PX);
+  for (const d of F.decor) place(d, d.x, d.y, d.lift);
   // The hands ride the stride and lag the turn — the whole reason to draw them
   // is that they are the only thing on screen that moves WITH you.
   if (F.hands) {
@@ -1133,25 +1520,18 @@ function drawMap() {
 function stepSim(now) {
   const dt = Math.min(0.08, (now - (F.last || now)) / 1000);
   /**
-   * Re-asked between every stage, not once at the top. A strike may now be
-   * thrown MID-STRIDE, and engage() raises `fighting` and the battle screen
-   * synchronously — so a single test up front would let the stride it
-   * interrupted finish underneath the bout. Landing that stride on the stairs
-   * ran endDelve while the fight was still out: the summary card was injected
-   * into a hidden screen, onEnd never fired, and the only way back to the guild
-   * was a page reload. onArrive can also fire usePortal, which swaps the map out
-   * from under a fight that is about to pay spoils for a creature you left behind.
+   * Re-asked between every stage, not once at the top. Any stage can end the
+   * session or start a door: a strike can drop the last creature and a stride
+   * can land on the stairs, and `onArrive` fires `usePortal`, which swaps the
+   * whole map out. Testing once up front let the stride that a portal
+   * interrupted finish inside the room it had already left.
    */
-  const busy = () => F.fighting || F.transiting;
+  const busy = () => F.transiting || F.ended;
   if (!busy()) readInput();
   if (!busy()) advanceMotion(dt);
-  if (!busy()) {
-    moveCreatures(dt);
-    checkArmed();
-    if (F.grace) {
-      if (F.creatures.every((c) => Math.hypot(c.x - F.px, c.y - F.py) > REACH + 0.5)) F.grace = false;
-    } else if (!F.ended) checkEncounters();
-  }
+  if (!busy()) moveCreatures(dt);
+  if (!busy()) checkArmed();
+  if (!busy()) fightTick(dt);
   if (!F || F.ended) return false;
   render();
   F.last = now;
@@ -1190,7 +1570,7 @@ function updateHaul() {
   el.textContent = `☠ ${kills} · ${F.haul.gold}g`;
 }
 
-function leave() { if (F && !F.fighting && !F.ended) endDelve('called it a day'); }
+function leave() { if (F && !F.ended) endDelve('called it a day'); }
 
 function endDelve(reason, beaten = false) {
   if (!F || F.ended) return;
@@ -1231,9 +1611,10 @@ window.__delveFp = { leave, close, help: () => helpUntil(9000) };
 if (typeof window !== 'undefined') {
   window.__fpDebug = () => F && ({
     map: F.map && F.map.id, x: +F.px.toFixed(2), y: +F.py.toFixed(2), dir: COMPASS[F.dir], yaw: F.yaw,
-    moving: !!(F.stepping || F.turning), fighting: F.fighting, armed: F.armed,
+    moving: !!(F.stepping || F.turning), hp: Math.ceil(F.hp), hpCeil: F.hpCeil, armed: F.armed,
     quads: F.world.querySelectorAll('.fp-q').length, creatures: F.creatures.length,
-    haul: F.haul.gold, seen: F.seen.size,
+    haul: F.haul.gold, seen: F.seen.size, power: F.hooks.power, fatigue: F.hooks.fatigue,
+    fight: { swings: F.haul.swings|0, landed: F.haul.landed|0, missed: F.haul.missed|0, foeHits: F.haul.taken|0, foeMisses: F.haul.dodged|0, bouts: F.haul.bouts },
     // The three numbers that decide whether a swing lands: how far the nearest
     // creature is, and how far in front of you it is.
     near: F.creatures.map((c) => {
