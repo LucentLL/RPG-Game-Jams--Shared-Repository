@@ -41,6 +41,7 @@ import { renderBuild, setTool as buildTool, armBuilding, armProp, cellClick as b
 import { artSprite, itemSprite, hasItemSprite } from './art.js';
 import { hasDiorama, roomSceneHTML, bindRoomScene, stopRoomLoop } from './rooms.js';
 import { openDelve, hasDelveMap, isDelveOpen, exitDelve } from './delve.js';
+import { openDelveFp, isDelveFpOpen } from './delve-fp.js';
 import { ORE_KINDS, setCampusGuild } from './delve-maps.js';
 import { ensureCampus } from './campus.js';
 
@@ -536,9 +537,15 @@ function setPlayHunt(localeId, preyId, mode) {
  * hunt pays: gold, rep, meat, pelt, loot, field insight). Losing a bout ends
  * the delve. All guild mutations stay HERE, passed to delve.js as hooks.
  */
-async function exploreLocale(localeId) {
+/**
+ * March into a locale on foot. `fp` picks the VIEW — the top-down walk or the
+ * first-person one. Both openers take the same hooks object built below, so the
+ * two modes cannot drift on what a kill is worth or what a vein pays; they are
+ * two ways of looking at one delve.
+ */
+async function exploreLocale(localeId, fp) {
   const h = heroById(selectedId) || guild.roster[0]; if (!h) return; // same fallback as wildsRoom's subject
-  if (!isDiscovered(guild, localeId) || !hasDelveMap(localeId) || isDelveOpen()) return;
+  if (!isDiscovered(guild, localeId) || !hasDelveMap(localeId) || isDelveOpen() || isDelveFpOpen()) return;
   if (!canMarch(h)) { notice = `${h.name.split(' ')[0]} is too tired or hurt to march.`; render(); return; }
   if (!battleEngineReady()) { notice = 'The battle engine is still waking — try again in a moment.'; render(); return; }
   const locale = localeById(localeId);
@@ -549,7 +556,7 @@ async function exploreLocale(localeId) {
   const wear = [1, 0.5, 0.25][Math.min(2, (wilds.delveEntries || {})[localeId] || 0)];
   let opened = false;
   try {
-    opened = await openDelve(localeId, h, {
+    opened = await (fp ? openDelveFp : openDelve)(localeId, h, {
       locale,
       fight: async (preyId) => {
         const prey = preyById(preyId); if (!prey) return null;
@@ -2776,7 +2783,7 @@ function wildsRoom() {
       : `<div class="hint" style="text-align:left;padding:4px 2px">Pick a quarry above to dispatch <b>${subject.name.split(' ')[0]}</b>.</div>`;
     // A charted locale can be WALKED — the Delve (delve.js): live 2.5D exploration.
     const delveRow = hasDelveMap(open.id)
-      ? `<div class="tourney-lens quest-lens"><button class="tourney-play" ${hCanMarch ? '' : 'disabled'} onclick="__guild.exploreLocale('${open.id}')">⛏ ${hCanMarch ? `Walk ${open.name} — take ${subject.name.split(' ')[0]} in on foot` : `${subject.name.split(' ')[0]} can't march right now`}</button></div>
+      ? `<div class="tourney-lens quest-lens"><button class="tourney-play" ${hCanMarch ? '' : 'disabled'} onclick="__guild.exploreLocale('${open.id}')">⛏ ${hCanMarch ? `Walk ${open.name} — take ${subject.name.split(' ')[0]} in on foot` : `${subject.name.split(' ')[0]} can't march right now`}</button>${hCanMarch ? `<button class="tourney-play" onclick="__guild.exploreLocale('${open.id}', true)">👁 Descend in first person</button>` : ''}</div>
         <div class="hint" style="text-align:left;padding:0 2px 6px">The area is charted. Explore it live: move with WASD or the stick, close with a creature to fight it for real, bump a vein to mine it. Entering costs ${QUEST_STAMINA} stamina and kills pay real spoils on the spot (repeat marches the same week find thinner pickings) — losing a bout sends ${subject.name.split(' ')[0]} home.</div>`
       : '';
     preyPanel = `<div class="plan-title">${open.glyph} ${open.name} <span class="dim" style="font-weight:400;text-transform:none">— ${open.biome}</span></div>
