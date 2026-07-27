@@ -58,11 +58,38 @@
 /* Wrapper: pinned bottom-center to its ground point ON the plane; owns the
    flat contact shadow. The inner .dv-up counter-rotates upright about the
    feet line, exactly like .ra-standee. */
+/* --dvlift raises the standee onto whatever surface it stands on, in the plane's
+   own pixels — the SAME translateZ a ledge's top is built with, so a walker who
+   climbs up lands exactly on the drawn surface rather than hovering over it or
+   sinking through. It must come BEFORE the translate: the lift is along the
+   plane's normal, the translate is across the plane. */
 .dv-actor, .dv-prop, .dv-ore {
   position: absolute;
-  transform: translate(-50%, -100%);
+  transform: translateZ(var(--dvlift, 0px)) translate(-50%, -100%);
   transform-style: preserve-3d;
   pointer-events: none;
+}
+
+/* --- Climb links: the way between levels ------------------------------- */
+/* Drawn upright against the face of the ledge they serve, so they read as
+   something you go up rather than something lying on the floor. Same grammar as
+   the action arena's .at-ladder / .at-vine — one rung language for both grounds. */
+.dv-ladder, .dv-vine { display: block; margin: 0 auto; }
+.dv-ladder {
+  width: 26px; height: 58px;
+  background:
+    repeating-linear-gradient(180deg, #8a6033 0 4px, transparent 4px 12px),
+    linear-gradient(90deg, #6b4a26 0 5px, transparent 5px calc(100% - 5px), #6b4a26 calc(100% - 5px) 100%);
+  border-radius: 2px;
+  filter: drop-shadow(0 2px 2px rgba(0, 0, 0, 0.5));
+}
+.dv-vine {
+  width: 22px; height: 60px;
+  background:
+    repeating-linear-gradient(200deg, #3f6b2c 0 3px, #5d8f3c 3px 7px, transparent 7px 11px),
+    linear-gradient(90deg, transparent 0 6px, #38612a 6px 11px, transparent 11px 100%);
+  border-radius: 0 0 6px 6px;
+  filter: drop-shadow(0 2px 2px rgba(0, 0, 0, 0.5));
 }
 .dv-up {
   transform: rotateX(calc(-1 * var(--dvtilt)));

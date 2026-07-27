@@ -122,6 +122,22 @@ function loadImg(url) {
 /** Full-height cells: chasm, veins, raised blocks, and a building's footprint.
  *  Nothing stands in these, and a walker is held clear of them (WALL_BACK). */
 const BLOCKING = { '#': 1, o: 1, B: 1, b: 1, F: 1 };
+/**
+ * A LEDGE — walkable ground one step up. It bakes as the low raised block it
+ * already is ('b': a lifted top plus side panels, exactly a shelf), but unlike
+ * 'b' you stand ON it, and you can only get up there through a climb cell.
+ */
+const LEDGE = '^';
+/** Climb links: ground you walk onto, dressed with the thing you climb. Stepping
+ *  between levels is legal only when one end of the step is one of these. */
+const CLIMB = { L: 'ladder', v: 'vine' };
+/** What the BAKER should see for an authored cell. A ledge is drawn as its block;
+ *  a ladder is drawn as plain floor, so the ground art runs on underneath it. */
+const bakeChar = (ch) => (ch === LEDGE ? 'b' : CLIMB[ch] ? '.' : ch);
+/** Fraction of walking speed while on the rungs — a climb costs time. */
+const CLIMB_SPEED = 0.42;
+/** Where a climber renders while between levels: visibly on the way up. */
+const CLIMB_LIFT = 0.5;
 /** Upright props — boulders, stalagmites, the cart, furniture. These block only
  *  the shallow floor slice their art actually rests on (SOLID_DEPTH), so you can
  *  step in behind one and have it sort in front of you. */
@@ -342,12 +358,17 @@ function extractGeometry(grid) {
  */
 async function bakeMap(map, theme) {
   const sheets = await loadSheets(map, theme);
+  // Two grids from here on. The AUTHORED one answers every gameplay question —
+  // what blocks, what is a step up, what you can climb. The RENDER one is what
+  // the baker and the geometry extractor see, with the height vocabulary
+  // translated into the block language they already speak.
+  const rgrid = map.grid.map((row) => Array.from(row, bakeChar).join(''));
   const { rows, cols, at } = gridFns(map.grid);
   const cv = document.createElement('canvas');
   cv.width = cols * TILE; cv.height = rows * TILE;
   const g = cv.getContext('2d');
   g.imageSmoothingEnabled = false;
-  paintGround(g, map.grid, theme, sheets);
+  paintGround(g, rgrid, theme, sheets);
 
   // Flat floor decals that belong ON the plane (holes and track). Boulders,
   // stalagmites and the cart are upright standees — see openDelve.
@@ -365,21 +386,29 @@ async function bakeMap(map, theme) {
 
   // Passability comes in two grains. `pass`/`tall` are the full-height cells;
   // `solids` are the shallow rectangles an upright prop really stands on.
-  const pass = [], tall = [], solids = [];
+  // Passability comes in three grains now. `pass`/`tall` are the full-height
+  // cells; `solids` the shallow rectangles an upright prop rests on; `height`
+  // and `climb` say which LEVEL a cell's floor is and where you may change it.
+  const pass = [], tall = [], solids = [], height = [], climb = [];
   for (let y = 0; y < rows; y++) {
-    pass.push([]); tall.push([]);
+    pass.push([]); tall.push([]); height.push([]); climb.push([]);
     for (let x = 0; x < cols; x++) {
       const ch = at(x, y);
       pass[y].push(!BLOCKING[ch]);
+      // A ledge is deliberately NOT tall: it is floor, one step up, and holding
+      // a walker off it the way WALL_BACK holds them off a wall would put a
+      // gap between their feet and the surface they are standing on.
       tall[y].push(ch === '#' || ch === 'B' || ch === 'b' || ch === 'F');
+      height[y].push(ch === LEDGE ? 1 : 0);
+      climb[y].push(!!CLIMB[ch]);
       if (FOOTED[ch]) solids.push({ x0: x, x1: x + 1, y0: y + 1 - SOLID_DEPTH, y1: y + 1 });
     }
   }
   return {
-    url: cv.toDataURL('image/png'), pass, tall, solids, cols, rows, sheets,
+    url: cv.toDataURL('image/png'), pass, tall, solids, height, climb, cols, rows, sheets,
     voidColor: sampleVoidColor(sheets.cliffs, theme),
     tex: cutWallTex(sheets, theme),
-    ...extractGeometry(map.grid),
+    ...extractGeometry(rgrid),
   };
 }
 
@@ -473,6 +502,7 @@ function mountScene(prep, entry) {
 
   D.map = map; D.theme = theme; D.field = field;
   D.pass = baked.pass; D.tall = baked.tall; D.cols = baked.cols; D.rows = baked.rows;
+  D.height = baked.height; D.climb = baked.climb; // levels, and where you may change them
   // Fresh per scene: prop footprints are rebaked with the map, and the props
   // you can work at are re-registered as they are placed below.
   D.solids = baked.solids.slice();
@@ -517,6 +547,8 @@ function mountScene(prep, entry) {
     for (let x = 0; x < D.cols; x++) {
       const ch = map.grid[y][x];
       if (ch === 's' || ch === 'w' || ch === 'd') D.exit = { x: x + 0.5, y: y + 0.5 };
+      // The thing you climb, standing against the face of the ledge it serves.
+      if (CLIMB[ch]) addProp(`<span class="dv-${CLIMB[ch]}"></span>`, x + 0.5, y + 1, 30);
       if (ch === 'w') addProp(artSprite('wagon', 'dv-wagon'), x + 0.5, y + 1, 82);
       else if (ch === 't' && map.theme === 'meadow') addProp(artSprite('treeTall', 'dv-tree'), x + 0.5, y + 1, 86);
       else if (ch === 't') addPropCanvas('stalag', baked.sheets, x + 0.5, y + 0.97);
@@ -794,6 +826,7 @@ function addProp(html, x, y, w) {
   el.style.top = (y * TILE) + 'px';
   el.style.width = w + 'px';
   el.style.zIndex = standZ(y);
+  el.style.setProperty('--dvlift', liftAt(x, y) + 'px'); // a prop on a ledge rides on it
   D.field.appendChild(el);
   trackOccluder(el, x, y, w);
   return el;
@@ -826,6 +859,7 @@ function addPropCanvas(decalName, sheets, x, y) {
   el.style.top = (y * TILE) + 'px';
   el.style.width = d.w + 'px';
   el.style.zIndex = standZ(y);
+  el.style.setProperty('--dvlift', liftAt(x, y) + 'px');
   D.field.appendChild(el);
   trackOccluder(el, x, y, d.w);
 }
@@ -847,6 +881,7 @@ function addOre(x, y, oresImg) {
   el.style.left = ((x + 0.5) * TILE) + 'px';
   el.style.top = ((y + 1) * TILE - 2) + 'px';
   el.style.zIndex = standZ(y + 1);
+  el.style.setProperty('--dvlift', liftAt(x + 0.5, y + 0.5) + 'px'); // a vein in an upper gallery
   D.field.appendChild(el);
   D.ores.push({ x, y, kind, el });
 }
@@ -1015,19 +1050,43 @@ const clearOfSolids = (x, y) => {
   }
   return true;
 };
-const canStand = (x, y) =>
+/** Which LEVEL the floor is at under a point, in whole steps (0 off the grid). */
+const heightAt = (x, y) => {
+  const tx = Math.floor(x), ty = Math.floor(y);
+  return (tx < 0 || ty < 0 || tx >= D.cols || ty >= D.rows) ? 0 : D.height[ty][tx];
+};
+/** Is this point on a ladder or a vine? */
+const onClimb = (x, y) => {
+  const tx = Math.floor(x), ty = Math.floor(y);
+  return tx >= 0 && ty >= 0 && tx < D.cols && ty < D.rows && D.climb[ty][tx];
+};
+/** How far off the plane a standee here rides, in plane px — the surface under
+ *  their feet, or halfway between levels while they are on the rungs. */
+const liftAt = (x, y) => (onClimb(x, y) ? CLIMB_LIFT : heightAt(x, y)) * BLOCK_H;
+/**
+ * A step that CHANGES LEVEL is legal only when one end of it is a climb cell.
+ * That single rule is what makes a ledge somewhere you climb up to rather than
+ * somewhere you stroll onto, and it is why the ledge itself can stay ordinary
+ * passable floor instead of needing a wall around three of its sides.
+ */
+const stepOK = (fx, fy, x, y) =>
+  fx == null || heightAt(fx, fy) === heightAt(x, y) || onClimb(fx, fy) || onClimb(x, y);
+
+const canStand = (x, y, fx, fy) =>
   passAt(x - BODY_R, y - BODY_R) && passAt(x + BODY_R, y - BODY_R) &&
   passAt(x - BODY_R, y + BODY_R) && passAt(x + BODY_R, y + BODY_R) &&
   // The extra standoff from a wall to the NORTH — see WALL_BACK. Props are
   // exempt (they use `solids`), so you can still tuck in behind an anvil.
   !tallAt(x - BODY_R, y - BODY_R - WALL_BACK) && !tallAt(x + BODY_R, y - BODY_R - WALL_BACK) &&
-  clearOfSolids(x, y);
+  clearOfSolids(x, y) && stepOK(fx, fy, x, y);
 
-/** Axis-separated move: slide along walls instead of sticking. Returns moved? */
+/** Axis-separated move: slide along walls instead of sticking. Returns moved?
+ *  The step's ORIGIN is passed through so the level rule can see it — a move
+ *  tested without one (a spawn, a wander target) is judged on footing alone. */
 function tryMove(e, dx, dy) {
   let moved = false;
-  if (dx && canStand(e.x + dx, e.y)) { e.x += dx; moved = true; }
-  if (dy && canStand(e.x, e.y + dy)) { e.y += dy; moved = true; }
+  if (dx && canStand(e.x + dx, e.y, e.x, e.y)) { e.x += dx; moved = true; }
+  if (dy && canStand(e.x, e.y + dy, e.x, e.y)) { e.y += dy; moved = true; }
   return moved;
 }
 
@@ -1039,7 +1098,8 @@ function movePlayer(dt) {
   const m = Math.hypot(ux, uy);
   if (m > 0.01) {
     ux /= Math.max(1, m); uy /= Math.max(1, m);
-    tryMove(p, ux * PLAYER_SPEED * dt, uy * PLAYER_SPEED * dt);
+    const speed = PLAYER_SPEED * (onClimb(p.x, p.y) ? CLIMB_SPEED : 1); // rungs cost time
+    tryMove(p, ux * speed * dt, uy * speed * dt);
     p.actor.facing = Math.atan2(ux, -uy);
     if (!p.moving) { D.gfx.setAnim(p.actor, 'move'); p.moving = true; }
   } else if (p.moving) {
@@ -1444,6 +1504,16 @@ function drawCreature(c, now) {
   }
 }
 
+/** Put a moving standee on the plane: its ground point, its painter's depth, and
+ *  the lift of whatever surface it is standing on. `--dvlift` is the same
+ *  translateZ the ledge's own top is built with, so feet land exactly on it. */
+function place(el, x, y) {
+  el.style.left = (x * TILE) + 'px';
+  el.style.top = (y * TILE) + 'px';
+  el.style.zIndex = standZ(y);
+  el.style.setProperty('--dvlift', liftAt(x, y).toFixed(1) + 'px');
+}
+
 function render(now) {
   const p = D.player;
   // Player — compositor actor, canvas anchored at the feet.
@@ -1454,23 +1524,17 @@ function render(now) {
   // before the measurement exists, so they collect it here).
   if (_heroFootPct == null) groundHeroSprite(p.cv);
   if (_heroFootPct != null && !p.grounded) { p.cv.style.setProperty('--footpct', _heroFootPct.toFixed(2) + '%'); p.grounded = true; }
-  p.el.style.left = (p.x * TILE) + 'px';
-  p.el.style.top = (p.y * TILE) + 'px';
-  p.el.style.zIndex = standZ(p.y);
+  place(p.el, p.x, p.y);
   updateXray(); // the walker is placed — fade whatever they are standing behind
   for (const c of D.creatures) {
     drawCreature(c, now);
-    c.el.style.left = (c.x * TILE) + 'px';
-    c.el.style.top = (c.y * TILE) + 'px';
-    c.el.style.zIndex = standZ(c.y);
+    place(c.el, c.x, c.y);
   }
   for (const c of D.companions) {
     D.gfx.tickActor(c.actor, now);
     D.gfx.renderActor(c.cv, c.actor);
     if (_heroFootPct != null && !c.grounded) { c.cv.style.setProperty('--footpct', _heroFootPct.toFixed(2) + '%'); c.grounded = true; }
-    c.el.style.left = (c.x * TILE) + 'px';
-    c.el.style.top = (c.y * TILE) + 'px';
-    c.el.style.zIndex = standZ(c.y);
+    place(c.el, c.x, c.y);
   }
   // Camera: the innermost translate slides the PLANE (in plane px) so the
   // walker sits at its center, which the rotateX·translateZ·scale chain then
