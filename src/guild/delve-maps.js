@@ -177,6 +177,21 @@ export const ORE_KINDS = {
 };
 
 /**
+ * Which ore a given cell is made of. Lives HERE, not in either renderer, because
+ * both views draw the same seam: the top-down walk paints a node on the floor and
+ * the first-person one bakes the vein into the wall you break, and a cell that
+ * pays emberroot in one view must not read as iron in the other.
+ * @param {number} x @param {number} y @returns {string} an ORE_KINDS key
+ */
+export function oreKindAt(x, y) {
+  let h = (x * 374761393 + y * 668265263) | 0;
+  h = ((h ^ (h >>> 13)) * 1274126177) | 0;
+  h = (h ^ (h >>> 16)) >>> 0;
+  const kinds = Object.keys(ORE_KINDS);
+  return kinds[h % kinds.length];
+}
+
+/**
  * @typedef {Object} DelveMap
  * @property {string} id @property {string} theme  THEMES key
  * @property {string[]} grid  ASCII rows (equal length)

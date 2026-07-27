@@ -23,9 +23,10 @@
  * a place you look at from above; the delve is a place you are inside.
  */
 import { ART_BASE } from '../config/assets.js';
-import { THEMES, DECALS, ORE_KINDS, mapForLocale, validateMap } from './delve-maps.js';
+import { THEMES, DECALS, ORE_KINDS, oreKindAt, mapForLocale, validateMap } from './delve-maps.js';
 import { preyById } from './locales.js';
 import { loadImg, SHEET_URLS } from './delve.js';
+import { ART, artSprite, gearIcon } from './art.js';
 
 /**
  * World scale. These look arbitrary and are not: what a surface MEASURES on
@@ -48,6 +49,30 @@ const STEP_PX = 430;     // one level of ledge, in world px
 const STEP_MS = 200, TURN_MS = 160;
 const VIEW_R = 9;        // tiles of geometry built around the walker
 const REACH = 0.75;      // how close a creature must be to engage
+
+/**
+ * How tall a creature STANDS, in world px, by rank — the one number that
+ * decides whether the delve is inhabited or infested with specks.
+ *
+ * The old cut scaled the sheet frame by a flat 1.9, which made an Old Delver
+ * (a 108px frame) 205px tall in a world whose ceiling is 1260 and whose eye is
+ * at 690: a human skeleton came up to your ankle, and at two and a half tiles
+ * measured 35px on a 720px stage. Sizing by rank instead of by sheet means the
+ * art's own resolution stops deciding how big the monster is. 760 is your own
+ * height (eye 690, so the top of your head is near there); a Slime Sovereign
+ * at 1080 fills the corridor to the ceiling, which is what a sovereign is for.
+ */
+const CREATURE_H = { 1: 320, 2: 470, 3: 760, 4: 900, 5: 1080 };
+/**
+ * Standing scenery, in world px tall. Sized to the fact that in FIRST PERSON a
+ * prop blocks its WHOLE cell (blocked() consults PROP), where the top-down walk
+ * only blocks the shallow slice its art rests on — so a boulder here really is
+ * the width of the passage, and drawing it knee-high would be a lie about what
+ * you just walked into. Everything stays under WALL_H so nothing pierces the roof.
+ */
+const DECOR_H = { boulder: 700, boulderGray: 700, stalagTall: 1100, cart: 780, tree: 1150 };
+/** One swing, and how far in front of you it reaches (tiles). */
+const SWING_MS = 380, SWING_REACH = 1.9, SWING_CONE = 0.3;
 
 /** Cells that are a full wall you cannot see over. 'o' is an ore face — a wall
  *  made of the thing you want, which is why you mine it by walking into it. */
@@ -103,6 +128,39 @@ function panel(img, sx, sy, sw, sh, dw, dh, dim) {
  * theme without one (the mine, the meadow) has its cliff FACE tiles instead, and
  * those are head-on rock, which is the same thing by another name.
  */
+/** Where the seams sit on an ore face: [across, down, size], all in world px
+ *  once multiplied out. Three clusters, off-centre, so no two faces line up. */
+const VEIN = [[0.50, 0.50, 300], [0.23, 0.74, 200], [0.76, 0.28, 180]];
+/** The light each ore throws — a seam has to be findable from down a corridor. */
+const ORE_GLOW = { iron: '200,178,140', copper: '224,138,60', silver: '206,224,236', crystal: '110,231,200' };
+
+/** One ore face: the wall, with the vein you are actually going to be paid for
+ *  worked into it at a size the eye can find. The first cut pasted a single
+ *  48px cluster onto a 900×1260 face — 0.2% of the wall, and invisible past a
+ *  tile — and pasted the IRON cluster whatever the cell really paid. */
+function bakeOreFace(wallCv, ores, kind) {
+  const d = DECALS[ORE_KINDS[kind].decal];
+  const cv = document.createElement('canvas');
+  cv.width = T; cv.height = WALL_H;
+  const g = cv.getContext('2d');
+  g.imageSmoothingEnabled = false;
+  g.drawImage(wallCv, 0, 0);
+  const glow = ORE_GLOW[kind] || ORE_GLOW.iron;
+  for (const [fx, fy, size] of VEIN) {
+    const cx = fx * T, cy = fy * WALL_H;
+    g.save();
+    g.globalCompositeOperation = 'lighter';
+    const grd = g.createRadialGradient(cx, cy, 0, cx, cy, size);
+    grd.addColorStop(0, `rgba(${glow},0.42)`);
+    grd.addColorStop(1, `rgba(${glow},0)`);
+    g.fillStyle = grd;
+    g.fillRect(cx - size, cy - size, size * 2, size * 2);
+    g.restore();
+    g.drawImage(ores, d.x, d.y, d.w, d.h, cx - size / 2, cy - size / 2, size, size);
+  }
+  return cv.toDataURL();
+}
+
 async function cutSurfaces(theme) {
   const need = new Set(['cliffs', theme.sheet, theme.walls && theme.walls.sheet].filter(Boolean));
   const sheets = {};
@@ -113,11 +171,22 @@ async function cutSurfaces(theme) {
   const floor = panel(floorImg, fill[0] * src, fill[1] * src, src, src, T, T);
   const ceil = panel(floorImg, fill[0] * src, fill[1] * src, src, src, T, T, 0.55);
 
-  let wall, low;
+  // Kept as CANVASES, not data URIs: the ore faces are the wall with a seam in
+  // it, and re-decoding a data URI four times to paint on it is a round trip
+  // through the image loader for no reason.
+  const wallCv = document.createElement('canvas');
+  wallCv.width = T; wallCv.height = WALL_H;
+  const lowCv = document.createElement('canvas');
+  lowCv.width = T; lowCv.height = LOW_H;
+  const paint = (cv, img, sx, sy, sw, sh) => {
+    const g = cv.getContext('2d');
+    g.imageSmoothingEnabled = false;
+    g.drawImage(img, sx, sy, sw, sh, 0, 0, cv.width, cv.height);
+  };
   if (theme.walls) {
     const w = sheets[theme.walls.sheet], r = theme.walls.tall, l = theme.walls.low;
-    wall = panel(w, r[0], r[1], r[2], r[3], T, WALL_H);
-    low = panel(w, l[0], l[1], l[2], l[3], T, LOW_H);
+    paint(wallCv, w, r[0], r[1], r[2], r[3]);
+    paint(lowCv, w, l[0], l[1], l[2], l[3]);
   } else {
     // Two cliff-face tiles stacked make one wall the height of the drop.
     const c = document.createElement('canvas');
@@ -126,26 +195,48 @@ async function cutSurfaces(theme) {
     g.imageSmoothingEnabled = false;
     const put = (t, dy) => g.drawImage(sheets.cliffs, t[0] * 48, t[1] * 48, 48, 48, 0, dy, 48, 48);
     put(theme.faceTop.m, 0); put(theme.faceBot.m, 48);
-    wall = panel(c, 0, 0, 48, 96, T, WALL_H);
-    low = panel(c, 0, 0, 48, 48, T, LOW_H);
+    paint(wallCv, c, 0, 0, 48, 96);
+    paint(lowCv, c, 0, 0, 48, 48);
   }
-  // The ore face is the vein art on a wall, so a seam reads as something to work.
-  const ores = await loadImg(SHEET_URLS.ores);
-  const oreCrop = DECALS.oreIron;
-  const oc = document.createElement('canvas');
-  oc.width = T; oc.height = WALL_H;
-  const og = oc.getContext('2d');
-  og.imageSmoothingEnabled = false;
-  const wi = new Image();
-  return new Promise((res) => {
-    wi.onload = () => {
-      og.drawImage(wi, 0, 0);
-      og.drawImage(ores, oreCrop.x, oreCrop.y, oreCrop.w, oreCrop.h, (T - 48) / 2, WALL_H - 56, 48, 48);
-      res({ floor, ceil, wall, low, ore: oc.toDataURL() });
-    };
-    wi.onerror = () => res({ floor, ceil, wall, low, ore: wall });
-    wi.src = wall;
-  });
+  const wall = wallCv.toDataURL(), low = lowCv.toDataURL();
+  let ores = null;
+  try {
+    const oreImg = await loadImg(SHEET_URLS.ores);
+    ores = {};
+    for (const kind of Object.keys(ORE_KINDS)) ores[kind] = bakeOreFace(wallCv, oreImg, kind);
+  } catch (e) {
+    console.warn('delve-fp: ore sheet missing — seams will read as plain rock', e);
+  }
+  let rail = null;
+  try {
+    const railImg = await loadImg(SHEET_URLS.rails);
+    const d = DECALS.railH;
+    const cv = document.createElement('canvas');
+    cv.width = T; cv.height = T;
+    const g = cv.getContext('2d');
+    g.imageSmoothingEnabled = false;
+    const rh = T * (d.h / d.w);
+    g.drawImage(railImg, d.x, d.y, d.w, d.h, 0, (T - rh) / 2, T, rh);
+    rail = cv.toDataURL();
+  } catch (e) { /* a map without rails simply has none */ }
+  return { floor, ceil, wall, low, ores, rail, ladder: ladderTexture() };
+}
+
+/** The rungs, drawn rather than cropped: no sheet in the kit has a head-on
+ *  ladder, and a ladder head-on is four rectangles. */
+let _ladderTex = null;
+function ladderTexture() {
+  if (_ladderTex) return _ladderTex;
+  const cv = document.createElement('canvas');
+  cv.width = 128; cv.height = 320;
+  const g = cv.getContext('2d');
+  g.fillStyle = '#5d4026';
+  g.fillRect(10, 0, 22, 320); g.fillRect(96, 0, 22, 320);
+  g.fillStyle = '#8a6238';
+  for (let y = 14; y < 320; y += 46) g.fillRect(10, y, 108, 14);
+  g.fillStyle = 'rgba(255,232,180,0.16)';
+  g.fillRect(10, 0, 6, 320); g.fillRect(96, 0, 6, 320);
+  return (_ladderTex = cv.toDataURL());
 }
 
 // ---------------------------------------------------------------------------
@@ -172,6 +263,24 @@ function canStep(fx, fy, tx, ty) {
 const DIRS = [[0, -1], [1, 0], [0, 1], [-1, 0]];
 const COMPASS = ['N', 'E', 'S', 'W'];
 
+/**
+ * Which way to face on arrival: down the longest open run from this cell.
+ *
+ * The first cut always faced south, which in Ferncreek is one step into the
+ * hedge — you arrive nose to the wall, press forward, nothing happens, and the
+ * button looks broken. A crawler should open looking at somewhere it can go.
+ */
+function openestDir(x, y) {
+  let best = 2, run = -1;
+  for (let d = 0; d < 4; d++) {
+    const [dx, dy] = DIRS[d];
+    let n = 0;
+    while (n < 8 && !blocked(x + dx * (n + 1), y + dy * (n + 1))) n++;
+    if (n > run) { run = n; best = d; }
+  }
+  return best;
+}
+
 // ---------------------------------------------------------------------------
 // Geometry — rebuilt on a change of cell, never per frame
 // ---------------------------------------------------------------------------
@@ -192,7 +301,8 @@ function buildGeometry() {
       const wx = (x + 0.5) * T, wz = (y + 0.5) * T;
       if (WALL[ch] || LOW[ch]) {
         const h = LOW[ch] ? LOW_H : WALL_H;
-        const tex = ch === 'o' ? S.ore : (LOW[ch] ? S.low : S.wall);
+        const tex = ch === 'o' ? ((S.ores && S.ores[oreKindAt(x, y)]) || S.wall)
+          : (LOW[ch] ? S.low : S.wall);
         const yc = -h / 2;
         // A face is emitted only where it meets somewhere you could stand, so a
         // solid block of rock costs nothing and no face is ever seen from behind.
@@ -208,11 +318,120 @@ function buildGeometry() {
       const lift = -heightAt(x, y) * STEP_PX;
       out.push(quad(S.floor, T, T, wx, lift, wz, 'rotateX(90deg)', 'fp-floor'));
       out.push(quad(S.ceil, T, T, wx, -WALL_H, wz, 'rotateX(-90deg)', 'fp-ceil'));
+      // Rails lie ON the floor, a hair above it so the two don't fight for depth.
+      if (ch === '=' && S.rail) out.push(quad(S.rail, T, T, wx, lift - 1, wz, 'rotateX(90deg)', 'fp-floor'));
       // A ledge's own riser, so a step up reads as a step and not a slope.
       if (heightAt(x, y) && !heightAt(x, y + 1)) out.push(quad(S.low, T, STEP_PX, wx, -STEP_PX / 2, (y + 1) * T, '', 'fp-wall'));
+      // The rungs. A climb cell is the ONLY place the level may change, so the
+      // ladder is drawn flat against whichever neighbouring face it serves —
+      // a thing you can see and aim at, not a square that silently lifts you.
+      if (S.ladder && onClimb(x, y)) {
+        if (heightAt(x, y + 1)) out.push(quad(S.ladder, T * 0.42, STEP_PX, wx, -STEP_PX / 2, (y + 1) * T - 6, 'rotateY(180deg)', 'fp-ladder'));
+        if (heightAt(x, y - 1)) out.push(quad(S.ladder, T * 0.42, STEP_PX, wx, -STEP_PX / 2, y * T + 6, '', 'fp-ladder'));
+        if (heightAt(x + 1, y)) out.push(quad(S.ladder, T * 0.42, STEP_PX, (x + 1) * T - 6, -STEP_PX / 2, wz, 'rotateY(-90deg)', 'fp-ladder'));
+        if (heightAt(x - 1, y)) out.push(quad(S.ladder, T * 0.42, STEP_PX, x * T + 6, -STEP_PX / 2, wz, 'rotateY(90deg)', 'fp-ladder'));
+      }
     }
   }
   F.world.querySelector('.fp-geo').innerHTML = out.join('');
+}
+
+// ---------------------------------------------------------------------------
+// Decor — everything that STANDS in the map but is not the map
+// ---------------------------------------------------------------------------
+
+/** Grid char → the decal it stands up as, and how tall it stands. */
+const GRID_DECOR = {
+  r: (theme) => (theme.grayProps ? 'boulderGray' : 'boulder'),
+  t: () => 'stalagTall',
+  m: () => 'cart',
+};
+/** The ways out, and what each one is. */
+const EXIT_SIGN = { s: ['⌃', 'Way out'], w: ['⌃', 'Way out'], d: ['🚪', 'Door'] };
+
+/** A decal stood up as a billboard, scaled to a real world height. */
+function decalBillboard(sheets, decalName, x, y, worldH) {
+  const d = DECALS[decalName];
+  const img = d && sheets[d.sheet];
+  if (!img) return;
+  const cv = document.createElement('canvas');
+  cv.width = d.w; cv.height = d.h;
+  const g = cv.getContext('2d');
+  g.imageSmoothingEnabled = false;
+  g.drawImage(img, d.x, d.y, d.w, d.h, 0, 0, d.w, d.h);
+  const el = addBillboard('fp-decor', '', worldH * (d.w / d.h), worldH);
+  el.appendChild(cv);
+  cv.style.width = '100%'; cv.style.height = '100%';
+  standDecor(el, x, y);
+}
+
+/** Decor turns to the walker every frame for the same reason a creature does:
+ *  a billboard is a flat plane, and a flat plane seen edge-on is nothing. */
+function standDecor(el, x, y) {
+  F.decor.push({ el, x, y, lift: -heightAt(Math.floor(x), Math.floor(y)) * STEP_PX });
+}
+
+/** A sign you can read from down the corridor — the only honest way to tell a
+ *  first-person walker that the square ahead is the stairs and not more floor. */
+function markerBillboard(glyph, label, cls, x, y) {
+  const el = addBillboard('fp-marker ' + cls,
+    `<span class="fpm-glyph">${glyph}</span><span class="fpm-label">${label}</span>`, 560, 560);
+  standDecor(el, x, y);
+}
+
+/**
+ * Stand up everything the chart says is in the room. The top-down walk has
+ * always done this (delve.js decorates the same grid chars); first person
+ * declared `PROP` and then used it for nothing but collision, so a boulder was
+ * an invisible wall, a cart was an invisible wall, and the stairs you were
+ * looking for were a patch of floor indistinguishable from any other.
+ *
+ * Built ONCE per map: none of it moves, and mining a face doesn't touch it.
+ */
+function buildDecor(sheets) {
+  F.decor = []; F.doors = [];
+  const theme = F.theme, map = F.map;
+  for (let y = 0; y < F.rows; y++) {
+    for (let x = 0; x < F.cols; x++) {
+      const ch = F.grid[y][x];
+      const pick = GRID_DECOR[ch];
+      if (pick) {
+        // The meadow's 't' is a tree, not a stalagmite — same rule as delve.js.
+        if (ch === 't' && map.theme === 'meadow') artBillboardH('treeTall', x + 0.5, y + 0.5, DECOR_H.tree);
+        else {
+          const name = pick(theme);
+          decalBillboard(sheets, name, x + 0.5, y + 0.5, DECOR_H[name] || 700);
+        }
+      }
+      const sign = EXIT_SIGN[ch];
+      if (sign || ch === '+') {
+        if (sign) markerBillboard(sign[0], sign[1], 'fpm-exit', x + 0.5, y + 0.5);
+        else markerBillboard('◈', 'Onward', 'fpm-portal', x + 0.5, y + 0.5);
+        F.doors.push({ x: x + 0.5, y: y + 0.5 });
+      }
+    }
+  }
+  // Authored furnishings — the same art.js standees the top-down walk uses, at
+  // the same size: `w` is that view's pixels against its 48px tile, so w/48 is
+  // the thing's width in TILES and T/48 carries it straight across.
+  for (const p of (map.props || [])) artBillboard(p.art, p.x, p.y, (p.w || 48) * (T / 48), p.label);
+}
+
+/** An art.js crop stood up. `worldW` is its width in world px; the height
+ *  follows from the crop's own proportions, which is what keeps it a thing and
+ *  not a stretched picture of one. */
+function artBillboard(name, x, y, worldW, title) {
+  const html = artSprite(name, '', 'width:100%;height:100%');
+  if (!html) return;
+  const a = ART[name];
+  const el = addBillboard('fp-decor', html, worldW, worldW * (a.h / a.w));
+  if (title) el.title = title;
+  standDecor(el, x, y);
+}
+/** The same, given a HEIGHT — for things the ceiling has an opinion about. */
+function artBillboardH(name, x, y, worldH) {
+  const a = ART[name];
+  if (a) artBillboard(name, x, y, worldH * (a.w / a.h));
 }
 
 // ---------------------------------------------------------------------------
@@ -230,23 +449,179 @@ function addBillboard(cls, inner, w, h) {
   return el;
 }
 
+/**
+ * The tight box the art occupies inside a walk-sheet frame, in frame-local
+ * coordinates, taken as the UNION over all twelve frames.
+ *
+ * RPG-Maker charsets centre a small sprite in a generous cell, and how much
+ * padding a given sheet leaves is an accident of that sheet. Scaling by the
+ * FRAME therefore makes a well-drawn creature small and a badly-cropped one
+ * large; scaling by the union of its real pixels makes the rank the only thing
+ * that decides. The union (not the one frame) is what stops the sprite
+ * jittering as it walks.
+ */
+const _trimCache = {};
+function trimBox(art, img, fw, fh) {
+  if (_trimCache[art] !== undefined) return _trimCache[art];
+  let box = null;
+  try {
+    const W = img.naturalWidth, H = img.naturalHeight;
+    const c = document.createElement('canvas');
+    c.width = W; c.height = H;
+    const g = c.getContext('2d', { willReadFrequently: true });
+    g.drawImage(img, 0, 0);
+    const d = g.getImageData(0, 0, W, H).data;
+    const tiled = W === fw * 3 && H === fh * 4;   // only then is x%fw a frame coordinate
+    let x0 = fw, y0 = fh, x1 = -1, y1 = -1;
+    for (let py = 0; py < H; py++) {
+      for (let px = 0; px < W; px++) {
+        if (d[(py * W + px) * 4 + 3] < 12) continue;
+        const lx = tiled ? px % fw : px, ly = tiled ? py % fh : py;
+        if (lx < x0) x0 = lx;
+        if (ly < y0) y0 = ly;
+        if (lx > x1) x1 = lx;
+        if (ly > y1) y1 = ly;
+      }
+    }
+    if (x1 >= 0) box = { x: x0, y: y0, w: x1 - x0 + 1, h: y1 - y0 + 1 };
+  } catch (e) {
+    console.warn('delve-fp: could not measure', art, e);   // tainted canvas — fall back
+  }
+  return (_trimCache[art] = box);
+}
+
+/** The walk cycle, in sheet columns — the same [1,2,1,0] the compositor uses. */
+const WALK_COLS = [1, 2, 1, 0];
+
+/** Repaint a creature's canvas. Cheap, and only ever called on a frame change. */
+function drawCreature(c) {
+  const g = c.cv.getContext('2d');
+  g.imageSmoothingEnabled = false;
+  g.clearRect(0, 0, c.cv.width, c.cv.height);
+  g.drawImage(c.img, c.col * c.fw + c.box.x, c.row * c.fh + c.box.y, c.box.w, c.box.h,
+    0, 0, c.box.w, c.box.h);
+  c.drawn = c.row * 4 + c.col;
+}
+
 function spawnCreature(prey, img, x, y) {
   const fw = Math.floor(img.naturalWidth / 3), fh = Math.floor(img.naturalHeight / 4);
+  const box = trimBox(prey.art, img, fw, fh) || { x: 0, y: 0, w: fw, h: fh };
+  const aspect = box.w / box.h;
+  // Rank sets the height, but nothing may be wider than the passage it stands
+  // in: a Slime Sovereign is squat (1.04 wide per tall), so rank 5's 1080 put
+  // it 1127 across a 900px tile and its shoulders inside both walls.
+  let h = CREATURE_H[Math.min(5, Math.max(1, prey.rank || 1))];
+  const maxW = T * 0.92;
+  if (h * aspect > maxW) h = maxW / aspect;
   const cv = document.createElement('canvas');
-  cv.width = fw; cv.height = fh;
-  const g = cv.getContext('2d');
-  g.imageSmoothingEnabled = false;
-  g.drawImage(img, fw, 0, fw, fh, 0, 0, fw, fh); // col 1, row 0 — the toward-you pose
-  const scale = 1.9;
-  const el = addBillboard('fp-creature', '', fw * scale, fh * scale);
+  cv.width = box.w; cv.height = box.h;
+  const el = addBillboard('fp-creature', '', h * aspect, h);
   el.appendChild(cv);
   cv.style.width = '100%'; cv.style.height = '100%';
-  F.creatures.push({ prey, el, x, y, home: { x, y }, mode: 'idle', t: 1 + Math.random() * 2, tx: x, ty: y });
+  const c = {
+    prey, img, el, cv, fw, fh, box, x, y, home: { x, y },
+    mode: 'idle', t: 1 + Math.random() * 2, tx: x, ty: y,
+    row: 0, col: 1, drawn: -1, phase: Math.random() * 4,
+  };
+  drawCreature(c);
+  F.creatures.push(c);
+}
+
+// ---------------------------------------------------------------------------
+// The hands — what you are carrying, held where you can see it
+// ---------------------------------------------------------------------------
+
+/**
+ * Build the viewmodel from the member's real kit.
+ *
+ * `hooks.gear` is what hall.js says is equipped — kind and material, nothing
+ * else — and art.js turns that pair into a 32px icon cell. The RIGHT hand is
+ * the weapon slot, mirrored so the hilt sits at the near corner and the blade
+ * rises into frame; the LEFT is a shield, which is what the body slot looks
+ * like from behind your own arm (there is no shield slot to read).
+ *
+ * Nothing is invented: a member with an empty weapon slot shows empty hands,
+ * and is told so on the way in, because that is a fact about the delve worth
+ * knowing before the first Old Delver.
+ */
+async function mountHands() {
+  const host = F.host.querySelector('.fp-hands');
+  if (!host) return;
+  // `meet`, not `none`: the dash that draws the arc is measured in USER units,
+  // so the viewBox has to scale uniformly or the pattern and the path disagree
+  // about how long the path is. (The first cut stretched it and kept the stroke
+  // width honest with vector-effect — which put the dashes in SCREEN px against
+  // a 122-unit path, and the arc came out as three disconnected chunks.)
+  host.innerHTML = '<svg class="fp-slash" viewBox="0 0 100 100" preserveAspectRatio="xMidYMid meet">'
+    + '<path d="M92 6 C 60 34, 34 60, 8 94" /></svg>';
+  const hands = { el: host, weapon: null, shield: null };
+  F.hands = hands;
+  const gear = F.hooks.gear || {};
+  // Sheet loads are slow enough to outlive the delve that asked for them, so
+  // every await is followed back into a session that may already be gone.
+  const live = () => !!F && F.hands === hands;
+  const put = async (slot, cls) => {
+    const g = gear[slot];
+    const icon = g && gearIcon(g.kind, g.material);
+    if (!icon) return null;
+    try {
+      const img = await loadImg(icon.url);
+      if (!live()) return null;
+      const cv = document.createElement('canvas');
+      cv.width = icon.s; cv.height = icon.s;
+      const c = cv.getContext('2d');
+      c.imageSmoothingEnabled = false;
+      c.drawImage(img, icon.sx, icon.sy, icon.s, icon.s, 0, 0, icon.s, icon.s);
+      const el = document.createElement('div');
+      el.className = 'fp-hand ' + cls;
+      el.title = g.name || '';
+      el.appendChild(cv);
+      host.appendChild(el);
+      return el;
+    } catch (e) {
+      console.warn('delve-fp: gear icon missing', g, e);
+      return null;
+    }
+  };
+  hands.weapon = await put('weapon', 'fp-hand-weapon');
+  // A bow is two-handed: nothing braces an off-hand shield behind it.
+  if (live() && !(gear.weapon && gear.weapon.kind === 'bow')) hands.shield = await put('body', 'fp-hand-shield');
+}
+
+/** Throw the swing. Retriggering needs the class off, a reflow, and the class
+ *  back on, or a second swing inside the first simply doesn't play. */
+function playSwing() {
+  if (!F.hands) return;
+  for (const el of [F.hands.weapon, F.hands.el.querySelector('.fp-slash')]) {
+    if (!el) continue;
+    el.classList.remove('fp-swinging');
+    void el.getBoundingClientRect();
+    el.classList.add('fp-swinging');
+  }
+  if (F.hands.shield) {
+    F.hands.shield.classList.remove('fp-bracing');
+    void F.hands.shield.getBoundingClientRect();
+    F.hands.shield.classList.add('fp-bracing');
+  }
 }
 
 // ---------------------------------------------------------------------------
 // Session
 // ---------------------------------------------------------------------------
+
+/** The prop sheets this chart actually needs — a room never pays for rails. */
+async function decorSheets(map) {
+  const chars = map.grid.join('');
+  const want = new Set();
+  if (/[rt]/.test(chars)) want.add('rocks');
+  if (chars.includes('m')) want.add('rails');
+  const out = {};
+  for (const k of want) {
+    try { out[k] = await loadImg(SHEET_URLS[k]); }
+    catch (e) { console.warn('delve-fp: prop sheet missing', k, e); }
+  }
+  return out;
+}
 
 async function prep(mapId) {
   const map = mapForLocale(mapId);
@@ -254,6 +629,7 @@ async function prep(mapId) {
   validateMap(map);
   const theme = THEMES[map.theme];
   const surf = await cutSurfaces(theme);
+  const props = await decorSheets(map);
   const spawns = [];
   for (const s of (map.spawns || [])) {
     const prey = preyById(s.prey);
@@ -261,23 +637,31 @@ async function prep(mapId) {
     try { spawns.push({ prey, s, img: await loadImg(ART_BASE + prey.art + '.png') }); }
     catch (e) { console.warn('delve-fp: creature sheet missing for', s.prey, e); }
   }
-  return { map, theme, surf, spawns };
+  return { map, theme, surf, props, spawns };
 }
 
 function mount(prep, entry) {
-  const { map, theme, surf, spawns } = prep;
+  const { map, theme, surf, props, spawns } = prep;
   F.map = map; F.theme = theme; F.surf = surf;
-  F.grid = map.grid; F.cols = map.grid[0].length; F.rows = map.grid.length;
+  F.cols = map.grid[0].length; F.rows = map.grid.length;
+  F.mined = F.mined || new Set();
+  // A face already worked stays worked. `map.grid` is the module's own copy and
+  // is never mutated, so coming back through a door would otherwise restore the
+  // seam as solid rock that mineOre then refuses to touch again — a wall with no
+  // way through it, in the middle of the passage you opened.
+  F.grid = map.grid.map((row, y) => row.replace(/o/g, (m, x) => (F.mined.has(map.id + ':' + x + ',' + y) ? '.' : m)));
   const at0 = entry || map.entry;
   F.px = Math.floor(at0[0]) + 0.5; F.py = Math.floor(at0[1]) + 0.5;
-  F.dir = 2; F.yaw = 180; F.turning = null; F.stepping = null;
-  F.creatures = []; F.mined = F.mined || new Set();
+  F.dir = openestDir(Math.floor(F.px), Math.floor(F.py));
+  F.yaw = F.dir * 90; F.turning = null; F.stepping = null;
+  F.creatures = []; F.decor = []; F.doors = []; F.armed = false;
   F.settleUntil = performance.now() + 250;
 
   const stage = F.host.querySelector('.fp-stage');
   stage.innerHTML = '<div class="fp-world"><div class="fp-geo"></div><div class="fp-bbs"></div></div>';
   F.world = stage.querySelector('.fp-world');
   buildGeometry();
+  buildDecor(props || {});
   for (const sp of spawns) spawnCreature(sp.prey, sp.img, sp.s.x + 0.5, sp.s.y + 0.5);
 
   const title = F.host.querySelector('.fp-title');
@@ -301,28 +685,38 @@ export async function openDelveFp(localeId, member, hooks) {
     const host = document.getElementById('delveFpScreen');
     host.innerHTML = `
       <div class="fp-stage"></div>
+      <div class="fp-hands"></div>
       <div class="fp-vignette"></div>
       <div class="delve-hud">
         <button class="dv-leave" onclick="__delveFp.leave()">⬅ Leave</button>
         <span class="fp-title dv-title"></span>
         <span class="fp-compass"></span>
         <span class="dv-haul fp-haul"></span>
+        <button class="fp-help" title="Controls" onclick="__delveFp.help()">?</button>
       </div>
       <canvas class="fp-map" width="150" height="150"></canvas>
       <div class="delve-toasts fp-toasts"></div>
+      <div class="fp-keys">
+        <b>W</b> forward · <b>S</b> back · <b>A</b>/<b>D</b> sidestep
+        · <b>←</b>/<b>→</b> turn · <b>Space</b> or <b>click</b> to strike
+        · <b>Esc</b> leave
+      </div>
       <div class="fp-pad">
-        <button data-k="turnL">◀</button>
-        <button data-k="fwd">▲</button>
-        <button data-k="turnR">▶</button>
-        <button data-k="back">▼</button>
+        <button data-k="turnL" aria-label="Turn left">◀<i>←</i></button>
+        <button data-k="fwd" aria-label="Forward">▲<i>W</i></button>
+        <button data-k="turnR" aria-label="Turn right">▶<i>→</i></button>
+        <button data-k="back" aria-label="Back">▼<i>S</i></button>
+        <button data-k="attack" class="fp-attack" aria-label="Strike">⚔<i>Space</i></button>
       </div>`;
 
     F = {
       map: null, theme: null, surf: null, hooks, member, host, world: null,
       grid: null, cols: 0, rows: 0,
       px: 0, py: 0, dir: 2, yaw: 180, turning: null, stepping: null,
-      keys: {}, last: 0, raf: 0, ended: false, fighting: false, grace: false, transiting: false,
-      creatures: [], seen: new Set(), mined: new Set(), settleUntil: 0,
+      keys: {}, latched: {}, last: 0, raf: 0, ended: false, fighting: false, grace: false, transiting: false,
+      creatures: [], decor: [], doors: [], armed: false,
+      seen: new Set(), mined: new Set(), settleUntil: 0,
+      hands: null, swingUntil: 0, helpTimer: 0,
       haul: { kills: {}, gold: 0, mats: {}, field: 0, bouts: 0 },
       stack: [],
     };
@@ -334,12 +728,19 @@ export async function openDelveFp(localeId, member, hooks) {
       startLoop();
     } catch (e) {
       if (F && F.raf) cancelAnimationFrame(F.raf);
+      if (F && F.onKeyDown) unwireInput();   // or the page keeps the listeners forever
       F = null;
       host.innerHTML = '';
       showScreen('guildScreen');
       throw e;
     }
-    toast(`${member.name.split(' ')[0]} descends into ${p.map.name || hooks.locale.name}.`);
+    // The hands come up after the screen does: a missing icon sheet must cost
+    // the delve nothing but its viewmodel.
+    mountHands().catch((e) => console.warn('delve-fp: hands', e));
+    const first = member.name.split(' ')[0];
+    toast(`${first} descends into ${p.map.name || hooks.locale.name}.`);
+    if (!(hooks.gear && hooks.gear.weapon)) toast(`${first} goes in bare-handed — nothing in the weapon slot.`);
+    helpUntil(8000);
     return true;
   } finally {
     opening = false;
@@ -350,43 +751,69 @@ export async function openDelveFp(localeId, member, hooks) {
 // Input — grid steps and quarter turns
 // ---------------------------------------------------------------------------
 
+/** One table, read by both handlers — two copies drifted apart waiting to happen. */
+const KEYMAP = {
+  arrowup: 'fwd', w: 'fwd', arrowdown: 'back', s: 'back',
+  arrowleft: 'turnL', arrowright: 'turnR', a: 'strafeL', d: 'strafeR',
+  q: 'turnL', e: 'turnR',
+  ' ': 'attack', spacebar: 'attack', f: 'attack', enter: 'attack',
+};
+
 function wireInput() {
+  // Both guard on F: a throw during open leaves the listener attached with no
+  // session behind it, and an unguarded handler then raises on every keypress
+  // for the rest of the page's life.
   F.onKeyDown = (e) => {
-    if (!screenActive() || F.fighting) return;
+    if (!F || !screenActive() || F.fighting) return;
     const k = e.key.toLowerCase();
     if (k === 'escape') { leave(); return; }
-    const map = {
-      arrowup: 'fwd', w: 'fwd', arrowdown: 'back', s: 'back',
-      arrowleft: 'turnL', arrowright: 'turnR', a: 'strafeL', d: 'strafeR',
-      q: 'turnL', e: 'turnR',
-    };
-    if (map[k]) { e.preventDefault(); F.keys[map[k]] = true; }
+    if (k === '?' || k === 'h') { e.preventDefault(); helpUntil(9000); return; }
+    if (KEYMAP[k]) { e.preventDefault(); F.keys[KEYMAP[k]] = true; }
   };
   F.onKeyUp = (e) => {
     if (!F) return;
     const k = e.key.toLowerCase();
-    const map = {
-      arrowup: 'fwd', w: 'fwd', arrowdown: 'back', s: 'back',
-      arrowleft: 'turnL', arrowright: 'turnR', a: 'strafeL', d: 'strafeR',
-      q: 'turnL', e: 'turnR',
-    };
-    if (map[k]) F.keys[map[k]] = false;
+    if (KEYMAP[k]) F.keys[KEYMAP[k]] = false;
   };
   window.addEventListener('keydown', F.onKeyDown);
   window.addEventListener('keyup', F.onKeyUp);
   F.host.querySelectorAll('.fp-pad button').forEach((b) => {
     const k = b.dataset.k;
-    const on = (e) => { e.preventDefault(); F.keys[k] = true; };
+    // A tap is shorter than a frame more often than you would think, so the
+    // press is LATCHED: readInput consumes it and clears the latch itself.
+    const on = (e) => { e.preventDefault(); F.keys[k] = true; F.latched[k] = true; };
     const off = () => { if (F) F.keys[k] = false; };
     b.addEventListener('pointerdown', on);
     b.addEventListener('pointerup', off);
     b.addEventListener('pointerleave', off);
     b.addEventListener('pointercancel', off);
   });
+  // Clicking into the world strikes at it. The most discoverable control there
+  // is: the thing you can see is the thing you can hit.
+  F.onStagePointer = (e) => {
+    if (!F || F.fighting || F.ended) return;
+    e.preventDefault();
+    trySwing();
+  };
+  const stage = F.host.querySelector('.fp-stage');
+  if (stage) stage.addEventListener('pointerdown', F.onStagePointer);
 }
 function unwireInput() {
   window.removeEventListener('keydown', F.onKeyDown);
   window.removeEventListener('keyup', F.onKeyUp);
+  const stage = F.host.querySelector('.fp-stage');
+  if (stage && F.onStagePointer) stage.removeEventListener('pointerdown', F.onStagePointer);
+}
+
+/** Show the control strip for a while. Shown on entry, and on ? or the HUD's
+ *  own button — a crawler that never says which key walks is a maze. */
+function helpUntil(ms) {
+  if (!F) return;
+  const el = F.host.querySelector('.fp-keys');
+  if (!el) return;
+  el.classList.add('on');
+  clearTimeout(F.helpTimer);
+  F.helpTimer = setTimeout(() => el.classList.remove('on'), ms);
 }
 
 // ---------------------------------------------------------------------------
@@ -412,15 +839,64 @@ function tryTurn(sign) {
   F.dir = (F.dir + sign + 4) % 4;
 }
 
+/**
+ * Strike at what is in front of you.
+ *
+ * A crawler's attack is a REACH, not a collision: the bout opens on anything
+ * inside SWING_REACH and roughly ahead, so you pick the fight instead of
+ * blundering into it. Walking into a creature still starts a bout — a Plague
+ * Speaker that runs you down does not wait to be invited — but that is now the
+ * fallback rather than the only way combat has ever begun.
+ *
+ * The same swing works the wall: an ore face IS a thing you hit until it comes
+ * out, so striking one mines it, exactly as walking into it always has.
+ */
+function trySwing() {
+  const now = performance.now();
+  if (!F || F.ended || F.fighting || F.transiting || now < F.swingUntil) return;
+  F.swingUntil = now + SWING_MS;
+  playSwing();
+  const [dx, dy] = DIRS[F.dir];
+  const ax = Math.floor(F.px) + dx, ay = Math.floor(F.py) + dy;
+  if (at(ax, ay) === 'o') { mineOre(ax, ay); return; }
+  let best = null, bd = SWING_REACH;
+  for (const c of F.creatures) {
+    const vx = c.x - F.px, vy = c.y - F.py, d = Math.hypot(vx, vy) || 1e-6;
+    if (d > bd) continue;
+    if ((vx * dx + vy * dy) / d < SWING_CONE) continue;   // it has to be in front
+    best = c; bd = d;
+  }
+  if (best) engage(best);
+}
+
+/**
+ * A key that is down, or a tap too short to still be down when we looked.
+ *
+ * Reading ALWAYS spends the latch, including on the key-is-down path. Returning
+ * early there left the latch armed through the whole stride — readInput bails on
+ * `F.turning || F.stepping` above these calls, so nothing could spend it — and
+ * the frame after the stride finished it fired again: one tap of ▲ walked two
+ * cells and one tap of ◀ turned a full 180°.
+ */
+function took(k) {
+  const on = !!F.keys[k] || !!F.latched[k];
+  F.latched[k] = false;
+  return on;
+}
+
 function readInput() {
-  if (F.turning || F.stepping || F.fighting || F.transiting) return;
+  if (F.fighting || F.transiting) return;
+  // Striking is allowed mid-stride: a stride is 200ms, and a crawler that
+  // swallows your attack because you are still walking feels broken.
+  if (took('attack')) trySwing();
+  if (F.turning || F.stepping) return;
   if (performance.now() < F.settleUntil) return;
-  if (F.keys.turnL) { tryTurn(-1); return; }
-  if (F.keys.turnR) { tryTurn(1); return; }
-  if (F.keys.fwd) { tryStep(1, 0); return; }
-  if (F.keys.back) { tryStep(-1, 0); return; }
-  if (F.keys.strafeL) { tryStep(1, -1); return; }
-  if (F.keys.strafeR) { tryStep(1, 1); return; }
+  if (took('turnL')) { tryTurn(-1); return; }
+  if (took('turnR')) { tryTurn(1); return; }
+  if (took('fwd')) { tryStep(1, 0); return; }
+  if (took('back')) { tryStep(-1, 0); return; }
+  if (took('strafeL')) { tryStep(1, -1); return; }
+  if (took('strafeR')) { tryStep(1, 1); return; }
 }
 
 function advanceMotion(dt) {
@@ -443,15 +919,27 @@ const ease = (t) => (t <= 0 ? 0 : t >= 1 ? 1 : t * t * (3 - 2 * t));
 /** Everything that happens because a stride finished on a new cell. */
 function onArrive() {
   const x = Math.floor(F.px), y = Math.floor(F.py);
-  F.seen.add(x + ',' + y);
+  F.seen.add(F.map.id + ':' + x + ',' + y);
   buildGeometry();
   drawMap();
   const ch = at(x, y);
+  // The entry sits ON or BESIDE the way out (hollowvein spawns one cell from
+  // its 's'), so a door is ARMED only once you have stepped clear of it — the
+  // same rule the top-down walk has always had (delve.js checkExit). Without
+  // it the first press of ▲ can end the delve before it has begun.
+  if (!F.armed) return;
   if (ch === '+') { const p = (F.map.portals || []).find((q) => Math.floor(q.x) === x && Math.floor(q.y) === y); if (p) { usePortal(p); return; } }
   if (EXIT[ch]) {
     if (F.stack.length) { usePortal({ ...F.stack.pop(), popped: true }); return; }
     endDelve('climbed back into the daylight');
   }
+}
+
+/** Arm the ways out once the walker has stepped clear of every one of them —
+ *  the same 1.35-tile rule delve.js uses, and for the same reason. */
+function checkArmed() {
+  if (F.armed) return;
+  if (F.doors.every((d) => Math.hypot(d.x - F.px, d.y - F.py) > 1.35)) F.armed = true;
 }
 
 async function usePortal(portal) {
@@ -489,15 +977,29 @@ function moveCreatures(dt) {
         }
         if (c.mode !== 'walk') c.t = 1.5;
       }
+      poseCreature(c, false);
       continue;
     }
     const dx = c.tx - c.x, dy = c.ty - c.y, d = Math.hypot(dx, dy);
-    if (d < 0.15) { c.mode = 'idle'; c.t = 1 + Math.random() * 2; continue; }
+    if (d < 0.15) { c.mode = 'idle'; c.t = 1 + Math.random() * 2; poseCreature(c, false); continue; }
     const step = Math.min(d, speed * dt);
     const nx = c.x + dx / d * step, ny = c.y + dy / d * step;
     if (!blocked(Math.floor(nx), Math.floor(c.y))) c.x = nx;
     if (!blocked(Math.floor(c.x), Math.floor(ny))) c.y = ny;
+    c.phase += dt * speed * 3.4;
+    poseCreature(c, true);
   }
+}
+
+/** Which cell of the walk sheet a creature is showing. Row 0 is the pose that
+ *  looks AT you and row 3 the one that looks away, so a fleeing rat shows you
+ *  its back — the billboard always faces you, but the creature need not. */
+function poseCreature(c, walking) {
+  const row = c.mode === 'flee' ? 3 : 0;
+  const col = walking ? WALK_COLS[Math.floor(c.phase) % 4] : 1;
+  if (c.drawn === row * 4 + col) return;
+  c.row = row; c.col = col;
+  drawCreature(c);
 }
 
 function checkEncounters() {
@@ -509,7 +1011,7 @@ function checkEncounters() {
 async function engage(c) {
   if (F.fighting || F.ended) return;
   F.fighting = true;
-  F.keys = {};
+  F.keys = {}; F.latched = {};
   let bout = null;
   try { bout = await F.hooks.fight(c.prey.id); }
   catch (e) { console.error('delve-fp: bout failed', e); }
@@ -519,20 +1021,29 @@ async function engage(c) {
   if (bout && bout.won) {
     F.creatures = F.creatures.filter((x) => x !== c);
     c.el.remove();
-    const r = F.hooks.onKill(c.prey.id);
-    F.haul.kills[c.prey.id] = (F.haul.kills[c.prey.id] || 0) + 1;
-    if (r) {
-      F.haul.gold += r.gold || 0;
-      F.haul.field += r.field || 0;
-      if (r.meat) F.haul.mats.game_meat = (F.haul.mats.game_meat || 0) + r.meat;
-      if (r.pelt) F.haul.mats.pelt = (F.haul.mats.pelt || 0) + r.pelt;
-      if (r.loot) F.haul.mats[r.loot] = (F.haul.mats[r.loot] || 0) + 1;
-      toast(`${c.prey.glyph} ${c.prey.name} felled! ${r.txt || ''}`);
+    // Banking the spoils must not be able to strand the session. The loop only
+    // restarts from here and from open, so a throw inside onKill would leave
+    // the screen up with `fighting` stuck true and no rAF — a delve you can
+    // look at and not play. Ledger first, loop always.
+    try {
+      const r = F.hooks.onKill(c.prey.id);
+      F.haul.kills[c.prey.id] = (F.haul.kills[c.prey.id] || 0) + 1;
+      if (r) {
+        F.haul.gold += r.gold || 0;
+        F.haul.field += r.field || 0;
+        if (r.meat) F.haul.mats.game_meat = (F.haul.mats.game_meat || 0) + r.meat;
+        if (r.pelt) F.haul.mats.pelt = (F.haul.mats.pelt || 0) + r.pelt;
+        if (r.loot) F.haul.mats[r.loot] = (F.haul.mats[r.loot] || 0) + 1;
+        toast(`${c.prey.glyph} ${c.prey.name} felled! ${r.txt || ''}`);
+      }
+      updateHaul();
+    } catch (e) {
+      console.error('delve-fp: spoils failed', e);
+    } finally {
+      F.grace = true;
+      F.fighting = false;
+      startLoop();
     }
-    updateHaul();
-    F.grace = true;
-    F.fighting = false;
-    startLoop();
   } else {
     F.fighting = false;
     endDelve(`driven out by the ${c.prey.name}`, true);
@@ -545,8 +1056,7 @@ function mineOre(x, y) {
   const key = F.map.id + ':' + x + ',' + y;
   if (F.mined.has(key)) return;
   F.mined.add(key);
-  const kinds = Object.keys(ORE_KINDS);
-  const kind = kinds[(x * 7 + y * 13) % kinds.length];
+  const kind = oreKindAt(x, y);   // the same seam the top-down walk would pay
   F.grid = F.grid.map((row, ry) => (ry === y ? row.slice(0, x) + '.' + row.slice(x + 1) : row));
   buildGeometry();
   const k = ORE_KINDS[kind];
@@ -573,6 +1083,17 @@ function render() {
   for (const c of F.creatures) {
     c.el.style.transform = `translate3d(${c.x * T}px,${-heightAt(Math.floor(c.x), Math.floor(c.y)) * STEP_PX}px,${c.y * T}px) rotateY(${-F.yaw}deg)`;
   }
+  for (const d of F.decor) {
+    d.el.style.transform = `translate3d(${d.x * T}px,${d.lift}px,${d.y * T}px) rotateY(${-F.yaw}deg)`;
+  }
+  // The hands ride the stride and lag the turn — the whole reason to draw them
+  // is that they are the only thing on screen that moves WITH you.
+  if (F.hands) {
+    const bob = F.stepping ? Math.sin(Math.min(1, F.stepping.t) * Math.PI) * 26 : 0;
+    const sway = F.turning ? (F.turning.to - F.yaw) / 90 * -30 : 0;
+    F.hands.el.style.setProperty('--fp-bob', bob.toFixed(1) + 'px');
+    F.hands.el.style.setProperty('--fp-sway', sway.toFixed(1) + 'px');
+  }
   const comp = F.host.querySelector('.fp-compass');
   if (comp) comp.textContent = '✦ ' + COMPASS[F.dir];
 }
@@ -589,7 +1110,11 @@ function drawMap() {
   for (let dy = -R; dy <= R; dy++) {
     for (let dx = -R; dx <= R; dx++) {
       const x = cx + dx, y = cy + dy;
-      if (!F.seen.has(x + ',' + y) && Math.hypot(dx, dy) > 3.5) continue;
+      // Keyed by MAP, like `mined` beside it. Bare coordinates meant a room you
+      // walked through left its shape drawn on the chart of the next room —
+      // walk the Academy's first form, step through, and the second form opens
+      // with a corridor sketched in that it does not have.
+      if (!F.seen.has(F.map.id + ':' + x + ',' + y) && Math.hypot(dx, dy) > 3.5) continue;
       const ch = at(x, y);
       g.fillStyle = WALL[ch] ? '#3b3128' : LOW[ch] ? '#5a4a36' : ch === '#' ? 'transparent'
         : EXIT[ch] ? '#d4a843' : ch === '+' ? '#8ab4d8' : '#7d6a4e';
@@ -607,10 +1132,22 @@ function drawMap() {
 
 function stepSim(now) {
   const dt = Math.min(0.08, (now - (F.last || now)) / 1000);
-  if (!F.fighting && !F.transiting) {
-    readInput();
-    advanceMotion(dt);
+  /**
+   * Re-asked between every stage, not once at the top. A strike may now be
+   * thrown MID-STRIDE, and engage() raises `fighting` and the battle screen
+   * synchronously — so a single test up front would let the stride it
+   * interrupted finish underneath the bout. Landing that stride on the stairs
+   * ran endDelve while the fight was still out: the summary card was injected
+   * into a hidden screen, onEnd never fired, and the only way back to the guild
+   * was a page reload. onArrive can also fire usePortal, which swaps the map out
+   * from under a fight that is about to pay spoils for a creature you left behind.
+   */
+  const busy = () => F.fighting || F.transiting;
+  if (!busy()) readInput();
+  if (!busy()) advanceMotion(dt);
+  if (!busy()) {
     moveCreatures(dt);
+    checkArmed();
     if (F.grace) {
       if (F.creatures.every((c) => Math.hypot(c.x - F.px, c.y - F.py) > REACH + 0.5)) F.grace = false;
     } else if (!F.ended) checkEncounters();
@@ -659,6 +1196,7 @@ function endDelve(reason, beaten = false) {
   if (!F || F.ended) return;
   F.ended = true;
   if (F.raf) cancelAnimationFrame(F.raf);
+  clearTimeout(F.helpTimer);
   unwireInput();
   const h = F.haul;
   const killLines = Object.keys(h.kills).map((pid) => {
@@ -687,19 +1225,26 @@ function close() {
   hooks.onEnd(summary);
 }
 
-window.__delveFp = { leave, close };
+window.__delveFp = { leave, close, help: () => helpUntil(9000) };
 
 // Dev probe — the headless pane runs no rAF, so the sim is stepped by hand.
 if (typeof window !== 'undefined') {
   window.__fpDebug = () => F && ({
     map: F.map && F.map.id, x: +F.px.toFixed(2), y: +F.py.toFixed(2), dir: COMPASS[F.dir], yaw: F.yaw,
-    moving: !!(F.stepping || F.turning), fighting: F.fighting,
+    moving: !!(F.stepping || F.turning), fighting: F.fighting, armed: F.armed,
     quads: F.world.querySelectorAll('.fp-q').length, creatures: F.creatures.length,
     haul: F.haul.gold, seen: F.seen.size,
+    // The three numbers that decide whether a swing lands: how far the nearest
+    // creature is, and how far in front of you it is.
+    near: F.creatures.map((c) => {
+      const vx = c.x - F.px, vy = c.y - F.py, d = Math.hypot(vx, vy) || 1e-6;
+      const [dx, dy] = DIRS[F.dir];
+      return { id: c.prey.id, d: +d.toFixed(2), dot: +((vx * dx + vy * dy) / d).toFixed(2) };
+    }).sort((a, b) => a.d - b.d).slice(0, 3),
   });
   window.__fpStep = (steps = 1, keys = '', ms = 16) => {
     if (!F || F.ended) return null;
-    const map = { w: 'fwd', s: 'back', a: 'strafeL', d: 'strafeR', l: 'turnL', r: 'turnR' };
+    const map = { w: 'fwd', s: 'back', a: 'strafeL', d: 'strafeR', l: 'turnL', r: 'turnR', x: 'attack' };
     for (const k of keys) if (map[k]) F.keys[map[k]] = true;
     for (let i = 0; i < steps; i++) {
       if (!F || F.ended) break;
