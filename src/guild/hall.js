@@ -583,7 +583,12 @@ async function exploreLocale(localeId, fp) {
       // first-person combat drinks one at a time, so the hook both SPENDS the
       // real Apothecary stock and says what is left — the same bottles either
       // way, and the delver cannot carry a bottle the guild does not have.
-      potions: () => withdrawPotions().reduce((n, b) => n + b.qty, 0),
+      // Every heal on the shelf, not the two batches withdrawPotions happens to
+      // window: that sorted-and-sliced view under-reported the satchel, and the
+      // count went UP when you drank the last of a batch and the window slid
+      // onto a fuller one. A consumable counter that rises as you consume is
+      // worse than none. (Heals only — `drink` never pours a tonic.)
+      potions: () => (guild.inventory.potions || []).reduce((n, b) => n + (b.type === 'heal' ? (b.qty || 0) : 0), 0),
       drink: () => {
         const b = withdrawPotions()[0];
         if (!b) return null;

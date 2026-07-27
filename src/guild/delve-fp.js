@@ -114,8 +114,17 @@ const CREATURE_H = { 1: 320, 2: 470, 3: 760, 4: 900, 5: 1080 };
  * you just walked into. Everything stays under WALL_H so nothing pierces the roof.
  */
 const DECOR_H = { boulder: 700, boulderGray: 700, stalagTall: 1100, cart: 780, tree: 1150 };
-/** One swing, and how far in front of you it reaches (tiles). */
-const SWING_MS = 380, SWING_REACH = 1.9, SWING_CONE = 0.3;
+/**
+ * One swing, and how far it reaches.
+ *
+ * MELEE is shared by BOTH sides on purpose. It used to be 1.9 for you and 1.10
+ * for them, and creatures have no pathfinding — so anything that wedged itself
+ * on a boulder or the far side of a block sat in the gap between the two
+ * numbers, where every blow of yours landed and none of its could reach. That
+ * is a free kill for full spoils, and it bypasses the entire risk economy the
+ * health ceiling and the potions exist to create. One number, both ways.
+ */
+const SWING_MS = 380, MELEE = 1.25, SWING_CONE = 0.3;
 
 /**
  * FIRST-PERSON COMBAT — Morrowind's contract, not the arena's.
@@ -364,6 +373,16 @@ function fitLens() {
   if (!h) return;
   F.lens = h / PERSP_AT;
   stage.style.perspective = (PERSP * F.lens).toFixed(1) + 'px';
+}
+
+/** Nothing solid on the floor between two points. Sampled rather than swept —
+ *  over a tile and a quarter of reach, eight samples is finer than the grid. */
+function clearLine(ax, ay, bx, by) {
+  for (let i = 1; i < 8; i++) {
+    const t = i / 8;
+    if (blocked(Math.floor(ax + (bx - ax) * t), Math.floor(ay + (by - ay) * t))) return false;
+  }
+  return true;
 }
 
 /** How far into the dark a point is, 0 (right here) to 1 (gone). */
@@ -942,6 +961,7 @@ export async function openDelveFp(localeId, member, hooks) {
         <button class="fp-help" title="Controls" onclick="__delveFp.help()">?</button>
       </div>
       <canvas class="fp-map" width="150" height="150"></canvas>
+      <div class="fp-floats"></div>
       <div class="delve-toasts fp-toasts"></div>
       <div class="fp-vitals">
         <span class="fp-vitals-fill"></span>
@@ -1015,7 +1035,7 @@ const KEYMAP = {
   arrowleft: 'turnL', arrowright: 'turnR', a: 'strafeL', d: 'strafeR',
   q: 'turnL', e: 'turnR',
   ' ': 'attack', spacebar: 'attack', f: 'attack', enter: 'attack',
-  shift: 'block', control: 'block', r: 'drink',
+  shift: 'block', r: 'drink',
 };
 
 function wireInput() {
@@ -1024,6 +1044,10 @@ function wireInput() {
   // for the rest of the page's life.
   F.onKeyDown = (e) => {
     if (!F || !screenActive()) return;
+    // Ctrl-R is the browser's, not ours. Claiming a bare letter is fine;
+    // claiming it under a modifier swallowed reload — and drank a real potion
+    // on the way past.
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
     const k = e.key.toLowerCase();
     if (k === 'escape') { leave(); return; }
     if (k === '?' || k === 'h') { e.preventDefault(); helpUntil(9000); return; }
@@ -1116,17 +1140,22 @@ function tryTurn(sign) {
 function trySwing() {
   const now = performance.now();
   if (!F || F.ended || F.transiting || now < F.swingUntil) return;
+  // A raised shield is a CHOICE, not a free passive: behind it you cannot
+  // strike. Guarding that cost nothing meant letting go of Shift was never the
+  // right move, which is the same as having no guard at all.
+  if (F.keys.block) { toast('Shield up — no room to swing.'); return; }
   F.swingUntil = now + SWING_MS;
   const [dx, dy] = DIRS[F.dir];
   const ax = Math.floor(F.px) + dx, ay = Math.floor(F.py) + dy;
   const seam = at(ax, ay) === 'o';
   playSwing(seam);
   if (seam) { mineOre(ax, ay); return; }
-  let best = null, bd = SWING_REACH;
+  let best = null, bd = MELEE;
   for (const c of F.creatures) {
     const vx = c.x - F.px, vy = c.y - F.py, d = Math.hypot(vx, vy) || 1e-6;
     if (d > bd) continue;
     if ((vx * dx + vy * dy) / d < SWING_CONE) continue;   // it has to be in front
+    if (!clearLine(F.px, F.py, c.x, c.y)) continue;      // and not behind the rock
     best = c; bd = d;
   }
   if (best) strike(best);
@@ -1288,12 +1317,28 @@ function rollHit(ratio, tired) {
 }
 const spread = (n) => Math.max(1, Math.round(n * (0.8 + Math.random() * 0.4)));
 
-/** A word or a number that rises off whatever it happened to. */
-function floater(host, txt, cls) {
+/**
+ * A word or a number that rises where the blow landed.
+ *
+ * SCREEN space, not world space. Parented to the creature it belonged to, a
+ * number was sized in WORLD px and every fight is fought at about a tile, where
+ * the billboard fills the screen — so "−9" arrived the height of the corridor.
+ * Worse, `slay()` removes the creature's element in the same synchronous task
+ * that spawned the number, so the killing blow — the one you most want to see —
+ * was destroyed before a single frame was painted.
+ *
+ * At a melee reach of 1.25 tiles inside a ±72° cone, whatever you hit is very
+ * near the middle of the screen anyway; a fixed spot reads better than a
+ * perspective-scaled one and cannot be taken away with its owner.
+ */
+function floater(txt, cls) {
+  const box = F && F.host.querySelector('.fp-floats');
+  if (!box) return;
   const el = document.createElement('span');
   el.className = 'fp-float ' + (cls || '');
   el.textContent = txt;
-  host.appendChild(el);
+  el.style.setProperty('--fx', (Math.random() * 16 - 8).toFixed(1) + '%');
+  box.appendChild(el);
   setTimeout(() => el.remove(), 900);
 }
 
@@ -1304,14 +1349,14 @@ function strike(c) {
   F.contactAt = performance.now();
   if (!rollHit(oddsVs(c.prey), F.hooks.fatigue)) {
     F.haul.missed = (F.haul.missed || 0) + 1;
-    floater(c.el, 'miss', 'fp-miss');
+    floater('miss', 'fp-miss');
     return;
   }
   F.haul.landed = (F.haul.landed || 0) + 1;
   const dmg = spread(DMG_BASE * Math.min(2, Math.max(0.5, oddsVs(c.prey))));
   c.hp -= dmg;
   c.hurtUntil = performance.now() + 160;
-  floater(c.el, '−' + dmg, 'fp-hit');
+  floater('−' + dmg, 'fp-hit');
   if (c.hp <= 0) slay(c);
 }
 
@@ -1322,7 +1367,8 @@ function foeSwing(c, now) {
   const guard = F.keys.block ? 1 - BLOCK_EVADE : 1;
   if (!rollHit((1 / oddsVs(c.prey)) * guard, 0)) {
     F.haul.dodged = (F.haul.dodged || 0) + 1;
-    floater(c.el, 'miss', 'fp-miss');
+    // Whose whiff it was has to be legible, or the fight is two identical words.
+    floater(F.keys.block ? 'blocked' : 'dodged', 'fp-parry');
     return;
   }
   F.haul.taken = (F.haul.taken || 0) + 1;
@@ -1330,7 +1376,7 @@ function foeSwing(c, now) {
   if (F.keys.block) { dmg = Math.max(1, Math.round(dmg * BLOCK_CUT)); braceShield(); }
   F.hp -= dmg;
   F.hurtUntil = now + 260;
-  floater(F.host.querySelector('.fp-hands'), '−' + dmg, 'fp-hurt');
+  floater('−' + dmg, 'fp-hurt');
   const blood = F.host.querySelector('.fp-blood');
   if (blood) { blood.classList.remove('on'); void blood.getBoundingClientRect(); blood.classList.add('on'); }
   updateVitals();
@@ -1376,7 +1422,8 @@ function slay(c) {
 function fightTick(dt) {
   const now = performance.now();
   for (const c of F.creatures) {
-    if (Math.hypot(c.x - F.px, c.y - F.py) > REACH + 0.35) continue;
+    if (Math.hypot(c.x - F.px, c.y - F.py) > MELEE) continue;
+    if (!clearLine(F.px, F.py, c.x, c.y)) continue;   // symmetric with yours
     if (!c.atkAt) { c.atkAt = now + FOE_SWING_MS * 0.5; continue; }
     if (now >= c.atkAt) foeSwing(c, now);
     if (!F || F.ended) return;
@@ -1400,7 +1447,7 @@ function drink() {
   if (!p) { toast('No draughts in the satchel.'); return; }
   F.drinkUntil = now + 900;
   F.hp = Math.min(F.hpCeil, F.hp + (p.potency || 20));
-  floater(F.host.querySelector('.fp-hands'), '+' + (p.potency || 20), 'fp-heal');
+  floater('+' + (p.potency || 20), 'fp-heal');
   toast(`${p.glyph || '🧪'} ${p.name} — ${Math.ceil(F.hp)} left in you.`);
   updateVitals();
   updatePotions();
@@ -1473,6 +1520,12 @@ function render() {
   // re-rasterises 30 layers a frame and one that does nothing.
   for (const c of F.creatures) place(c, c.x, c.y, -heightAt(Math.floor(c.x), Math.floor(c.y)) * STEP_PX);
   for (const d of F.decor) place(d, d.x, d.y, d.lift);
+  // A raised shield has to LOOK raised, or the only feedback for a key you are
+  // holding down is that you cannot attack.
+  if (F.hands && F.hands.shield) {
+    const up = !!F.keys.block;
+    if (up !== F.hands._guard) { F.hands._guard = up; F.hands.shield.el.classList.toggle('fp-guarding', up); }
+  }
   // The hands ride the stride and lag the turn — the whole reason to draw them
   // is that they are the only thing on screen that moves WITH you.
   if (F.hands) {
