@@ -81,7 +81,16 @@ const PERSP = 500, PERSP_AT = 720;
  * Capped, because the cost of a scene is this number squared, and no light is
  * allowed to quietly ask for a thousand quads.
  */
-const VIEW_CAP = 9;
+/**
+ * The LIGHT TIER. A phone pays for this scene at devicePixelRatio² — the same
+ * quad rasterises 7-9× the pixels at dpr 3 — and a tile GPU pays again for
+ * every blur-radius filter. So coarse-pointer / high-dpr devices get a shorter
+ * lamp and no decorative filters (body.fp-lite in delve.css). VIEW_CAP and
+ * FOG_CULL move TOGETHER: both feed viewR(), and changing one without the
+ * other puts unfogged rock at the build edge.
+ */
+const COARSE = typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches;
+const VIEW_CAP = COARSE ? 7 : 9;
 const viewR = () => Math.min(VIEW_CAP, Math.ceil(L.near + FOG_CULL * (L.far - L.near)) + 1);
 const REACH = 0.75;      // how close a creature must be to engage
 
@@ -96,7 +105,7 @@ const REACH = 0.75;      // how close a creature must be to engage
  * emitted at all — which is the draw distance, arrived at honestly rather than
  * as a hard circle you can see the edge of.
  */
-const FOG_CULL = 0.96;
+const FOG_CULL = COARSE ? 0.90 : 0.96;
 /** The light this map is under, chosen by its theme (delve-maps LIGHTS). */
 let L = LIGHTS.dark;
 /* Creatures go into the dark BEFORE the room does (L.sprite). A monster is the
@@ -303,8 +312,16 @@ async function cutSurfaces(theme) {
   const src = theme.src || 48;
   const fill = theme.fill[0];
   const floorImg = sheets[theme.sheet || 'cliffs'];
-  const floor = panel(floorImg, fill[0] * src, fill[1] * src, src, src);
-  const ceil = panel(floorImg, fill[0] * src, fill[1] * src, src, src, 0.55);
+  // The floor/ceiling dim is baked HERE, not applied as a CSS filter: a filter
+  // gives every quad its own offscreen GPU buffer, and floors+ceilings are 75%
+  // of a scene — that alone was the mobile frame budget. 0.08 reproduces the
+  // old brightness(0.92); 0.73 reproduces the old baked 0.55 × brightness(0.6).
+  const floor = panel(floorImg, fill[0] * src, fill[1] * src, src, src, 0.08);
+  const ceil = panel(floorImg, fill[0] * src, fill[1] * src, src, src, 0.73);
+  // The waist-high blocks' lids were floor-lit (0.45 × brightness 0.92 ≈ 0.41),
+  // not ceiling-dark — reusing the ceil bake for them turned every aisle-stack
+  // top into a shadowed hole.
+  const lid = panel(floorImg, fill[0] * src, fill[1] * src, src, src, 0.586);
 
   // Kept as CANVASES, not data URIs: the ore faces are the wall with a seam in
   // it, and re-decoding a data URI four times to paint on it is a round trip
@@ -350,9 +367,14 @@ async function cutSurfaces(theme) {
     const g = cv.getContext('2d');
     g.imageSmoothingEnabled = false;
     g.drawImage(railImg, d.x, d.y, d.w, d.h, 0, (d.w - d.h) / 2, d.w, d.h);
+    // The same 0.08 dim the floor is baked with — a rail lies ON the floor and
+    // must share its light, or it reads brighter than the ground it sits on.
+    g.globalCompositeOperation = 'source-atop';
+    g.fillStyle = 'rgba(0,0,0,0.08)';
+    g.fillRect(0, 0, cv.width, cv.height);
     rail = cv.toDataURL();
   } catch (e) { /* a map without rails simply has none */ }
-  return { floor, ceil, wall, low, ores, rail, ladder: ladderTexture() };
+  return { floor, ceil, lid, wall, low, ores, rail, ladder: ladderTexture() };
 }
 
 /** The rungs, drawn rather than cropped: no sheet in the kit has a head-on
@@ -491,7 +513,9 @@ function buildGeometry() {
         if (!WALL[at(x + 1, y)] && !LOW[at(x + 1, y)]) out.push(quad(tex, T, h, (x + 1) * T, yc, wz, 'rotateY(90deg)', 'fp-wall', wf(x + 1, y + 0.5)));
         if (!WALL[at(x - 1, y)] && !LOW[at(x - 1, y)]) out.push(quad(tex, T, h, x * T, yc, wz, 'rotateY(-90deg)', 'fp-wall', wf(x, y + 0.5)));
         // A waist-high run needs a lid, or you look down into an open box.
-        if (LOW[ch]) out.push(quad(S.ceil, T, T, wx, -h, wz, 'rotateX(90deg)', 'fp-floor', fog));
+        // S.lid, not S.ceil: a lid is floor-lit (you look DOWN at it under the
+        // room's light), and the ceil bake is tuned for the dark overhead.
+        if (LOW[ch]) out.push(quad(S.lid || S.ceil, T, T, wx, -h, wz, 'rotateX(90deg)', 'fp-floor', fog));
         continue;
       }
       if (ch === '#') continue;
@@ -587,7 +611,11 @@ function place(b, x, y, lift) {
   const hurt = b.hurtUntil > performance.now();
   if (hurt !== b._hurt) {
     b._hurt = hurt;
-    b.el.style.filter = 'drop-shadow(0 4px 5px rgba(0,0,0,0.6))' + (hurt ? ' brightness(2.6) saturate(0.2)' : '');
+    // The drop-shadow is a per-sprite blur buffer — decorative on desktop,
+    // unaffordable on a dpr-3 phone. The hurt flash stays on both: it is
+    // feedback, brief, and on one creature at a time.
+    b.el.style.filter = (COARSE ? '' : 'drop-shadow(0 4px 5px rgba(0,0,0,0.6))')
+      + (hurt ? ' brightness(2.6) saturate(0.2)' : '');
   }
   // The bar only exists while the thing is hurt, so an untouched room is clean.
   if (b.bar) {
@@ -872,6 +900,14 @@ function fitHands() {
     h.el.style.bottom = Math.round(HAND_INSET * H - (1 - bottom) * elH) + 'px';
     if (h.side === 'left') h.el.style.left = Math.round(HAND_INSET * W - left * elW) + 'px';
     else h.el.style.right = Math.round(HAND_INSET * W - (1 - right) * elW) + 'px';
+    // The PIVOT is the GRIP — the bottom-centre of the rest pose within the
+    // union box. The swing keyframes only rotate; about this point the rotation
+    // reads as a wrist. About the default origin (the centre of a box fitHands
+    // has just grown to near screen height, ~350px from the visible weapon) the
+    // same keyframes carried the weapon around the entire viewport. Inline for
+    // the same reason the sizing is: it is per-sheet, and re-set on resize.
+    h.el.style.transformOrigin = ((r.x + r.w / 2 - b.x) / b.w * 100).toFixed(1) + '% '
+      + ((r.y + r.h - b.y) / b.h * 100).toFixed(1) + '%';
   }
 }
 
@@ -1021,6 +1057,10 @@ function mount(prep, entry) {
   const stage = F.host.querySelector('.fp-stage');
   stage.innerHTML = '<div class="fp-world"><div class="fp-geo"></div><div class="fp-bbs"></div></div>';
   F.world = stage.querySelector('.fp-world');
+  // The world element is NEW but render()'s write-guard cache is not: a portal
+  // landing on the same coords/yaw would build the identical transform string,
+  // skip the write, and leave this world untransformed. Same-task reset.
+  F._wtf = '';
   fitLens();
   buildGeometry();
   buildDecor(props || {});
@@ -1045,6 +1085,9 @@ export async function openDelveFp(localeId, member, hooks) {
     if (F || !guildUp || !guildUp.classList.contains('active')) return false;
 
     const host = document.getElementById('delveFpScreen');
+    // The light tier's CSS switch (blur filters off, see delve.css). Keyed to
+    // the device, not the session, so it is never removed.
+    if (COARSE) document.body.classList.add('fp-lite');
     host.innerHTML = `
       <div class="fp-stage"></div>
       <div class="fp-hands"></div>
@@ -1798,7 +1841,10 @@ function render() {
   // scale3d, never scale(): a 2D scale between a rotate and the billboards'
   // counter-rotate leaves Z alone, which is not a similarity in 3D and squashes
   // every standee (the top-down view learned this the hard way).
-  F.world.style.transform = `scale3d(${F.lens},${F.lens},${F.lens}) rotateY(${F.yaw}deg) translate3d(${-ex}px,${-ey}px,${-ez}px)`;
+  // Guarded like every billboard write below: an idle frame must recomposite
+  // nothing, and an unguarded write here recomposited the whole quad stack.
+  const wtf = `scale3d(${F.lens},${F.lens},${F.lens}) rotateY(${F.yaw}deg) translate3d(${-ex}px,${-ey}px,${-ez}px)`;
+  if (wtf !== F._wtf) F.world.style.transform = (F._wtf = wtf);
   // Billboards stand on the floor and counter-rotate to face the walker. Every
   // write is guarded by the value it would write: standing still, this loop
   // touches no style at all, which is the difference between a scene that
@@ -1815,13 +1861,16 @@ function render() {
   // The hands ride the stride and lag the turn — the whole reason to draw them
   // is that they are the only thing on screen that moves WITH you.
   if (F.hands) {
-    const bob = F.stepping ? Math.sin(Math.min(1, F.stepping.t) * Math.PI) * 26 : 0;
-    const sway = F.turning ? (F.turning.to - F.yaw) / 90 * -30 : 0;
-    F.hands.el.style.setProperty('--fp-bob', bob.toFixed(1) + 'px');
-    F.hands.el.style.setProperty('--fp-sway', sway.toFixed(1) + 'px');
+    const bob = (F.stepping ? Math.sin(Math.min(1, F.stepping.t) * Math.PI) * 26 : 0).toFixed(1) + 'px';
+    const sway = (F.turning ? (F.turning.to - F.yaw) / 90 * -30 : 0).toFixed(1) + 'px';
+    if (bob !== F._bob) F.hands.el.style.setProperty('--fp-bob', (F._bob = bob));
+    if (sway !== F._sway) F.hands.el.style.setProperty('--fp-sway', (F._sway = sway));
   }
-  const comp = F.host.querySelector('.fp-compass');
-  if (comp) comp.textContent = '✦ ' + COMPASS[F.dir];
+  // The compass element survives portal re-mounts (mount() rebuilds only the
+  // stage, the HUD is per-session), so it is looked up once — a querySelector
+  // plus a textContent write per frame kept layout dirty on every idle frame.
+  if (!F._comp) F._comp = F.host.querySelector('.fp-compass');
+  if (F._comp && F._compDir !== F.dir) { F._compDir = F.dir; F._comp.textContent = '✦ ' + COMPASS[F.dir]; }
 }
 
 /** The scrap of chart you have drawn so far — only cells you have stood on and

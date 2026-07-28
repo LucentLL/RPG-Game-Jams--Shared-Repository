@@ -286,7 +286,12 @@ function aimCamera() {
 export function tacFpToggle(on) {
   const want = on == null ? !V : !!on;
   if (want && !V) mount();
-  else if (!want && V) { V.host.remove(); V = null; }
+  else if (!want && V) {
+    // The resize listener closes over the module-level V — left attached it
+    // fires on a null V after exit (one throw per prior FP entry, per resize).
+    if (V.onResize) window.removeEventListener('resize', V.onResize);
+    V.host.remove(); V = null;
+  }
   if (V) { tacFpSync(); fitLens(); }
   return !!V;
 }

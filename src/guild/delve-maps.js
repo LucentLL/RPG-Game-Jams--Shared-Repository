@@ -482,10 +482,10 @@ export const DELVE_MAPS = {
       '#B.bbbbb.B#', //  5  ← the racks
       '#B.......B#', //  6
       '#B.......B#', //  7
-      '#BBBBdBBBB#', //  8
+      '#BBBdBBBBB#', //  8  ← 'd' under the shopfront art's own door (~27% across)
       '###########', //  9
     ],
-    entry: [5.5, 7.3],
+    entry: [4.5, 7.3],
     props: [
       { art: 'armorKnight', x: 3.5, y: 4, w: 42 }, { art: 'armorSteel', x: 7.5, y: 4, w: 42 },
       { art: 'gearCubbies', x: 5.5, y: 2.02, w: 120 },

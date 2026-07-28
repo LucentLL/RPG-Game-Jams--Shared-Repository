@@ -196,7 +196,10 @@ export function canPlace(guild, kind, x, base, ignoreId) {
     if (taken.has(cx + ',' + cy)) return { ok: false, why: 'that ground is taken' };
   }
   // The gate lane must stay walkable or the player can be sealed out of the map.
-  const dx = x + Math.min(w - 1, Math.floor(w * (BUILDING_KINDS[kind].frac)));
+  // Same door logic as doorOf — the frac formula it used disagreed with the
+  // room's own 'd' (armory: frac says col x+2, the wall says x+3), so a plot
+  // could pass this check while its REAL door and threshold sat on the lane.
+  const dx = doorOf({ kind, x, base })[0];
   if (dx === 13 && base >= CAMPUS_H - 5) return { ok: false, why: 'that blocks the gate' };
   return { ok: true };
 }
@@ -267,7 +270,7 @@ export function buildCampusMap(guild) {
     // cleared — a tree grown across your own doorstep would lock the room out.
     if (g[dy]) g[dy][dx] = '.';
     if (g[dy + 1] && g[dy + 1][dx] === 't') g[dy + 1][dx] = '.';
-    return { id: b.id, to: k.to, art: k.art, name: k.name, x: b.x, y: top, w, h, px: k.px, door: [dx, dy] };
+    return { id: b.id, to: k.to, art: k.art, name: k.name, x: b.x, y: top, w, h, px: k.px, roomed: !!room, door: [dx, dy] };
   });
   g[CAMPUS_H - 3][13] = 'w'; // the gate — the way back to the desk
 
@@ -282,11 +285,15 @@ export function buildCampusMap(guild) {
     grid: g.map((r) => r.join('')),
     entry: [13.5, CAMPUS_H - 4.7],
     regions,
-    // Facades are STANDEES now, not doors — every one is drawn over the room it
-    // contains, at the room's own width so it actually covers it, and the
-    // see-through rule fades it the moment you step under it. Nothing here is a
-    // portal any more except a stair.
-    facades: buildings.map((b) => ({ art: b.art, name: b.name, x: b.x, y: b.y, w: b.w, h: b.h })),
+    // Facades are STANDEES now, not doors — every one stands over the room it
+    // contains. `w/h` is the room's tile rect (the occluder must cover all of
+    // it), `px` the art's AUTHORED width: the sprite renders at native scale,
+    // centred, because stretching it to room width also stretched its height
+    // (aspect-ratio) and grew every door to three characters tall. `roomed`
+    // marks the ones whose rect got a stamped interior (annexes did not) — the
+    // renderer caps those with a roof so their wall ring reads as a building,
+    // not a fence. Nothing here is a portal any more except a stair.
+    facades: buildings.map((b) => ({ art: b.art, name: b.name, x: b.x, y: b.y, w: b.w, h: b.h, px: b.px, roomed: b.roomed })),
     portals: stairs,
     props: props.concat(roomProps),
   };

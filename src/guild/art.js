@@ -272,7 +272,15 @@ export function hasItemSprite(item) { return !!(item && ITEM_WEAPON[item.kind]);
 export const WORN = {
   cell: 48,
   row: 3,               // north — the wielder's back
-  rest: 1,              // the walk-cycle stand frame, painted in every row
+  // Rest is the slash FOLLOW-THROUGH cell, not the walk-cycle stand frame (1):
+  // the stand frame carries the weapon at the character's side, hilt up and
+  // blade hanging DOWN — a carried sword behind a 48px standee, an upside-down
+  // one held to the screen. Col 14 is blade-up ready, exists in every weapon
+  // sheet's slash block (it is the compositor's own anim), and doubles as the
+  // pose a swing settles back onto. It is also the only one of the two the
+  // PICK sheet paints at all — pickaxe1 row 3 col 1 is empty, so with rest:1
+  // the delver's pick viewmodel was invisible.
+  rest: 14,
   swing: [10, 11, 12, 13, 14],
   frameMs: 70,          // ELEMENTS_ANIMS.slash speed
   // Shields paint nothing in the slash columns and stand edge-on (5px) in the

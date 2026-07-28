@@ -97,6 +97,7 @@ export async function playHuntBout(hero, prey, partySize, opts = {}) {
   const result = await window.playGuildBattle({
     player: heroSpec(hero), opponent: foe,
     mode: opts.mode === 'tactical' || opts.mode === 'spectate' ? opts.mode : 'action',
+    fp: !!opts.fp,   // view only — start the tactical lens inside the fighter
     label: 'The Hunt — ' + prey.name,
     items: opts.items || null,
   });
@@ -157,7 +158,7 @@ export async function playTournamentMatch(hero, t, opts = {}) {
     }
     const result = await window.playGuildBattle({
       player: heroSpec(hero), opponent: roundOpponent(t, i, field[i]),
-      mode, label: t.name + ' — round ' + (i + 1) + ' of ' + rounds,
+      mode, fp: !!opts.fp, label: t.name + ' — round ' + (i + 1) + ' of ' + rounds,
       items: items.filter((it) => it.qty > 0),
     });
     if (result && result.itemsUsed) {
@@ -202,6 +203,7 @@ export async function playQuestBout(hero, quest, partySize, opts = {}) {
   const result = await window.playGuildBattle({
     player: heroSpec(hero), opponent: foe,
     mode: opts.mode === 'tactical' || opts.mode === 'spectate' ? opts.mode : 'action',
+    fp: !!opts.fp,   // view only — start the tactical lens inside the fighter
     label: quest.title,
     items: opts.items || null,
   });

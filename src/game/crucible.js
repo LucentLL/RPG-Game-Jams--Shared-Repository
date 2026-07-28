@@ -3795,10 +3795,19 @@ function startGuildTacticalBattle(p1Spec, p2Spec, label, opts){
     if(ab){ab.style.display='';ab.classList.toggle('on',_tacAuto);ab.textContent=_tacAuto?'🤖 Watching — tap to take control':'🤖 Watch';}
     var eb=document.getElementById('execBtn');if(eb)eb.disabled=false;
     var vb=document.getElementById('tacViewBtns');if(vb)vb.style.display='';
+    var cf=document.getElementById('tacCamFp');if(cf)cf.style.display='';
     _tacFitPending=true;
     initTiles();faceBothFighters();buildGrid();buildControls();renderAll();
     tacFitFighters(); requestAnimationFrame(function(){ if(_tacFitPending) tacFitFighters(); }); // frame the fighters once layout settles
     startAnimLoop();
+    // Start in the lens the caller PICKED. Entered/exited via the tacViewToggle
+    // wrapper, never tacFpToggle directly, so the buttons and the grid's
+    // visibility stay in sync. Symmetric on purpose: nothing on the battle-end
+    // path exits first person (V and .tfp-host persist so bracket rounds keep
+    // their view), so a board or spectate pick after an FP bout must toggle it
+    // OFF or it inherits a first-person camera it never asked for. Bracket
+    // rounds re-passing fp:true no-op (already on).
+    if(opts&&(!!opts.fp)!==tacFpActive())tacViewToggle();
     logMsg(_tacAuto
       ? '👁 '+p1.name+' vs '+p2.name+' — spectating; take control any turn.'
       : '⚔ '+p1.name+' vs '+p2.name+' — queue your moves, then EXECUTE!','phase');
@@ -3857,8 +3866,12 @@ window.playGuildBattle = function(config){
   var f2 = guildFighterFromSpec(config.opponent || {}, 2);
   // (config.items — mid-fight consumables — are an action-lens feature; the tactical
   //  lens' turn economy gets potions later, alongside its item-action design.)
-  if (config.mode === 'tactical') return startGuildTacticalBattle(f1, f2, config.label);
-  if (config.mode === 'spectate') return startGuildTacticalBattle(f1, f2, config.label, { spectate: true });
+  // `fp` is a separate boolean beside mode, never a mode of its own: every
+  // mode string passes through whitelist coercions (battle-bridge, playPlan)
+  // that silently downgrade unknown values to 'action', and the flag is VIEW
+  // ONLY — it decides where the camera starts, not one rule of the fight.
+  if (config.mode === 'tactical') return startGuildTacticalBattle(f1, f2, config.label, { fp: !!config.fp });
+  if (config.mode === 'spectate') return startGuildTacticalBattle(f1, f2, config.label, { spectate: true, fp: !!config.fp });
   return startGuildBattle(f1, f2, config);
 };
 
@@ -4185,6 +4198,7 @@ function startBattle(){
   // camera standing in a fighter from the last match.
   if(tacFpActive())tacViewToggle();
   var _vb=document.getElementById('tacViewBtns');if(_vb)_vb.style.display='none';
+  var _cf=document.getElementById('tacCamFp');if(_cf)_cf.style.display='none';
   // Battles end mid-execution (checkWin), which leaves the exec button disabled —
   // re-arm it for the new battle (finishTurn only re-enables on turns nobody died).
   document.getElementById('execBtn').disabled=false;
@@ -4437,7 +4451,10 @@ function getFighterLinkCount(f){
   if(!f.gear)return 0;
   var links=0;
   EQUIP_SLOTS.forEach(function(pos){
-    var g=f.gear[pos];if(g)links+=g.links;
+    // ||0: guild fighters carry guildCosmeticGear's visual-only stubs with no
+    // links field — undefined here turned the whole count (and the rank the
+    // stat sheet prints from it) into NaN.
+    var g=f.gear[pos];if(g)links+=g.links||0;
   });
   return links;
 }
@@ -4493,9 +4510,14 @@ function updateStatSheet(){
     sg+='<div class="sg-item"><div class="val">'+f.stats[s]+'</div><div class="lbl">'+s+'</div><div class="mod">'+sign+mod+'</div></div>';
   });
   var ac=f.ac+(f.ward||0);var fLinks=getFighterLinkCount(f);var rank=getRank(fLinks);
-  // Build gear display
+  // Build gear display. Roguelike fighters only (f._mr marks a guild fighter):
+  // guild gear is guildCosmeticGear's VISUAL-ONLY kit — {type,tier,pos} stubs
+  // with no name, materia or sockets — and reading g.materia.forEach off one
+  // threw mid-renderAll, which silently aborted startGuildTacticalBattle's
+  // executor: no battle log line, an unresolvable battle promise, and the
+  // guild's `advancing` latch wedged after every tactical bout.
   var gearHTML='';
-  if(f.gear){
+  if(f.gear&&!f._mr){
     var ssDom=(run&&run.dominantHand)||'R';
     var ssHand=function(pos){ return pos.charAt(0)===ssDom ? 'Main' : 'Off'; };
     var slotLabels={};
@@ -6846,13 +6868,18 @@ window.CharGen = {
 function tacViewToggle(){
   var on=tacFpToggle();
   var b=document.getElementById('tacViewBtn');
-  if(b){b.classList.toggle('on',on);b.textContent=on?'👁 Inside':'👁 Board';}
+  // Labels say where tapping TAKES you, not where you are — '👁 Board' read as
+  // a board widget and nobody found the first-person view behind it.
+  if(b){b.classList.toggle('on',on);b.textContent=on?'♟ Board':'👁 1st Person';}
   var pv=document.getElementById('tacPovBtn'),wh=document.getElementById('tacWhoBtn');
   if(pv)pv.style.display=on?'':'none';
   if(wh)wh.style.display=on?'':'none';
   var gw=document.querySelector('#battleScreen .grid-wrap');
   if(gw)gw.style.visibility=on?'hidden':'';   // the board keeps running underneath
-  if(on){tacFpSetSubject(0);tacFpSync();}
+  // A fresh mount always stands in fighter 0, first person — the sibling
+  // buttons' labels must say so, or a re-entry shows '🙸 3rd' over a 1st-person
+  // view (the labels kept whatever the LAST session ended on).
+  if(on){tacFpSetSubject(0);tacFpSync();_tacWho=0;if(pv)pv.textContent='🙶 1st';if(wh)wh.textContent='↔ Eyes';}
   logMsg(on?'👁 Standing in '+(p1&&p1.name||'your fighter')+' — same turn, same rules.':'♟ Back to the board.','phase');
 }
 function tacViewPov(){
