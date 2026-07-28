@@ -187,3 +187,61 @@
 .dice-result{font-size:0.9em;color:var(--text);margin-top:10px}
 .dice-damage{font-size:1.1em;font-weight:600;margin-top:4px}
 
+
+/* ═══ The tactical board, seen from inside it (src/game/tactical-fp.js) ═══════
+   A SECOND VIEW, laid over the grid — never a second battle. It sits below the
+   floating HUD and the controls, so the whole planning UI keeps working exactly
+   as it does on the board: you queue the same steps, against the same rules,
+   while standing in the fighter who will walk them. */
+.tfp-host { position: absolute; inset: 0; z-index: 2; background: #10141c; }
+.tfp-stage {
+  position: absolute; inset: 0; overflow: hidden;
+  perspective: 500px; perspective-origin: 50% 50%;
+}
+/* Placed at the stage's centre, so the subject's eye is the world's origin. */
+.tfp-world {
+  position: absolute; left: 50%; top: 50%;
+  transform-style: preserve-3d; will-change: transform;
+}
+.tfp-geo, .tfp-path, .tfp-bbs { transform-style: preserve-3d; }
+.tfp-q {
+  position: absolute; left: 0; top: 0;
+  background-size: 100% 100%; background-repeat: no-repeat;
+  image-rendering: pixelated;
+  backface-visibility: hidden;   /* a face is never seen from behind the rock */
+  transform-style: flat;
+}
+.tfp-floor { filter: brightness(0.96); }
+.tfp-wall  { filter: brightness(0.82); }
+.tfp-mark  { opacity: 0.85; }
+/* Standing things: bottom-anchored on their ground point, turned to the camera. */
+.tfp-bb {
+  position: absolute; left: 0; bottom: 0;
+  transform-origin: 50% 100%;
+  image-rendering: pixelated;
+  pointer-events: none;
+  filter: drop-shadow(0 6px 7px rgba(0,0,0,0.6));
+}
+.tfp-bb canvas { display: block; image-rendering: pixelated; }
+/* Each fighter carries their own bar, over their head, in world space. */
+.tfp-bb > i {
+  position: absolute; left: 12%; right: 12%; top: -4%;
+  display: block; height: 3%; min-height: 6px;
+  background: linear-gradient(#7fe08a, #2f8f3c);
+  box-shadow: 0 0 0 3px rgba(0,0,0,0.55);
+}
+/* Depth, not decoration: the arena is outdoors, so distance goes pale. */
+.tfp-haze {
+  position: absolute; inset: 0; pointer-events: none; z-index: 3;
+  background: radial-gradient(ellipse at 50% 48%, transparent 34%, rgba(94,110,130,0.34) 82%, rgba(78,92,112,0.6) 100%);
+}
+/* Over the shoulder wants a little less vignette — you are looking AT someone. */
+.tfp-ots .tfp-haze { opacity: 0.5; }
+/* The view toggles live with the other battle chrome. */
+.tfp-btns { display: inline-flex; gap: 4px; }
+.tfp-btns button {
+  font: inherit; font-size: 0.82em; cursor: pointer;
+  background: rgba(20,24,34,0.9); color: #cfd8e8;
+  border: 1px solid rgba(150,170,200,0.35); border-radius: 7px; padding: 3px 9px;
+}
+.tfp-btns button.on { background: rgba(120,160,220,0.3); border-color: rgba(170,200,240,0.7); color: #fff; }

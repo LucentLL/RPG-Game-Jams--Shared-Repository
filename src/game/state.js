@@ -28,6 +28,11 @@ export const S = {
   executing: false,
   statsOpen: false,
   arenaGrid: null,
+  // The battlefield's other three grids, and the ground the tactical board bakes.
+  // Here rather than in crucible.js so a SECOND view can read the same board
+  // without reaching into it — see state.js's migration note above.
+  arenaElevation: null, arenaPassable: null, arenaTerrainCost: null, arenaName: '',
+  arenaGroundURI: null,
   animLoopRunning: false,
   actionLoopRunning: false,
   _pendingRunMode: 'turn',

@@ -7,7 +7,15 @@
    (lifted top + four sides). The camera (rotate·z-lift·scale·translate on
    the field) follows the walker; #delveScreen itself never scrolls. */
 
-#delveScreen { padding: 0; overflow: hidden; position: relative; --dvtilt: 52deg; }
+/* Pinned to the DYNAMIC viewport (same pattern as #guildScreen/#battleScreen):
+   .screen's min-height:100vh is the LARGE viewport on phones, so the bottom
+   ~56-110px of the element sat under the browser chrome — which is exactly
+   where the touch controls live. vh first as the fallback, dvh where it exists. */
+#delveScreen {
+  padding: 0; overflow: hidden; position: relative; --dvtilt: 52deg;
+  min-height: 100vh; height: 100vh;
+  min-height: 100dvh; height: 100dvh;
+}
 
 /* The stage owns the camera perspective and the clipping — the field must not
    clip or upright standees would shear at the plane edge (ranch rule). */
@@ -123,8 +131,30 @@
    The fade goes on `.dv-up`, NEVER on `.dv-prop`: opacity below 1 forces
    transform-style:flat, and flattening that wrapper would collapse the
    standee's counter-rotation and squash it back into the floor. */
-.dv-up, .dv-block-top, .dv-face { transition: opacity 0.14s linear; }
+.dv-up, .dv-block-top, .dv-face, .dv-roof { transition: opacity 0.14s linear; }
 .dv-xray { opacity: 0.36; }
+/* The third state: the walker is INSIDE the room this occluder covers. A 36%
+   ghost of a whole facade laid over the room you are standing in still obscures
+   everything in it — inside, the front of the building is simply not there.
+   Opacity, not display:none: the lazy height measurement in updateXray reads
+   offsetHeight, and a stair portal can re-enter the estate with the walker
+   already indoors. */
+.dv-gone { opacity: 0; }
+
+/* The cap over a stamped room's wall ring. Without it a building seen from the
+   lanes is an open-topped rectangle of free-standing wall — a fenced yard, not
+   a house. A flat quad at the ring's own 96px height, faded as one thing with
+   the facade (delve.js pushes it into the facade's occluder group). A transform
+   LEAF: fading it can flatten nothing. */
+.dv-roof {
+  position: absolute; pointer-events: none;
+  background:
+    repeating-linear-gradient(180deg, rgba(255, 255, 255, 0.055) 0 2px, rgba(0, 0, 0, 0.10) 10px 12px, transparent 2px 12px),
+    linear-gradient(180deg, #6e3d2c, #53301f 62%, #422417);
+  border: 2px solid #2c1a10;
+  box-shadow: inset 0 3px 0 rgba(255, 255, 255, 0.09);
+  image-rendering: pixelated;
+}
 
 /* --- Campus buildings: upright facades you walk into through the door --- */
 .dv-bldg { display: block; width: 100%; position: relative; }
@@ -356,7 +386,15 @@
    perspective stage, one preserve-3d world, and every surface a textured quad
    placed by a transform. The WORLD counter-moves about the walker — there is no
    camera object, only a scene that steps aside. */
-#delveFpScreen { padding: 0; overflow: hidden; position: relative; background: #06060a; }
+/* Same dynamic-viewport pin as #delveScreen above — the touch pad is anchored
+   bottom:12px and 109px tall, so under a 100vh screen the whole pad sat in the
+   strip mobile browser chrome covers. "No controls in first person on mobile"
+   was this line missing. */
+#delveFpScreen {
+  padding: 0; overflow: hidden; position: relative; background: #06060a;
+  min-height: 100vh; height: 100vh;
+  min-height: 100dvh; height: 100dvh;
+}
 .fp-stage {
   position: absolute; inset: 0; overflow: hidden;
   perspective: 500px; perspective-origin: 50% 50%; /* re-fitted per window by fitLens() */
@@ -378,8 +416,11 @@
   backface-visibility: hidden;   /* a face is never seen from behind the rock */
   transform-style: flat;
 }
-.fp-floor { filter: brightness(0.92); }
-.fp-ceil  { filter: brightness(0.6); }
+/* NO filter on quads — a filter here is a private GPU buffer per surface, and
+   75% of a scene is floors and ceilings; on a dpr-3 phone that alone was the
+   frame budget. The floor/ceiling dim is baked into the TEXTURES instead
+   (cutSurfaces in delve-fp.js), same reason the fog veil is a background layer
+   and not a filter. */
 /* Standing things: bottom-anchored on their ground point, turned to the walker. */
 /* The drop-shadow lives INLINE (see place() in delve-fp.js), because the same
    filter property carries the distance dimming and the two must be written
@@ -530,9 +571,11 @@
    Each hand is cropped to the UNION of the frames it plays, so nothing shifts
    as it animates — but that union is set by the big slash cells, and the stand
    frame is a small part of it (a sword measures 8×11 inside a 19×34 box). The
-   box must therefore be large enough that the SMALL pose still reads, which
-   makes the swing sweep right across the view. That is the right way round: a
-   weapon at rest sits at the corner of your eye, a weapon swung fills it. */
+   SWEEP across the view comes from the sheet's own slash frames painting
+   through that union; the CSS swing below only PIVOTS the element, about a
+   transform-origin fitHands() sets at the grip of the rest pose. Rotating a
+   near-screen-sized box about its default centre — a point hundreds of px from
+   the visible weapon — was what sent the weapon orbiting the whole screen. */
 /* Size and position are written by fitHands() in delve-fp.js, from the measured
    REST frame — no sheet's art sits in the same place inside its cell, so this
    cannot be a static rule. See the note there. */
@@ -560,12 +603,16 @@
 
 .fp-hand-weapon.fp-swinging, .fp-hand-pick.fp-swinging { animation: fp-swing 380ms cubic-bezier(.3,.7,.3,1); }
 .fp-hand-shield.fp-bracing  { animation: fp-brace 380ms ease-out; }
+/* Rotation only (plus a whisper of body-throw): the origin is the GRIP, so the
+   rotation IS the arc. The old %-translates were tuned for a ≤560px box; after
+   fitHands sized the element to the swing union they resolved to ±350px and
+   carried the weapon around the viewport. */
 @keyframes fp-swing {
-  0%   { transform: rotate(-6deg)  translate(0, 0); }
-  18%  { transform: rotate(26deg)  translate(14%, 12%); }   /* draw back */
-  48%  { transform: rotate(-74deg) translate(-64%, -20%); } /* through the arc */
-  70%  { transform: rotate(-34deg) translate(-26%, -4%); }
-  100% { transform: rotate(-6deg)  translate(0, 0); }
+  0%   { transform: rotate(-6deg); }
+  18%  { transform: rotate(22deg)  translate(3%, 2%); }    /* draw back */
+  48%  { transform: rotate(-70deg) translate(-4%, -2%); }  /* through the arc */
+  70%  { transform: rotate(-32deg) translate(-2%, -1%); }
+  100% { transform: rotate(-6deg); }
 }
 @keyframes fp-brace {
   0%, 100% { transform: rotate(7deg) translate(0, 0) scale(1); }
@@ -651,6 +698,18 @@
 .fp-pad button.fp-drink.fp-dry { opacity: .42; }
 
 @media (hover: hover) and (pointer: fine) { .fp-pad { opacity: 0.72; } .fp-pad:hover { opacity: 1; } }
+
+/* ── The light tier ──────────────────────────────────────────────────────
+   delve-fp.js stamps `fp-lite` on <body> for coarse-pointer / high-dpr
+   devices. Blur-radius filters (drop-shadow, big text-shadow) each rasterize
+   their own offscreen buffer at device resolution — the hands alone are two
+   near-screen-sized layers — and a phone GPU pays for them every frame the
+   layer animates. The look survives without them; the frame rate did not. */
+body.fp-lite .fp-hand { filter: none; }
+body.fp-lite .fp-shot { filter: none; }
+body.fp-lite .fp-slash path { filter: none; }
+body.fp-lite .fpm-exit   { text-shadow: 0 3px 0 rgba(0, 0, 0, 0.6); }
+body.fp-lite .fpm-portal { text-shadow: 0 3px 0 rgba(0, 0, 0, 0.6); }
 
 /* A thing in flight. No shadow (it is not on the floor) and no dimming beyond
    the distance fade every billboard takes, so an arrow stays legible against a

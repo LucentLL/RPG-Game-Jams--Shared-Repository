@@ -560,7 +560,7 @@ function mountScene(prep, entry) {
   // exactly one tile and covers nothing, so counters stay solid.
   for (const b of attachTerrain(field, baked, { zMode: 'y' })) {
     if (b.h <= TILE) continue;
-    D.occluders.push({ els: b.els, x0: b.x, x1: b.x + 1, y: b.y + 1, rows: rowsHidden(b.h), on: false });
+    D.occluders.push({ els: b.els, x0: b.x, x1: b.x + 1, y: b.y + 1, rows: rowsHidden(b.h), on: 0 });
   }
 
   // --- the walker: a fresh element per scene, the SAME actor across rooms ---
@@ -606,13 +606,55 @@ function mountScene(prep, entry) {
     if (p.use) D.uses.push({ id: p.use, label: p.label || 'Use', x: p.x, y: p.y, art: p.art, el });
   }
   // Facades on the grounds. A facade is a STANDEE over the room it contains —
-  // drawn at the room's own width so it really covers it — and not a door: the
-  // room is part of this plane, so walking in is just walking, and the
-  // see-through rule takes the facade away the moment you step under it. That
-  // is the cutaway, and it costs nothing extra because the town was never left.
+  // not a door: the room is part of this plane, so walking in is just walking,
+  // and the see-through rule takes the facade away the moment you step under
+  // it. That is the cutaway, and it costs nothing extra: the town was never
+  // left. The PROP BOX spans the whole room (the occluder rect must), but the
+  // ART inside is capped at its authored width — stretched to room width its
+  // aspect-ratio stretched the height too, and every door grew to three
+  // characters tall. A stamped room is also an open-topped ring of wall until
+  // something caps it: seen from the lanes it read as a fenced yard, so each
+  // roomed building gets a flat ROOF quad at wall height that fades (and, when
+  // you are inside, vanishes) together with its facade.
   for (const b of (map.facades || [])) {
-    addProp(`<span class="dv-bldg">${artSprite(b.art)}<span class="bl-name">${b.name}</span></span>`,
-      b.x + b.w / 2, b.y + b.h, b.w * TILE);
+    const artW = Math.min(b.w * TILE, b.px || b.w * TILE);
+    const propEl = addProp(`<span class="dv-bldg">${artSprite(b.art, '', `width:${artW}px;margin:0 auto`)}<span class="bl-name">${b.name}</span></span>`,
+      b.x + b.w / 2, b.y + b.h, b.w * TILE,
+      b.roomed ? { x0: b.x, x1: b.x + b.w, y0: b.y, y1: b.y + b.h } : null);
+    if (b.roomed) {
+      const roof = document.createElement('div');
+      roof.className = 'dv-roof';
+      roof.style.left = (b.x * TILE) + 'px';
+      roof.style.top = (b.y * TILE) + 'px';
+      roof.style.width = (b.w * TILE) + 'px';
+      roof.style.height = (b.h * TILE) + 'px';
+      // The same translateZ the room's own 96px walls are built with — the cap
+      // sits exactly on the ring. A leaf element, so fading it cannot flatten
+      // any preserve-3d parent.
+      roof.style.transform = 'translateZ(96px)';
+      // Above everything standing INSIDE the room, below the facade standee and
+      // below anyone standing south of it (painter's rule: base-relative z).
+      roof.style.zIndex = standZ(b.y + b.h) - 1;
+      D.field.appendChild(roof);
+      // One occluder group: addProp just pushed the facade's entry; the roof
+      // joins its els so both fade as one thing, and so does the prop's contact
+      // shadow — at state 2 the whole building is gone, and a detached shadow
+      // ellipse left over the doorway reads as a hole in the grass. Append,
+      // never prepend: els[0] must stay the .dv-up (the lazy height measure
+      // reads it).
+      const occ = D.occluders[D.occluders.length - 1];
+      occ.els.push(roof);
+      const sh = propEl.querySelector('.dv-shadow');
+      if (sh) occ.els.push(sh);
+      // A stair can re-mount the estate with the walker already indoors. Born
+      // gone — a class present before first style resolution skips the 0.14s
+      // transition — or the first frame paints an opaque roof over their head
+      // and then fades it out.
+      if (at[0] >= b.x && at[0] < b.x + b.w && at[1] >= b.y && at[1] < b.y + b.h) {
+        occ.on = 2;
+        for (const el of occ.els) el.classList.add('dv-gone');
+      }
+    }
   }
   // Doors to other maps (the wall gap is the doorway; this is just the trigger).
   for (const p of (map.portals || [])) D.portals.push({ x: p.x, y: p.y, to: p.to, at: p.at, enter: p.enter });
@@ -826,7 +868,7 @@ export function attachTerrain(parent, baked, opts = {}) {
  * counter-rotation and squash the standee back into the floor. `.dv-up` already
  * flattens its own children, so it has nothing left to lose.
  */
-function trackOccluder(el, x, y, w) {
+function trackOccluder(el, x, y, w, room) {
   const up = el.querySelector('.dv-up');
   if (!up) return;
   // `rows: 0` means NOT YET MEASURED. Height cannot be taken here: mountScene
@@ -835,12 +877,18 @@ function trackOccluder(el, x, y, w) {
   // aspect-ratio, so there is no number to compute from either. updateXray
   // resolves each one on the first frame its layout exists, and drops the ones
   // that turn out to be a tile or less.
-  D.occluders.push({ els: [up], x0: x - w / TILE / 2, x1: x + w / TILE / 2, y, rows: 0, on: false });
+  // `room` (optional) is the tile rect of a stamped interior this occluder
+  // covers: standing IN that rect is a stronger condition than standing behind
+  // the occluder, and gets a stronger answer (gone, not ghosted).
+  D.occluders.push({ els: [up], x0: x - w / TILE / 2, x1: x + w / TILE / 2, y, rows: 0, on: 0, room: room || null });
 }
 
 /** Fade whatever the walker has stepped behind, and un-fade whatever they left.
  *  Only the walker counts — creatures and companions are a tile tall and hide
- *  nobody, and fading for them would set the whole room blinking. */
+ *  nobody, and fading for them would set the whole room blinking.
+ *  Three states, not two: 0 solid, 1 ghosted (behind it), 2 gone — the walker
+ *  is INSIDE the room this occluder covers, and a 36% ghost of a whole facade
+ *  laid over the room you are standing in obscures everything in it. */
 function updateXray() {
   const p = D.player;
   for (let i = D.occluders.length - 1; i >= 0; i--) {
@@ -850,16 +898,32 @@ function updateXray() {
       if (!h) continue;                             // screen still hidden — try next frame
       if (h <= TILE) { D.occluders.splice(i, 1); continue; } // too short to hide anyone
       o.rows = rowsHidden(h);
+      // A roomed group also fades a ROOF spanning the whole room plus the
+      // ~2.56-row up-screen projection of its raised 96px lip — the ghost zone
+      // must reach at least that far, or a short-fronted building (the armory's
+      // art is 96px) paints its opaque roof over walkers in the lane behind it
+      // with nothing ever triggering the fade. XRAY_PAD absorbs the difference
+      // between this orthographic estimate and the stage's real perspective.
+      if (o.room) {
+        o.rows = Math.max(o.rows,
+          (o.y - o.room.y0) + (96 / TILE) * Math.tan(TILT * Math.PI / 180) + XRAY_PAD);
+      }
     }
-    const hides = p.y < o.y && (o.y - p.y) <= o.rows
+    const inside = o.room && p.x >= o.room.x0 && p.x < o.room.x1
+      && p.y >= o.room.y0 && p.y < o.room.y1;
+    const hides = !inside && p.y < o.y && (o.y - p.y) <= o.rows
       && p.x > o.x0 - XRAY_PAD && p.x < o.x1 + XRAY_PAD;
-    if (hides === o.on) continue;
-    o.on = hides;
-    for (const el of o.els) el.classList.toggle('dv-xray', hides);
+    const state = inside ? 2 : hides ? 1 : 0;
+    if (state === o.on) continue;
+    o.on = state;
+    for (const el of o.els) {
+      el.classList.toggle('dv-xray', state === 1);
+      el.classList.toggle('dv-gone', state === 2);
+    }
   }
 }
 
-function addProp(html, x, y, w) {
+function addProp(html, x, y, w, room) {
   const el = document.createElement('div');
   el.className = 'dv-prop';
   el.innerHTML = `<div class="dv-shadow"></div><div class="dv-up">${html}</div>`;
@@ -869,7 +933,7 @@ function addProp(html, x, y, w) {
   el.style.zIndex = standZ(y);
   el.style.setProperty('--dvlift', liftAt(x, y) + 'px'); // a prop on a ledge rides on it
   D.field.appendChild(el);
-  trackOccluder(el, x, y, w);
+  trackOccluder(el, x, y, w, room);
   return el;
 }
 

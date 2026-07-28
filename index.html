@@ -194,6 +194,10 @@
     <button class="cam-btn" onclick="tacZoom(1.25)" title="Zoom in">＋</button>
     <button class="cam-btn" onclick="tacZoom(0.8)" title="Zoom out">－</button>
     <button class="cam-btn cam-fit" onclick="tacFit()" title="Frame the fighters">⊡</button>
+    <!-- The first-person toggle ALSO lives here, always in view: buried at the
+         bottom of the scrollable control panel nobody ever found it. Guild
+         matches show it (startGuildTacticalBattle); roguelike runs hide it. -->
+    <button class="cam-btn" id="tacCamFp" style="display:none" onclick="tacViewToggle()" title="First person — stand in the fighter">👁</button>
   </div>
   <div class="controls" id="ctrlPanel">
     <div class="section-label">MOVEMENT</div>
@@ -210,6 +214,12 @@
       <button class="exec-btn" id="execBtn" onclick="executeTurn()">⚗ EXECUTE TURN</button>
       <button class="exec-btn btl-forfeit" id="tacAutoBtn" style="display:none" onclick="toggleTacticalAuto()">🤖 Watch</button>
       <button class="exec-btn btl-forfeit" id="btlForfeitBtn" style="display:none" onclick="forfeitTactical()">↩ Forfeit Match</button>
+      <!-- The same battle, from inside it. View only — every rule stays on the board. -->
+      <span class="tfp-btns" id="tacViewBtns" style="display:none">
+        <button id="tacViewBtn" onclick="tacViewToggle()" title="Stand in the fighter">👁 1st Person</button>
+        <button id="tacPovBtn" onclick="tacViewPov()" style="display:none" title="First person / over the shoulder">🙶 1st</button>
+        <button id="tacWhoBtn" onclick="tacViewWho()" style="display:none" title="Whose eyes">↔ Eyes</button>
+      </span>
     </div>
   </div>
   <div class="log" id="log"></div>

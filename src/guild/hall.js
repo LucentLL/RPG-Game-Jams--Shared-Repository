@@ -173,6 +173,7 @@ function tourneyBoard(t, champ) {
         ${tourneyLadder(t, champ)}
         <button class="lens-btn" data-m="action">⚔ Fight it live <span>real-time arena — stick + tap</span></button>
         <button class="lens-btn" data-m="tactical">♟ Command it <span>simultaneous turn-based tactics</span></button>
+        <button class="lens-btn" data-m="tactical-fp">🙶 Fight it from inside <span>the same turn-based duel, first person</span></button>
         <button class="lens-btn" data-m="spectate">👁 Spectate <span>watch it fought turn by turn — take control anytime</span></button>
         <button class="lens-btn sim" data-m="sim">▶ Simulate <span>let the week resolve it</span></button>
         <label class="lens-remember"><input type="checkbox"> don’t ask again — always simulate <span class="dim">(re-enable on the Calendar)</span></label>
@@ -1264,8 +1265,12 @@ async function advanceAll() {
     }
     if (lens && battleEngineReady()) {
       if (armed) guild.playPlan = null; // consume the opt-in (a board pick never armed one)
+      // 'tactical-fp' is a board-picker value only (never armed, never saved):
+      // it travels as mode:'tactical' + fp:true, so every mode whitelist
+      // downstream keeps seeing a string it knows.
+      const fp = lens === 'tactical-fp';
       const played = await playTournamentMatch(lineup[0], t, {
-        mode: lens, items: withdrawPotions(),
+        mode: fp ? 'tactical' : lens, fp, items: withdrawPotions(),
         powerFn: combatPower,               // gear counts, same as the simulated bracket
         field: (t.rivalIds || []).map((id) => rivalById(guild, id)), // fight the SAME rivals the board showed
         interstitial: bracketInterstitial(t), // per-round: fight on / simulate the rest
@@ -3443,9 +3448,14 @@ async function practiceBout(myId, oppId, mode) {
   const toSpec = (p) => ({ name: p.name, stats: p.stats, archetype: p.archetype, appearance: p.appearance, appearanceSeed: p.appearanceSeed, prime: p.prime });
   advancing = true;
   try {
+    // 'tactical-fp' is a PICKER value, not an engine mode: it reaches the
+    // engine as mode:'tactical' + fp:true, so every whitelist that coerces
+    // unknown mode strings to 'action' never sees a new one.
+    const fp = mode === 'tactical-fp';
     const result = await window.playGuildBattle({
       player: toSpec(me), opponent: toSpec(opp),
-      mode: mode === 'tactical' || mode === 'spectate' ? mode : 'action', label: 'Practice bout',
+      mode: fp ? 'tactical' : mode === 'tactical' || mode === 'spectate' ? mode : 'action',
+      fp, label: 'Practice bout',
     });
     const won = result && result.winner === 'player';
     notice = (result && result.forfeit) ? `${me.name} bowed out of the bout.`
@@ -3467,6 +3477,7 @@ function arenaRoom() {
       <span class="bout-btns">
         <button class="bout-btn" title="Real-time — move with the stick, tap to attack" onclick="__guild.practiceBout('${h.id}','${oppId}','action')">⚔ Live</button>
         <button class="bout-btn" title="Turn-based — queue moves; both sides execute at once" onclick="__guild.practiceBout('${h.id}','${oppId}','tactical')">♟ Tactics</button>
+        <button class="bout-btn" title="The same turn-based bout, seen from inside your fighter" onclick="__guild.practiceBout('${h.id}','${oppId}','tactical-fp')">🙶 1st</button>
         <button class="bout-btn" title="Watch it fought turn by turn — take control anytime" onclick="__guild.practiceBout('${h.id}','${oppId}','spectate')">👁</button>
       </span></div>`;
   const dummy = boutRow('__dummy', '🥊 Training Dummy', 'a mirror of your own strength');
