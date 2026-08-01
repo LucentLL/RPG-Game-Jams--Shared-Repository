@@ -12,14 +12,24 @@
 .globe-overlay.on { opacity: 1; }
 
 .globe-hud {
-  display: flex; align-items: center; gap: 14px;
-  width: min(76vmin, 540px);
+  display: flex; align-items: center; gap: 10px;
+  width: min(88vmin, 640px);
 }
 .globe-title {
   flex: 1;
   font-family: 'Cinzel', serif; font-weight: 700; letter-spacing: 0.1em;
   color: var(--gold); font-size: 1.1em;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
+.globe-zoomlvl { color: var(--muted); font-size: 0.85em; flex: 0 0 auto; font-variant-numeric: tabular-nums; }
+.globe-zoom {
+  font: inherit; cursor: pointer; line-height: 1;
+  width: 30px; height: 30px; padding: 0; flex: 0 0 auto;
+  background: var(--card); color: var(--gold);
+  border: 1px solid var(--border); border-radius: 50%;
+  font-weight: 700;
+}
+.globe-zoom:hover { border-color: var(--gold); }
 .globe-x {
   font: inherit; cursor: pointer; line-height: 1;
   width: 30px; height: 30px; padding: 0;
@@ -30,7 +40,7 @@
 
 .globe-box {
   position: relative;
-  width: min(76vmin, 540px); aspect-ratio: 1;
+  width: min(88vmin, 640px); aspect-ratio: 1;
   touch-action: none; cursor: grab;
 }
 .globe-box:active { cursor: grabbing; }
@@ -53,14 +63,25 @@
   pointer-events: auto;
   filter: drop-shadow(0 2px 3px rgba(0, 0, 0, 0.8));
 }
+/* Real castle sprites off the worldmap sheet now — sized by contain so the
+   grey keep and the red-roofed home hall each keep their own proportions.
+   (The first cut pointed at worldmapminis_base, which is the BASE-BODY
+   character grid: naked minis on every seat. Never again.) */
 .mk-keep {
-  display: block; width: 22px; height: 22px;
-  background-size: 300% 400%;
+  display: block; width: 30px; height: 26px;
+  background-size: contain;
+  background-position: center bottom;
+  background-repeat: no-repeat;
   image-rendering: pixelated;
   filter: grayscale(0.55) brightness(0.8);   /* an uncontacted hall is a rumour */
 }
 .globe-mk.known .mk-keep { filter: none; }
-.globe-mk.home .mk-keep { filter: drop-shadow(0 0 5px rgba(255, 216, 120, 0.95)); }
+.globe-mk.home .mk-keep { width: 34px; height: 30px; filter: drop-shadow(0 0 5px rgba(255, 216, 120, 0.95)); }
+/* The detail layer — towns and charted delves, smaller than any hall, and
+   never greyed (a town is not a rumour, it is scenery). */
+.globe-mk.globe-poi .mk-keep { width: 20px; height: 18px; filter: none; }
+.globe-mk.poi-delve .mk-keep { filter: drop-shadow(0 0 3px rgba(140, 200, 255, 0.6)); }
+.globe-mk.globe-poi .mk-label { color: #aeb9a8; font-size: 8px; }
 .mk-label {
   font-size: 9px; line-height: 1.1; white-space: nowrap;
   font-family: 'Cinzel', serif; letter-spacing: 0.04em;
@@ -84,7 +105,7 @@
 }
 
 .globe-panel {
-  width: min(76vmin, 540px); min-height: 108px;
+  width: min(88vmin, 640px); min-height: 108px;
   background: var(--card); border: 1px solid var(--border); border-radius: 12px;
   padding: 12px 16px;
 }

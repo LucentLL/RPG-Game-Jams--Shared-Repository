@@ -97,6 +97,26 @@ export const SEATS = [
   { id: 'kelpmoor', name: 'Kelpmoor', realm: 'meridia', cx: 17, cy: 25, mini: 9 },
 ];
 
+/** Free towns — the detail layer. They exist so a zoomed-in globe shows a
+ *  lived-in world, not just politics; two per realm, all on probed land. */
+export const TOWNS = [
+  { id: 'millbrook', name: 'Millbrook', realm: 'veyra', cx: 5, cy: 9 },
+  { id: 'harrowgate', name: 'Harrowgate', realm: 'veyra', cx: 18, cy: 14 },
+  { id: 'elkford', name: 'Elkford', realm: 'norvale', cx: 35, cy: 8 },
+  { id: 'coldquay', name: 'Coldquay', realm: 'norvale', cx: 41, cy: 9 },
+  { id: 'brasshaven', name: 'Brasshaven', realm: 'ashvara', cx: 41, cy: 21 },
+  { id: 'semirsrest', name: "Semir's Rest", realm: 'ashvara', cx: 44, cy: 20 },
+  { id: 'saltwhistle', name: 'Saltwhistle', realm: 'meridia', cx: 6, cy: 21 },
+  { id: 'palmrow', name: 'Palmrow', realm: 'meridia', cx: 14, cy: 23 },
+];
+
+/** Where each Wilds locale sits on the world, keyed by locale id — charted
+ *  delves join the zoomed globe once discovered (hall.js gates on discovery).
+ *  All in Veyra, around the home seat: the Wilds are YOUR wilds. */
+export const DUNGEON_CELLS = {
+  ferncreek: [17, 11], hollowvein: [7, 12], thornwood: [13, 9], mistfen: [16, 14], blackpine: [12, 14],
+};
+
 export const seatById = (id) => SEATS.find((s) => s.id === id) || null;
 export const realmById = (id) => REALMS.find((r) => r.id === id) || null;
 /** A seat's display name — the home seat wears the guild's own. */
@@ -133,8 +153,11 @@ export function rivalSeat(rivalId) {
     if (row.length !== W) throw new Error(`world chart row ${y} is ${row.length} wide, not ${W}`);
     if (/[^~itgfhmd]/.test(row)) throw new Error(`world chart row ${y} carries an unknown biome`);
   });
-  for (const s of SEATS) {
-    const c = (CHART[s.cy] || '')[s.cx];
-    if (!c || c === '~' || c === 'i') throw new Error(`guild seat ${s.id} stands at ${s.cx},${s.cy} on '${c || 'nothing'}'`);
-  }
+  const dry = (id, cx, cy) => {
+    const c = (CHART[cy] || '')[cx];
+    if (!c || c === '~' || c === 'i') throw new Error(`${id} stands at ${cx},${cy} on '${c || 'nothing'}'`);
+  };
+  for (const s of SEATS) dry('guild seat ' + s.id, s.cx, s.cy);
+  for (const t of TOWNS) dry('town ' + t.id, t.cx, t.cy);
+  for (const k in DUNGEON_CELLS) dry('delve ' + k, DUNGEON_CELLS[k][0], DUNGEON_CELLS[k][1]);
 })();

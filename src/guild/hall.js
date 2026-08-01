@@ -45,8 +45,8 @@ import { openDelveFp, isDelveFpOpen } from './delve-fp.js';
 import { ORE_KINDS, setCampusGuild } from './delve-maps.js';
 import { ensureCampus } from './campus.js';
 import { openScroll, refreshScroll, isScrollOpen } from './scroll-ui.js';
-import { SEATS, REALMS, seatById, realmById, seatForEvent, rivalSeat } from './world-guilds.js';
-import { openGlobe, refreshGlobePanel, isGlobeOpen } from './globe.js';
+import { SEATS, REALMS, TOWNS, DUNGEON_CELLS, seatById, realmById, seatForEvent, rivalSeat } from './world-guilds.js';
+import { openGlobe, refreshGlobePanel, isGlobeOpen, flatMapDataUrl } from './globe.js';
 
 const SLOT = 'guild';
 // The roster cap is no longer a constant — it's derived from the Living Quarters
@@ -3251,13 +3251,33 @@ const DESK_SCROLLS = {
   contacts: { glyph: '🤝', title: 'Contacts Abroad', render: () => deskContacts() },
   quests: { glyph: '🗺', title: 'The Quest Board', render: () => deskQuests() },
   tourneys: { glyph: '🏆', title: 'Tournament Circulars', render: () => deskTourneys() },
+  map: { glyph: '🗾', title: 'Map of the Known World', render: () => deskFlatMap() },
 };
+
+/** The flat map's last bake — a data URL, so the <img> survives every scroll
+ *  refresh byte-identical instead of repainting a canvas each render. */
+let _flatMapUrl = null;
 
 function deskScroll(kind) {
   const d = DESK_SCROLLS[kind];
   if (!d) return;
-  openScroll({ glyph: d.glyph, title: d.title, render: d.render, width: kind === 'tourneys' ? 760 : 680 });
+  if (kind === 'map') {
+    // Bake fresh (contacts and venues move), then re-ink the open scroll.
+    _flatMapUrl = null;
+    flatMapDataUrl(globeFacts())
+      .then((u) => { _flatMapUrl = u; if (isScrollOpen()) refreshScroll(); })
+      .catch((e) => console.warn('flat map bake failed', e));
+  }
+  openScroll({ glyph: d.glyph, title: d.title, render: d.render, width: kind === 'tourneys' ? 760 : kind === 'map' ? 860 : 680 });
   paintSprites();   // cards inside carry hero-sprite canvases; ink them now
+}
+
+function deskFlatMap() {
+  return `${_flatMapUrl
+    ? `<img class="flatmap" src="${_flatMapUrl}" alt="The Known World, flat">`
+    : '<div class="hint" style="text-align:left">The cartographer is inking the plate…</div>'}
+    <div class="hint" style="text-align:left">The wall-scroll view — every hall at once, named where your letters reach. The 🌍 globe is the living version: turn it, and zoom in for towns and your charted delves.</div>
+    <div class="tourney-lens quest-lens"><button class="tourney-play" onclick="__guild.openGlobe()">🌍 Turn the globe instead</button></div>`;
 }
 
 function studyRoom() {
@@ -3281,6 +3301,7 @@ function studyRoom() {
         ${item('contacts', 'Contacts', contacts + '/' + (SEATS.length - 1) + ' halls known', false)}
         ${item('quests', 'Quests', (guild.questBoard || []).length + ' posted', false)}
         ${item('tourneys', 'Tournaments', nextT ? (nextT.week - cur <= 0 ? 'one this week' : 'next in ' + (nextT.week - cur) + 'w') : 'a quiet season', !!nextT && nextT.week - cur <= 1)}
+        ${item('map', 'World Map', SEATS.length + ' halls, one sheet', false)}
       </div>
       <div class="desk-note">Take a scroll from the desk — it unrolls with the paperwork inside. The same letters hang on the room boards; the desk is where the guildmaster reads everything at once.</div>
     </div>`;
@@ -3409,31 +3430,50 @@ function worldRoom() {
   }).join('');
   return `<div class="plan-card">
       <div class="plan-title">🌍 The Known World</div>
-      <div class="hint" style="text-align:left">Four realms, thirty-two halls — yours among them. Drag the globe to turn it; tournaments pulse at the hall hosting them. Envoys (☉${CONTACT_GOLD}, sent here or from the desk's 🤝 Contacts scroll) light a hall up with its dossier.</div>
-      <div class="tourney-lens quest-lens"><button class="tourney-play" onclick="__guild.openGlobe()">🌍 Turn the globe</button></div>
+      <div class="hint" style="text-align:left">Four realms, thirty-two halls — yours among them. Drag the globe to turn it, pinch or ＋/− to zoom: closer in, the free towns and your charted Wilds delves appear. Tournaments pulse at the hall hosting them; envoys (☉${CONTACT_GOLD}, sent here or from the desk's 🤝 Contacts scroll) light a hall up with its dossier.</div>
+      <div class="tourney-lens quest-lens">
+        <button class="tourney-play" onclick="__guild.openGlobe()">🌍 Turn the globe</button>
+        <button class="tourney-play" onclick="__guild.deskScroll('map')">🗾 Unroll the flat map</button>
+      </div>
       ${realmLines}
       <div class="dept-lbl">This season's venues</div>
       ${evLines || '<div class="world-line dim">A quiet season — advance a week and the calendar refills.</div>'}
     </div>`;
 }
 
-/** Open the globe over the guild. State is handed in as a GETTER so the map
- *  re-reads live gold/contacts after every action instead of a stale copy. */
+/** The detail layer the zoomed globe shows: the world's towns, plus the
+ *  Wilds delves THIS guild has actually charted — discovery gates the map. */
+function worldPois() {
+  const towns = TOWNS.map((t) => ({ ...t, kind: 'town' }));
+  const delves = discoveredLocales(guild).map((l) => {
+    const c = DUNGEON_CELLS[l.id];
+    return c ? { id: l.id, kind: 'dungeon', name: l.name, glyph: l.glyph, tier: l.tier, cx: c[0], cy: c[1] } : null;
+  }).filter(Boolean);
+  return towns.concat(delves);
+}
+
+/** Live world facts, shared by the globe and the flat map. A GETTER everywhere
+ *  it can be, so views re-read gold/contacts after every action. */
+function globeFacts() {
+  return {
+    guildName: guild.name,
+    gold: guild.gold,
+    contacts: guild.contacts || {},
+    contactCost: CONTACT_GOLD,
+    events: (guild.schedule || []).filter((t) => !t.resolved && t.week >= guild.calendar.week).map((t) => ({
+      name: t.name, rank: t.rank,
+      venueId: t.venueId || seatForEvent(t.id),
+      when: t.week - guild.calendar.week <= 0 ? 'this week' : 'in ' + (t.week - guild.calendar.week) + 'w',
+    })),
+    rivalsOf: (seatId) => (guild.rivals || []).filter((r) => rivalSeat(r.id) === seatId)
+      .map((r) => ({ name: r.name, record: recordStr(r.record) })),
+    pois: worldPois(),
+  };
+}
+
 function openWorldGlobe() {
   openGlobe({
-    state: () => ({
-      guildName: guild.name,
-      gold: guild.gold,
-      contacts: guild.contacts || {},
-      contactCost: CONTACT_GOLD,
-      events: (guild.schedule || []).filter((t) => !t.resolved && t.week >= guild.calendar.week).map((t) => ({
-        name: t.name, rank: t.rank,
-        venueId: t.venueId || seatForEvent(t.id),
-        when: t.week - guild.calendar.week <= 0 ? 'this week' : 'in ' + (t.week - guild.calendar.week) + 'w',
-      })),
-      rivalsOf: (seatId) => (guild.rivals || []).filter((r) => rivalSeat(r.id) === seatId)
-        .map((r) => ({ name: r.name, record: recordStr(r.record) })),
-    }),
+    state: globeFacts,
     onContact: (id) => { makeContact(id); refreshGlobePanel(); },
   });
 }
