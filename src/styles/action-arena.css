@@ -94,6 +94,26 @@
 .action-log .log-entry.crit{color:var(--gold);font-weight:600}
 .action-log .log-entry.miss{color:var(--muted);font-style:italic}
 
+/* ═══ The arena from inside (src/game/action-fp.js) ═══ */
+/* The view button carries words, not a glyph — like the delve's, it says where
+   tapping TAKES you: 1st Person → 3rd Person → Arena. */
+#actCamFp{width:auto;padding:0 12px;white-space:nowrap;font-family:'Cinzel',serif;
+  font-size:0.66em;letter-spacing:0.06em;text-transform:uppercase}
+#actCamFp.on{background:rgba(120,160,220,0.3);border-color:rgba(170,200,240,0.7);color:#fff}
+/* While the inside camera is up the tilted plane rests — the FP host paints
+   every pixel of the stage, so the arena underneath would be pure hidden cost.
+   (visibility, not display: the terrain DOM must keep its layout for the swap
+   back, exactly as the tactical board keeps running under its own FP view.) */
+#actionScreen.afp-on .action-arena{visibility:hidden}
+/* The held charge in first person: a ring low-centre, where your hands would
+   be. (Over the shoulder it blooms at the standee's feet instead, as it does
+   over the field — drawn by action-fp on the fighter's own canvas.) */
+.afp-ring{position:absolute;left:50%;bottom:132px;transform:translateX(-50%);
+  width:72px;height:72px;pointer-events:none;z-index:6}
+/* Terrain dressing and shots are plain billboards; fighters reuse .tfp-fighter. */
+.afp-prop{filter:drop-shadow(0 6px 9px rgba(0,0,0,0.45))}
+.afp-shot{filter:drop-shadow(0 0 10px rgba(0,0,0,0.45))}
+
 /* Virtual movement stick (touch). Lives on the SCREEN-SPACE stage (never on the
    rotated plane — its pointer math is 2D); shown only while a battle loop runs. */
 .action-joystick{position:absolute;left:14px;bottom:14px;width:112px;height:112px;border-radius:50%;background:radial-gradient(circle,rgba(15,15,22,0.55),rgba(15,15,22,0.3));border:2px solid rgba(212,168,67,0.45);touch-action:none;z-index:30;display:none;align-items:center;justify-content:center}

@@ -59,13 +59,20 @@ import { buildCampusMap } from './campus.js';
 export const LIGHTS = {
   // Underground: a lamp's worth of world, and black past it.
   dark: { rgb: [6, 6, 10], near: 1.2, far: 5.2, sprite: 0.78 },
-  // Open air: pale distance rather than black, and you see half again as far —
-  // but it must still CLOSE, because the renderer only builds a few tiles
-  // around you and a haze that has not arrived by the edge of that leaves the
-  // world visibly stopping in mid-air. A meadow with weather in it, not a vista.
+  // Open air: pale distance rather than black — and a real VISTA now, not
+  // weather pressing on your face. The haze starts far enough out that the
+  // whole meadow reads clear, and what it takes it takes at the horizon, where
+  // the sky band is painted in the same colour — so the far cull is the
+  // atmosphere arriving, not the world stopping. It must still CLOSE by the
+  // edge of what the renderer builds; the first-person view derives its build
+  // radius from these numbers, so they move together by construction.
+  // `lite` is the same weather on a phone: the build radius a coarse-pointer
+  // device can afford is smaller, so the haze has to arrive sooner or the
+  // world stops at a hard edge of unfogged grass (the rule VIEW_CAP and
+  // FOG_CULL have always lived by).
   // `sky` means no ceiling is built at all: the background IS the sky, and the
   // haze runs up into it. A meadow with a roof on it is a cave with grass in it.
-  open: { rgb: [150, 168, 186], near: 2.6, far: 7.4, sprite: 0.92, sky: true },
+  open: { rgb: [150, 168, 186], near: 7, far: 16, sprite: 0.95, sky: true, lite: { near: 4.5, far: 10 } },
   // Somebody else's lamps — dim at the edges, warmer than a cave.
   lit: { rgb: [16, 14, 20], near: 2.2, far: 6.6, sprite: 0.86 },
 };
