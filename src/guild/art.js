@@ -90,9 +90,17 @@ const SHEETS = {
 /** Named crops: { sheet, x, y, w, h } in sheet pixels. Crops tagged `MEASURE`
  *  are provisional and refined against the real sheet with the alpha-box probe. */
 export const ART = {
-  tree:      { sheet: 'tree_3x', x: 96, y: 0, w: 96, h: 144 },   // canopy crop (campus rows)
-  treeTall:  { sheet: 'tree_3x', x: 96, y: 0, w: 96, h: 240 },   // the FULL tree, trunk included (delve standees)
-  treeSmall: { sheet: 'tree_3x', x: 0, y: 0, w: 96, h: 120 },    // its rounder sibling
+  // The sheet's ONLY complete tree is the top-left one (canopy + trunk on
+  // transparent). The right column and the bottom-left row are FILLERS — canopy
+  // mass and trunk rows meant to stand BEHIND real trees in a tree line — and
+  // cropping them as standees is what planted blobby green columns everywhere.
+  tree:      { sheet: 'tree_3x', x: 0, y: 0, w: 96, h: 120 },    // the complete tree
+  treeTall:  { sheet: 'tree_3x', x: 0, y: 0, w: 96, h: 120 },    // same tree (standee alias)
+  treeSmall: { sheet: 'tree_3x', x: 0, y: 0, w: 96, h: 120 },
+  // The fillers, named for what they are — forest-wall bakes use these.
+  treeFillCanopy: { sheet: 'tree_3x', x: 96, y: 0, w: 96, h: 120 },   // bright crown mass
+  treeFillDark:   { sheet: 'tree_3x', x: 96, y: 144, w: 96, h: 96 },  // dense dark canopy
+  treeFillTrunks: { sheet: 'tree_3x', x: 0, y: 144, w: 96, h: 96 },   // trunk row under canopy
   stall:     { sheet: 'stall_3x', x: 3, y: 156, w: 138, h: 156 },// red-striped market stall, table + legs
   wagon:     { sheet: 'wagon_1x', x: 4, y: 26, w: 94, h: 66 },   // covered wagon side view (tight box — the sheet's barrel row sits above it)
   well:      { sheet: 'well_3x', x: 192, y: 6, w: 189, h: 254 }, // the roofed village well

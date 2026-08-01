@@ -23,11 +23,11 @@ import { hasMaterials, spendMaterials, addMaterial } from './inventory.js';
  * @property {number} reqTheory @property {number} staminaCost @property {string} blurb
  */
 export const RATION_RECIPES = [
-  { id: 'daily_bread', name: 'Daily Bread', glyph: '🍞', food: 'grain', cost: {},
+  { id: 'daily_bread', name: 'Daily Bread', glyph: '', food: 'grain', cost: {},
     base: 3, ceil: 10, reqTheory: 0, staminaCost: 16, blurb: 'Bakes plain grain rations for the pantry — pure labour.' },
-  { id: 'cure_meat', name: 'Salt-Cured Meat', glyph: '🥓', food: 'salted_meat', cost: { game_meat: 2 },
+  { id: 'cure_meat', name: 'Salt-Cured Meat', glyph: '', food: 'salted_meat', cost: { game_meat: 2 },
     base: 2, ceil: 6, reqTheory: 6, staminaCost: 20, blurb: 'Preserves hunted game into rich, keeping rations.' },
-  { id: 'hearty_stew', name: 'Hearty Stew', glyph: '🍲', food: 'salted_meat', cost: { grain: 3 },
+  { id: 'hearty_stew', name: 'Hearty Stew', glyph: '', food: 'salted_meat', cost: { grain: 3 },
     base: 2, ceil: 5, reqTheory: 18, staminaCost: 22, blurb: 'Stews grain and stock into a filling table.' },
 ];
 

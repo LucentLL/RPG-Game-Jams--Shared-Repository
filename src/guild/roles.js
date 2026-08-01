@@ -17,18 +17,18 @@
 
 /** @type {Object.<string, Role>} keyed by room id. */
 export const ROLES = {
-  grounds:    { name: 'The Grounds',   glyph: '🏕', kind: 'living',  skill: null,           blurb: 'The whole compound — expand quarters, training & stores.' },
-  calendar:   { name: 'The Season',    glyph: '📅', kind: 'field',   skill: null,           blurb: 'Tournaments ahead — enter heroes early and train toward them.' },
-  roster:     { name: 'Adventurer',    glyph: '🛡', kind: 'field',   skill: null,           blurb: 'Trains, then quests in the field.' },
+  grounds:    { name: 'The Grounds',   glyph: '', kind: 'living',  skill: null,           blurb: 'The whole compound — expand quarters, training & stores.' },
+  calendar:   { name: 'The Season',    glyph: '', kind: 'field',   skill: null,           blurb: 'Tournaments ahead — enter heroes early and train toward them.' },
+  roster:     { name: 'Adventurer',    glyph: '▣', kind: 'field',   skill: null,           blurb: 'Trains, then quests in the field.' },
   arena:      { name: 'Combatant',     glyph: '⚔', kind: 'field',   skill: null,           blurb: 'Step in for a live practice bout — anytime.' },
-  forge:      { name: 'Blacksmith',    glyph: '🔨', kind: 'work',    skill: 'blacksmithing', blurb: 'Forges weapons & armor into the armory.' },
-  kitchen:    { name: 'Cook',          glyph: '🍲', kind: 'work',    skill: 'cooking',       blurb: 'Prepares meals that speed recovery.' },
-  library:    { name: 'Scholar',       glyph: '📖', kind: 'work',    skill: 'blacksmithing', blurb: 'Studies theory to unlock recipes.' },
-  armory:     { name: 'Quartermaster', glyph: '🗡', kind: 'storage', skill: null,           blurb: 'Issues gear to the party by policy.' },
-  apothecary: { name: 'Apothecary',    glyph: '🏺', kind: 'storage', skill: 'alchemy',       blurb: 'Keeps & dispenses potions and supplies.' },
+  forge:      { name: 'Blacksmith',    glyph: '', kind: 'work',    skill: 'blacksmithing', blurb: 'Forges weapons & armor into the armory.' },
+  kitchen:    { name: 'Cook',          glyph: '', kind: 'work',    skill: 'cooking',       blurb: 'Prepares meals that speed recovery.' },
+  library:    { name: 'Scholar',       glyph: '', kind: 'work',    skill: 'blacksmithing', blurb: 'Studies theory to unlock recipes.' },
+  armory:     { name: 'Quartermaster', glyph: '†', kind: 'storage', skill: null,           blurb: 'Issues gear to the party by policy.' },
+  apothecary: { name: 'Apothecary',    glyph: '', kind: 'storage', skill: 'alchemy',       blurb: 'Keeps & dispenses potions and supplies.' },
   laboratory: { name: 'Alchemist',     glyph: '⚗', kind: 'work',    skill: 'alchemy',       blurb: 'Brews potions from gathered herbs.' },
-  quarters:   { name: 'Steward',       glyph: '🍺', kind: 'living',  skill: null,           blurb: 'Runs the hall and takes on recruits.' },
-  academy:    { name: 'The Academy',    glyph: '🎓', kind: 'living',  skill: null,           blurb: 'Houses & teaches apprentices; graduate them into named heroes.' },
+  quarters:   { name: 'Steward',       glyph: '', kind: 'living',  skill: null,           blurb: 'Runs the hall and takes on recruits.' },
+  academy:    { name: 'The Academy',    glyph: '', kind: 'living',  skill: null,           blurb: 'Houses & teaches apprentices; graduate them into named heroes.' },
 };
 
 /** @param {string} roomId @returns {?Role} */

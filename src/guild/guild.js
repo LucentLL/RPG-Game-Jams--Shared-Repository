@@ -34,17 +34,17 @@ import { createMarket } from './market.js';
  * @type {Object.<string, {name:string, glyph:string, desc:string, costs:number[], caps?:number[], mainMult?:number[], injuryBonus?:number[], fed?:number[]}>}
  */
 export const FACILITIES = {
-  quarters: { name: 'Living Quarters', glyph: '🏠', desc: 'Beds & bunks. Raises how many members the guild can house.',
+  quarters: { name: 'Living Quarters', glyph: '', desc: 'Beds & bunks. Raises how many members the guild can house.',
     caps: [6, 10, 20, 60, 120], costs: [0, 800, 2000, 6000, 15000] },
   yard: { name: 'Training Yard', glyph: '⚔', desc: 'Grounds & equipment. Speeds up training and unlocks equipment slots on the ranch (2 / 4 / 6 / 9).',
     mainMult: [1, 1.1, 1.2, 1.3], slots: [2, 4, 6, 9], costs: [0, 600, 1800, 5000] },
-  ring: { name: 'Sparring Ring', glyph: '🥊', desc: 'A padded arena. Lowers the risk of overtraining injuries.',
+  ring: { name: 'Sparring Ring', glyph: '', desc: 'A padded arena. Lowers the risk of overtraining injuries.',
     injuryBonus: [0, 20, 35, 50], costs: [0, 500, 1500, 4500] },
-  mess: { name: 'Mess Hall', glyph: '🍲', desc: 'Kitchens & stores. Sets how many mouths the guild can feed — its contracts scale the market’s weekly food supply.',
+  mess: { name: 'Mess Hall', glyph: '', desc: 'Kitchens & stores. Sets how many mouths the guild can feed — its contracts scale the market’s weekly food supply.',
     fed: [6, 12, 24, 60, 120], costs: [0, 700, 2000, 6000, 14000] },
-  infirmary: { name: 'Infirmary', glyph: '🩹', desc: 'Cots & a surgeon. Injuries heal twice as fast (tier 1+).',
+  infirmary: { name: 'Infirmary', glyph: '', desc: 'Cots & a surgeon. Injuries heal twice as fast (tier 1+).',
     healRate: [1, 2, 2, 3], costs: [0, 900, 2400, 6500] },
-  dorm: { name: 'Dormitory', glyph: '🎓', desc: 'Bunks, mess & books for apprentices. Sets how many trainees the academy can house.',
+  dorm: { name: 'Dormitory', glyph: '', desc: 'Bunks, mess & books for apprentices. Sets how many trainees the academy can house.',
     beds: [3, 6, 12, 24], costs: [0, 500, 1500, 4000] },
 };
 

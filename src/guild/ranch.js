@@ -35,16 +35,16 @@ const GATE = { x: 11, y: 19.8 };                      // quest parties muster he
 
 // Buildings/zones placed on the campus (tile coords). Rooms → openRoom on tap.
 const RANCH_PROPS = [
-  { glyph: '🏰', name: 'Great Hall', room: 'roster', tx: 11.0, ty: 3.4, big: true },
-  { glyph: '📖', name: 'Library', room: 'library', tx: 7.6, ty: 3.2 },
-  { glyph: '🍲', name: 'Kitchen', room: 'kitchen', tx: 14.4, ty: 3.3 },
-  { glyph: '🏠', name: 'Quarters', room: 'quarters', tx: 17.6, ty: 4.6, grow: 'quarters' },
-  { glyph: '🔨', name: 'Forge', room: 'forge', tx: 4.4, ty: 5.0 },
-  { glyph: '🗡', name: 'Armory', room: 'armory', tx: 2.8, ty: 7.3 },
+  { glyph: '', name: 'Great Hall', room: 'roster', tx: 11.0, ty: 3.4, big: true },
+  { glyph: '', name: 'Library', room: 'library', tx: 7.6, ty: 3.2 },
+  { glyph: '', name: 'Kitchen', room: 'kitchen', tx: 14.4, ty: 3.3 },
+  { glyph: '', name: 'Quarters', room: 'quarters', tx: 17.6, ty: 4.6, grow: 'quarters' },
+  { glyph: '', name: 'Forge', room: 'forge', tx: 4.4, ty: 5.0 },
+  { glyph: '†', name: 'Armory', room: 'armory', tx: 2.8, ty: 7.3 },
   { glyph: '⚗', name: 'Laboratory', room: 'laboratory', tx: 5.9, ty: 8.4 },
-  { glyph: '🏺', name: 'Apothecary', room: 'apothecary', tx: 8.7, ty: 7.9 },
+  { glyph: '', name: 'Apothecary', room: 'apothecary', tx: 8.7, ty: 7.9 },
   { glyph: '⚔', name: 'Arena', room: 'arena', tx: 13.8, ty: 12.8 },
-  { glyph: '🎓', name: 'Academy', room: 'academy', tx: 17.8, ty: 9.6 },
+  { glyph: '', name: 'Academy', room: 'academy', tx: 17.8, ty: 9.6 },
 ];
 const PROP_BY_ROOM = {};
 RANCH_PROPS.forEach((p) => { PROP_BY_ROOM[p.room] = p; });
@@ -91,10 +91,10 @@ function buildDecor() {
     { kind: 'bush', tx: 9.4, ty: 4.6, s: 1 }, { kind: 'bush', tx: 12.6, ty: 4.7, s: 1.05 },
     { kind: 'bush', tx: 16.2, ty: 6.2, s: 0.9 }, { kind: 'bush', tx: 3.4, ty: 9.4, s: 1 },
     { kind: 'bush', tx: 12.4, ty: 14.3, s: 0.95 }, { kind: 'bush', tx: 2.6, ty: 11.6, s: 1.1 },
-    { kind: 'glyph', g: '🌼', tx: 3.4, ty: 3.9 }, { kind: 'glyph', g: '🌷', tx: 5.2, ty: 10.6 },
-    { kind: 'glyph', g: '🌾', tx: 13.2, ty: 8.4 }, { kind: 'glyph', g: '🌾', tx: 15.8, ty: 15.2 },
-    { kind: 'glyph', g: '🍄', tx: 1.6, ty: 13.4 }, { kind: 'glyph', g: '🪨', tx: 19.4, ty: 7.4 },
-    { kind: 'glyph', g: '🪵', tx: 9.8, ty: 18.6 }, { kind: 'glyph', g: '🌼', tx: 12.8, ty: 17.4 });
+    { kind: 'glyph', g: '', tx: 3.4, ty: 3.9 }, { kind: 'glyph', g: '', tx: 5.2, ty: 10.6 },
+    { kind: 'glyph', g: '', tx: 13.2, ty: 8.4 }, { kind: 'glyph', g: '', tx: 15.8, ty: 15.2 },
+    { kind: 'glyph', g: '', tx: 1.6, ty: 13.4 }, { kind: 'glyph', g: '▲', tx: 19.4, ty: 7.4 },
+    { kind: 'glyph', g: '', tx: 9.8, ty: 18.6 }, { kind: 'glyph', g: '', tx: 12.8, ty: 17.4 });
   return d;
 }
 const RANCH_DECOR = buildDecor();
@@ -152,14 +152,14 @@ function seedActors(roster) {
 /** This week's task, as a glanceable bubble over the member's head (MR-style). */
 function taskGlyph(h) {
   const a = h.assignment || {};
-  if (h.condition && h.condition.injury) return '🩹';
-  if (a.type === 'forge') return '🔨';
+  if (h.condition && h.condition.injury) return '';
+  if (a.type === 'forge') return '';
   if (a.type === 'brew') return '⚗';
-  if (a.type === 'study') return '📖';
-  if (a.type === 'quest') return '🗺';
-  if (a.type === 'hunt') return '🏹';
-  if (a.trainingId === 'spar') return '🤺';
-  if (a.trainingId === 'rest' || !a.trainingId) return '💤';
+  if (a.type === 'study') return '';
+  if (a.type === 'quest') return '';
+  if (a.type === 'hunt') return '➳';
+  if (a.trainingId === 'spar') return '';
+  if (a.trainingId === 'rest' || !a.trainingId) return '';
   return '⚔';
 }
 
@@ -532,7 +532,7 @@ export function renderRanch(guild, save) {
           <span class="rbld-t"><b>${s.name}</b><small>+${Math.round(s.boost * 100)}% ${s.stat} · ☉${s.cost}g</small></span></button>`;
     }).join('');
     buildPanelHTML = `<div class="ranch-build">
-        <div class="rbld-head"><span>🏗 Training yard</span><span class="rbld-cap ${full ? 'full' : ''}">${count} / ${cap}</span></div>
+        <div class="rbld-head"><span>Training yard</span><span class="rbld-cap ${full ? 'full' : ''}">${count} / ${cap}</span></div>
         <div class="rbld-hint">${full ? 'Yard full — upgrade the Training Yard in Grounds for more slots.' : (pickType ? 'Tap a ＋ spot in the training yard (south-west grounds) to place it.' : 'Pick a station, then tap a spot in the yard.')}</div>
         <div class="rbld-list">${items}</div>
       </div>`;
@@ -543,7 +543,7 @@ export function renderRanch(guild, save) {
       <span class="ranch-title">☙ ${guild.name}</span>
       <span class="ranch-meta">☉ <b>${guild.gold}</b>g · ✦ <b>${guild.reputation}</b> · ${formatDate(guild.calendar)}</span>
       <span class="ranch-hud-btns">
-        <button class="ranch-btn ${buildMode ? 'on' : ''}" onclick="__guild.ranchBuild()">🏗 ${buildMode ? 'Done' : 'Build'}</button>
+        <button class="ranch-btn ${buildMode ? 'on' : ''}" onclick="__guild.ranchBuild()">${buildMode ? 'Done' : 'Build'}</button>
         <button class="ranch-btn adv" onclick="__guild.advanceAll()">▶ Advance Week</button>
       </span>
     </div>
@@ -557,10 +557,10 @@ export function renderRanch(guild, save) {
       <button class="rz-btn" title="See the whole estate" onclick="__guild.ranchZoomFit()">⤢</button>
     </div>
     <div class="ranch-menu">
-      <button class="rmn-btn" onclick="__guild.enterRoomFromRanch('roster')"><span class="rmn-g">🛡</span>Roster</button>
-      <button class="rmn-btn" onclick="__guild.enterRoomFromRanch('calendar')"><span class="rmn-g">📅</span>Calendar</button>
+      <button class="rmn-btn" onclick="__guild.enterRoomFromRanch('roster')"><span class="rmn-g">▣</span>Roster</button>
+      <button class="rmn-btn" onclick="__guild.enterRoomFromRanch('calendar')"><span class="rmn-g"></span>Calendar</button>
       <button class="rmn-btn" onclick="__guild.enterRoomFromRanch('arena')"><span class="rmn-g">⚔</span>Arena</button>
-      <button class="rmn-btn" onclick="__guild.enterRoomFromRanch('grounds')"><span class="rmn-g">🏗</span>Grounds</button>
+      <button class="rmn-btn" onclick="__guild.enterRoomFromRanch('grounds')"><span class="rmn-g"></span>Grounds</button>
       <button class="rmn-btn" onclick="__guild.enterRoomFromRanch('hub')"><span class="rmn-g">☰</span>All rooms</button>
     </div>`;
 

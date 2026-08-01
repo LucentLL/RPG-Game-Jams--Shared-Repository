@@ -33,30 +33,30 @@ export const CAMPUS_W = 46, CAMPUS_H = 46;
  * across that width. Every `art` key must exist in art.js ART.
  */
 export const BUILDING_KINDS = {
-  guildhall:  { name: 'Great Hall', art: 'bldgGuildhall',  px: 240, frac: 0.50, to: 'guildhall',  glyph: '🏰', cost: 0, core: true },
-  library:    { name: 'Library',    art: 'bldgLibrary',    px: 238, frac: 0.50, to: 'library',    glyph: '📖', cost: 0, core: true },
-  academy:    { name: 'Academy',    art: 'bldgAcademy',    px: 238, frac: 0.50, to: 'classroom',  glyph: '🎓', cost: 0, core: true },
-  forge:      { name: 'Forge',      art: 'bldgForge',      px: 285, frac: 0.45, to: 'forge',      glyph: '🔨', cost: 0, core: true },
-  kitchen:    { name: 'Kitchen',    art: 'bldgKitchen',    px: 285, frac: 0.45, to: 'kitchen',    glyph: '🍲', cost: 0, core: true },
-  armory:     { name: 'Armory',     art: 'bldgArmory',     px: 288, frac: 0.27, to: 'armory',     glyph: '🗡', cost: 0, core: true },
-  dormitory:  { name: 'Dormitory',  art: 'bldgDormitory',  px: 267, frac: 0.50, to: 'dormitory',  glyph: '🛏', cost: 0, core: true },
-  apothecary: { name: 'Apothecary', art: 'bldgApothecary', px: 144, frac: 0.50, to: 'apothecary', glyph: '🏺', cost: 0, core: true },
+  guildhall:  { name: 'Great Hall', art: 'bldgGuildhall',  px: 240, frac: 0.50, to: 'guildhall',  glyph: '', cost: 0, core: true },
+  library:    { name: 'Library',    art: 'bldgLibrary',    px: 238, frac: 0.50, to: 'library',    glyph: '', cost: 0, core: true },
+  academy:    { name: 'Academy',    art: 'bldgAcademy',    px: 238, frac: 0.50, to: 'classroom',  glyph: '', cost: 0, core: true },
+  forge:      { name: 'Forge',      art: 'bldgForge',      px: 285, frac: 0.45, to: 'forge',      glyph: '', cost: 0, core: true },
+  kitchen:    { name: 'Kitchen',    art: 'bldgKitchen',    px: 285, frac: 0.45, to: 'kitchen',    glyph: '', cost: 0, core: true },
+  armory:     { name: 'Armory',     art: 'bldgArmory',     px: 288, frac: 0.27, to: 'armory',     glyph: '†', cost: 0, core: true },
+  dormitory:  { name: 'Dormitory',  art: 'bldgDormitory',  px: 267, frac: 0.50, to: 'dormitory',  glyph: '', cost: 0, core: true },
+  apothecary: { name: 'Apothecary', art: 'bldgApothecary', px: 144, frac: 0.50, to: 'apothecary', glyph: '', cost: 0, core: true },
   arena:      { name: 'Arena',      art: 'bldgArena',      px: 228, frac: 0.50, to: 'arena',      glyph: '⚔', cost: 0, core: true },
   // Annexes: more of an existing facade, buildable and demolishable. They have no
   // interior of their own — an outbuilding, not a second Forge you can walk into.
-  storehouse: { name: 'Storehouse', art: 'bldgKitchen',    px: 285, frac: 0.45, to: null, glyph: '📦', cost: 900 },
-  bunkhouse:  { name: 'Bunkhouse',  art: 'bldgDormitory',  px: 267, frac: 0.50, to: null, glyph: '🏠', cost: 1200 },
-  watchtower: { name: 'Watchtower', art: 'bldgLibrary',    px: 238, frac: 0.50, to: null, glyph: '🗼', cost: 1500 },
+  storehouse: { name: 'Storehouse', art: 'bldgKitchen',    px: 285, frac: 0.45, to: null, glyph: '', cost: 900 },
+  bunkhouse:  { name: 'Bunkhouse',  art: 'bldgDormitory',  px: 267, frac: 0.50, to: null, glyph: '', cost: 1200 },
+  watchtower: { name: 'Watchtower', art: 'bldgLibrary',    px: 238, frac: 0.50, to: null, glyph: '', cost: 1500 },
 };
 
 /** Free-standing dressing you can place and clear. `w` is render px. */
 export const PROP_KINDS = {
-  lampPost:   { name: 'Lamp Post',      art: 'lampPost',   w: 58,  glyph: '🕯', cost: 60 },
-  statue:     { name: 'Statue',         art: 'statue',     w: 90,  glyph: '🗿', cost: 400 },
-  trainDummy: { name: 'Training Dummy', art: 'trainDummy', w: 50,  glyph: '🎯', cost: 120 },
-  well:       { name: 'Well',           art: 'well',       w: 96,  glyph: '⛲', cost: 250 },
-  stall:      { name: 'Market Stall',   art: 'stall',      w: 84,  glyph: '🏪', cost: 180 },
-  treeTall:   { name: 'Tree',           art: 'treeTall',   w: 80,  glyph: '🌳', cost: 40 },
+  lampPost:   { name: 'Lamp Post',      art: 'lampPost',   w: 58,  glyph: '', cost: 60 },
+  statue:     { name: 'Statue',         art: 'statue',     w: 90,  glyph: '', cost: 400 },
+  trainDummy: { name: 'Training Dummy', art: 'trainDummy', w: 50,  glyph: '◎', cost: 120 },
+  well:       { name: 'Well',           art: 'well',       w: 96,  glyph: '', cost: 250 },
+  stall:      { name: 'Market Stall',   art: 'stall',      w: 84,  glyph: '', cost: 180 },
+  treeTall:   { name: 'Tree',           art: 'treeTall',   w: 96,  glyph: '', cost: 40 },
 };
 
 /**
@@ -293,7 +293,7 @@ export function buildCampusMap(guild) {
     // marks the ones whose rect got a stamped interior (annexes did not) — the
     // renderer caps those with a roof so their wall ring reads as a building,
     // not a fence. Nothing here is a portal any more except a stair.
-    facades: buildings.map((b) => ({ art: b.art, name: b.name, x: b.x, y: b.y, w: b.w, h: b.h, px: b.px, roomed: b.roomed })),
+    facades: buildings.map((b) => ({ art: b.art, name: b.name, x: b.x, y: b.y, w: b.w, h: b.h, px: b.px, roomed: b.roomed, door: b.door })),
     portals: stairs,
     props: props.concat(roomProps),
   };

@@ -263,17 +263,17 @@ function renderPanel() {
   if (G.sel && G.sel.poi) {
     const p = G.sel.poi;
     panel.innerHTML = p.kind === 'dungeon'
-      ? `<div class="gp-title">${p.glyph || '⛏'} ${p.name}</div>
+      ? `<div class="gp-title">${p.glyph || '⚒'} ${p.name}</div>
          <div class="gp-sub">A charted delve of your Wilds${p.tier ? ` · tier ${p.tier}` : ''}.</div>
-         <div class="gp-dim">March there from the 🗺 Wilds room — this map only knows where it is.</div>`
-      : `<div class="gp-title">🏘 ${p.name}</div>
+         <div class="gp-dim">March there from the Wilds room — this map only knows where it is.</div>`
+      : `<div class="gp-title">${p.name}</div>
          <div class="gp-sub">A free town of ${(realmById(p.realm) || {}).name || 'the world'}.</div>
          <div class="gp-dim">Caravans, gossip, and somewhere for a road to go.</div>`;
     return;
   }
   const s = G.sel ? seatById(G.sel.id) : null;
   if (!s) {
-    panel.innerHTML = `<div class="gp-title">🌍 The Known World</div>
+    panel.innerHTML = `<div class="gp-title">The Known World</div>
       <div class="gp-sub">${REALMS.map((r) => `${r.glyph} <b>${r.name}</b>`).join(' · ')}</div>
       <div class="gp-dim">Drag to turn · pinch or ＋/− to zoom (closer in, towns and your charted delves appear) · tap a hall. ${Object.keys(st.contacts || {}).length}/${SEATS.length - 1} halls answer your letters.</div>`;
     return;
@@ -288,12 +288,12 @@ function renderPanel() {
   }
   const known = (st.contacts || {})[s.id];
   const hosting = (st.events || []).filter((e) => e.venueId === s.id);
-  const hostLines = hosting.map((e) => `<div class="gp-line">🏆 <b>${e.name}</b> · R${e.rank} · ${e.when}</div>`).join('');
+  const hostLines = hosting.map((e) => `<div class="gp-line"><b>${e.name}</b> · R${e.rank} · ${e.when}</div>`).join('');
   const locals = (st.rivalsOf ? st.rivalsOf(s.id) : []).slice(0, 3)
-    .map((r) => `<div class="gp-line gp-dim2">🗡 ${r.name} · ${r.record}</div>`).join('');
+    .map((r) => `<div class="gp-line gp-dim2">† ${r.name} · ${r.record}</div>`).join('');
   panel.innerHTML = `<div class="gp-title">${realm.glyph} ${name}</div>
     <div class="gp-sub">${realm.name} — ${realm.blurb}</div>
-    ${known ? `<div class="gp-line gp-known">🤝 A standing contact since week ${known} — their circulars reach your desk.</div>` : ''}
+    ${known ? `<div class="gp-line gp-known">A standing contact since week ${known} — their circulars reach your desk.</div>` : ''}
     ${hostLines || '<div class="gp-line gp-dim2">No tournament on their grounds this season.</div>'}
     ${locals}
     ${!known ? `<button class="gp-contact" ${st.gold >= st.contactCost ? '' : 'disabled'} onclick="__globe.contact()">✉ Send an envoy — establish contact (☉${st.contactCost})</button>` : ''}`;
@@ -342,7 +342,7 @@ export async function openGlobe(opts) {
   ov.className = 'globe-overlay';
   ov.innerHTML = `
     <div class="globe-hud">
-      <span class="globe-title">🌍 The Known World</span>
+      <span class="globe-title">The Known World</span>
       <span class="globe-zoomlvl">×1.0</span>
       <button class="globe-zoom" onclick="__globe.zoom(-1)" title="Zoom out">−</button>
       <button class="globe-zoom" onclick="__globe.zoom(1)" title="Zoom in">＋</button>
@@ -460,18 +460,36 @@ export async function flatMapDataUrl(st) {
   cv.width = W; cv.height = H;
   const g = cv.getContext('2d');
   g.imageSmoothingEnabled = false;
-  // The sea behind the oval's own edge, then the world squashed into it.
+  /**
+   * The oval is a GLOBE seen face-on, not a picture squeezed sideways: the
+   * latitude remap is orthographic (dest y = sin(lat)), so tiles compress in
+   * BOTH axes toward the poles and the ice caps hug the rim as caps. The old
+   * row-squash kept vertical spacing linear — polar tiles stayed full height
+   * while their rows narrowed, which shredded the caps into square teeth and
+   * put every stamped icon out of relation with the ground under it.
+   */
+  const vOfY = (y) => 0.5 + Math.asin(Math.max(-1, Math.min(1, (y - cy) / ry))) / Math.PI;
   for (let y = 0; y < MAP_H; y++) {
-    const t = (y - cy) / ry;
-    if (Math.abs(t) > 1) continue;
-    const k = Math.sqrt(1 - t * t);
-    const sy = ((y - (cy - ry)) / (2 * ry)) * tex.h;
-    g.drawImage(tex.canvas, 0, sy, tex.w, tex.h / (2 * ry), cx - rx * k, y, 2 * rx * k, 1);
+    const t = (y + 0.5 - cy) / ry;
+    if (Math.abs(t) >= 1) continue;
+    const k = Math.sqrt(1 - t * t);                    // = cos(lat), the row's width share
+    const sy = vOfY(y) * tex.h;
+    const sh = Math.max(0.5, (vOfY(y + 1) - vOfY(y)) * tex.h);
+    g.drawImage(tex.canvas, 0, sy, tex.w, sh, cx - rx * k, y, 2 * rx * k, 1);
   }
   // Rim so the oval reads as an object on the parchment.
   g.strokeStyle = '#2a1c0e';
   g.lineWidth = 3;
   g.beginPath(); g.ellipse(cx, cy, rx + 1, ry + 1, 0, 0, Math.PI * 2); g.stroke();
+
+  /** A chart cell projected onto the oval, with the local shrink factor —
+   *  markers ride the same projection as the ground or they float off it. */
+  const project = (ccx, ccy) => {
+    const u = (ccx + 0.5) / CHART[0].length;
+    const lat = (0.5 - (ccy + 0.5) / CHART.length) * Math.PI;   // +π/2 north … −π/2 south
+    const k = Math.cos(lat);
+    return { x: cx + (u - 0.5) * 2 * rx * k, y: cy - Math.sin(lat) * ry, k };
+  };
 
   const plate = (x, y, txt, gold) => {
     g.font = '700 15px Georgia, serif';
@@ -489,37 +507,41 @@ export async function flatMapDataUrl(st) {
   const homeImg = await spriteImg(_sprites.hallHome), hallImg = await spriteImg(_sprites.hall);
   const seats = SEATS.map((s) => ({ s, known: s.id === 'home' || !!(st.contacts || {})[s.id] }));
   for (const { s, known } of seats) {
-    const u = ((s.cx + 0.5) / CHART[0].length);
-    const y = (cy - ry) + ((s.cy + 0.5) / CHART.length) * 2 * ry;
-    const k = Math.sqrt(Math.max(0.02, 1 - ((y - cy) / ry) ** 2));
-    const x = cx + (u - 0.5) * 2 * rx * k;
+    const { x, y, k } = project(s.cx, s.cy);
+    // Icons shrink with the ground they stand on — a full-size castle on a
+    // pole-squashed row is exactly the "kept square, breaking the map
+    // relation" look. Floored so nothing vanishes into a sliver.
+    const sc = 0.55 * Math.max(0.55, k);
     const img = s.id === 'home' ? homeImg : hallImg;
     const hosting = (st.events || []).some((e) => e.venueId === s.id);
     if (hosting) {
       g.strokeStyle = '#ffd98a'; g.lineWidth = 2;
-      g.beginPath(); g.arc(x, y - 8, 17, 0, Math.PI * 2); g.stroke();
+      g.beginPath(); g.arc(x, y - 8 * sc / 0.55, 17 * Math.max(0.6, k), 0, Math.PI * 2); g.stroke();
     }
     if (img) {
       g.globalAlpha = known ? 1 : 0.5;
-      const iw = img.width * 0.55, ih = img.height * 0.55;
-      g.drawImage(img, x - iw / 2, y - ih + 4, iw, ih);
+      const iw = img.width * sc, ih = img.height * sc;
+      g.drawImage(img, x - iw / 2, y - ih + 4 * sc / 0.55, iw, ih);
       g.globalAlpha = 1;
     }
   }
   // Plates second, so no castle overprints a neighbour's name.
   for (const { s, known } of seats) {
     if (!known) continue;
-    const u = ((s.cx + 0.5) / CHART[0].length);
-    const y = (cy - ry) + ((s.cy + 0.5) / CHART.length) * 2 * ry;
-    const k = Math.sqrt(Math.max(0.02, 1 - ((y - cy) / ry) ** 2));
-    const x = cx + (u - 0.5) * 2 * rx * k;
+    const { x, y } = project(s.cx, s.cy);
     plate(x, Math.min(H - 22, y + 6), seatName(s, st.guildName), s.id === 'home');
   }
-  // Legend strip under the oval.
+  // Legend strip under the oval. The venue ring is DRAWN — the legend must
+  // show the mark itself, not a lookalike glyph from some emoji font.
   g.font = '700 16px Georgia, serif';
   g.fillStyle = '#2a1c0e';
   const known = seats.filter((q) => q.known).length - 1;
-  g.fillText(`THE KNOWN WORLD — ${SEATS.length} halls · ${known}/${SEATS.length - 1} in contact · ⭘ hosts a tournament`, 18, MAP_H + 34);
+  const lead = `THE KNOWN WORLD — ${SEATS.length} halls · ${known}/${SEATS.length - 1} in contact · `;
+  g.fillText(lead, 18, MAP_H + 34);
+  const lw = g.measureText(lead).width;
+  g.strokeStyle = '#a87f2e'; g.lineWidth = 2;
+  g.beginPath(); g.arc(18 + lw + 7, MAP_H + 28, 6, 0, Math.PI * 2); g.stroke();
+  g.fillText('hosts a tournament', 18 + lw + 18, MAP_H + 34);
   g.font = '14px Georgia, serif';
   g.fillStyle = '#55402a';
   g.fillText('Unknown halls stand faded until an envoy carries your seal. The globe knows more: zoom it for towns and delves.', 18, MAP_H + 60);

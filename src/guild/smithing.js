@@ -221,8 +221,8 @@ export function refineChance(item, hero) {
 /** What a failed attempt does under each guard. */
 export const REFINE_GUARDS = {
   none:     { id: 'none',     name: 'No protection',    glyph: '⚠', material: null },
-  oil:      { id: 'oil',      name: 'Tempering Oil',    glyph: '🫙', material: 'tempering_oil' },
-  blessing: { id: 'blessing', name: "Smith's Blessing", glyph: '⭐', material: 'smith_blessing' },
+  oil:      { id: 'oil',      name: 'Tempering Oil',    glyph: '', material: 'tempering_oil' },
+  blessing: { id: 'blessing', name: "Smith's Blessing", glyph: '★', material: 'smith_blessing' },
 };
 
 /**

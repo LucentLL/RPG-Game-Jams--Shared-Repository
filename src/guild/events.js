@@ -27,9 +27,9 @@ const MAJOR_NAMES = ['The Rite of Blossoms', 'The Solstice Crucible', 'The Harve
  * rival — later keystones) will add `generate`/`resolve` hooks here.
  */
 export const EVENT_TYPES = {
-  tournament: { glyph: '🏆', name: 'Tournament', blurb: 'a monthly open bracket' },
-  major:      { glyph: '👑', name: 'Seasonal Major', blurb: 'the season’s tentpole — double purse, brutal field' },
-  worldcup:   { glyph: '🌍', name: 'World Cup', blurb: 'once every four years — the deadliest bracket; win it or fall trying' },
+  tournament: { glyph: '', name: 'Tournament', blurb: 'a monthly open bracket' },
+  major:      { glyph: '♛', name: 'Seasonal Major', blurb: 'the season’s tentpole — double purse, brutal field' },
+  worldcup:   { glyph: '', name: 'World Cup', blurb: 'once every four years — the deadliest bracket; win it or fall trying' },
 };
 
 /** weekOfYear (1..48) for an absolute week, anchored on the current calendar. */

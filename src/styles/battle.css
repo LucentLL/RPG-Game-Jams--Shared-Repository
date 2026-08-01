@@ -214,6 +214,10 @@
 .tfp-floor { filter: brightness(0.96); }
 .tfp-wall  { filter: brightness(0.82); }
 .tfp-mark  { opacity: 0.85; }
+/* The world outside the lists: ground tiles at one-tile scale, stands tile
+   along their length — never one texture stretched across the whole ring. */
+.tfp-apron { background-size: 900px 900px; background-repeat: repeat; }
+.tfp-ring  { background-size: auto 100%; background-repeat: repeat-x; filter: brightness(0.9); }
 /* Standing things: bottom-anchored on their ground point, turned to the camera. */
 .tfp-bb {
   position: absolute; left: 0; bottom: 0;
