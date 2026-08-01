@@ -131,7 +131,7 @@
    The fade goes on `.dv-up`, NEVER on `.dv-prop`: opacity below 1 forces
    transform-style:flat, and flattening that wrapper would collapse the
    standee's counter-rotation and squash it back into the floor. */
-.dv-up, .dv-block-top, .dv-face, .dv-roof { transition: opacity 0.14s linear; }
+.dv-up, .dv-block-top, .dv-face, .dv-roof, .dv-roofq { transition: opacity 0.14s linear; }
 .dv-xray { opacity: 0.36; }
 /* The third state: the walker is INSIDE the room this occluder covers. A 36%
    ghost of a whole facade laid over the room you are standing in still obscures
@@ -155,6 +155,24 @@
   box-shadow: inset 0 3px 0 rgba(255, 255, 255, 0.09);
   image-rendering: pixelated;
 }
+/* The gabled roof's quads (delve.js gableRoof): two shingled slopes + two
+   triangular gable ends, all transform leaves like the walls they sit on. */
+.dv-roofq {
+  position: absolute; pointer-events: none;
+  background-size: 48px 48px; background-repeat: repeat;
+  image-rendering: pixelated;
+}
+.dv-gable { background-color: #b09a78; box-shadow: inset 0 0 0 2px rgba(44, 26, 16, 0.5); }
+/* The lawn beyond an interior's walls — the world does not end at the room. */
+.dv-apron {
+  position: absolute; z-index: 0; pointer-events: none;
+  background-size: 96px 96px; background-repeat: repeat;
+  image-rendering: pixelated;
+}
+/* A roomed building's standee is its NAMEPLATE only now (the walls and roof
+   are the building) — keep the sign snug so the occluder's height read stays
+   honest. */
+.dv-bldg-sign { min-height: 22px; padding: 2px 0; }
 
 /* --- Campus buildings: upright facades you walk into through the door --- */
 .dv-bldg { display: block; width: 100%; position: relative; }

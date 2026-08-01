@@ -44,7 +44,7 @@ import { openDelve, hasDelveMap, isDelveOpen, exitDelve } from './delve.js';
 import { openDelveFp, isDelveFpOpen } from './delve-fp.js';
 import { ORE_KINDS, setCampusGuild } from './delve-maps.js';
 import { ensureCampus } from './campus.js';
-import { openScroll, refreshScroll, isScrollOpen } from './scroll-ui.js';
+import { openScroll, openScrollPane, closeScroll, refreshScroll, isScrollOpen } from './scroll-ui.js';
 import { SEATS, REALMS, TOWNS, DUNGEON_CELLS, seatById, realmById, seatForEvent, rivalSeat } from './world-guilds.js';
 import { openGlobe, refreshGlobePanel, isGlobeOpen, flatMapDataUrl } from './globe.js';
 
@@ -3719,7 +3719,7 @@ async function practiceBout(myId, oppId, mode) {
       : `${me.name} lost the bout vs ${opp.name} — no harm done, just practice.`;
   } finally { advancing = false; }
   showScreen('guildScreen'); render();
-  if (buildView) { renderBuild(guild, save); applyViewToggle(); } // the plan re-renders after a bout
+  if (buildView) mountBuildPane(); // the plan re-renders after a bout, still on its scroll
 }
 
 /** The Arena — jump straight into a live, playable bout (no Advance Week needed).
@@ -3924,19 +3924,39 @@ function render({ top = false } = {}) {
 }
 
 // --- the Build plan ---------------------------------------------------------
-/** Show exactly one of the Build plan or the room-hub host (siblings in #guildScreen). */
+/**
+ * The estate plan lives ON A SCROLL now — an overlay pane, never a sibling
+ * view swapped in for the rooms. That retires the whole layering bug class
+ * (the plan visibly stacked over the Study after "exiting"): the plan cannot
+ * cover a room it isn't an overlay above, and rolling the scroll up IS the
+ * exit, whichever way it happens (✕, Esc, the veil, its own button).
+ */
 function applyViewToggle() {
-  const screen = document.getElementById('guildScreen');
-  const host = screen.querySelector('.guild-hall-host');
-  const view = screen.querySelector('.build-view');
-  if (host) host.hidden = buildView;
-  if (view) view.hidden = !buildView;
+  // Kept for its callers: the rooms are ALWAYS the screen now.
+  const host = document.getElementById('guildScreen').querySelector('.guild-hall-host');
+  if (host) host.hidden = false;
+}
+/** renderBuild mounts `.build-view` as a screen child (CSS keeps that spot
+ *  invisible); this moves it into the open scroll pane's parchment. */
+function mountBuildPane() {
+  renderBuild(guild, save);
+  const stray = document.querySelector('#guildScreen > .build-view');
+  const pane = document.querySelector('.scrollui-pane .scrollui-content');
+  if (stray && pane) { pane.replaceChildren(stray); stray.hidden = false; }
 }
 /** Open the estate plan. Reached from the plans in the Great Hall (and the desk in
  *  the Guildmaster's study) — see useStation's 'estatePlan' — never from the rail. */
-function openBuild() { buildView = true; stopRoomLoop(); stopRanchLoop(); renderBuild(guild, save); applyViewToggle(); }
+function openBuild() {
+  buildView = true;
+  stopRoomLoop(); stopRanchLoop();
+  openScrollPane({
+    glyph: '📐', title: 'The Estate Plan',
+    mount: () => mountBuildPane(),
+    onClose: () => { if (buildView) { buildView = false; render({ top: true }); } },
+  });
+}
 /** Roll the plan back up and go back to the guild's rooms. */
-function closeBuild() { buildView = false; applyViewToggle(); render({ top: true }); }
+function closeBuild() { buildView = false; closeScroll(); render({ top: true }); }
 /** Drill from a home view into a room's menus. */
 function enterRoomFromRanch(roomId) { stopRanchLoop(); buildView = false; applyViewToggle(); openRoom(roomId); }
 /** Tap a member on a home view → open their Roster card. */

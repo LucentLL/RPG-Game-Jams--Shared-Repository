@@ -178,7 +178,9 @@ async function loadSheets(map, theme) {
     for (const k of [t.sheet, t.rimSheet, t.walls && t.walls.sheet]) if (k) keys.add(k);
   }
   const chars = map.grid.join('');
-  if (chars.includes('s')) keys.add('stairs');
+  // 's' locale exits, upper-floor 'd' stairwells, and climbing portals all
+  // paint stair mouths — any of them means the sheet must ride along.
+  if (chars.includes('s') || map.exitStairs || (map.portals || []).some((p) => p.stairs)) keys.add('stairs');
   if (chars.includes('o')) keys.add('ores');
   if (/[rt]/.test(chars)) keys.add('rocks');
   if (/[=m]/.test(chars)) keys.add('rails');
@@ -404,7 +406,15 @@ async function bakeMap(map, theme) {
       const ch = at(x, y);
       if (ch === '=') decal('railH', x * TILE, y * TILE - 4);
       else if (ch === 's') decal(theme.grayProps ? 'stairsDownGray' : 'stairsDown', (x - 1) * TILE, (y - 1) * TILE);
+      // Upper floors: the 'd' that pops you back DOWN is a stairwell, not a
+      // street door — an unmarked doorway between floors read as a mystery.
+      else if (ch === 'd' && map.exitStairs) decal('stairsDownGray', (x - 1) * TILE, (y - 1) * TILE);
     }
+  }
+  // Portals that climb (the back-wall stairs to lofts, upper forms, the
+  // study) paint a stair mouth at their cell for the same reason.
+  for (const p of (map.portals || [])) {
+    if (p.stairs) decal('stairsDownGray', (Math.floor(p.x) - 1) * TILE, (Math.floor(p.y) - 1) * TILE);
   }
 
   // Passability comes in two grains. `pass`/`tall` are the full-height cells;
@@ -506,6 +516,81 @@ async function prepMap(mapId) {
   return { map, theme, baked, spawns };
 }
 
+/** Shingles for the gabled roofs — drawn, cached, tiled at 48px. */
+let _shingleUrl = null;
+function shingleUrl() {
+  if (_shingleUrl) return _shingleUrl;
+  const cv = document.createElement('canvas');
+  cv.width = 48; cv.height = 48;
+  const g = cv.getContext('2d');
+  for (let row = 0; row < 6; row++) {
+    const y = row * 8;
+    g.fillStyle = '#8a4a3a';
+    g.fillRect(0, y, 48, 8);
+    g.fillStyle = '#a05a44';
+    g.fillRect(0, y, 48, 2);
+    g.fillStyle = '#5a2c22';
+    g.fillRect(0, y + 7, 48, 1);
+    for (let x = (row % 2) * 12; x < 48; x += 24) g.fillRect(x, y + 2, 1, 5);
+  }
+  return (_shingleUrl = cv.toDataURL());
+}
+
+/** Campus turf for the apron outside interior walls — cached, tiled at 96px. */
+let _apronUrl = null;
+function apronTileUrl(cliffs) {
+  if (_apronUrl) return _apronUrl;
+  const fills = (THEMES.meadow && THEMES.meadow.fill) || [[1, 3], [1, 4], [5, 3], [5, 4]];
+  const cv = document.createElement('canvas');
+  cv.width = 96; cv.height = 96;
+  const g = cv.getContext('2d');
+  g.imageSmoothingEnabled = false;
+  [[0, 0], [48, 0], [0, 48], [48, 48]].forEach(([dx, dy], i) => {
+    const f = fills[i % fills.length];
+    g.drawImage(cliffs, f[0] * TILE, f[1] * TILE, TILE, TILE, dx, dy, TILE, TILE);
+  });
+  return (_apronUrl = cv.toDataURL());
+}
+
+/**
+ * A REAL roof for a stamped room: two shingled slopes meeting at a ridge and
+ * a gable triangle closing each end — folded off the plane with the same
+ * transform grammar the walls use, seated on the ring's 96px top. The old
+ * flat cap read as a painted lid (and at worst wore interior art like a
+ * decal); a pitch is what says "building" from a 52° camera.
+ */
+const ROOF_RISE = 54;
+function gableRoof(b) {
+  const x = b.x * TILE, y = b.y * TILE, w = b.w * TILE, h = b.h * TILE;
+  const z = standZ(b.y + b.h) - 1;
+  const els = [];
+  const mk = (css, cls = 'dv-roofq') => {
+    const d = document.createElement('div');
+    d.className = cls;
+    d.style.cssText = css + `;z-index:${z}`;
+    D.field.appendChild(d);
+    els.push(d);
+    return d;
+  };
+  const shingles = `background-image:url(${shingleUrl()})`;
+  if (w >= h) {
+    // Ridge east–west: slopes face north/south, gables cap east/west.
+    const d2 = h / 2, L = Math.hypot(d2, ROOF_RISE), deg = (Math.atan2(ROOF_RISE, d2) * 180 / Math.PI).toFixed(2);
+    mk(`left:${x}px;top:${y}px;width:${w}px;height:${L}px;transform-origin:50% 0;transform:translateZ(96px) rotateX(${deg}deg);${shingles}`);
+    mk(`left:${x}px;top:${y + h - L}px;width:${w}px;height:${L}px;transform-origin:50% 100%;transform:translateZ(96px) rotateX(-${deg}deg);${shingles}`);
+    mk(`left:${x - ROOF_RISE}px;top:${y}px;width:${ROOF_RISE}px;height:${h}px;transform-origin:100% 50%;transform:translateZ(96px) rotateY(90deg);clip-path:polygon(100% 0,0 50%,100% 100%)`, 'dv-roofq dv-gable');
+    mk(`left:${x + w}px;top:${y}px;width:${ROOF_RISE}px;height:${h}px;transform-origin:0 50%;transform:translateZ(96px) rotateY(-90deg);clip-path:polygon(0 0,100% 50%,0 100%)`, 'dv-roofq dv-gable');
+  } else {
+    // Ridge north–south: slopes face east/west, gables cap north/south.
+    const d2 = w / 2, L = Math.hypot(d2, ROOF_RISE), deg = (Math.atan2(ROOF_RISE, d2) * 180 / Math.PI).toFixed(2);
+    mk(`left:${x}px;top:${y}px;width:${L}px;height:${h}px;transform-origin:0 50%;transform:translateZ(96px) rotateY(-${deg}deg);${shingles}`);
+    mk(`left:${x + w - L}px;top:${y}px;width:${L}px;height:${h}px;transform-origin:100% 50%;transform:translateZ(96px) rotateY(${deg}deg);${shingles}`);
+    mk(`left:${x}px;top:${y - ROOF_RISE}px;width:${w}px;height:${ROOF_RISE}px;transform-origin:50% 100%;transform:translateZ(96px) rotateX(-90deg);clip-path:polygon(0 100%,50% 0,100% 100%)`, 'dv-roofq dv-gable');
+    mk(`left:${x}px;top:${y + h}px;width:${w}px;height:${ROOF_RISE}px;transform-origin:50% 0;transform:translateZ(96px) rotateX(90deg);clip-path:polygon(0 0,50% 100%,100% 0)`, 'dv-roofq dv-gable');
+  }
+  return els;
+}
+
 /**
  * Build (or rebuild) the scene for one map inside the session's stage: sizes
  * the plane, attaches the terrain, and creates the walker, props, ores and
@@ -536,6 +621,21 @@ function mountScene(prep, entry) {
   field.style.cssText = `width:${W}px;height:${H}px;margin-left:${-W / 2}px;margin-top:${-H / 2}px;background-image:url(${baked.url})`;
   stage.innerHTML = '';
   stage.appendChild(field);
+  // The world beyond the walls. An interior used to float in a void the
+  // colour of cave-rock; four turf strips extend the plane past the map so a
+  // room reads as standing on the campus it was built on. Strips, not one
+  // slab — a slab child would cover the baked ground, which is the field's
+  // own background. (Walled themes are exactly the indoor maps.)
+  if (theme.walls) {
+    const M = 6 * TILE, turf = apronTileUrl(baked.sheets.cliffs);
+    for (const [al, at2, aw, ah] of [[-M, -M, W + 2 * M, M], [-M, H, W + 2 * M, M], [-M, 0, M, H], [W, 0, M, H]]) {
+      const ap = document.createElement('div');
+      ap.className = 'dv-apron';
+      ap.style.cssText = `left:${al}px;top:${at2}px;width:${aw}px;height:${ah}px;background-image:url(${turf})`;
+      field.appendChild(ap);
+    }
+    stage.style.background = '#2e4724';   // past the apron: far lawn, not cave
+  }
 
   D.map = map; D.theme = theme; D.field = field;
   D.pass = baked.pass; D.tall = baked.tall; D.cols = baked.cols; D.rows = baked.rows;
@@ -618,32 +718,26 @@ function mountScene(prep, entry) {
   // you are inside, vanishes) together with its facade.
   for (const b of (map.facades || [])) {
     const artW = Math.min(b.w * TILE, b.px || b.w * TILE);
-    const propEl = addProp(`<span class="dv-bldg">${artSprite(b.art, '', `width:${artW}px;margin:0 auto`)}<span class="bl-name">${b.name}</span></span>`,
-      b.x + b.w / 2, b.y + b.h, b.w * TILE,
+    // A roomed building is its WALLS and a REAL ROOF now, with only the
+    // nameplate standing at the door. Drawing the facade sprite as well put a
+    // whole hut peeking out of a tile box — two vocabularies for one
+    // building, and the playtest read it as "structures hidden behind a wall
+    // of tiles". Un-roomed landmarks keep their standee art; they have no
+    // stamped ring to fight. (The sign stays a .dv-up standee because the
+    // occluder's lazy height measure reads els[0].)
+    const inner = b.roomed
+      ? `<span class="dv-bldg dv-bldg-sign"><span class="bl-name">${b.name}</span></span>`
+      : `<span class="dv-bldg">${artSprite(b.art, '', `width:${artW}px;margin:0 auto`)}<span class="bl-name">${b.name}</span></span>`;
+    const propEl = addProp(inner, b.x + b.w / 2, b.y + b.h, b.w * TILE,
       b.roomed ? { x0: b.x, x1: b.x + b.w, y0: b.y, y1: b.y + b.h } : null);
     if (b.roomed) {
-      const roof = document.createElement('div');
-      roof.className = 'dv-roof';
-      roof.style.left = (b.x * TILE) + 'px';
-      roof.style.top = (b.y * TILE) + 'px';
-      roof.style.width = (b.w * TILE) + 'px';
-      roof.style.height = (b.h * TILE) + 'px';
-      // The same translateZ the room's own 96px walls are built with — the cap
-      // sits exactly on the ring. A leaf element, so fading it cannot flatten
-      // any preserve-3d parent.
-      roof.style.transform = 'translateZ(96px)';
-      // Above everything standing INSIDE the room, below the facade standee and
-      // below anyone standing south of it (painter's rule: base-relative z).
-      roof.style.zIndex = standZ(b.y + b.h) - 1;
-      D.field.appendChild(roof);
-      // One occluder group: addProp just pushed the facade's entry; the roof
-      // joins its els so both fade as one thing, and so does the prop's contact
-      // shadow — at state 2 the whole building is gone, and a detached shadow
-      // ellipse left over the doorway reads as a hole in the grass. Append,
-      // never prepend: els[0] must stay the .dv-up (the lazy height measure
-      // reads it).
+      // One occluder group: addProp just pushed the sign's entry; the roof
+      // quads join its els so the building fades as one thing, and so does
+      // the contact shadow — a detached ellipse over the doorway reads as a
+      // hole in the grass. Append, never prepend: els[0] stays the .dv-up.
+      const els = gableRoof(b);
       const occ = D.occluders[D.occluders.length - 1];
-      occ.els.push(roof);
+      for (const e of els) occ.els.push(e);
       const sh = propEl.querySelector('.dv-shadow');
       if (sh) occ.els.push(sh);
       // A stair can re-mount the estate with the walker already indoors. Born

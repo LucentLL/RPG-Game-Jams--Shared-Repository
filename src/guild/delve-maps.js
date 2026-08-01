@@ -322,11 +322,11 @@ export const DELVE_MAPS = {
     ],
     entry: [4.5, 7.3],
     spawns: [],
-    portals: [{ x: 4.5, y: 1.5, to: 'libraryLoft', at: [4.5, 7.3] }],
+    portals: [{ x: 4.5, y: 1.5, to: 'libraryLoft', at: [4.5, 7.3], stairs: true }],
   },
   //             012345678
   libraryLoft: {
-    id: 'libraryLoft', theme: 'interior', name: 'The Reading Room',
+    id: 'libraryLoft', theme: 'interior', name: 'The Reading Room', exitStairs: true,
     grid: [
       '#########', //  0
       '#BBBBBBB#', //  1
@@ -540,11 +540,11 @@ export const DELVE_MAPS = {
       { art: 'classDesk', x: 3.5, y: 6, w: 42 }, { art: 'classDesk', x: 5.5, y: 6, w: 42 },
       { art: 'lessonBoard', x: 2.6, y: 2.02, w: 66 },
     ],
-    portals: [{ x: 4.5, y: 1.5, to: 'classroom2', at: [4.5, 7.3] }],
+    portals: [{ x: 4.5, y: 1.5, to: 'classroom2', at: [4.5, 7.3], stairs: true }],
   },
   //             012345678
   classroom2: {
-    id: 'classroom2', theme: 'classroom', name: 'The Classroom · Second Form',
+    id: 'classroom2', theme: 'classroom', name: 'The Classroom · Second Form', exitStairs: true,
     grid: [
       '#########', //  0
       '#BBB+BBB#', //  1  ← up to the Third Form
@@ -564,11 +564,11 @@ export const DELVE_MAPS = {
       { art: 'globe', x: 6.4, y: 2.02, w: 36 },
     ],
     // `enter` so the Third Form remembers THIS floor to come back down to.
-    portals: [{ x: 4.5, y: 1.5, to: 'classroom3', at: [4.5, 7.3], enter: true }],
+    portals: [{ x: 4.5, y: 1.5, to: 'classroom3', at: [4.5, 7.3], enter: true, stairs: true }],
   },
   //             012345678
   classroom3: {
-    id: 'classroom3', theme: 'classroom', name: 'The Classroom · Third Form',
+    id: 'classroom3', theme: 'classroom', name: 'The Classroom · Third Form', exitStairs: true,
     grid: [
       '#########', //  0
       '#BBBBBBB#', //  1
@@ -613,11 +613,11 @@ export const DELVE_MAPS = {
       { art: 'gmLedgers', x: 4.0, y: 6.12, w: 34 },
       { art: 'gmPortrait', x: 2.6, y: 2.02, w: 60 }, { art: 'gmBust', x: 6.4, y: 2.02, w: 30 },
     ],
-    portals: [{ x: 4.5, y: 1.5, to: 'guildmaster', at: [4.5, 7.3] }],
+    portals: [{ x: 4.5, y: 1.5, to: 'guildmaster', at: [4.5, 7.3], stairs: true }],
   },
   //             012345678
   guildmaster: {
-    id: 'guildmaster', theme: 'guildmaster', name: "The Guildmaster's Study",
+    id: 'guildmaster', theme: 'guildmaster', name: "The Guildmaster's Study", exitStairs: true,
     grid: [
       '#########', //  0
       '#BBBBBBB#', //  1
