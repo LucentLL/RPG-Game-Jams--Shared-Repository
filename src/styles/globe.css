@@ -1,0 +1,109 @@
+/* ── The world globe (globe.js) ──────────────────────────────────────────────
+   A small canvas scaled up pixelated (the retro grain IS the perf budget),
+   DOM markers riding above it, and a dossier panel below. */
+
+.globe-overlay {
+  position: fixed; inset: 0; z-index: 530;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 12px; padding: 14px;
+  background: radial-gradient(ellipse at 50% 42%, rgba(16, 24, 44, 0.94), rgba(4, 6, 12, 0.97));
+  opacity: 0; transition: opacity 0.28s ease;
+}
+.globe-overlay.on { opacity: 1; }
+
+.globe-hud {
+  display: flex; align-items: center; gap: 14px;
+  width: min(76vmin, 540px);
+}
+.globe-title {
+  flex: 1;
+  font-family: 'Cinzel', serif; font-weight: 700; letter-spacing: 0.1em;
+  color: var(--gold); font-size: 1.1em;
+}
+.globe-x {
+  font: inherit; cursor: pointer; line-height: 1;
+  width: 30px; height: 30px; padding: 0;
+  background: var(--card); color: var(--gold);
+  border: 1px solid var(--border); border-radius: 50%;
+}
+.globe-x:hover { border-color: var(--gold); }
+
+.globe-box {
+  position: relative;
+  width: min(76vmin, 540px); aspect-ratio: 1;
+  touch-action: none; cursor: grab;
+}
+.globe-box:active { cursor: grabbing; }
+.globe-cv {
+  width: 100%; height: 100%; display: block;
+  image-rendering: pixelated;
+  border-radius: 50%;
+  box-shadow: 0 0 60px rgba(90, 140, 220, 0.25), 0 0 8px rgba(120, 170, 255, 0.35),
+    inset 0 0 46px rgba(0, 0, 0, 0.35);
+}
+.globe-marks { position: absolute; inset: 0; pointer-events: none; }
+
+/* A hall on the map: a little keep sprite with its name beneath. The button
+   is pointer-enabled inside a pointer-disabled layer so drags on open water
+   fall through to the globe. */
+.globe-mk {
+  position: absolute; display: flex; flex-direction: column; align-items: center;
+  gap: 0; padding: 2px; margin: 0;
+  background: none; border: none; cursor: pointer; font: inherit;
+  pointer-events: auto;
+  filter: drop-shadow(0 2px 3px rgba(0, 0, 0, 0.8));
+}
+.mk-keep {
+  display: block; width: 22px; height: 22px;
+  background-size: 300% 400%;
+  image-rendering: pixelated;
+  filter: grayscale(0.55) brightness(0.8);   /* an uncontacted hall is a rumour */
+}
+.globe-mk.known .mk-keep { filter: none; }
+.globe-mk.home .mk-keep { filter: drop-shadow(0 0 5px rgba(255, 216, 120, 0.95)); }
+.mk-label {
+  font-size: 9px; line-height: 1.1; white-space: nowrap;
+  font-family: 'Cinzel', serif; letter-spacing: 0.04em;
+  color: #cfd8ea; text-shadow: 0 1px 2px rgba(0, 0, 0, 0.95);
+  opacity: 0; transition: opacity 0.15s;
+}
+.globe-mk.home .mk-label, .globe-mk.sel .mk-label, .globe-mk:hover .mk-label { opacity: 1; }
+.globe-mk.home .mk-label { color: #ffd98a; }
+.globe-mk.sel .mk-keep { outline: 2px solid var(--gold); outline-offset: 1px; border-radius: 3px; }
+/* A hall with a tournament on its grounds this season beats like a drum. */
+.globe-mk.hosting::after {
+  content: ''; position: absolute; top: -2px; left: 50%; transform: translateX(-50%);
+  width: 30px; height: 30px; border-radius: 50%;
+  border: 2px solid rgba(255, 205, 100, 0.75);
+  animation: globe-pulse 1.6s ease-out infinite;
+  pointer-events: none;
+}
+@keyframes globe-pulse {
+  0% { transform: translateX(-50%) scale(0.55); opacity: 0.95; }
+  100% { transform: translateX(-50%) scale(1.35); opacity: 0; }
+}
+
+.globe-panel {
+  width: min(76vmin, 540px); min-height: 108px;
+  background: var(--card); border: 1px solid var(--border); border-radius: 12px;
+  padding: 12px 16px;
+}
+.gp-title { font-family: 'Cinzel', serif; font-weight: 700; color: var(--gold); margin-bottom: 2px; }
+.gp-sub { color: var(--text); font-size: 0.9em; margin-bottom: 6px; }
+.gp-dim, .gp-dim2 { color: var(--muted); font-size: 0.85em; }
+.gp-line { font-size: 0.9em; margin: 3px 0; }
+.gp-known { color: #9be8ad; }
+.gp-contact {
+  margin-top: 8px; width: 100%;
+  font: inherit; cursor: pointer;
+  background: rgba(74, 52, 18, 0.6); color: #ffe6a4;
+  border: 1px solid rgba(212, 168, 67, 0.62); border-radius: 9px;
+  padding: 8px 10px;
+}
+.gp-contact:hover { background: rgba(96, 68, 24, 0.7); }
+.gp-contact:disabled { opacity: 0.45; cursor: default; }
+.globe-hint { color: var(--muted); font-size: 0.8em; }
+
+/* The World ROOM's summary lines (hall.js worldRoom — dark theme, not parchment). */
+.world-line { font-size: 0.92em; margin: 5px 0; color: var(--text); }
+.world-line .dim { color: var(--muted); }

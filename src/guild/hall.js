@@ -21,7 +21,7 @@ import { RATION_RECIPES, getRation, rationUnlocked, previewYield, cook } from '.
 import { orbCost, orbReqTheory, orbUnlocked, previewOrbLevel, craftMateria, slotMateria, itemSockets, orbLabel, craftBlessing, blessingUnlocked, BLESSING_REQ_THEORY, BLESSING_COST } from './enchanting.js';
 import { PLANETS } from '../game/data/progression.js';
 import { advanceWeek, formatDate } from './calendar.js';
-import { weeklyUpkeep, addGold, guildIncome } from './economy.js';
+import { weeklyUpkeep, heroWage, addGold, guildIncome } from './economy.js';
 import { RECIPES, getRecipe, previewQuality, forge, study, recipeUnlocked, rework, previewRework, refine, refineChance, recipeForItem, materialOreCost, MATERIAL_META, MAX_PLUS, REFINE_GUARDS, REFINE_STAMINA } from './smithing.js';
 import { POTION_RECIPES, getPotionRecipe, previewPotency, previewBrewYield, brew, potionUnlocked, applyPotion } from './alchemy.js';
 import { MATERIALS, createInventory, armoryItems, findItem, addMaterial, gearBonus, itemPower, EQUIP_SLOTS, findPotion, consumePotion, potionCount, roomMaterialIds, materialCount } from './inventory.js';
@@ -44,6 +44,9 @@ import { openDelve, hasDelveMap, isDelveOpen, exitDelve } from './delve.js';
 import { openDelveFp, isDelveFpOpen } from './delve-fp.js';
 import { ORE_KINDS, setCampusGuild } from './delve-maps.js';
 import { ensureCampus } from './campus.js';
+import { openScroll, refreshScroll, isScrollOpen } from './scroll-ui.js';
+import { SEATS, REALMS, seatById, realmById, seatForEvent, rivalSeat } from './world-guilds.js';
+import { openGlobe, refreshGlobePanel, isGlobeOpen } from './globe.js';
 
 const SLOT = 'guild';
 // The roster cap is no longer a constant — it's derived from the Living Quarters
@@ -73,6 +76,8 @@ let wildsSelId = null; // UI-only: the Wilds locale whose prey are open for disp
 // living; `locked` rooms are stubbed until their system (the Alchemist) is built.
 const ROOMS = [
   { id: 'grounds', glyph: '🏕', name: 'Grounds', tag: 'COMPOUND' },
+  { id: 'study', glyph: '🖋', name: 'Study', tag: 'DESK' },
+  { id: 'world', glyph: '🌍', name: 'World', tag: 'CIRCUIT' },
   { id: 'calendar', glyph: '📅', name: 'Calendar', tag: 'SEASON' },
   { id: 'roster', glyph: '🛡', name: 'Roster', tag: 'MEMBERS' },
   { id: 'wilds', glyph: '🗺', name: 'Wilds', tag: 'EXPLORE' },
@@ -440,6 +445,12 @@ function load() {
   if (!Array.isArray(guild.rivals)) guild.rivals = [];
   for (const t of guild.schedule) ensureField(guild, t);
   pruneRivals(guild);
+  // The desk's contact ledger, and a HOST hall for every event on the globe.
+  // Venue is derived (a stable hash of the event id), so events booked after
+  // this load simply resolve it lazily at render — stamping here only keeps
+  // the save tidy.
+  if (!guild.contacts || typeof guild.contacts !== 'object' || Array.isArray(guild.contacts)) guild.contacts = {};
+  for (const t of guild.schedule) if (!t.venueId) t.venueId = seatForEvent(t.id);
   if (!Array.isArray(guild.questBoard) || !guild.questBoard.length) guild.questBoard = generateQuestBoard(guild, 3);
   ensureWilds(guild); // the Wilds discovery map (Ferncreek Hollow known from the start)
   // Save rev 2 (the Refinement System): the smith's old 'refine' mode meant the
@@ -653,6 +664,7 @@ async function exploreLocale(localeId, fp) {
  * the stair at the back of the Great Hall (delve-maps.js portals).
  */
 const WALKABLE = {
+  study: ['guildmaster', "the Guildmaster's study"],
   roster: ['guildhall', 'the great hall'],
   library: ['library', 'the stacks'],
   kitchen: ['kitchen', 'the kitchen'],
@@ -2724,6 +2736,8 @@ function roomStatus(id) {
   const r = guild.roster;
   switch (id) {
     case 'grounds': return `${r.length}/${maxRoster(guild)} housed`;
+    case 'study': { const n = (guild.applications || []).length; return n ? `${n} letter${n === 1 ? '' : 's'}` : `−${weeklyBill(guild)}g/wk`; }
+    case 'world': { const n = Object.keys(guild.contacts || {}).length; return `${n}/${SEATS.length - 1} halls`; }
     case 'arena': return r.length ? 'fight now' : 'no fighters';
     case 'calendar': { const t = nextTournament(guild); if (!t) return 'no events'; const w = Math.max(0, t.week - guild.calendar.week); return `${w === 0 ? 'this week' : w + 'w'} · R${t.rank}`; }
     case 'roster': return `${r.length} member${r.length === 1 ? '' : 's'}`;
@@ -3223,6 +3237,207 @@ function weeklyBill(g) {
   return weeklyUpkeep(g, getDietPlan) + academyBoard(g) + Math.max(0, -academyTuition(g));
 }
 
+// --- The Guildmaster's Desk (the Study) --------------------------------------
+// Every paperwork task the guildmaster owns, each on its own scroll: take one
+// off the desk and it unrolls across the screen (scroll-ui.js). Content is a
+// render FUNCTION over live state — actions inside call the same __guild
+// handlers the rooms use, and render()'s tail re-inks the open scroll.
+
+const CONTACT_GOLD = 150;
+
+const DESK_SCROLLS = {
+  applications: { glyph: '📜', title: 'Letters of Application', render: () => deskApplications() },
+  ledger: { glyph: '🧾', title: 'The Weekly Ledger', render: () => deskLedger() },
+  contacts: { glyph: '🤝', title: 'Contacts Abroad', render: () => deskContacts() },
+  quests: { glyph: '🗺', title: 'The Quest Board', render: () => deskQuests() },
+  tourneys: { glyph: '🏆', title: 'Tournament Circulars', render: () => deskTourneys() },
+};
+
+function deskScroll(kind) {
+  const d = DESK_SCROLLS[kind];
+  if (!d) return;
+  openScroll({ glyph: d.glyph, title: d.title, render: d.render, width: kind === 'tourneys' ? 760 : 680 });
+  paintSprites();   // cards inside carry hero-sprite canvases; ink them now
+}
+
+function studyRoom() {
+  const letters = ensureApplications(guild);
+  const bill = weeklyBill(guild);
+  const cur = guild.calendar.week;
+  const upcoming = (guild.schedule || []).filter((t) => !t.resolved && t.week >= cur).sort((a, b) => a.week - b.week);
+  const nextT = upcoming[0];
+  const contacts = Object.keys(guild.contacts || {}).length;
+  const item = (kind, label, badge, hot) => `
+    <button class="desk-scroll" onclick="__guild.deskScroll('${kind}')">
+      <span class="ds-art"></span>
+      <b>${DESK_SCROLLS[kind].glyph} ${label}</b>
+      <i class="${hot ? 'due' : ''}">${badge}</i>
+    </button>`;
+  return `<div class="plan-card desk-card">
+      <div class="plan-title">🖋 The Guildmaster’s Desk</div>
+      <div class="desk-top">
+        ${item('applications', 'Applications', letters.length ? letters.length + ' waiting' : 'none waiting', letters.length > 0)}
+        ${item('ledger', 'Ledger', '−' + bill + 'g each week', false)}
+        ${item('contacts', 'Contacts', contacts + '/' + (SEATS.length - 1) + ' halls known', false)}
+        ${item('quests', 'Quests', (guild.questBoard || []).length + ' posted', false)}
+        ${item('tourneys', 'Tournaments', nextT ? (nextT.week - cur <= 0 ? 'one this week' : 'next in ' + (nextT.week - cur) + 'w') : 'a quiet season', !!nextT && nextT.week - cur <= 1)}
+      </div>
+      <div class="desk-note">Take a scroll from the desk — it unrolls with the paperwork inside. The same letters hang on the room boards; the desk is where the guildmaster reads everything at once.</div>
+    </div>`;
+}
+
+function deskApplications() {
+  const letters = ensureApplications(guild);
+  if (!letters.length) return '<div class="hint" style="text-align:left">No letters this week — hopefuls write in as your reputation carries.</div>';
+  return `<div class="ap-list">${letters.map(applicationCard).join('')}</div>`;
+}
+
+function deskLedger() {
+  const wageRows = guild.roster.map((h) => [`${h.name} — wages`, -heroWage(h)]);
+  const dietRows = guild.roster.map((h) => {
+    const p = getDietPlan(h);
+    return p && p.weeklyCost ? [`${h.name} — board (${p.name})`, -p.weeklyCost] : null;
+  }).filter(Boolean);
+  const board = academyBoard(guild);
+  const tuition = academyTuition(guild);
+  const income = guildIncome(guild);
+  const net = income + Math.max(0, tuition) - weeklyBill(guild);
+  const row = (l, v, cls = '') => `<div class="ledger-row ${cls}"><span class="lr-l">${l}</span><span class="lr-r ${v < 0 ? 'lr-bad' : v > 0 ? 'lr-good' : ''}">${v > 0 ? '+' : ''}${v}g</span></div>`;
+  return `<div class="hint" style="text-align:left">What Advance Week will bank and bill — the number on the rail is this page's total.</div>
+    <div class="ledger-tbl">
+      ${row('Patron retainer (reputation keeps it flowing)', income)}
+      ${tuition > 0 ? row('Academy tuition, paid in', tuition) : ''}
+      ${wageRows.map(([l, v]) => row(l, v, 'lr-sub')).join('')}
+      ${dietRows.map(([l, v]) => row(l, v, 'lr-sub')).join('')}
+      ${board ? row(`Apprentice board — ${(guild.apprentices || []).length} bunk${(guild.apprentices || []).length === 1 ? '' : 's'}`, -board, 'lr-sub') : ''}
+      ${tuition < 0 ? row('Scholarships pledged', tuition, 'lr-sub') : ''}
+      ${row('The week, settled', net, 'lr-net')}
+    </div>
+    ${net < 0 ? '<div class="hint" style="text-align:left">⚠ The chest runs down each week — win purses, sell forgework, or trim the table.</div>' : ''}`;
+}
+
+function deskContacts() {
+  const known = guild.contacts || {};
+  const rows = REALMS.map((r) => {
+    const lines = SEATS.filter((s) => s.realm === r.id && s.id !== 'home').map((s) => `
+      <div class="contact-row"><span class="c-flag">${r.glyph}</span><b>${s.name}</b>
+        ${known[s.id] ? `<span class="c-known">🤝 since week ${known[s.id]}</span>`
+          : `<button class="contact-btn" ${guild.gold >= CONTACT_GOLD ? '' : 'disabled'} onclick="__guild.makeContact('${s.id}')">✉ Send envoy · ☉${CONTACT_GOLD}</button>`}
+      </div>`).join('');
+    return `<div class="contact-realm">${r.glyph} ${r.name} — ${r.blurb}</div>${lines}`;
+  }).join('');
+  return `<div class="hint" style="text-align:left">An envoy carries your seal to a rival hall: their keep lights up on the world map and their circulars reach this desk.</div>
+    <div class="tourney-lens quest-lens"><button class="tourney-play" onclick="__guild.openGlobe()">🌍 Open the world map — every hall on the circuit</button></div>
+    ${rows}`;
+}
+
+function deskQuests() {
+  if (!(guild.questBoard || []).length) return '<div class="hint" style="text-align:left">The board is bare — a new sheaf posts with the week.</div>';
+  const cards = guild.questBoard.map((q) => {
+    const party = guild.roster.filter((h) => h.assignment.type === 'quest' && h.assignment.questId === q.id);
+    const power = party.filter(canMarch).reduce((s, x) => s + combatPower(x), 0);
+    const odds = questOdds(power, q.recommendedPower);
+    const chips = guild.roster.map((h) => {
+      const on = party.includes(h);
+      return `<button class="hs-chip ${on ? 'sel' : 'add'}" title="${on ? 'Recall' : 'Dispatch'} ${h.name}" onclick="__guild.deskDispatch('${q.id}','${h.id}')">${personSprite(h, 42)}</button>`;
+    }).join('');
+    const lootTxt = q.loot ? ` · +1 ${MATERIALS[q.loot].name}` : '';
+    return `<div class="plan-card scroll-quest">
+        <div class="tourney-head"><span class="tourney-name">${q.title}</span><span class="q-rank">R${q.rank}</span></div>
+        <div class="rr-sub">${q.patron} · ${party.length ? `<span class="${odds.cls}">${odds.txt} ~${odds.pct}%</span> · party of ${party.length}` : 'no one dispatched'}</div>
+        <div class="rr-sub">Pays <span class="up">${q.rewards.gold}g · +${q.rewards.reputation} rep${lootTxt}</span></div>
+        <div class="dept-lbl">Dispatch</div>
+        <div class="hero-switch">${chips}</div>
+      </div>`;
+  }).join('');
+  return `<div class="hint" style="text-align:left">Tap a member onto a job — parties march when the week advances. The same board hangs in the Roster room.</div>${cards}`;
+}
+
+function deskTourneys() {
+  const cur = guild.calendar.week;
+  const upcoming = (guild.schedule || []).filter((t) => !t.resolved && t.week >= cur).sort((a, b) => a.week - b.week).slice(0, 3);
+  const bar = `<div class="tourney-lens quest-lens"><button class="tourney-play" onclick="__guild.openGlobe()">🌍 See where the circuit fights — the world map</button></div>`;
+  if (!upcoming.length) return bar + '<div class="hint" style="text-align:left">No circulars this season — advance a week and the calendar refills.</div>';
+  return bar + upcoming.map(tournamentCard).join('');
+}
+
+function deskDispatch(questId, heroId) {
+  const h = heroById(heroId);
+  const q = (guild.questBoard || []).find((x) => x.id === questId);
+  if (!h || !q) return;
+  if (h.assignment.type === 'quest' && h.assignment.questId === questId) {
+    h.assignment.type = 'train';           // recalled — back to the yard
+    h.assignment.questId = null;
+  } else {
+    h.assignment.type = 'quest';
+    h.assignment.questId = questId;
+    h.assignment.huntId = null;
+    h.assignment.localeId = null;
+  }
+  save(); render();
+}
+
+function makeContact(seatId) {
+  const seat = seatById(seatId);
+  if (!seat || seat.id === 'home') return;
+  if (!guild.contacts) guild.contacts = {};
+  if (guild.contacts[seatId]) return;
+  if (guild.gold < CONTACT_GOLD) { notice = `The envoy's kit and road-purse run ☉${CONTACT_GOLD} — the chest is short.`; render(); return; }
+  addGold(guild, -CONTACT_GOLD);
+  guild.contacts[seatId] = guild.calendar.week;
+  notice = `🤝 An envoy rides for ${seat.name} — their circulars will reach your desk.`;
+  save(); render();
+}
+
+const calendarGlobeBar = () => `<div class="tourney-lens quest-lens"><button class="tourney-play" onclick="__guild.openGlobe()">🌍 The Known World — every hall, every venue</button></div>`;
+
+/** The World room — the globe's own front door on the rail, so nobody has to
+ *  find it inside a scroll. Counts by realm, this season's venues, one button. */
+function worldRoom() {
+  const known = guild.contacts || {};
+  const cur = guild.calendar.week;
+  const upcoming = (guild.schedule || []).filter((t) => !t.resolved && t.week >= cur).sort((a, b) => a.week - b.week).slice(0, 4);
+  const evLines = upcoming.map((t) => {
+    const v = seatById(t.venueId || seatForEvent(t.id));
+    const w = t.week - cur;
+    return `<div class="world-line">🏆 <b>${t.name}</b> · R${t.rank} — at <b>${v ? v.name : 'an unnamed hall'}</b>, ${w <= 0 ? 'this week' : 'in ' + w + 'w'}</div>`;
+  }).join('');
+  const realmLines = REALMS.map((r) => {
+    const seats = SEATS.filter((s) => s.realm === r.id && s.id !== 'home');
+    const met = seats.filter((s) => known[s.id]).length;
+    return `<div class="world-line">${r.glyph} <b>${r.name}</b> — ${r.blurb} · <span class="${met ? 'up' : 'dim'}">${met}/${seats.length} known</span></div>`;
+  }).join('');
+  return `<div class="plan-card">
+      <div class="plan-title">🌍 The Known World</div>
+      <div class="hint" style="text-align:left">Four realms, thirty-two halls — yours among them. Drag the globe to turn it; tournaments pulse at the hall hosting them. Envoys (☉${CONTACT_GOLD}, sent here or from the desk's 🤝 Contacts scroll) light a hall up with its dossier.</div>
+      <div class="tourney-lens quest-lens"><button class="tourney-play" onclick="__guild.openGlobe()">🌍 Turn the globe</button></div>
+      ${realmLines}
+      <div class="dept-lbl">This season's venues</div>
+      ${evLines || '<div class="world-line dim">A quiet season — advance a week and the calendar refills.</div>'}
+    </div>`;
+}
+
+/** Open the globe over the guild. State is handed in as a GETTER so the map
+ *  re-reads live gold/contacts after every action instead of a stale copy. */
+function openWorldGlobe() {
+  openGlobe({
+    state: () => ({
+      guildName: guild.name,
+      gold: guild.gold,
+      contacts: guild.contacts || {},
+      contactCost: CONTACT_GOLD,
+      events: (guild.schedule || []).filter((t) => !t.resolved && t.week >= guild.calendar.week).map((t) => ({
+        name: t.name, rank: t.rank,
+        venueId: t.venueId || seatForEvent(t.id),
+        when: t.week - guild.calendar.week <= 0 ? 'this week' : 'in ' + (t.week - guild.calendar.week) + 'w',
+      })),
+      rivalsOf: (seatId) => (guild.rivals || []).filter((r) => rivalSeat(r.id) === seatId)
+        .map((r) => ({ name: r.name, record: recordStr(r.record) })),
+    }),
+    onContact: (id) => { makeContact(id); refreshGlobePanel(); },
+  });
+}
+
 function groundsRoom() {
   const roster = guild.roster;
   const housed = roster.length, cap = maxRoster(guild), fed = fedCapacity(guild);
@@ -3355,6 +3570,7 @@ function tournamentCard(t) {
       ${t.type === 'major' ? '<div class="rr-sub major-tag">👑 The season’s tentpole — double purse, one rank up, a deeper bracket.</div>' : ''}
       ${t.type === 'worldcup' ? '<div class="rr-sub major-tag worldcup-tag">🌍 The World Cup — once every four years. The richest purse in the game, and the only bracket that can kill.</div>' : ''}
       <div class="rr-sub stakes-line stakes-${t.type}">${stakesOf(t).glyph} <b>${stakesOf(t).tier}</b> · ${stakesOf(t).danger}</div>
+      ${(() => { const v = seatById(t.venueId || seatForEvent(t.id)); return v ? `<div class="rr-sub">🏛 Hosted at <b>${v.name}</b> — ${(realmById(v.realm) || {}).name || ''} <button class="tb-toggle" style="display:inline;width:auto;padding:1px 8px;margin-left:4px" onclick="__guild.openGlobe()">🌍 map</button></div>` : ''; })()}
       <div class="rr-sub">Field ~${t.field}⚡ · best of ${t.rounds} · Champion <span class="up">${t.rewards.gold}g · +${t.rewards.reputation} rep${loot}</span></div>
       <div class="tourney-odds">${odds}</div>
       <button class="tb-toggle" onclick="__guild.toggleDraw('${t.id}')">${drawOpenId === t.id ? '🏟 Hide the draw' : `🏟 View the draw — who waits in each round`}</button>
@@ -3588,7 +3804,9 @@ function renderRoom(id) {
   if (room.locked) return hdr + roomStub(room);
   switch (id) {
     case 'grounds': return hdr + groundsRoom();
-    case 'calendar': return hdr + calendarRoom();
+    case 'study': return hdr + studyRoom();
+    case 'world': return hdr + worldRoom();
+    case 'calendar': return hdr + calendarGlobeBar() + calendarRoom();
     case 'roster': return hdr + rosterRoom();
     case 'wilds': return hdr + wildsRoom();
     case 'arena': return hdr + arenaRoom();
@@ -3653,6 +3871,10 @@ function render({ top = false } = {}) {
     </div>`;
   const stage = host.querySelector('.room-stage');
   if (stage) stage.scrollTop = keepScroll;
+  // An open desk scroll re-reads live state BEFORE sprites paint, so the
+  // hero-sprite canvases inside its cards get inked in the same pass.
+  if (isScrollOpen()) refreshScroll();
+  if (isGlobeOpen()) refreshGlobePanel();
   paintSprites(); // canvases exist now — draw the Elements sprites into them
   // Living room interior: rebind the freshly-rendered diorama canvases to the
   // animation loop (or stop it if this room has no interior). Skipped while the
@@ -3731,7 +3953,7 @@ export function openGuild() {
 // Every handler no-ops while a week is advancing (a played battle can be mid-flight;
 // rail buttons still render behind the battle screen and would corrupt the in-flight
 // week). practiceBout/advanceAll keep their own internal checks as a second belt.
-const __guildApi = { selectHero, setActivity, setTraining, setIntensity, scheduleAdd, scheduleRemoveAt, scheduleClear, setRecipe, setForgeMode, setRefineItem, setRefineGuard, setStudyMode, setEnchantMode, setSpecialization, setPotion, setDiscipline, usePotion, setDiet, setQuest, setHunt, selectWildsLocale, scoutRegion, setPlayHunt, exploreLocale, strollRoom, walkGuild, masterName, masterBuild, masterReroll, sellMaterial, setElective, setTrackKind, setSecondDiscipline, setCookRecipe, setEnchantPlanet, slotOrb, assignTo, setSpar, equipItem, unequipSlot, setPolicy, provision, buyMaterial, sellItem, buyBook, hire, promoteApprentice, dismissApprentice, bidTuition, sendOffer, rejectApplication, advanceAll, back, openRoom, toggleFullscreen, upgradeFacility, enterTournament, leaveTournament, setPlayNext, setPlayQuest, setAskTournaments, toggleDraw, selectCalEvent, praiseHero, scoldHero, openAssembly, closeAssembly, appointTrainer, practiceBout, openBuild, closeBuild, enterRoomFromRanch, manageMemberFromRanch, buildTool, buildArm: armBuilding, buildArmProp: armProp, buildCell, buildZoomIn, buildZoomOut, buildZoomFit };
+const __guildApi = { selectHero, setActivity, setTraining, setIntensity, scheduleAdd, scheduleRemoveAt, scheduleClear, setRecipe, setForgeMode, setRefineItem, setRefineGuard, setStudyMode, setEnchantMode, setSpecialization, setPotion, setDiscipline, usePotion, setDiet, setQuest, setHunt, selectWildsLocale, scoutRegion, setPlayHunt, exploreLocale, strollRoom, walkGuild, masterName, masterBuild, masterReroll, sellMaterial, setElective, setTrackKind, setSecondDiscipline, setCookRecipe, setEnchantPlanet, slotOrb, assignTo, setSpar, equipItem, unequipSlot, setPolicy, provision, buyMaterial, sellItem, buyBook, hire, promoteApprentice, dismissApprentice, bidTuition, sendOffer, rejectApplication, advanceAll, back, openRoom, toggleFullscreen, upgradeFacility, enterTournament, leaveTournament, setPlayNext, setPlayQuest, setAskTournaments, toggleDraw, selectCalEvent, praiseHero, scoldHero, openAssembly, closeAssembly, appointTrainer, practiceBout, openBuild, closeBuild, enterRoomFromRanch, manageMemberFromRanch, buildTool, buildArm: armBuilding, buildArmProp: armProp, buildCell, buildZoomIn, buildZoomOut, buildZoomFit, deskScroll, deskDispatch, makeContact, openGlobe: openWorldGlobe };
 window.__guild = {};
 for (const k in __guildApi) {
   window.__guild[k] = (...args) => {

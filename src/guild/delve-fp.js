@@ -41,11 +41,23 @@ import { ART, artSprite, WORN, wornWeapon, wornShield, wornPick } from './art.js
  * against the same lens and drew that same far wall 39px tall on a 1280px
  * screen — geometrically perfect and completely unreadable.
  */
-const T = 900;           // world px per tile
-const WALL_H = 1260;     // full wall height — 1.4 tiles reads best
-const LOW_H = 560;       // 'b' — waist-high, seen over
-const EYE = 690;         // eye height above the floor
-const STEP_PX = 430;     // one level of ledge, in world px
+/**
+ * WORLD UNITS vs RASTER MEMORY. The framing was tuned at T=900, but layout px
+ * are what the compositor records and rasters: at 900 one wall face is a
+ * 900×1260 layer, a phone pays it again at devicePixelRatio², and ~300 of them
+ * is how tiles simply stop being drawn (the playtest's missing floor).
+ * Shrinking the UNIT and growing the world scale by the same factor is a
+ * similarity — the screen image is identical (fitLens carries the factor:
+ * lens ÷ K, perspective untouched) — but every raster is K² the memory.
+ * Every world-px constant below carries ×K so the tuned ratios survive
+ * verbatim; nothing about the framing is being re-decided here.
+ */
+const T = 300;           // world px per tile
+const K = T / 900;       // ratio to the scale this view was TUNED at
+const WALL_H = 1260 * K; // full wall height — 1.4 tiles reads best
+const LOW_H = 560 * K;   // 'b' — waist-high, seen over
+const EYE = 690 * K;     // eye height above the floor
+const STEP_PX = 430 * K; // one level of ledge, in world px
 const STEP_MS = 250, TURN_MS = 185;
 
 /**
@@ -113,10 +125,10 @@ let L = LIGHTS.dark;
    it must be taken by the dark sooner than the walls it stands between, or the
    mine reads as a lit diorama with things loitering at the back. In open air
    that barely applies — which is why the number belongs to the light. */
-/** The veil, in the light's own colour. The stage background is set to match on
- *  mount, so a surface that has faded out entirely and one that was never drawn
- *  are indistinguishable — black underground, pale daylight in the open. */
-const fogRgba = (a) => `rgba(${L.rgb[0]},${L.rgb[1]},${L.rgb[2]},${a.toFixed(3)})`;
+/** The veil is painted in the light's own colour (`--fp-fog`, set on mount to
+ *  the same rgb the stage background gets) — so a surface that has faded out
+ *  entirely and one that was never drawn are indistinguishable: black
+ *  underground, pale daylight in the open. */
 
 /**
  * How tall a creature STANDS, in world px, by rank — the one number that
@@ -130,7 +142,7 @@ const fogRgba = (a) => `rgba(${L.rgb[0]},${L.rgb[1]},${L.rgb[2]},${a.toFixed(3)}
  * height (eye 690, so the top of your head is near there); a Slime Sovereign
  * at 1080 fills the corridor to the ceiling, which is what a sovereign is for.
  */
-const CREATURE_H = { 1: 320, 2: 470, 3: 760, 4: 900, 5: 1080 };
+const CREATURE_H = { 1: 320 * K, 2: 470 * K, 3: 760 * K, 4: 900 * K, 5: 1080 * K };
 /**
  * Standing scenery, in world px tall. Sized to the fact that in FIRST PERSON a
  * prop blocks its WHOLE cell (blocked() consults PROP), where the top-down walk
@@ -138,7 +150,7 @@ const CREATURE_H = { 1: 320, 2: 470, 3: 760, 4: 900, 5: 1080 };
  * the width of the passage, and drawing it knee-high would be a lie about what
  * you just walked into. Everything stays under WALL_H so nothing pierces the roof.
  */
-const DECOR_H = { boulder: 700, boulderGray: 700, stalagTall: 1100, cart: 780, tree: 1150 };
+const DECOR_H = { boulder: 700 * K, boulderGray: 700 * K, stalagTall: 1100 * K, cart: 780 * K, tree: 1150 * K };
 /**
  * One swing, and how far it reaches.
  *
@@ -239,8 +251,8 @@ const screenActive = () => {
 // ---------------------------------------------------------------------------
 
 /**
- * Draw a source rect onto a canvas OF THE SOURCE'S OWN SIZE and hand back a
- * data URI. `dim` darkens it, which is how the ceiling is made out of the floor.
+ * Draw a source rect onto a canvas OF THE SOURCE'S OWN SIZE and hand back the
+ * canvas. `dim` darkens it, which is how the ceiling is made out of the floor.
  *
  * Native size, deliberately. The first cut baked every surface out at WORLD
  * size — a 48×96 rock face blown up to 900×1260 — which buys nothing, because
@@ -256,7 +268,7 @@ function panel(img, sx, sy, sw, sh, dim) {
   g.imageSmoothingEnabled = false;
   g.drawImage(img, sx, sy, sw, sh, 0, 0, sw, sh);
   if (dim) { g.globalCompositeOperation = 'source-atop'; g.fillStyle = `rgba(0,0,0,${dim})`; g.fillRect(0, 0, sw, sh); }
-  return c.toDataURL();
+  return c;
 }
 
 /**
@@ -302,7 +314,7 @@ function bakeOreFace(wallCv, ores, kind) {
     g.restore();
     g.drawImage(ores, d.x, d.y, d.w, d.h, cx - size / 2, cy - size / 2, size, size);
   }
-  return cv.toDataURL();
+  return cv;
 }
 
 async function cutSurfaces(theme) {
@@ -349,7 +361,6 @@ async function cutSurfaces(theme) {
     paint(wallCv, c, 0, 0, 48, 96);
     paint(lowCv, c, 0, 0, 48, 48);
   }
-  const wall = wallCv.toDataURL(), low = lowCv.toDataURL();
   let ores = null;
   try {
     const oreImg = await loadImg(SHEET_URLS.ores);
@@ -372,9 +383,33 @@ async function cutSurfaces(theme) {
     g.globalCompositeOperation = 'source-atop';
     g.fillStyle = 'rgba(0,0,0,0.08)';
     g.fillRect(0, 0, cv.width, cv.height);
-    rail = cv.toDataURL();
+    rail = cv;
   } catch (e) { /* a map without rails simply has none */ }
-  return { floor, ceil, lid, wall, low, ores, rail, ladder: ladderTexture() };
+  /**
+   * Blob URLs, not data URIs. A data URI IS the bytes, re-parsed out of every
+   * style string that names it — the ore faces run to hundreds of KB and there
+   * are four of them per map. A blob URL is a constant-length handle to bytes
+   * decoded once. `_urls` rides along so mount() can revoke the outgoing map's
+   * set when a portal swaps the scene.
+   */
+  const urls = [];
+  const urlOf = (cv) => new Promise((resolve, reject) => cv.toBlob((b) => {
+    if (!b) { reject(new Error('delve-fp: texture bake failed')); return; }
+    const u = URL.createObjectURL(b);
+    urls.push(u);
+    resolve(u);
+  }, 'image/png'));
+  const out = {
+    floor: await urlOf(floor), ceil: await urlOf(ceil), lid: await urlOf(lid),
+    wall: await urlOf(wallCv), low: await urlOf(lowCv),
+    ores: null, rail: rail ? await urlOf(rail) : null,
+    ladder: ladderTexture(), _urls: urls,
+  };
+  if (ores) {
+    out.ores = {};
+    for (const kind of Object.keys(ores)) out.ores[kind] = await urlOf(ores[kind]);
+  }
+  return out;
 }
 
 /** The rungs, drawn rather than cropped: no sheet in the kit has a head-on
@@ -426,8 +461,12 @@ function fitLens() {
   // window is. The caller re-fits once the screen is up. (Same trap the
   // top-down view hit measuring prop heights before showScreen.)
   if (!h) return;
-  F.lens = h / PERSP_AT;
-  stage.style.perspective = (PERSP * F.lens).toFixed(1) + 'px';
+  // Perspective is UNCHANGED by the world-unit shrink; the world scale carries
+  // the whole factor instead (÷K), so the projection is the same similarity it
+  // was at T=900 and every measured framing number still holds.
+  const fit = h / PERSP_AT;
+  F.lens = fit / K;
+  stage.style.perspective = (PERSP * fit).toFixed(1) + 'px';
 }
 
 /** Nothing solid on the floor between two points. Sampled rather than swept —
@@ -473,31 +512,40 @@ function openestDir(x, y) {
 // ---------------------------------------------------------------------------
 
 /**
- * One quad. `cls` only carries styling; the transform does all the placing.
+ * THE SCENE IS RETAINED, NOT REBUILT.
  *
- * `fog` is painted as a flat colour layer OVER the texture rather than applied
- * as a filter, because `filter` on hundreds of quads is hundreds of GPU passes
- * — and on any wrapper it would flatten `preserve-3d` and collapse the scene.
- * A second background layer costs nothing and is baked in with the geometry.
+ * The first cut rebuilt every quad as one innerHTML string on every change of
+ * cell. Every element was therefore NEW: the compositor re-recorded and
+ * re-rasterised the entire scene per step, painted each quad blank until its
+ * raster arrived (the playtest's "tiles flicker when moving"), and under a
+ * phone's memory pressure some rasters never arrived at all (the missing
+ * floor). Now each quad is created once, keyed by what and where it is, and a
+ * step only ADDS the rim that walked into the light, REMOVES the rim that
+ * left it, and adjusts fog.
+ *
+ * Fog itself is a solid-colour CHILD (`.fp-veil`) whose OPACITY is the
+ * amount. Solid-colour layers cost the compositor almost nothing, and opacity
+ * is compositor-only — so re-fogging the world as you walk re-rasterises not
+ * one texture. (The old form baked the veil into the background, which is
+ * exactly why every step had to repaint everything.) Quantised to 1/40ths so
+ * idle steps compare equal and write nothing.
  */
-function quad(tex, w, h, tx, ty, tz, rot, cls, fog) {
-  const c = fogRgba(fog > 0 ? fog : 0);
-  const veil = fog > 0.004 ? `linear-gradient(${c},${c}),` : '';
-  return `<div class="fp-q ${cls}" style="width:${w}px;height:${h}px;margin-left:${-w / 2}px;margin-top:${-h / 2}px;` +
-    `background-image:${veil}url(${tex});transform:translate3d(${tx}px,${ty}px,${tz}px) ${rot}"></div>`;
-}
+const fogQ = (f) => Math.round(Math.min(1, Math.max(0, f)) * 40) / 40;
 
 function buildGeometry() {
   const S = F.surf;
   const cx = Math.floor(F.px), cy = Math.floor(F.py);
   const R = viewR();
-  const out = [];
+  const want = new Map();
+  const add = (key, tex, w, h, tx, ty, tz, rot, cls, fog) =>
+    want.set(key, { tex, w, h, tx, ty, tz, rot, cls, fog: fogQ(fog) });
   for (let y = cy - R; y <= cy + R; y++) {
     for (let x = cx - R; x <= cx + R; x++) {
       const fog = fogAt(x + 0.5, y + 0.5);
       if (fog >= FOG_CULL) continue;   // solid dark already — emitting it is pure overdraw
       const ch = at(x, y);
       const wx = (x + 0.5) * T, wz = (y + 0.5) * T;
+      const id = x + ',' + y;
       if (WALL[ch] || LOW[ch]) {
         const h = LOW[ch] ? LOW_H : WALL_H;
         const tex = ch === 'o' ? ((S.ores && S.ores[oreKindAt(x, y)]) || S.wall)
@@ -508,36 +556,61 @@ function buildGeometry() {
         // A face is fogged by ITS OWN distance, not the cell's — the two sides
         // of a block a tile apart should not be equally dark.
         const wf = (fx, fy) => fogAt(fx, fy);
-        if (!WALL[at(x, y + 1)] && !LOW[at(x, y + 1)]) out.push(quad(tex, T, h, wx, yc, (y + 1) * T, '', 'fp-wall', wf(x + 0.5, y + 1)));
-        if (!WALL[at(x, y - 1)] && !LOW[at(x, y - 1)]) out.push(quad(tex, T, h, wx, yc, y * T, 'rotateY(180deg)', 'fp-wall', wf(x + 0.5, y)));
-        if (!WALL[at(x + 1, y)] && !LOW[at(x + 1, y)]) out.push(quad(tex, T, h, (x + 1) * T, yc, wz, 'rotateY(90deg)', 'fp-wall', wf(x + 1, y + 0.5)));
-        if (!WALL[at(x - 1, y)] && !LOW[at(x - 1, y)]) out.push(quad(tex, T, h, x * T, yc, wz, 'rotateY(-90deg)', 'fp-wall', wf(x, y + 0.5)));
+        if (!WALL[at(x, y + 1)] && !LOW[at(x, y + 1)]) add('s' + id, tex, T, h, wx, yc, (y + 1) * T, '', 'fp-wall', wf(x + 0.5, y + 1));
+        if (!WALL[at(x, y - 1)] && !LOW[at(x, y - 1)]) add('n' + id, tex, T, h, wx, yc, y * T, 'rotateY(180deg)', 'fp-wall', wf(x + 0.5, y));
+        if (!WALL[at(x + 1, y)] && !LOW[at(x + 1, y)]) add('e' + id, tex, T, h, (x + 1) * T, yc, wz, 'rotateY(90deg)', 'fp-wall', wf(x + 1, y + 0.5));
+        if (!WALL[at(x - 1, y)] && !LOW[at(x - 1, y)]) add('w' + id, tex, T, h, x * T, yc, wz, 'rotateY(-90deg)', 'fp-wall', wf(x, y + 0.5));
         // A waist-high run needs a lid, or you look down into an open box.
         // S.lid, not S.ceil: a lid is floor-lit (you look DOWN at it under the
         // room's light), and the ceil bake is tuned for the dark overhead.
-        if (LOW[ch]) out.push(quad(S.lid || S.ceil, T, T, wx, -h, wz, 'rotateX(90deg)', 'fp-floor', fog));
+        if (LOW[ch]) add('d' + id, S.lid || S.ceil, T, T, wx, -h, wz, 'rotateX(90deg)', 'fp-floor', fog);
         continue;
       }
       if (ch === '#') continue;
       const lift = -heightAt(x, y) * STEP_PX;
-      out.push(quad(S.floor, T, T, wx, lift, wz, 'rotateX(90deg)', 'fp-floor', fog));
-      if (!L.sky) out.push(quad(S.ceil, T, T, wx, -WALL_H, wz, 'rotateX(-90deg)', 'fp-ceil', fog));
+      add('f' + id, S.floor, T, T, wx, lift, wz, 'rotateX(90deg)', 'fp-floor', fog);
+      if (!L.sky) add('c' + id, S.ceil, T, T, wx, -WALL_H, wz, 'rotateX(-90deg)', 'fp-ceil', fog);
       // Rails lie ON the floor, a hair above it so the two don't fight for depth.
-      if (ch === '=' && S.rail) out.push(quad(S.rail, T, T, wx, lift - 1, wz, 'rotateX(90deg)', 'fp-floor', fog));
+      if (ch === '=' && S.rail) add('r' + id, S.rail, T, T, wx, lift - 1, wz, 'rotateX(90deg)', 'fp-floor', fog);
       // A ledge's own riser, so a step up reads as a step and not a slope.
-      if (heightAt(x, y) && !heightAt(x, y + 1)) out.push(quad(S.low, T, STEP_PX, wx, -STEP_PX / 2, (y + 1) * T, '', 'fp-wall', fog));
+      if (heightAt(x, y) && !heightAt(x, y + 1)) add('z' + id, S.low, T, STEP_PX, wx, -STEP_PX / 2, (y + 1) * T, '', 'fp-wall', fog);
       // The rungs. A climb cell is the ONLY place the level may change, so the
       // ladder is drawn flat against whichever neighbouring face it serves —
       // a thing you can see and aim at, not a square that silently lifts you.
       if (S.ladder && onClimb(x, y)) {
-        if (heightAt(x, y + 1)) out.push(quad(S.ladder, T * 0.42, STEP_PX, wx, -STEP_PX / 2, (y + 1) * T - 6, 'rotateY(180deg)', 'fp-ladder', fog));
-        if (heightAt(x, y - 1)) out.push(quad(S.ladder, T * 0.42, STEP_PX, wx, -STEP_PX / 2, y * T + 6, '', 'fp-ladder', fog));
-        if (heightAt(x + 1, y)) out.push(quad(S.ladder, T * 0.42, STEP_PX, (x + 1) * T - 6, -STEP_PX / 2, wz, 'rotateY(-90deg)', 'fp-ladder', fog));
-        if (heightAt(x - 1, y)) out.push(quad(S.ladder, T * 0.42, STEP_PX, x * T + 6, -STEP_PX / 2, wz, 'rotateY(90deg)', 'fp-ladder', fog));
+        if (heightAt(x, y + 1)) add('l0' + id, S.ladder, T * 0.42, STEP_PX, wx, -STEP_PX / 2, (y + 1) * T - 6 * K, 'rotateY(180deg)', 'fp-ladder', fog);
+        if (heightAt(x, y - 1)) add('l1' + id, S.ladder, T * 0.42, STEP_PX, wx, -STEP_PX / 2, y * T + 6 * K, '', 'fp-ladder', fog);
+        if (heightAt(x + 1, y)) add('l2' + id, S.ladder, T * 0.42, STEP_PX, (x + 1) * T - 6 * K, -STEP_PX / 2, wz, 'rotateY(-90deg)', 'fp-ladder', fog);
+        if (heightAt(x - 1, y)) add('l3' + id, S.ladder, T * 0.42, STEP_PX, x * T + 6 * K, -STEP_PX / 2, wz, 'rotateY(90deg)', 'fp-ladder', fog);
       }
     }
   }
-  F.world.querySelector('.fp-geo').innerHTML = out.join('');
+  // The diff. A quad that left the light is dropped, one that entered it is
+  // built, and one that merely got darker changes a single compositor-only
+  // number. This — not the traversal above — is why a step costs no raster.
+  const host = F.world.querySelector('.fp-geo');
+  for (const [key, q] of F.geo) {
+    if (want.has(key)) continue;
+    q.el.remove();
+    F.geo.delete(key);
+  }
+  for (const [key, w] of want) {
+    const have = F.geo.get(key);
+    if (have) {
+      if (have.fog !== w.fog) { have.fog = w.fog; have.veil.style.opacity = w.fog; }
+      continue;
+    }
+    const el = document.createElement('div');
+    el.className = 'fp-q ' + w.cls;
+    el.style.cssText = `width:${w.w}px;height:${w.h}px;margin-left:${-w.w / 2}px;margin-top:${-w.h / 2}px;`
+      + `background-image:url(${w.tex});transform:translate3d(${w.tx}px,${w.ty}px,${w.tz}px) ${w.rot}`;
+    const veil = document.createElement('i');
+    veil.className = 'fp-veil';
+    veil.style.opacity = w.fog;
+    el.appendChild(veil);
+    host.appendChild(el);
+    F.geo.set(key, { el, veil, fog: w.fog });
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -632,7 +705,7 @@ function place(b, x, y, lift) {
  *  first-person walker that the square ahead is the stairs and not more floor. */
 function markerBillboard(glyph, label, cls, x, y) {
   const el = addBillboard('fp-marker ' + cls,
-    `<span class="fpm-glyph">${glyph}</span><span class="fpm-label">${label}</span>`, 560, 560);
+    `<span class="fpm-glyph">${glyph}</span><span class="fpm-label">${label}</span>`, 560 * K, 560 * K);
   standDecor(el, x, y);
 }
 
@@ -657,7 +730,7 @@ function buildDecor(sheets) {
         if (ch === 't' && map.theme === 'meadow') artBillboardH('treeTall', x + 0.5, y + 0.5, DECOR_H.tree);
         else {
           const name = pick(theme);
-          decalBillboard(sheets, name, x + 0.5, y + 0.5, DECOR_H[name] || 700);
+          decalBillboard(sheets, name, x + 0.5, y + 0.5, DECOR_H[name] || 700 * K);
         }
       }
       const sign = EXIT_SIGN[ch];
@@ -1034,12 +1107,17 @@ async function prep(mapId) {
 
 function mount(prep, entry) {
   const { map, theme, surf, props, spawns } = prep;
+  // The outgoing map's textures are blob URLs; the incoming set replaces every
+  // reference to them in the same task, so they can be revoked here.
+  if (F.surf && F.surf._urls && F.surf !== surf) F.surf._urls.forEach((u) => URL.revokeObjectURL(u));
   F.map = map; F.theme = theme; F.surf = surf;
   // The light comes with the place. Everything that fades — quads, sprites, the
   // stage behind them — reads it, so switching a map switches the whole mood in
   // one assignment rather than in six.
   L = LIGHTS[theme.light] || LIGHTS.dark;
   F.host.style.background = `rgb(${L.rgb[0]},${L.rgb[1]},${L.rgb[2]})`;
+  // The veil colour every quad's fog child paints in — one write, whole mood.
+  F.host.style.setProperty('--fp-fog', `rgb(${L.rgb[0]},${L.rgb[1]},${L.rgb[2]})`);
   F.cols = map.grid[0].length; F.rows = map.grid.length;
   F.mined = F.mined || new Set();
   // A face already worked stays worked. `map.grid` is the module's own copy and
@@ -1057,6 +1135,8 @@ function mount(prep, entry) {
   const stage = F.host.querySelector('.fp-stage');
   stage.innerHTML = '<div class="fp-world"><div class="fp-geo"></div><div class="fp-bbs"></div></div>';
   F.world = stage.querySelector('.fp-world');
+  // A fresh .fp-geo means the retained-quad registry starts empty with it.
+  F.geo = new Map();
   // The world element is NEW but render()'s write-guard cache is not: a portal
   // landing on the same coords/yaw would build the identical transform string,
   // skip the write, and leave this world untransformed. Same-task reset.
@@ -1603,7 +1683,7 @@ function shotTexture(kind) {
 
 /** Loose something. `from` is who owns the roll when it arrives. */
 function spawnShot(kind, from, x, y, dx, dy, prey) {
-  const w = kind === 'arrow' ? 260 : 190;
+  const w = (kind === 'arrow' ? 260 : 190) * K;
   const el = addBillboard('fp-shot', '', w, kind === 'arrow' ? w / 3 : w);
   el.style.backgroundImage = `url(${shotTexture(kind)})`;
   F.shots.push({ el, x, y, dx, dy, from, prey, t: 0, lift: -EYE * 0.62, range: from === 'player' ? BOW_RANGE : RANGED_MAX + 1 });
@@ -1858,6 +1938,17 @@ function render() {
     const up = !!F.keys.block;
     if (up !== F.hands._guard) { F.hands._guard = up; F.hands.shield.el.classList.toggle('fp-guarding', up); }
   }
+  // DUEL STANCE. A rank-1 creature stands 320 world px — knee height — and the
+  // tile in front of you is exactly where the viewmodel lives, so the thing
+  // you were fighting was hidden behind your own sword. When anything alive is
+  // in the fight, the hands drop clear; they rise again once the floor ahead
+  // is empty. Hysteresis (enter 1.7, leave 2.05) so a circler on the threshold
+  // doesn't strobe the hands. Class goes on the HOST so the CSS can reach both
+  // hands and the shield with one flag.
+  if (F.hands) {
+    const near = F.creatures.some((c) => Math.hypot(c.x - F.px, c.y - F.py) < (F._duel ? 2.05 : 1.7));
+    if (near !== !!F._duel) { F._duel = near; F.host.classList.toggle('fp-duel', near); }
+  }
   // The hands ride the stride and lag the turn — the whole reason to draw them
   // is that they are the only thing on screen that moves WITH you.
   if (F.hands) {
@@ -1989,6 +2080,7 @@ function endDelve(reason, beaten = false) {
 function close() {
   if (!F) return;
   const hooks = F.hooks, summary = F.haul;
+  if (F.surf && F.surf._urls) F.surf._urls.forEach((u) => URL.revokeObjectURL(u));
   F.host.innerHTML = '';
   F = null;
   hooks.onEnd(summary);
