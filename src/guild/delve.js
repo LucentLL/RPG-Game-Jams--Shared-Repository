@@ -990,17 +990,20 @@ function updateXray() {
     if (!o.rows) {                                  // a standee awaiting its first layout
       const h = o.els[0].offsetHeight;
       if (!h) continue;                             // screen still hidden — try next frame
-      if (h <= TILE) { D.occluders.splice(i, 1); continue; } // too short to hide anyone
+      // Too short to hide anyone — UNLESS it fronts a room. A roomed group's
+      // standee is only the NAMEPLATE now (the walls and roof are the
+      // building), and dropping the group for the sign's 22px threw away the
+      // roof fade with it: you walked into a building and saw nothing inside.
+      if (h <= TILE && !o.room) { D.occluders.splice(i, 1); continue; }
       o.rows = rowsHidden(h);
       // A roomed group also fades a ROOF spanning the whole room plus the
-      // ~2.56-row up-screen projection of its raised 96px lip — the ghost zone
-      // must reach at least that far, or a short-fronted building (the armory's
-      // art is 96px) paints its opaque roof over walkers in the lane behind it
+      // up-screen projection of its ridge — 150px now: the 96px ring plus the
+      // gable's rise — or the roof paints over walkers in the lane behind it
       // with nothing ever triggering the fade. XRAY_PAD absorbs the difference
       // between this orthographic estimate and the stage's real perspective.
       if (o.room) {
         o.rows = Math.max(o.rows,
-          (o.y - o.room.y0) + (96 / TILE) * Math.tan(TILT * Math.PI / 180) + XRAY_PAD);
+          (o.y - o.room.y0) + (150 / TILE) * Math.tan(TILT * Math.PI / 180) + XRAY_PAD);
       }
     }
     const inside = o.room && p.x >= o.room.x0 && p.x < o.room.x1

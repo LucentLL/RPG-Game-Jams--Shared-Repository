@@ -3268,13 +3268,13 @@ function deskScroll(kind) {
       .then((u) => { _flatMapUrl = u; if (isScrollOpen()) refreshScroll(); })
       .catch((e) => console.warn('flat map bake failed', e));
   }
-  openScroll({ glyph: d.glyph, title: d.title, render: d.render, width: kind === 'tourneys' ? 760 : kind === 'map' ? 860 : 680 });
+  openScroll({ glyph: d.glyph, title: d.title, render: d.render, tall: kind === 'map', width: kind === 'tourneys' ? 760 : kind === 'map' ? 1080 : 680 });
   paintSprites();   // cards inside carry hero-sprite canvases; ink them now
 }
 
 function deskFlatMap() {
   return `${_flatMapUrl
-    ? `<img class="flatmap" src="${_flatMapUrl}" alt="The Known World, flat">`
+    ? `<img class="flatmap" src="${_flatMapUrl}" alt="The Known World, flat" style="aspect-ratio:1024/600">`
     : '<div class="hint" style="text-align:left">The cartographer is inking the plate…</div>'}
     <div class="hint" style="text-align:left">The wall-scroll view — every hall at once, named where your letters reach. The 🌍 globe is the living version: turn it, and zoom in for towns and your charted delves.</div>
     <div class="tourney-lens quest-lens"><button class="tourney-play" onclick="__guild.openGlobe()">🌍 Turn the globe instead</button></div>`;

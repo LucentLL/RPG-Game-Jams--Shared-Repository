@@ -58,7 +58,9 @@ const WALL_H = 1260 * K; // full wall height — 1.4 tiles reads best
 const LOW_H = 560 * K;   // 'b' — waist-high, seen over
 const EYE = 690 * K;     // eye height above the floor
 const STEP_PX = 430 * K; // one level of ledge, in world px
-const STEP_MS = 250, TURN_MS = 185;
+/** Snappier than the first cut (250/185): the playtest read the walk as
+ *  stiff. A diagonal stride pays √2-ish in time so speed stays honest. */
+const STEP_MS = 205, TURN_MS = 130, DIAG_MS = 1.35;
 
 /**
  * THE LENS, AND WHY IT HAS TO MOVE WITH THE WINDOW.
@@ -352,14 +354,45 @@ async function cutSurfaces(theme) {
     paint(lowCv, w, l[0], l[1], l[2], l[3]);
   } else {
     // Two cliff-face tiles stacked make one wall the height of the drop.
-    const c = document.createElement('canvas');
-    c.width = 48; c.height = 96;
-    const g = c.getContext('2d');
-    g.imageSmoothingEnabled = false;
-    const put = (t, dy) => g.drawImage(sheets.cliffs, t[0] * 48, t[1] * 48, 48, 48, 0, dy, 48, 48);
-    put(theme.faceTop.m, 0); put(theme.faceBot.m, 48);
-    paint(wallCv, c, 0, 0, 48, 96);
-    paint(lowCv, c, 0, 0, 48, 48);
+    const cliffWall = () => {
+      const c = document.createElement('canvas');
+      c.width = 48; c.height = 96;
+      const g = c.getContext('2d');
+      g.imageSmoothingEnabled = false;
+      const put = (t, dy) => g.drawImage(sheets.cliffs, t[0] * 48, t[1] * 48, 48, 48, 0, dy, 48, 48);
+      put(theme.faceTop.m, 0); put(theme.faceBot.m, 48);
+      paint(wallCv, c, 0, 0, 48, 96);
+      paint(lowCv, c, 0, 0, 48, 48);
+    };
+    let walled = false;
+    if ((LIGHTS[theme.light] || {}).sky) {
+      // OPEN AIR: the rim of a meadow is a FOREST EDGE, not a rock shaft —
+      // the playtest read the cliff-faced ravines as "trapped in a dirt
+      // hole". Leaf-wall tiled from the campus tree's own canopy, with a
+      // shadowed foot where the hedge meets the grass.
+      try {
+        const tree = await loadImg(ART_BASE + 'tree_3x.png');
+        const c = document.createElement('canvas');
+        c.width = 96; c.height = 192;
+        const g = c.getContext('2d');
+        g.imageSmoothingEnabled = false;
+        for (let ty = 0; ty < 4; ty++) {
+          for (let tx = 0; tx < 2; tx++) {
+            const sx = 104 + ((tx + ty) % 2) * 24;
+            const sy = 16 + ((ty * 37) % 3) * 24;
+            g.drawImage(tree, sx, sy, 48, 48, tx * 48, ty * 48, 48, 48);
+          }
+        }
+        g.fillStyle = 'rgba(18, 28, 10, 0.45)';
+        g.fillRect(0, 182, 96, 10);
+        paint(wallCv, c, 0, 0, 96, 192);
+        paint(lowCv, c, 0, 96, 96, 96);
+        walled = true;
+      } catch (e) {
+        console.warn('delve-fp: tree sheet missing — the rim stays rock', e);
+      }
+    }
+    if (!walled) cliffWall();
   }
   let ores = null;
   try {
@@ -443,9 +476,13 @@ const blocked = (x, y) => isWall(x, y) || isLow(x, y) || !!PROP[at(x, y)];
 const heightAt = (x, y) => (at(x, y) === '^' ? 1 : 0);
 const onClimb = (x, y) => { const c = at(x, y); return c === 'L' || c === 'v'; };
 /** A step is legal if the destination is open AND — the delve's own rule — any
- *  change of level happens across a ladder. */
+ *  change of level happens across a ladder. A DIAGONAL stride additionally
+ *  needs both shoulders clear: cutting a corner through a wall's edge put the
+ *  camera briefly inside the rock. */
 function canStep(fx, fy, tx, ty) {
   if (blocked(tx, ty)) return false;
+  const dx = tx - fx, dy = ty - fy;
+  if (dx && dy && (blocked(fx + dx, fy) || blocked(fx, fy + dy))) return false;
   return heightAt(fx, fy) === heightAt(tx, ty) || onClimb(fx, fy) || onClimb(tx, ty);
 }
 
@@ -485,9 +522,12 @@ function fogAt(x, y) {
   return Math.min(1, Math.max(0, (d - L.near) / (L.far - L.near)));
 }
 
-/** Facing 0=north(-y) 1=east(+x) 2=south(+y) 3=west(-x). */
-const DIRS = [[0, -1], [1, 0], [0, 1], [-1, 0]];
-const COMPASS = ['N', 'E', 'S', 'W'];
+/** EIGHT facings now — quarter turns felt like a tank. 0=N clockwise to 7=NW;
+ *  yaw = dir·45°. `DIRS` holds the GRID step (diagonals land on the corner
+ *  cell); `DIRV` the unit vector, for every aim, cone and pose dot-product. */
+const DIRS = [[0, -1], [1, -1], [1, 0], [1, 1], [0, 1], [-1, 1], [-1, 0], [-1, -1]];
+const DIRV = DIRS.map(([dx, dy]) => { const m = Math.hypot(dx, dy); return [dx / m, dy / m]; });
+const COMPASS = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];
 
 /**
  * Which way to face on arrival: down the longest open run from this cell.
@@ -497,8 +537,8 @@ const COMPASS = ['N', 'E', 'S', 'W'];
  * button looks broken. A crawler should open looking at somewhere it can go.
  */
 function openestDir(x, y) {
-  let best = 2, run = -1;
-  for (let d = 0; d < 4; d++) {
+  let best = 4, run = -1;
+  for (let d = 0; d < 8; d += 2) {   // cardinal looks only — arriving at 45° reads as a stumble
     const [dx, dy] = DIRS[d];
     let n = 0;
     while (n < 8 && !blocked(x + dx * (n + 1), y + dy * (n + 1))) n++;
@@ -1128,7 +1168,7 @@ function mount(prep, entry) {
   const at0 = entry || map.entry;
   F.px = Math.floor(at0[0]) + 0.5; F.py = Math.floor(at0[1]) + 0.5;
   F.dir = openestDir(Math.floor(F.px), Math.floor(F.py));
-  F.yaw = F.dir * 90; F.turning = null; F.stepping = null;
+  F.yaw = F.dir * 45; F.turning = null; F.stepping = null;
   F.creatures = []; F.decor = []; F.doors = []; F.shots = []; F.armed = false;
   F.settleUntil = performance.now() + 250;
 
@@ -1137,6 +1177,8 @@ function mount(prep, entry) {
   F.world = stage.querySelector('.fp-world');
   // A fresh .fp-geo means the retained-quad registry starts empty with it.
   F.geo = new Map();
+  // The third-person self rides across portals — a fresh stage orphaned it.
+  if (F.self) { F.world.querySelector('.fp-bbs').appendChild(F.self.el); F.self._tf = ''; }
   // The world element is NEW but render()'s write-guard cache is not: a portal
   // landing on the same coords/yaw would build the identical transform string,
   // skip the write, and leave this world untransformed. Same-task reset.
@@ -1178,6 +1220,7 @@ export async function openDelveFp(localeId, member, hooks) {
         <span class="fp-title dv-title"></span>
         <span class="fp-compass"></span>
         <span class="dv-haul fp-haul"></span>
+        <button class="fp-help fp-povbtn" title="First / third person" onclick="__delveFp.pov()">👁</button>
         <button class="fp-help" title="Controls" onclick="__delveFp.help()">?</button>
       </div>
       <canvas class="fp-map" width="150" height="150"></canvas>
@@ -1211,6 +1254,7 @@ export async function openDelveFp(localeId, member, hooks) {
       creatures: [], decor: [], doors: [], shots: [], armed: false,
       seen: new Set(), mined: new Set(), settleUntil: 0,
       hands: null, swingUntil: 0, helpTimer: 0, lens: 1,
+      pov: 1, self: null,
       hp: HP_MAX, hpCeil: HP_MAX, contactAt: 0, hurtUntil: 0,
       haul: { kills: {}, gold: 0, mats: {}, field: 0, bouts: 0, swings: 0 },
       stack: [],
@@ -1327,9 +1371,10 @@ function helpUntil(ms) {
 // Simulation
 // ---------------------------------------------------------------------------
 
-/** Begin a stride into the next cell, if anything is there to stride into. */
+/** Begin a stride into the next cell, if anything is there to stride into.
+ *  `strafe` is in eighth-turns; a sidestep is ±2 (a true 90° sidestep). */
 function tryStep(sign, strafe) {
-  const d = (F.dir + (strafe || 0) + 4) % 4;
+  const d = (F.dir + (strafe || 0) + 8) % 8;
   const [dx, dy] = DIRS[d];
   const fx = Math.floor(F.px), fy = Math.floor(F.py);
   const tx = fx + dx * sign, ty = fy + dy * sign;
@@ -1338,12 +1383,12 @@ function tryStep(sign, strafe) {
     if (at(tx, ty) === 'o') mineOre(tx, ty);
     return;
   }
-  F.stepping = { fx: fx + 0.5, fy: fy + 0.5, tx: tx + 0.5, ty: ty + 0.5, t: 0 };
+  F.stepping = { fx: fx + 0.5, fy: fy + 0.5, tx: tx + 0.5, ty: ty + 0.5, t: 0, ms: STEP_MS * (dx && dy ? DIAG_MS : 1) };
 }
 
 function tryTurn(sign) {
-  F.turning = { from: F.yaw, to: F.yaw + sign * 90, t: 0 };
-  F.dir = (F.dir + sign + 4) % 4;
+  F.turning = { from: F.yaw, to: F.yaw + sign * 45, t: 0 };
+  F.dir = (F.dir + sign + 8) % 8;
 }
 
 /**
@@ -1366,8 +1411,9 @@ function trySwing() {
   // right move, which is the same as having no guard at all.
   if (F.keys.block) { toast('Shield up — no room to swing.'); return; }
   F.swingUntil = now + SWING_MS;
-  const [dx, dy] = DIRS[F.dir];
-  const ax = Math.floor(F.px) + dx, ay = Math.floor(F.py) + dy;
+  const [gx, gy] = DIRS[F.dir];                          // the CELL ahead (grid step)
+  const [dx, dy] = DIRV[F.dir];                          // the true aim (unit)
+  const ax = Math.floor(F.px) + gx, ay = Math.floor(F.py) + gy;
   const seam = at(ax, ay) === 'o';
   playSwing(seam);
   if (seam) { mineOre(ax, ay); return; }
@@ -1416,8 +1462,8 @@ function readInput() {
   if (took('turnR')) { tryTurn(1); return; }
   if (took('fwd')) { tryStep(1, 0); return; }
   if (took('back')) { tryStep(-1, 0); return; }
-  if (took('strafeL')) { tryStep(1, -1); return; }
-  if (took('strafeR')) { tryStep(1, 1); return; }
+  if (took('strafeL')) { tryStep(1, -2); return; }
+  if (took('strafeR')) { tryStep(1, 2); return; }
 }
 
 function advanceMotion(dt) {
@@ -1428,7 +1474,7 @@ function advanceMotion(dt) {
   }
   if (F.stepping) {
     const s = F.stepping;
-    s.t += dt * 1000 / STEP_MS;
+    s.t += dt * 1000 / (s.ms || STEP_MS);
     const k = Math.min(1, ease(s.t));
     F.px = s.fx + (s.tx - s.fx) * k;
     F.py = s.fy + (s.ty - s.fy) * k;
@@ -1577,7 +1623,7 @@ function moveCreatures(dt) {
  */
 function poseCreature(c, walking) {
   if (walking && (c.vx || c.vy)) {
-    const [cdx, cdy] = DIRS[F.dir];
+    const [cdx, cdy] = DIRV[F.dir];
     const rx = -cdy, ry = cdx;                    // the camera's right, on the floor
     const away = c.vx * cdx + c.vy * cdy;         // + = walking off into the scene
     const across = c.vx * rx + c.vy * ry;         // + = walking to screen right
@@ -1806,7 +1852,7 @@ function fightTick(dt) {
     // use the corridor's own shape has ever had.
     if (c.prey.ranged && c.aggro && c.staggerUntil <= now && d > RANGED_MIN && d < RANGED_MAX
         && clearLine(c.x, c.y, F.px, F.py)) {
-      if (!c.shotAt) c.shotAt = now + RANGED_MS * 0.5;
+      if (!c.shotAt) c.shotAt = now + RANGED_MS * 0.5;   // (unchanged — the shot aims by vector, not facing)
       else if (now >= c.shotAt) {
         c.shotAt = now + RANGED_MS * (0.8 + Math.random() * 0.5);
         const k = 1 / (d || 1);
@@ -1912,8 +1958,13 @@ function mineOre(x, y) {
 // ---------------------------------------------------------------------------
 
 function render() {
-  const ex = F.px * T, ez = F.py * T;
-  const ey = -EYE - heightAt(Math.floor(F.px), Math.floor(F.py)) * STEP_PX;
+  // OVER THE SHOULDER: third person is the same camera pulled back along the
+  // facing and lifted — the world, the controls and the combat don't move.
+  const pov3 = F.pov === 3;
+  const [fvx, fvy] = DIRV[F.dir];
+  const back = pov3 ? T * 1.25 : 0;
+  const ex = F.px * T - fvx * back, ez = F.py * T - fvy * back;
+  const ey = -EYE - (pov3 ? EYE * 0.5 : 0) - heightAt(Math.floor(F.px), Math.floor(F.py)) * STEP_PX;
   // rotateY(+yaw), not −yaw. Forward is −Z, and CSS rotateY maps (x,y,z) to
   // (x·cosθ + z·sinθ, y, −x·sinθ + z·cosθ) — so facing east (yaw 90) has to send
   // world +X to view −Z, which needs +90. The negative sign put east BEHIND the
@@ -1957,6 +2008,19 @@ function render() {
     if (bob !== F._bob) F.hands.el.style.setProperty('--fp-bob', (F._bob = bob));
     if (sway !== F._sway) F.hands.el.style.setProperty('--fp-sway', (F._sway = sway));
   }
+  // The walker's own back, when the camera stands behind it.
+  if (F.self) {
+    if (pov3 !== F.self._on) { F.self._on = pov3; F.self.el.style.display = pov3 ? '' : 'none'; }
+    if (pov3) {
+      const lift = -heightAt(Math.floor(F.px), Math.floor(F.py)) * STEP_PX;
+      const tf = `translate3d(${(F.px * T).toFixed(1)}px,${lift}px,${(F.py * T).toFixed(1)}px) rotateY(${-F.yaw}deg)`;
+      if (tf !== F.self._tf) F.self.el.style.transform = (F.self._tf = tf);
+      const moving = !!(F.stepping || F.turning);
+      if (moving !== F.self.moving) { F.self.moving = moving; F.self.gfx.setAnim(F.self.actor, moving ? 'move' : 'idle'); }
+      F.self.actor.facing = Math.atan2(fvx, -fvy);
+      F.self.gfx.renderActor(F.self.cv, F.self.actor);
+    }
+  }
   // The compass element survives portal re-mounts (mount() rebuilds only the
   // stage, the HUD is per-session), so it is looked up once — a querySelector
   // plus a textContent write per frame kept layout dirty on every idle frame.
@@ -1989,7 +2053,7 @@ function drawMap() {
   }
   g.fillStyle = '#e8e0d0';
   g.beginPath();
-  const mx = (R + 0.5) * cell, my = (R + 0.5) * cell, a = (F.dir * 90 - 90) * Math.PI / 180;
+  const mx = (R + 0.5) * cell, my = (R + 0.5) * cell, a = (F.dir * 45 - 90) * Math.PI / 180;
   g.moveTo(mx + Math.cos(a) * cell, my + Math.sin(a) * cell);
   g.lineTo(mx + Math.cos(a + 2.5) * cell, my + Math.sin(a + 2.5) * cell);
   g.lineTo(mx + Math.cos(a - 2.5) * cell, my + Math.sin(a - 2.5) * cell);
@@ -2050,6 +2114,33 @@ function updateHaul() {
   el.textContent = `☠ ${kills} · ${F.haul.gold}g`;
 }
 
+/**
+ * First person ⇄ over-the-shoulder. The toggle moves only the CAMERA (render
+ * pulls it back along the facing) and stands the member's own composited
+ * sprite at the walker cell — same controls, same combat, same spoils. The
+ * viewmodel hands hide via .fp-pov3 (you can't hold a sword to a screen you
+ * are standing inside of).
+ */
+function togglePov() {
+  if (!F || F.ended) return;
+  F.pov = F.pov === 3 ? 1 : 3;
+  F.host.classList.toggle('fp-pov3', F.pov === 3);
+  if (F.pov === 3 && !F.self) mountSelf();
+  F._wtf = '';                       // force the camera transform to rewrite
+  toast(F.pov === 3 ? 'Over the shoulder.' : 'Through their eyes.');
+}
+function mountSelf() {
+  const gfx = window.__ranchGfx;
+  if (!gfx) { console.warn('delve-fp: compositor missing — no third-person sprite'); return; }
+  const h = CREATURE_H[3];           // your own height — the rank the eye was tuned to
+  const el = addBillboard('fp-self', '', h, h);
+  const cv = document.createElement('canvas');
+  cv.width = 96; cv.height = 96;
+  el.appendChild(cv);
+  F.self = { el, cv, gfx, actor: gfx.makeActor(F.member), moving: false, _on: false, _tf: '' };
+  el.style.display = 'none';
+}
+
 function leave() { if (F && !F.ended) endDelve('called it a day'); }
 
 function endDelve(reason, beaten = false) {
@@ -2086,7 +2177,7 @@ function close() {
   hooks.onEnd(summary);
 }
 
-window.__delveFp = { leave, close, help: () => helpUntil(9000) };
+window.__delveFp = { leave, close, help: () => helpUntil(9000), pov: togglePov };
 
 // Dev probe — the headless pane runs no rAF, so the sim is stepped by hand.
 if (typeof window !== 'undefined') {
@@ -2100,7 +2191,7 @@ if (typeof window !== 'undefined') {
     // creature is, and how far in front of you it is.
     near: F.creatures.map((c) => {
       const vx = c.x - F.px, vy = c.y - F.py, d = Math.hypot(vx, vy) || 1e-6;
-      const [dx, dy] = DIRS[F.dir];
+      const [dx, dy] = DIRV[F.dir];
       return {
         id: c.prey.id, d: +d.toFixed(2), dot: +((vx * dx + vy * dy) / d).toFixed(2),
         row: ['front', 'left', 'right', 'back'][c.row], mode: c.mode,
