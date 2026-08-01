@@ -67,7 +67,14 @@
   border-radius:0 0 6px 6px}
 .aa-standee{position:absolute;inset:0;transform:rotateX(-50deg);transform-origin:50% 100%;
   display:flex;align-items:flex-end;justify-content:center}
-.action-fighter{width:165%;height:165%;margin-bottom:-4%;image-rendering:pixelated;pointer-events:none;flex:0 0 auto}
+/* GROUNDED on the soles. The Elements compositor centres a 48px sprite in a
+   96px cell and leaves 31.25% of the canvas EMPTY below the feet — so a
+   bottom-aligned canvas draws the character nearly a tile above the point the
+   rules stand them on (their shadow), and collision reads as hitting things
+   the sprite visibly cleared. translateY resolves against the element's own
+   height, so the art's soles land exactly on the wrapper's ground point at
+   any scale — the same rule every delve standee lives by (--footpct). */
+.action-fighter{width:165%;height:165%;transform:translateY(31.25%);image-rendering:pixelated;pointer-events:none;flex:0 0 auto}
 
 /* Flying projectiles (arrows / bolts / thrown blades) loosed by ranged attacks.
    Children of the tilted plane, so they lie IN the ground and rotate (--ang) to

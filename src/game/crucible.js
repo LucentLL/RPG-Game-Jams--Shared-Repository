@@ -56,7 +56,7 @@ import {
 import { gearLevel, getRefineChance, getDrillChance, getLinkChance } from './items/blacksmithing.js';
 import { tileRng, elementsRng, rollDice, statMod, matXpNeeded, randInt, pick } from './engine/rng.js';
 import { tacFpToggle, tacFpSetSubject, tacFpSetPov, tacFpPov, tacFpSync, tacFpFrame, tacFpActive } from './tactical-fp.js';
-import { actFpToggle, actFpPov, actFpActive, actFpFrame, actFpMapInput } from './action-fp.js';
+import { actFpToggle, actFpPov, actFpActive, actFpFrame, actFpSteer } from './action-fp.js';
 
 // ══════════════════════════════════════════════════════════════
 // THE CRUCIBLE — ATHANOR MODE v1.0
@@ -3175,7 +3175,8 @@ function startActionLoop(){
     var scr = document.getElementById('actionScreen');
     if (!scr || !scr.classList.contains('active')) return;
     var k = e.key.toLowerCase();
-    if (k === 'w'||k === 'a'||k === 's'||k === 'd'||k === 'arrowup'||k === 'arrowdown'||k === 'arrowleft'||k === 'arrowright'){
+    // q/e are the first-person turn keys (the delve's); dead weight otherwise.
+    if (k === 'w'||k === 'a'||k === 's'||k === 'd'||k === 'q'||k === 'e'||k === 'arrowup'||k === 'arrowdown'||k === 'arrowleft'||k === 'arrowright'){
       _actionKeys[k] = true; e.preventDefault();
     } else if (/^[1-9]$/.test(e.key)){
       var idx = parseInt(e.key,10) - 1;
@@ -3280,14 +3281,25 @@ function actionTick(dt){
   // ─── Player movement (held keys) ─────────────────────────────
   var sp1 = ((p1.speed||4) * 0.9);       // tiles/sec
   var dx = 0, dy = 0;
-  if (_actionKeys.w || _actionKeys.arrowup) dy -= 1;
-  if (_actionKeys.s || _actionKeys.arrowdown) dy += 1;
-  if (_actionKeys.a || _actionKeys.arrowleft) dx -= 1;
-  if (_actionKeys.d || _actionKeys.arrowright) dx += 1;
-  dx += _touchMove.x; dy += _touchMove.y;   // virtual joystick (touch) adds to keyboard input
-  // Inside the first-person camera, ▲ means "the way I am looking" — the held
-  // vector rotates into the camera's frame and nothing else about it changes.
-  if (actFpActive() && (dx || dy)){ var _fpv = actFpMapInput(dx, dy); dx = _fpv.x; dy = _fpv.y; }
+  if (actFpActive()){
+    // The delve's controls, in real time: W/S walk the way you are looking
+    // (and back), A/D sidestep, ←/→ and Q/E turn, the stick turns on X and
+    // walks on Y. The steer owns the camera yaw and hands back a WORLD
+    // vector — same speed, same slide rules — and the yaw becomes the
+    // fighter's facing, so pose, Blink direction and camera are one fact.
+    var _st = actFpSteer({
+      turn: ((_actionKeys.arrowright || _actionKeys.e) ? 1 : 0) - ((_actionKeys.arrowleft || _actionKeys.q) ? 1 : 0) + _touchMove.x,
+      strafe: (_actionKeys.d ? 1 : 0) - (_actionKeys.a ? 1 : 0),
+      fwd: ((_actionKeys.w || _actionKeys.arrowup) ? 1 : 0) - ((_actionKeys.s || _actionKeys.arrowdown) ? 1 : 0) - _touchMove.y,
+    }, dt);
+    if (_st){ dx = _st.x; dy = _st.y; p1.facing = _st.yaw; }
+  } else {
+    if (_actionKeys.w || _actionKeys.arrowup) dy -= 1;
+    if (_actionKeys.s || _actionKeys.arrowdown) dy += 1;
+    if (_actionKeys.a || _actionKeys.arrowleft) dx -= 1;
+    if (_actionKeys.d || _actionKeys.arrowright) dx += 1;
+    dx += _touchMove.x; dy += _touchMove.y;   // virtual joystick (touch) adds to keyboard input
+  }
   // Rungs cost time: crossing a ladder or a vine is deliberately slow, which is
   // what makes a ledge worth holding and a climber worth shooting at.
   p1._climbing = arenaOnClimb(_arenaT, p1.ax, p1.ay);
@@ -3302,7 +3314,9 @@ function actionTick(dt){
       p1.ax = Math.max(0.5, Math.min(ACTION_GS - 0.5, p1.ax + dx * sp1 * dt));
       p1.ay = Math.max(0.5, Math.min(ACTION_GS - 0.5, p1.ay + dy * sp1 * dt));
     }
-    p1.facing = Math.atan2(dx, -dy);  // same convention as facingToRow
+    // In first person the facing is the LOOK (actFpSteer set it above) — a
+    // backpedal must not spin you round to face the camera.
+    if (!actFpActive()) p1.facing = Math.atan2(dx, -dy);  // same convention as facingToRow
     if (!p1.anim || p1.anim.name !== 'move') setFighterAnim(p1, 'move');
   } else if (p1.anim && p1.anim.name === 'move'){
     setFighterAnim(p1, 'idle');
