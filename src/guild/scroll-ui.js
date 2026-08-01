@@ -193,7 +193,9 @@ function fitHeight() {
   const content = CUR.ov.querySelector('.scrollui-content');
   if (!body || !content) return;
   const chrome = (head ? head.offsetHeight : 0) + 28;
-  const max = Math.round(Math.min(window.innerHeight * 0.8, 760)) - 34 * 2;
+  // A `tall` scroll (the world map, the estate plan) may take the whole
+  // screen; ordinary paperwork stops at a hand-held height.
+  const max = Math.round(CUR.tall ? window.innerHeight * 0.94 : Math.min(window.innerHeight * 0.8, 760)) - 34 * 2;
   body.style.setProperty('--sh-open', Math.max(140, Math.min(max, content.scrollHeight + chrome)) + 'px');
 }
 
@@ -250,7 +252,7 @@ export function openScroll(opts) {
   closeScroll(true);
   const ov = buildOverlay(opts.title, opts.glyph);
   if (opts.width) ov.style.setProperty('--sw', opts.width + 'px');
-  CUR = { ov, render: opts.render, onClose: null, ...armOpen(ov) };
+  CUR = { ov, render: opts.render, onClose: null, tall: !!opts.tall, ...armOpen(ov) };
   refreshScroll();
   fitRollers();
 }
@@ -265,7 +267,7 @@ export function openScrollPane(opts) {
   closeScroll(true);
   const ov = buildOverlay(opts.title, opts.glyph);
   ov.classList.add('scrollui-pane');
-  CUR = { ov, render: null, onClose: opts.onClose || null, ...armOpen(ov) };
+  CUR = { ov, render: null, onClose: opts.onClose || null, tall: true, ...armOpen(ov) };
   opts.mount(ov.querySelector('.scrollui-content'));
   fitHeight();
   fitRollers();

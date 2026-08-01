@@ -445,6 +445,15 @@
   backface-visibility: hidden;
   pointer-events: none;
 }
+/* Over the shoulder: the hands belong to a first-person frame only, and the
+   member's own composited back stands at the walker cell instead. The canvas
+   rides down by the compositor's empty under-feet band so the soles ground. */
+.fp-pov3 .fp-hands { display: none; }
+.fp-self canvas {
+  width: 100%; height: 100%; display: block;
+  image-rendering: pixelated;
+  transform: translateY(31.25%);
+}
 /* A flying thing's texture fills its billboard — without this the background
    painted at its own native px and tiled. */
 .fp-shot { background-size: 100% 100%; background-repeat: no-repeat; image-rendering: pixelated; }
