@@ -173,3 +173,14 @@ canvas.scrollui-roll {
 /* Compact quest dispatch chips inside the scroll reuse .hs-chip; the row just
    needs breathing room on paper. */
 .scroll-quest .hero-switch { margin-top: 6px; }
+
+/* The flat wall-scroll map (deskFlatMap) — one baked image, arcade-select
+   oval, pinned to the parchment. */
+.flatmap {
+  display: block; width: 100%;
+  image-rendering: pixelated;
+  border: 2px solid #55381f; border-radius: 4px;
+  background: #10314f;
+  box-shadow: 0 4px 10px rgba(60, 35, 10, 0.35);
+  margin-bottom: 8px;
+}
