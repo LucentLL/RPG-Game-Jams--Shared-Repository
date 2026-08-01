@@ -96,7 +96,7 @@ export const PLUS_POWER = { leather: 2, iron: 2, steel: 3, mithril: 5 };
  * One item's combat-power contribution for a wearer: quality (slot- and durability-
  * scaled) + the refine level's flat power, ×1.15 if the wearer's declared
  * specialization covers the item's kind (sword → Swordsmanship, armor → Shield & Guard…).
- * Shared by gearBonus and the quartermaster's itemScore so the ⚡ never lies.
+ * Shared by gearBonus and the quartermaster's itemScore so the ↯ never lies.
  * @param {import('./item.js').Item} it @param {?import('./hero.js').Hero} hero
  */
 export function itemPower(it, hero) {

@@ -35,6 +35,18 @@
 .room-chip.on { border-color: var(--gold); background: linear-gradient(135deg, #2a1a0a, #3a2a10); }
 .room-chip.locked { opacity: 0.6; }
 .hub-chip { margin-bottom: 2px; }
+/* Drawn UI icons (icons.js): a 1em mask square painted in currentColor, so an
+   icon takes the colour of the text it stands in — gold in the rail, ink on
+   parchment — like a character of type would. */
+.gi {
+  display: inline-block; width: 1em; height: 1em;
+  background: currentColor; vertical-align: -0.14em;
+  -webkit-mask-image: var(--gi); mask-image: var(--gi);
+  -webkit-mask-size: contain; mask-size: contain;
+  -webkit-mask-repeat: no-repeat; mask-repeat: no-repeat;
+  -webkit-mask-position: center; mask-position: center;
+  image-rendering: pixelated;
+}
 .rc-glyph { font-size: 1.1em; flex: 0 0 auto; width: 20px; text-align: center; }
 .rc-body { display: flex; flex-direction: column; min-width: 0; }
 .rc-name { font-family: 'Cinzel', serif; font-size: 0.86em; color: #e8e0d0; }

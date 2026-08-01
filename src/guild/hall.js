@@ -40,9 +40,10 @@ import { stopRanchLoop } from './ranch.js';
 import { renderBuild, setTool as buildTool, armBuilding, armProp, cellClick as buildCell, buildZoomIn, buildZoomOut, buildZoomFit } from './build-view.js';
 import { artSprite, itemSprite, hasItemSprite } from './art.js';
 import { hasDiorama, roomSceneHTML, bindRoomScene, stopRoomLoop } from './rooms.js';
-import { openDelve, hasDelveMap, isDelveOpen, exitDelve } from './delve.js';
-import { openDelveFp, isDelveFpOpen } from './delve-fp.js';
+import { openDelve, hasDelveMap, isDelveOpen, exitDelve, closeDelveSilent } from './delve.js';
+import { openDelveFp, isDelveFpOpen, closeDelveFpSilent } from './delve-fp.js';
 import { ORE_KINDS, setCampusGuild } from './delve-maps.js';
+import { icon } from './icons.js';
 import { ensureCampus } from './campus.js';
 import { openScroll, openScrollPane, closeScroll, refreshScroll, isScrollOpen } from './scroll-ui.js';
 import { SEATS, REALMS, TOWNS, DUNGEON_CELLS, seatById, realmById, seatForEvent, rivalSeat } from './world-guilds.js';
@@ -55,8 +56,10 @@ const QUEST_STAMINA = 40; // dispatching on a quest costs stamina — questing c
 /** Whether a hero would actually march if dispatched — injured or too-tired heroes stay home. */
 const canMarch = (h) => !h.condition.injury && h.condition.stamina >= QUEST_STAMINA;
 const DRILL_MIGRATE = { drill_pow: 'pow', guard_def: 'def', forms_skl: 'skl', sprint_spd: 'spd', study_int: 'int', march_vit: 'vit', spar: 'pow' };
-const ARCH_GLYPH = { Knight: '⚔', Mage: '✦', Ranger: '🏹', Cleric: '☩', Rogue: '🗡', Berserker: '🪓', Adventurer: '☉' };
-const KIND_GLYPH = { sword: '⚔', armor: '🛡', bow: '🏹', axe: '🪓', dagger: '🔪' };
+// Typographic marks only — the dagger sign IS a dagger, the feathered arrow a
+// shot. Nothing here may resolve to a platform emoji.
+const ARCH_GLYPH = { Knight: '⚔', Mage: '✦', Ranger: '➳', Cleric: '☩', Rogue: '†', Berserker: '⚒', Adventurer: '☉' };
+const KIND_GLYPH = { sword: '⚔', armor: '▣', bow: '➳', axe: '⚒', dagger: '†' };
 
 let guild = null;
 let selectedId = null;
@@ -74,23 +77,25 @@ let wildsSelId = null; // UI-only: the Wilds locale whose prey are open for disp
 
 // The guild hall's rooms, in the sketch's row-major order. `tag` = work vs storage vs
 // living; `locked` rooms are stubbed until their system (the Alchemist) is built.
+// Room glyphs are DRAWN icons now (icons.js) — inline mask markup, safe in any
+// innerHTML context. Never pass one through an attribute or textContent.
 const ROOMS = [
-  { id: 'grounds', glyph: '🏕', name: 'Grounds', tag: 'COMPOUND' },
-  { id: 'study', glyph: '🖋', name: 'Study', tag: 'DESK' },
-  { id: 'world', glyph: '🌍', name: 'World', tag: 'CIRCUIT' },
-  { id: 'calendar', glyph: '📅', name: 'Calendar', tag: 'SEASON' },
-  { id: 'roster', glyph: '🛡', name: 'Roster', tag: 'MEMBERS' },
-  { id: 'wilds', glyph: '🗺', name: 'Wilds', tag: 'EXPLORE' },
-  { id: 'town', glyph: '🏘', name: 'Town', tag: 'OFF-CAMPUS' },
-  { id: 'arena', glyph: '⚔', name: 'Arena', tag: 'COMBAT' },
-  { id: 'forge', glyph: '🔨', name: 'Forge', tag: 'WORK' },
-  { id: 'kitchen', glyph: '🍲', name: 'Kitchen', tag: 'WORK' },
-  { id: 'apothecary', glyph: '🏺', name: 'Apothecary', tag: 'STORAGE' },
-  { id: 'library', glyph: '📖', name: 'Library', tag: 'WORK' },
-  { id: 'armory', glyph: '🗡', name: 'Armory', tag: 'STORAGE' },
-  { id: 'laboratory', glyph: '⚗', name: 'Laboratory', tag: 'WORK' },
-  { id: 'quarters', glyph: '🍺', name: 'Quarters', tag: 'LIVING' },
-  { id: 'academy', glyph: '🎓', name: 'Academy', tag: 'LIVING' },
+  { id: 'grounds', glyph: icon('tent'), name: 'Grounds', tag: 'COMPOUND' },
+  { id: 'study', glyph: icon('quill'), name: 'Study', tag: 'DESK' },
+  { id: 'world', glyph: icon('globe'), name: 'World', tag: 'CIRCUIT' },
+  { id: 'calendar', glyph: icon('calendar'), name: 'Calendar', tag: 'SEASON' },
+  { id: 'roster', glyph: icon('shield'), name: 'Roster', tag: 'MEMBERS' },
+  { id: 'wilds', glyph: icon('map'), name: 'Wilds', tag: 'EXPLORE' },
+  { id: 'town', glyph: icon('town'), name: 'Town', tag: 'OFF-CAMPUS' },
+  { id: 'arena', glyph: icon('swords'), name: 'Arena', tag: 'COMBAT' },
+  { id: 'forge', glyph: icon('hammer'), name: 'Forge', tag: 'WORK' },
+  { id: 'kitchen', glyph: icon('pot'), name: 'Kitchen', tag: 'WORK' },
+  { id: 'apothecary', glyph: icon('jar'), name: 'Apothecary', tag: 'STORAGE' },
+  { id: 'library', glyph: icon('book'), name: 'Library', tag: 'WORK' },
+  { id: 'armory', glyph: icon('sword'), name: 'Armory', tag: 'STORAGE' },
+  { id: 'laboratory', glyph: icon('flask'), name: 'Laboratory', tag: 'WORK' },
+  { id: 'quarters', glyph: icon('mug'), name: 'Quarters', tag: 'LIVING' },
+  { id: 'academy', glyph: icon('cap'), name: 'Academy', tag: 'LIVING' },
 ];
 function getRoom(id) { return ROOMS.find((r) => r.id === id) || null; }
 
@@ -99,7 +104,7 @@ function heroById(id) { return guild.roster.find((h) => h.id === id); }
 function clamp(n) { return Math.max(0, Math.min(100, Math.round(n))); }
 
 /** Field power = trained stats + whatever gear the hero is carrying. Used for quest
- *  odds, resolution, and the displayed ⚡ so equipping visibly makes a hero stronger. */
+ *  odds, resolution, and the displayed ↯ so equipping visibly makes a hero stronger. */
 function combatPower(h) { return heroPower(h) + gearBonus(guild.inventory, h); }
 
 /** The armed play lens for an event, or null. guild.playPlan = {kind, id, mode}. */
@@ -130,7 +135,7 @@ function recordStr(rec) {
 
 /**
  * The event's LADDER: the drawn field, final at the top, round 1 at the bottom —
- * every rival a face, a record, and the exact ⚡ the resolver will check for that
+ * every rival a face, a record, and the exact ↯ the resolver will check for that
  * round. Read-only: the field was drawn in load()/advanceAll (never mid-render).
  * @param {Object} t @param {?import('./hero.js').Hero} champ  highlight rounds already cleared
  */
@@ -139,24 +144,24 @@ function tourneyLadder(t, champ) {
   const rows = [];
   for (let i = rounds - 1; i >= 0; i--) {
     const r = rivalById(guild, (t.rivalIds || [])[i]);
-    const tag = i === rounds - 1 ? '👑 Final' : `Round ${i + 1}`;
+    const tag = i === rounds - 1 ? '♛ Final' : `Round ${i + 1}`;
     rows.push(r ? `<div class="tb-row ${i === rounds - 1 ? 'final' : ''}">
         <span class="tb-round">${tag}</span>
         <span class="rr-portrait">${personSprite(r, 44)}</span>
-        <span class="tb-main"><b>${r.name}</b><span class="rr-sub">${ARCH_GLYPH[r.archetype] || '☉'} ${r.archetype} · ⚡${r.power} · ${recordStr(r.record)}${r.titles ? ' · 👑' + r.titles : ''}</span></span>
-      </div>` : `<div class="tb-row"><span class="tb-round">${tag}</span><span class="tb-main dim">an unseeded contender · ~⚡${Math.round(roundOpponentPower(t, i))}</span></div>`);
+        <span class="tb-main"><b>${r.name}</b><span class="rr-sub">${ARCH_GLYPH[r.archetype] || '☉'} ${r.archetype} · ↯${r.power} · ${recordStr(r.record)}${r.titles ? ' · ♛' + r.titles : ''}</span></span>
+      </div>` : `<div class="tb-row"><span class="tb-round">${tag}</span><span class="tb-main dim">an unseeded contender · ~↯${Math.round(roundOpponentPower(t, i))}</span></div>`);
   }
   const champRow = champ ? `<div class="tb-row you">
       <span class="tb-round">You</span>
       <span class="rr-portrait">${personSprite(champ, 44)}</span>
-      <span class="tb-main"><b>${champ.name}</b><span class="rr-sub">${ARCH_GLYPH[champ.archetype] || '☉'} ${champ.archetype} · ⚡${combatPower(champ)} · ${recordStr(champ.career)}</span></span>
+      <span class="tb-main"><b>${champ.name}</b><span class="rr-sub">${ARCH_GLYPH[champ.archetype] || '☉'} ${champ.archetype} · ↯${combatPower(champ)} · ${recordStr(champ.career)}</span></span>
     </div>` : '';
   return `<div class="tb-ladder">${rows.join('')}${champRow}</div>`;
 }
 
 /**
  * The Tourney Board — the pre-match moment the fight used to skip. Shown when an
- * event is DUE: the full drawn ladder (scout every rival's face, ⚡ and record),
+ * event is DUE: the full drawn ladder (scout every rival's face, ↯ and record),
  * your champion's record and title odds, THEN the choice of lens. Resolves
  * {mode:'action'|'tactical'|'spectate'|'sim', remember} exactly like the old bare
  * chooser, so advanceAll's flow is unchanged — the fight just stops arriving unannounced.
@@ -173,13 +178,13 @@ function tourneyBoard(t, champ) {
     const ov = document.createElement('div');
     ov.className = 'lens-overlay';
     ov.innerHTML = `<div class="lens-card tb-card">
-        <div class="lens-title">${(EVENT_TYPES[t.type] || {}).glyph || '🏆'} ${t.name}</div>
+        <div class="lens-title">${(EVENT_TYPES[t.type] || {}).glyph || ''} ${t.name}</div>
         <div class="lens-sub">${s.glyph} <b>${s.tier}</b> · best of ${t.rounds} · <span class="${odds >= 50 ? 'up' : odds >= 20 ? '' : 'down'}">~${odds}% to win it all</span></div>
         ${tourneyLadder(t, champ)}
         <button class="lens-btn" data-m="action">⚔ Fight it live <span>real-time arena — stick + tap</span></button>
         <button class="lens-btn" data-m="tactical">♟ Command it <span>simultaneous turn-based tactics</span></button>
-        <button class="lens-btn" data-m="tactical-fp">🙶 Fight it from inside <span>the same turn-based duel, first person</span></button>
-        <button class="lens-btn" data-m="spectate">👁 Spectate <span>watch it fought turn by turn — take control anytime</span></button>
+        <button class="lens-btn" data-m="tactical-fp">Fight it from inside <span>the same turn-based duel, first person</span></button>
+        <button class="lens-btn" data-m="spectate">Spectate <span>watch it fought turn by turn — take control anytime</span></button>
         <button class="lens-btn sim" data-m="sim">▶ Simulate <span>let the week resolve it</span></button>
         <label class="lens-remember"><input type="checkbox"> don’t ask again — always simulate <span class="dim">(re-enable on the Calendar)</span></label>
       </div>`;
@@ -204,12 +209,12 @@ function bracketInterstitial(t) {
     const old = document.querySelector('.lens-overlay'); if (old) old.remove();
     const rival = rivalById(guild, (t.rivalIds || [])[nextRound - 1]);
     const foeTxt = rival
-      ? `<b>${rival.name}</b> (${recordStr(rival.record)} · ⚡${rival.power}) waits in the ring`
-      : `a ~${nextFoePower}⚡ foe waits in the ring`;
+      ? `<b>${rival.name}</b> (${recordStr(rival.record)} · ↯${rival.power}) waits in the ring`
+      : `a ~${nextFoePower}↯ foe waits in the ring`;
     const ov = document.createElement('div');
     ov.className = 'lens-overlay';
     ov.innerHTML = `<div class="lens-card">
-        <div class="lens-title">${(EVENT_TYPES[t.type] || {}).glyph || '🏆'} ${t.name}</div>
+        <div class="lens-title">${(EVENT_TYPES[t.type] || {}).glyph || ''} ${t.name}</div>
         <div class="lens-sub">Round won! Next: <b>round ${nextRound} of ${rounds}</b> — ${foeTxt}.</div>
         <button class="lens-btn" data-v="fight">⚔ Fight on <span>next opponent, same controls</span></button>
         <button class="lens-btn sim" data-v="sim">▶ Simulate the rest <span>the resolver plays out the remaining rounds</span></button>
@@ -261,7 +266,7 @@ function fellInGlory(h, t, week) {
 }
 
 // --- Quartermaster: hand armory gear out by policy ---------------------------
-// Uses the same per-item math the ⚡ uses (quality + refine level; no wearer
+// Uses the same per-item math the ↯ uses (quality + refine level; no wearer
 // affinity here — allocation ranks the ITEM, the affinity follows the wearer).
 const itemScore = (it) => itemPower(it, null);
 
@@ -529,7 +534,7 @@ function scoutRegion() {
   if (guild.gold < cost) { notice = `A scout wants ${cost}g to map the next area — the coffers are short.`; render(); return; }
   addGold(guild, -cost);
   const found = discoverNextLocale(guild);
-  if (found) { wildsSelId = found.id; notice = `🗺 Scout returns: ${found.glyph} ${found.name} is on the map.`; }
+  if (found) { wildsSelId = found.id; notice = `Scout returns: ${found.glyph} ${found.name} is on the map.`; }
   save(); render();
 }
 /** Arm (or disarm) the play lens for a hunt. The plan id is the PARTY key
@@ -560,6 +565,27 @@ function gearOf(h) {
 }
 
 /**
+ * Let either walker view hand its session to the other, mid-walk. The carry is
+ * the session itself — map, position, doors behind you, worked veins, haul —
+ * so a swap is a change of camera, not a re-entry: no second stamina charge,
+ * no payout, the same hooks object on both sides. Open the twin FIRST, retire
+ * the old view only once it has the screen, so a failed bake leaves the walk
+ * exactly where it was.
+ */
+function makeSwapView(localeId, member, hooks) {
+  return async (kind, carry) => {
+    try {
+      const ok = await (kind === 'fp' ? openDelveFp : openDelve)(localeId, member, hooks, carry);
+      if (ok) (kind === 'fp' ? closeDelveSilent : closeDelveFpSilent)();
+      return ok;
+    } catch (e) {
+      console.warn('view swap failed', e);
+      return false;
+    }
+  };
+}
+
+/**
  * March into a locale on foot. `fp` picks the VIEW — the top-down walk or the
  * first-person one. Both openers take the same hooks object built below, so the
  * two modes cannot drift on what a kill is worth or what a vein pays; they are
@@ -578,13 +604,13 @@ async function exploreLocale(localeId, fp) {
   const wear = [1, 0.5, 0.25][Math.min(2, (wilds.delveEntries || {})[localeId] || 0)];
   let opened = false;
   try {
-    opened = await (fp ? openDelveFp : openDelve)(localeId, h, {
+    const hooks = {
       locale,
       // What the delver is visibly carrying. The first-person view holds this
       // up in front of you; the top-down view ignores it (you see the sprite's
       // own composited weapon there). Kind + material is all the art needs.
       gear: gearOf(h),
-      // The two numbers first-person combat rolls against. ⚡ against the prey's
+      // The two numbers first-person combat rolls against. ↯ against the prey's
       // recommended power is the SAME ratio huntOdds shows on the hunt card, so
       // a fight you are told is Grim is a fight that rolls Grim; and tiredness
       // costs you accuracy, which is the one thing a delve can spend that the
@@ -631,8 +657,8 @@ async function exploreLocale(localeId, fp) {
         h.condition.fatigue = Math.min(100, h.condition.fatigue + 8);
         save();
         const bits = [`+${gGold}g`];
-        if (spoils.meat) bits.push(`🥩${spoils.meat}`);
-        if (spoils.pelt) bits.push(`🟫${spoils.pelt}`);
+        if (spoils.meat) bits.push(`${spoils.meat}`);
+        if (spoils.pelt) bits.push(`${spoils.pelt}`);
         if (spoils.loot && MATERIALS[spoils.loot]) bits.push(`✦ ${MATERIALS[spoils.loot].name}`);
         return { txt: bits.join(' · '), gold: gGold, meat: spoils.meat, pelt: spoils.pelt, loot: spoils.loot, field: prey.field };
       },
@@ -641,10 +667,12 @@ async function exploreLocale(localeId, fp) {
         addGold(guild, k.gold);
         if (k.mat) addMaterial(guild.inventory, k.mat, 1);
         save();
-        return { txt: `⛏ ${k.name} · +${k.gold}g${k.mat && MATERIALS[k.mat] ? ' · ✦ ' + MATERIALS[k.mat].name : ''}` };
+        return { txt: `⚒ ${k.name} · +${k.gold}g${k.mat && MATERIALS[k.mat] ? ' · ✦ ' + MATERIALS[k.mat].name : ''}` };
       },
       onEnd: () => { showScreen('guildScreen'); save(); render({ top: true }); },
-    });
+    };
+    hooks.swapView = makeSwapView(localeId, h, hooks);
+    opened = await (fp ? openDelveFp : openDelve)(localeId, h, hooks);
   } catch (e) {
     console.warn('delve: failed to open', e);
     notice = `The way into ${locale.name} is blocked — nothing was spent. Try again.`;
@@ -681,7 +709,7 @@ function strollBar(id) {
   if (!w || !room || !hasDelveMap(w[0])) return '';
   const subject = heroById(selectedId) || guild.roster[0];
   if (!subject) return '';
-  return `<div class="tourney-lens quest-lens"><button class="tourney-play" onclick="__guild.strollRoom('${w[0]}','${room.glyph}')">🚶 Walk ${w[1]} — take ${subject.name.split(' ')[0]} inside</button></div>`;
+  return `<div class="tourney-lens quest-lens"><button class="tourney-play" onclick="__guild.strollRoom('${w[0]}')">Walk ${w[1]} — take ${subject.name.split(' ')[0]} inside</button></div>`;
 }
 /** Body types the Elements compositor builds from (crucible BODY_TYPES). */
 const MASTER_BUILDS = ['salt', 'sulfur', 'mercury'];
@@ -728,7 +756,7 @@ async function walkGuild() {
   const m = ensureMaster(guild);
   if (!hasDelveMap('campus') || isDelveOpen()) return;
   try {
-    await openDelve('campus', m, {
+    const hooks = {
       locale: { glyph: '☙', name: guild.name },
       fight: async () => null,
       onKill: () => null,
@@ -738,7 +766,9 @@ async function walkGuild() {
       // are the one station only this walk can reach the interesting way.
       use: (stationId, api) => useStation(m, stationId, api),
       onEnd: () => { showScreen('guildScreen'); render({ top: true }); },
-    });
+    };
+    hooks.swapView = makeSwapView('campus', m, hooks);
+    await openDelve('campus', m, hooks);
   } catch (e) {
     console.warn('walk: failed to open', e);
     notice = 'The gate is stuck — try again.';
@@ -868,7 +898,7 @@ async function anvilRefine(h, api) {
   const guardTxt = guard.id === 'none' ? 'Bare — a failure past the safe line destroys it'
     : `${guard.glyph} ${guard.name} — ${guard.id === 'oil' ? 'a failure only drops it −1' : 'a failure keeps the level'}`;
   const pick = await api.choose({
-    title: '✨ Refine at the anvil',
+    title: '✦ Refine at the anvil',
     sub: `${h.name.split(' ')[0]} · Practice ${h.professions.blacksmithing.practice} · ${guardTxt}`,
     options,
   });
@@ -902,7 +932,7 @@ async function anvilRefine(h, api) {
       return {
         ok: res.success, broke: res.broke,
         txt: res.success ? `⚒ ${name} rings true — +${res.to}!`
-          : res.broke ? `💥 ${name} shatters on the anvil.`
+          : res.broke ? `✷ ${name} shatters on the anvil.`
           : res.downgraded ? `The oil saves it — ${name} slips to +${res.to}.`
           : `The blessing holds — ${name} keeps +${res.to}.`,
       };
@@ -936,19 +966,21 @@ const INTERIOR_FOLK = {
  * doorways carry them from room to room without leaving the building, and the
  * members assigned to that work are in there with them.
  */
-async function strollRoom(mapId, glyph) {
+async function strollRoom(mapId) {
   const h = heroById(selectedId) || guild.roster[0]; if (!h) return;
   if (!hasDelveMap(mapId) || isDelveOpen()) return;
   try {
-    await openDelve(mapId, h, {
-      locale: { glyph: glyph || '🚪', name: 'the guild' },
+    const hooks = {
+      locale: { glyph: '', name: 'the guild' },
       fight: async () => null,
       onKill: () => null,
       onOre: () => null,
       companions: (mid) => (INTERIOR_FOLK[mid] ? INTERIOR_FOLK[mid](guild.roster) : []).slice(0, 5),
       use: (stationId, api) => useStation(h, stationId, api),
       onEnd: () => { showScreen('guildScreen'); render({ top: true }); },
-    });
+    };
+    hooks.swapView = makeSwapView(mapId, h, hooks);
+    await openDelve(mapId, h, hooks);
   } catch (e) {
     console.warn('stroll: failed to open', e);
     notice = 'That door is stuck — try again.';
@@ -1758,23 +1790,23 @@ function qualHTML(item) { const t = qualityTier(item.quality); return `<span sty
 function questTitle(id) { const q = guild.questBoard.find((x) => x.id === id); return q ? q.title : null; }
 function rosterRow(h) {
   const a = h.assignment;
-  const plan = a.type === 'forge' ? (a.forgeMode === 'refine' ? `✨ Refine ${refineItemName(a)}` : a.forgeMode === 'rework' ? `⚒ Rework ${refineItemName(a)}` : `🔨 ${getRecipe(a.recipeId).name}`)
+  const plan = a.type === 'forge' ? (a.forgeMode === 'refine' ? `✦ Refine ${refineItemName(a)}` : a.forgeMode === 'rework' ? `⚒ Rework ${refineItemName(a)}` : `${getRecipe(a.recipeId).name}`)
     : a.type === 'brew' ? `⚗ ${(getPotionRecipe(a.potionId) || {}).name || 'Brew'}`
-    : a.type === 'cook' ? `🍳 ${(getRation(a.cookRecipeId) || {}).name || 'Cook'}`
-    : a.type === 'enchant' ? (a.enchantMode === 'blessing' ? `⭐ Smith's Blessing` : `✨ ${(PLANETS[a.enchantPlanet] || {}).name || ''} orb`)
-    : a.type === 'study' ? `${a.studyMode === 'write' ? '📜 Write' : '📖 Study'} ${(BOOK_SUBJECTS[a.discipline] || BOOK_SUBJECTS.blacksmithing).label}`
-    : a.type === 'quest' ? `🗺 ${a.questId ? (questTitle(a.questId) || 'On Quest') : '(choose quest)'}`
-    : a.type === 'hunt' ? `🏹 ${a.huntId ? `Hunt ${(preyById(a.huntId) || {}).name || ''}` : '(choose prey)'}`
-    : a.trainingId === 'spar' ? `🤺 Spar ${((heroById(a.sparWith) || {}).name || '?').split(' ')[0]}`
+    : a.type === 'cook' ? `${(getRation(a.cookRecipeId) || {}).name || 'Cook'}`
+    : a.type === 'enchant' ? (a.enchantMode === 'blessing' ? `★ Smith's Blessing` : `✦ ${(PLANETS[a.enchantPlanet] || {}).name || ''} orb`)
+    : a.type === 'study' ? `${a.studyMode === 'write' ? 'Write' : 'Study'} ${(BOOK_SUBJECTS[a.discipline] || BOOK_SUBJECTS.blacksmithing).label}`
+    : a.type === 'quest' ? `${a.questId ? (questTitle(a.questId) || 'On Quest') : '(choose quest)'}`
+    : a.type === 'hunt' ? `➳ ${a.huntId ? `Hunt ${(preyById(a.huntId) || {}).name || ''}` : '(choose prey)'}`
+    : a.trainingId === 'spar' ? `Spar ${((heroById(a.sparWith) || {}).name || '?').split(' ')[0]}`
     : `⚔ ${(getDrill(a.trainingId) || REST).name}${a.intensity === 'heavy' ? ' (H)' : ''}`;
   return `<button class="roster-row ${h.id === selectedId ? 'sel' : ''}" onclick="__guild.selectHero('${h.id}')">
       <span class="rr-portrait">${personSprite(h, 60)}</span>
       <span class="rr-main">
         <span class="rr-name">${h.name} <span class="rr-sub">${h.archetype} Lv${h.level}</span></span>
-        <span class="rr-assign">${plan} · 🍖 ${getDietPlan(a.dietId).name}</span>
+        <span class="rr-assign">${plan} · ${getDietPlan(a.dietId).name}</span>
         <span class="rr-cond">sta ${mini(h.condition.stamina, 'var(--success)')} fat ${mini(h.condition.fatigue, '#e08a3c')}</span>
       </span>
-      <span class="rr-power">⚡${combatPower(h)}</span>
+      <span class="rr-power">↯${combatPower(h)}</span>
     </button>`;
 }
 
@@ -1795,8 +1827,8 @@ function heroSwitcher() {
   return `<div class="hero-switch">${guild.roster.map((h) => `<button class="hs-chip ${h.id === selectedId ? 'sel' : ''}" title="${h.name}" onclick="__guild.selectHero('${h.id}')">${personSprite(h, 48)}</button>`).join('')}</div>`;
 }
 
-/** The member's academic identity, one line: "⚔ Melee · 🔨 Blacksmithing" or
- *  "⚔ Melee + 🏹 Ranged · Double Major". */
+/** The member's academic identity, one line: "⚔ Melee · Blacksmithing" or
+ *  "⚔ Melee + ➳ Ranged · Double Major". */
 function curriculumLabel(h) {
   const maj = disciplineById(h.major) || DISCIPLINES.melee;
   // A declared specialization joins the identity line: "⚔ Melee · Swordsmanship".
@@ -1846,7 +1878,7 @@ function curriculumPanel(h) {
     return `<div class="skill-shape">${el.glyph} ${el.name} — <b>Theory ${p.theory}</b> · <b>Practice ${p.practice}</b> · <span class="dim">Field ${p.field}</span></div>`;
   })() : '';
   const trackToggle = `<div class="intensity-toggle">
-      <button class="${!isDouble ? 'on' : ''}" onclick="__guild.setTrackKind('elective')">🎓 Take an Elective</button>
+      <button class="${!isDouble ? 'on' : ''}" onclick="__guild.setTrackKind('elective')">Take an Elective</button>
       <button class="${isDouble ? 'on' : ''}" onclick="__guild.setTrackKind('double')">⚔ Double Major</button>
     </div>`;
   let trackBody;
@@ -1863,7 +1895,7 @@ function curriculumPanel(h) {
         <span><span class="o-name">${e.glyph} ${e.name}</span> <span class="o-desc">${e.blurb}</span></span></button>`; }).join('')}</div>
       <div class="hint" style="text-align:left;padding:4px 2px">An Elective is the member's trade — they work its room (${cur ? `the ${cur.room}` : 'once chosen'}). Every member still trains combat besides.</div>`;
   }
-  return `<div class="plan-title">🎓 Curriculum — <span class="pt-cur">${maj.glyph} ${maj.name}</span> <span class="dim" style="font-weight:400;text-transform:none">major · their nature</span></div>
+  return `<div class="plan-title">Curriculum — <span class="pt-cur">${maj.glyph} ${maj.name}</span> <span class="dim" style="font-weight:400;text-transform:none">major · their nature</span></div>
     <div class="disc-list">${discRows}</div>
     ${craftLine}
     ${trackToggle}${trackBody}`;
@@ -1881,7 +1913,7 @@ function heroHeader(h) {
   const stage = lifeStage(h);
   const cr = h.career || {};
   const record = (cr.wins || cr.losses || cr.draws || (cr.titles || []).length)
-    ? ` · <span class="dim">${recordStr(cr)}${(cr.titles || []).length ? ' · 👑' + cr.titles.length : ''}</span>` : '';
+    ? ` · <span class="dim">${recordStr(cr)}${(cr.titles || []).length ? ' · ♛' + cr.titles.length : ''}</span>` : '';
   const chips = (h.traits || []).map((t) => `<span class="trait-chip" title="${(TRAITS[t] || {}).desc || ''}">${t}</span>`).join('');
   // The Roster is the MEMBER's own screen: a large, featured portrait leads their card.
   return `<div class="hero-banner">
@@ -1890,7 +1922,7 @@ function heroHeader(h) {
           <div class="hero-name">${h.name}</div>
           <div class="hero-sub">${h.archetype} · Lv${h.level} · <span style="color:${stage.col}">${stage.name}</span></div>
           <div class="hero-track">${curriculumLabel(h)}</div>
-          <div class="hero-power">⚡ ${combatPower(h)}${record}</div>
+          <div class="hero-power">↯ ${combatPower(h)}${record}</div>
           ${chips ? `<div class="trait-row">${chips}</div>` : ''}
         </div>
       </div>
@@ -1906,7 +1938,7 @@ function heroHeader(h) {
 
 function skillShapeOf(h) {
   const prof = h.professions.blacksmithing;
-  return `<div class="skill-shape">🔨 Blacksmithing — <b>Theory ${prof.theory}</b> · <b>Practice ${prof.practice}</b> · <span class="dim">Field ${prof.field}</span></div>`;
+  return `<div class="skill-shape">Blacksmithing — <b>Theory ${prof.theory}</b> · <b>Practice ${prof.practice}</b> · <span class="dim">Field ${prof.field}</span></div>`;
 }
 
 /** THIS WEEK's drill menu (MR schedule style: big rows, the chosen one lit).
@@ -1925,12 +1957,12 @@ function trainThisWeek(h) {
       <span class="o-name">${d.name}</span><span class="o-stat">${desc}</span></button>`;
   }).join('');
   const restItem = `<button class="opt drill ${at === 'train' && h.assignment.trainingId === 'rest' ? 'active' : ''}" onclick="__guild.setTraining('rest')">
-      <span class="o-name">💤 ${REST.name}</span><span class="o-stat">fatigue− stress−</span></button>`;
+      <span class="o-name">${REST.name}</span><span class="o-stat">fatigue− stress−</span></button>`;
   const sparring = at === 'train' && h.assignment.trainingId === 'spar';
   const others = guild.roster.filter((x) => x.id !== h.id);
   const sparList = others.length
     ? others.map((p) => `<button class="opt drill ${sparring && h.assignment.sparWith === p.id ? 'active' : ''}" onclick="__guild.setSpar('${p.id}')">
-        <span class="o-name">🤺 vs ${p.name}</span><span class="o-stat">SKL+ SPD+ · Lv${p.level}</span></button>`).join('')
+        <span class="o-name">vs ${p.name}</span><span class="o-stat">SKL+ SPD+ · Lv${p.level}</span></button>`).join('')
     : '<div class="hint">Recruit another member to spar with.</div>';
   return `<div class="plan-title">⚔ This Week — <span class="pt-cur">${jobLabel(h)}</span></div>
     <div class="intensity-toggle">
@@ -1938,7 +1970,7 @@ function trainThisWeek(h) {
       <button class="${heavy ? 'on' : ''}" onclick="__guild.setIntensity('heavy')">Heavy · +sec${rh ? ` · <span class="down">⚠${rh}%</span>` : ''}</button>
     </div>
     <div class="opt-list">${drillItems}${restItem}</div>
-    <div class="dept-lbl">🤺 Spar — both train</div>
+    <div class="dept-lbl">Spar — both train</div>
     <div class="opt-list">${sparList}</div>`;
 }
 
@@ -1963,9 +1995,9 @@ function trainPlan(h) {
         <button class="sr-x" onclick="__guild.scheduleRemoveAt(${i})" title="Remove from plan">✕</button></div>`).join('')
     : '<div class="hint" style="text-align:left;padding:6px 2px">No weeks queued — the member repeats this week’s drill until you plan ahead. Queue upcoming weeks below.</div>';
   const addBtns = DRILLS.map((d) => `<button class="sched-btn" onclick="__guild.scheduleAdd('${d.id}')" title="Queue ${d.name} (${heavy ? 'heavy' : 'light'})">+ ${d.main}</button>`).join('')
-    + `<button class="sched-btn" onclick="__guild.scheduleAdd('rest')" title="Queue Rest">+ 💤</button>`
+    + `<button class="sched-btn" onclick="__guild.scheduleAdd('rest')" title="Queue Rest">+ </button>`
     + (sched.length ? `<button class="sched-btn clear" onclick="__guild.scheduleClear()">clear</button>` : '');
-  return `<div class="plan-title">📅 Upcoming Weeks <span class="dim" style="font-weight:400;text-transform:none">— training plan · queues as ${heavy ? 'heavy' : 'light'}</span></div>
+  return `<div class="plan-title">Upcoming Weeks <span class="dim" style="font-weight:400;text-transform:none">— training plan · queues as ${heavy ? 'heavy' : 'light'}</span></div>
     <div class="sched-list">${nowRow}${rows}</div>
     <div class="sched-add">${addBtns}</div>
     <div class="cal-note">Plan ahead: each row is a future <b>training</b> week, run in order. Quest, hunt, or workshop weeks don’t consume the plan — it waits.</div>`;
@@ -1997,7 +2029,7 @@ function questBody(h) {
       <button class="tourney-play ${planFor('quest', cur.id) === 'action' ? 'on' : ''}" onclick="__guild.setPlayQuest('${cur.id}','action')">${planFor('quest', cur.id) === 'action' ? '⚔ Leading the bout live' : '⚔ Lead the bout live'}</button>
       <button class="tourney-play ${planFor('quest', cur.id) === 'tactical' ? 'on' : ''}" onclick="__guild.setPlayQuest('${cur.id}','tactical')">${planFor('quest', cur.id) === 'tactical' ? '♟ Commanding the bout' : '♟ Command the bout'}</button>
     </div>
-    <div class="hint" style="text-align:left;padding:0 2px 6px">On Advance Week the party's strongest marcher duels <b>${cur.title}</b>'s boss — win it and the job's luck swings your way; the party's ⚡ still decides.</div>` : '';
+    <div class="hint" style="text-align:left;padding:0 2px 6px">On Advance Week the party's strongest marcher duels <b>${cur.title}</b>'s boss — win it and the job's luck swings your way; the party's ↯ still decides.</div>` : '';
   return `<div class="opt-list">${list}</div>${lensBar}`;
 }
 
@@ -2008,9 +2040,9 @@ function forgeBody(h) {
   const mode = h.assignment.forgeMode;
   const prof = h.professions.blacksmithing;
   const modeToggle = `<div class="intensity-toggle">
-      <button class="${isForge && mode === 'new' ? 'on' : ''}" onclick="__guild.setForgeMode('new')">🔨 Forge new</button>
+      <button class="${isForge && mode === 'new' ? 'on' : ''}" onclick="__guild.setForgeMode('new')">Forge new</button>
       <button class="${isForge && mode === 'rework' ? 'on' : ''}" onclick="__guild.setForgeMode('rework')">⚒ Rework</button>
-      <button class="${isForge && mode === 'refine' ? 'on' : ''}" onclick="__guild.setForgeMode('refine')">✨ Refine +N</button>
+      <button class="${isForge && mode === 'refine' ? 'on' : ''}" onclick="__guild.setForgeMode('refine')">✦ Refine +N</button>
     </div>`;
   let body;
   if (isForge && mode === 'rework') {
@@ -2021,7 +2053,7 @@ function forgeBody(h) {
       const costTxt = Object.keys(cost).map((k) => `${MATERIALS[k].name} ×${cost[k]}`).join(', ');
       const enough = Object.keys(cost).every((k) => (guild.inventory.materials[k] || 0) >= cost[k]);
       if (!recipeUnlocked(h, rec)) {
-        return `<button class="opt lack" disabled><span><span class="o-name">🔒 ${itemLabel(it)}</span> <span class="o-desc">study ${it.material} theory to rework it</span></span><span class="o-cost">Theory ${rec.reqTheory}</span></button>`;
+        return `<button class="opt lack" disabled><span><span class="o-name">${itemLabel(it)}</span> <span class="o-desc">study ${it.material} theory to rework it</span></span><span class="o-cost">Theory ${rec.reqTheory}</span></button>`;
       }
       const to = previewRework(it, prof.practice, prof.field);
       if (to <= it.quality) {
@@ -2040,7 +2072,7 @@ function forgeBody(h) {
       const rec = recipeForItem(it);
       const meta = MATERIAL_META[it.material] || MATERIAL_META.iron;
       if (!recipeUnlocked(h, rec)) {
-        return `<button class="opt lack" disabled><span><span class="o-name">🔒 ${itemLabel(it)}</span> <span class="o-desc">study ${it.material} theory to refine it</span></span><span class="o-cost">Theory ${rec.reqTheory}</span></button>`;
+        return `<button class="opt lack" disabled><span><span class="o-name">${itemLabel(it)}</span> <span class="o-desc">study ${it.material} theory to refine it</span></span><span class="o-cost">Theory ${rec.reqTheory}</span></button>`;
       }
       if ((it.plus || 0) >= MAX_PLUS) {
         return `<button class="opt lack" disabled><span><span class="o-name">${KIND_GLYPH[it.kind] || '▪'} ${itemLabel(it)}</span> <span class="o-desc">a finished masterpiece — it can climb no higher</span></span><span class="o-cost">MAX</span></button>`;
@@ -2063,7 +2095,7 @@ function forgeBody(h) {
       : guard.id === 'blessing' ? 'a failure keeps the level'
       : '<b class="risk">a failure past the safe line DESTROYS the piece</b> — materia, story and all';
     body = `<div class="opt-list">${body}</div>
-      <div class="dept-lbl" style="margin-top:8px">🧰 Protection for the attempt</div>
+      <div class="dept-lbl" style="margin-top:8px">Protection for the attempt</div>
       <div class="intensity-toggle guard-toggle">${guardBtn(REFINE_GUARDS.none)}${guardBtn(REFINE_GUARDS.oil)}${guardBtn(REFINE_GUARDS.blessing)}</div>
       <div class="hint" style="text-align:left;padding:4px 0">Each week is ONE attempt: +1 on success — and ${guardHint}. The Alchemist brews Tempering Oil; the Enchanter crafts Smith's Blessings. A practiced smith rolls up to +10% better.</div>`;
   } else {
@@ -2071,7 +2103,7 @@ function forgeBody(h) {
       const cost = Object.keys(r.cost).map((k) => `${MATERIALS[k].name} ×${r.cost[k]}`).join(', ');
       const enough = Object.keys(r.cost).every((k) => (guild.inventory.materials[k] || 0) >= r.cost[k]);
       if (!recipeUnlocked(h, r)) {
-        return `<button class="opt lack" disabled><span><span class="o-name">🔒 ${r.name}</span> <span class="o-desc">study to unlock</span></span><span class="o-cost">Theory ${r.reqTheory}</span></button>`;
+        return `<button class="opt lack" disabled><span><span class="o-name">${r.name}</span> <span class="o-desc">study to unlock</span></span><span class="o-cost">Theory ${r.reqTheory}</span></button>`;
       }
       return `<button class="opt ${isForge && mode === 'new' && r.id === h.assignment.recipeId ? 'active' : ''} ${enough ? '' : 'lack'}" onclick="__guild.setRecipe('${r.id}')">
         <span><span class="o-name">${KIND_GLYPH[r.kind] || ''} ${r.name}</span> <span class="o-desc">${cost}</span></span>
@@ -2095,7 +2127,7 @@ function brewBody(h) {
     const cost = Object.keys(r.cost).map((k) => `${MATERIALS[k].name} ×${r.cost[k]}`).join(', ');
     const enough = Object.keys(r.cost).every((k) => (guild.inventory.materials[k] || 0) >= r.cost[k]);
     if (!potionUnlocked(h, r)) {
-      return `<button class="opt lack" disabled><span><span class="o-name">🔒 ${r.name}</span> <span class="o-desc">study alchemy to unlock</span></span><span class="o-cost">Theory ${r.reqTheory}</span></button>`;
+      return `<button class="opt lack" disabled><span><span class="o-name">${r.name}</span> <span class="o-desc">study alchemy to unlock</span></span><span class="o-cost">Theory ${r.reqTheory}</span></button>`;
     }
     return `<button class="opt ${isBrew && r.id === h.assignment.potionId ? 'active' : ''} ${enough ? '' : 'lack'}" onclick="__guild.setPotion('${r.id}')">
       <span><span class="o-name">${r.glyph} ${r.name}</span> <span class="o-desc">${cost}</span></span>
@@ -2106,7 +2138,7 @@ function brewBody(h) {
 
 function cookingShapeOf(h) {
   const p = h.professions.cooking || { theory: 0, practice: 0, field: 0 };
-  return `<div class="skill-shape">🍳 Cooking — <b>Theory ${p.theory}</b> · <b>Practice ${p.practice}</b> · <span class="dim">Field ${p.field}</span></div>`;
+  return `<div class="skill-shape">Cooking — <b>Theory ${p.theory}</b> · <b>Practice ${p.practice}</b> · <span class="dim">Field ${p.field}</span></div>`;
 }
 /** Kitchen work body for a Cook: pick a ration recipe. Picking one sets them to Cook. */
 function cookBody(h) {
@@ -2116,7 +2148,7 @@ function cookBody(h) {
     const costTxt = Object.keys(r.cost).length ? Object.keys(r.cost).map((k) => `${MATERIALS[k].name} ×${r.cost[k]}`).join(', ') : 'pure labour';
     const enough = Object.keys(r.cost).every((k) => (guild.inventory.materials[k] || 0) >= r.cost[k]);
     if (!rationUnlocked(h, r)) {
-      return `<button class="opt lack" disabled><span><span class="o-name">🔒 ${r.name}</span> <span class="o-desc">a more seasoned hand</span></span><span class="o-cost">Theory ${r.reqTheory}</span></button>`;
+      return `<button class="opt lack" disabled><span><span class="o-name">${r.name}</span> <span class="o-desc">a more seasoned hand</span></span><span class="o-cost">Theory ${r.reqTheory}</span></button>`;
     }
     return `<button class="opt ${isCook && r.id === h.assignment.cookRecipeId ? 'active' : ''} ${enough ? '' : 'lack'}" onclick="__guild.setCookRecipe('${r.id}')">
       <span><span class="o-name">${r.glyph} ${r.name}</span> <span class="o-desc">${costTxt} → ${MATERIALS[r.food].name}</span></span>
@@ -2128,7 +2160,7 @@ function cookBody(h) {
 
 function enchantingShapeOf(h) {
   const p = h.professions.enchanting || { theory: 0, practice: 0, field: 0 };
-  return `<div class="skill-shape">✨ Enchanting — <b>Theory ${p.theory}</b> · <b>Practice ${p.practice}</b> · <span class="dim">Field ${p.field} · forges Lv${previewOrbLevel(p.practice, p.field)} orbs</span></div>`;
+  return `<div class="skill-shape">✦ Enchanting — <b>Theory ${p.theory}</b> · <b>Practice ${p.practice}</b> · <span class="dim">Field ${p.field} · forges Lv${previewOrbLevel(p.practice, p.field)} orbs</span></div>`;
 }
 /** Enchanter's bench: craft a planet's orb — or a Smith's Blessing for the Forge. */
 function enchantBody(h) {
@@ -2136,8 +2168,8 @@ function enchantBody(h) {
   const prof = h.professions.enchanting || { theory: 0, practice: 0, field: 0 };
   const blessing = h.assignment.enchantMode === 'blessing';
   const benchToggle = `<div class="intensity-toggle">
-      <button class="${isEnch && !blessing ? 'on' : ''}" onclick="__guild.setEnchantMode('materia')">✨ Craft materia</button>
-      <button class="${isEnch && blessing ? 'on' : ''}" onclick="__guild.setEnchantMode('blessing')">⭐ Smith's Blessing</button>
+      <button class="${isEnch && !blessing ? 'on' : ''}" onclick="__guild.setEnchantMode('materia')">✦ Craft materia</button>
+      <button class="${isEnch && blessing ? 'on' : ''}" onclick="__guild.setEnchantMode('blessing')">★ Smith's Blessing</button>
     </div>`;
   if (blessing) {
     const costTxt = Object.keys(BLESSING_COST).map((k) => `${MATERIALS[k].name} ×${BLESSING_COST[k]}`).join(', ');
@@ -2145,7 +2177,7 @@ function enchantBody(h) {
     const have = materialCount(guild.inventory, 'smith_blessing');
     return `${enchantingShapeOf(h)}${benchToggle}
       <div class="opt-list"><button class="opt active ${unlocked ? '' : 'lack'}" ${unlocked ? '' : 'disabled'}>
-        <span><span class="o-name">⭐ Smith's Blessing</span> <span class="o-desc">${unlocked ? costTxt : `deeper lore needed — Theory ${BLESSING_REQ_THEORY}`}</span></span>
+        <span><span class="o-name">★ Smith's Blessing</span> <span class="o-desc">${unlocked ? costTxt : `deeper lore needed — Theory ${BLESSING_REQ_THEORY}`}</span></span>
         <span class="o-cost">in stock: ${have}</span></button></div>
       <div class="hint" style="text-align:left;padding:4px 0">A mithril-laced charm for the Forge: guard a refine attempt with one and a <b>failed attempt keeps its level</b> instead of shattering. Shelved in the Forge stockroom.</div>`;
   }
@@ -2154,7 +2186,7 @@ function enchantBody(h) {
     const costTxt = Object.keys(cost).map((k) => `${MATERIALS[k].name} ×${cost[k]}`).join(', ');
     const enough = Object.keys(cost).every((k) => (guild.inventory.materials[k] || 0) >= cost[k]);
     if (!orbUnlocked(h, i)) {
-      return `<button class="opt lack" disabled><span><span class="o-name" style="color:${pl.col}">🔒 ${pl.sym} ${pl.name}</span> <span class="o-desc">${pl.bonusDesc} · deeper lore needed</span></span><span class="o-cost">Theory ${orbReqTheory(i)}</span></button>`;
+      return `<button class="opt lack" disabled><span><span class="o-name" style="color:${pl.col}">${pl.sym} ${pl.name}</span> <span class="o-desc">${pl.bonusDesc} · deeper lore needed</span></span><span class="o-cost">Theory ${orbReqTheory(i)}</span></button>`;
     }
     return `<button class="opt ${isEnch && h.assignment.enchantPlanet === i ? 'active' : ''} ${enough ? '' : 'lack'}" onclick="__guild.setEnchantPlanet(${i})">
       <span><span class="o-name" style="color:${pl.col}">${pl.sym} ${pl.name}</span> <span class="o-desc">${pl.bonusDesc} · ${costTxt}</span></span>
@@ -2168,7 +2200,7 @@ function enchantBody(h) {
       <button class="rc-hire ${freeWeapon ? '' : 'disabled'}" onclick="__guild.slotOrb(${i})">${freeWeapon ? `↳ Slot into ${itemLabel(freeWeapon)}` : 'no free socket'}</button></div>`; }).join('')
     : '<div class="hint">No orbs yet — the Enchanter crafts one each week they work.</div>';
   return `${enchantingShapeOf(h)}${benchToggle}<div class="opt-list">${list}</div>
-    <div class="dept-lbl" style="margin-top:8px">✨ Materia store · ${store.length}</div>
+    <div class="dept-lbl" style="margin-top:8px">✦ Materia store · ${store.length}</div>
     <div class="market-list">${storeHTML}</div>
     <div class="hint" style="text-align:left;padding:4px 0">Crafted orbs slot into armoury weapons. <span class="dim">A slotted orb doesn't change a played fight yet — the arena bridge comes later.</span></div>`;
 }
@@ -2180,8 +2212,8 @@ function studyBody(h) {
   const disc = BOOK_SUBJECTS[a.discipline] ? a.discipline : 'blacksmithing';
   const writing = a.studyMode === 'write';
   const modeToggle = `<div class="intensity-toggle">
-      <button class="${assigned && !writing ? 'on' : ''}" onclick="__guild.setStudyMode('read')">📖 Study</button>
-      <button class="${assigned && writing ? 'on' : ''}" onclick="__guild.setStudyMode('write')">📜 Write a book</button>
+      <button class="${assigned && !writing ? 'on' : ''}" onclick="__guild.setStudyMode('read')">Study</button>
+      <button class="${assigned && writing ? 'on' : ''}" onclick="__guild.setStudyMode('write')">Write a book</button>
     </div>`;
   const subjToggle = `<div class="intensity-toggle subj-toggle">${BOOK_SUBJECT_IDS.map((s) => {
     const B = BOOK_SUBJECTS[s];
@@ -2195,10 +2227,10 @@ function studyBody(h) {
     const theory = (h.professions[disc] || {}).theory || 0;
     jobline = tier < 1
       ? `<div class="hint">✍ ${h.name.split(' ')[0]} knows too little ${BOOK_SUBJECTS[disc].label} to write on it — Theory ${theory}/${WRITE_MIN_THEORY}. Study first (or pick a subject they've mastered).</div>`
-      : `<div class="room-jobline">📜 ${h.name} will pen a <b>${'★'.repeat(tier)}${'☆'.repeat(3 - tier)} ${BOOK_SUBJECTS[disc].label}</b> volume this week — their mastery becomes the shelf's.</div>`;
+      : `<div class="room-jobline">${h.name} will pen a <b>${'★'.repeat(tier)}${'☆'.repeat(3 - tier)} ${BOOK_SUBJECTS[disc].label}</b> volume this week — their mastery becomes the shelf's.</div>`;
   } else {
     jobline = assigned
-      ? `<div class="room-jobline">📖 ${h.name} is studying <b>${BOOK_SUBJECTS[disc].label}</b> this week.</div>`
+      ? `<div class="room-jobline">${h.name} is studying <b>${BOOK_SUBJECTS[disc].label}</b> this week.</div>`
       : '<div class="hint">Pick a subject above to assign this member to study.</div>';
   }
   return `${shape}${modeToggle}${subjToggle}
@@ -2223,14 +2255,14 @@ function refineItemName(a) {
 /** One-line summary of what a member is doing this week. */
 function jobLabel(h) {
   const a = h.assignment;
-  return a.type === 'forge' ? (a.forgeMode === 'refine' ? `✨ Refining ${refineItemName(a)}` : a.forgeMode === 'rework' ? `⚒ Reworking ${refineItemName(a)}` : `🔨 Forging ${(getRecipe(a.recipeId) || {}).name || ''}`)
+  return a.type === 'forge' ? (a.forgeMode === 'refine' ? `✦ Refining ${refineItemName(a)}` : a.forgeMode === 'rework' ? `⚒ Reworking ${refineItemName(a)}` : `Forging ${(getRecipe(a.recipeId) || {}).name || ''}`)
     : a.type === 'brew' ? `⚗ Brewing ${(getPotionRecipe(a.potionId) || {}).name || ''}`
-    : a.type === 'cook' ? `🍳 Cooking ${(getRation(a.cookRecipeId) || {}).name || ''}`
-    : a.type === 'enchant' ? (a.enchantMode === 'blessing' ? `⭐ Crafting a Smith's Blessing` : `✨ Enchanting ${(PLANETS[a.enchantPlanet] || {}).name || ''}`)
-    : a.type === 'study' ? `${a.studyMode === 'write' ? '📜 Writing on' : '📖 Studying'} ${((BOOK_SUBJECTS[a.discipline] || BOOK_SUBJECTS.blacksmithing).label).toLowerCase()}`
-    : a.type === 'quest' ? `🗺 ${a.questId ? (questTitle(a.questId) || 'On a quest') : 'Quest (pick one)'}`
-    : a.type === 'hunt' ? `🏹 ${a.huntId ? `Hunting ${(preyById(a.huntId) || {}).name || ''}` : 'Hunt (pick prey)'}`
-    : a.trainingId === 'spar' ? `🤺 Sparring ${((heroById(a.sparWith) || {}).name || '?').split(' ')[0]}`
+    : a.type === 'cook' ? `Cooking ${(getRation(a.cookRecipeId) || {}).name || ''}`
+    : a.type === 'enchant' ? (a.enchantMode === 'blessing' ? `★ Crafting a Smith's Blessing` : `✦ Enchanting ${(PLANETS[a.enchantPlanet] || {}).name || ''}`)
+    : a.type === 'study' ? `${a.studyMode === 'write' ? 'Writing on' : 'Studying'} ${((BOOK_SUBJECTS[a.discipline] || BOOK_SUBJECTS.blacksmithing).label).toLowerCase()}`
+    : a.type === 'quest' ? `${a.questId ? (questTitle(a.questId) || 'On a quest') : 'Quest (pick one)'}`
+    : a.type === 'hunt' ? `➳ ${a.huntId ? `Hunting ${(preyById(a.huntId) || {}).name || ''}` : 'Hunt (pick prey)'}`
+    : a.trainingId === 'spar' ? `Sparring ${((heroById(a.sparWith) || {}).name || '?').split(' ')[0]}`
     : `⚔ ${(getDrill(a.trainingId) || REST).name}${a.intensity === 'heavy' ? ' (Heavy)' : ''}`;
 }
 
@@ -2254,10 +2286,10 @@ function armoryPanel() {
   }).join('') : '<div class="hint">Empty. Assign a hero to the Forge to make weapons.</div>';
 
   return `<div class="plan-card">
-      <div class="plan-title">🏛 Armory · finished gear</div>
+      <div class="plan-title">Armory · finished gear</div>
       <div class="armory-shelf">${shelfHTML}</div>
       ${carried.length ? `<div class="rr-sub" style="margin-top:8px">${carried.length} item(s) carried by heroes.</div>` : ''}
-      <div class="hint" style="text-align:left;padding:6px 0 0">The Forge can ⚒ rework a shelved piece's quality, or ✨ refine it +1 at a time — raw ore lives in the Forge's own stockroom.</div>
+      <div class="hint" style="text-align:left;padding:6px 0 0">The Forge can ⚒ rework a shelved piece's quality, or ✦ refine it +1 at a time — raw ore lives in the Forge's own stockroom.</div>
     </div>`;
 }
 
@@ -2277,7 +2309,7 @@ function storesPanel(title, roomId, hint) {
 function libraryShelfPanel() {
   const books = guild.inventory.books || [];
   const rows = books.length ? books.map((b) => {
-    const sub = BOOK_SUBJECTS[b.subject] || { glyph: '📖', label: b.subject };
+    const sub = BOOK_SUBJECTS[b.subject] || { glyph: '', label: b.subject };
     const provenance = b.source === 'quest' ? 'recovered on a quest'
       : b.source === 'penned' ? `✍ penned by ${b.author || 'a member'}` : 'bought at market';
     return `<div class="armory-item">
@@ -2293,7 +2325,7 @@ function libraryShelfPanel() {
       : `<div class="r-line dim">${sub.glyph} No ${sub.label.toLowerCase()} volume shelved — scholars study from loose notes.</div>`;
   }).join('');
   return `<div class="plan-card">
-      <div class="plan-title">📚 The Shelf · ${books.length} volume${books.length === 1 ? '' : 's'}</div>
+      <div class="plan-title">The Shelf · ${books.length} volume${books.length === 1 ? '' : 's'}</div>
       <div class="armory-shelf">${rows}</div>
       <div style="margin-top:8px;font-size:0.82em">${guide}</div>
       <div class="hint" style="text-align:left;padding:6px 0 0">The shelf also teaches the shop floor: every trade week, the worker consults the best volume on their craft for a little Theory.</div>
@@ -2315,7 +2347,7 @@ function quartermasterPanel() {
   const toggle = POLICIES.map((p) => `<button class="${policy === p.id ? 'on' : ''}" onclick="__guild.setPolicy('${p.id}')">${p.name}</button>`).join('');
   const desc = (POLICIES.find((p) => p.id === policy) || POLICIES[0]).desc;
   return `<div class="plan-card">
-      <div class="plan-title">🎽 Quartermaster</div>
+      <div class="plan-title">Quartermaster</div>
       <div class="activity-toggle">${toggle}</div>
       <div class="skill-shape"><span class="dim">${desc}</span></div>
       <div class="rr-sub" style="margin-bottom:10px">${kitted}/${guild.roster.length} fully kitted · armory idle: ${idleW} weapon${idleW === 1 ? '' : 's'}, ${idleB} armor</div>
@@ -2341,7 +2373,7 @@ function marketPanel() {
         <button class="rc-hire" onclick="__guild.sellMaterial('${id}')">Sell · ${sellPriceMat(id)}g</button>
       </div>`).join('');
   const bookRows = (m.bookStock || []).map((b) => {
-    const sub = BOOK_SUBJECTS[b.subject] || { glyph: '📖', label: b.subject };
+    const sub = BOOK_SUBJECTS[b.subject] || { glyph: '', label: b.subject };
     const price = bookPrice(b);
     const afford = guild.gold >= price;
     return `<div class="market-row">
@@ -2350,15 +2382,15 @@ function marketPanel() {
       </div>`;
   }).join('');
   const haulSection = haulRows
-    ? `<div class="dept-lbl" style="margin-top:8px">🏹 Sell your haul</div><div class="market-list">${haulRows}</div>`
+    ? `<div class="dept-lbl" style="margin-top:8px">➳ Sell your haul</div><div class="market-list">${haulRows}</div>`
     : '';
   return `<div class="plan-card">
       <div class="plan-title">⚖ Market · Buy Materials</div>
       <div class="market-list">${rows}</div>
       ${haulSection}
-      <div class="dept-lbl" style="margin-top:8px">📚 The bookseller's shelf</div>
+      <div class="dept-lbl" style="margin-top:8px">The bookseller's shelf</div>
       <div class="market-list">${bookRows || '<div class="hint">Sold out this week — the shelf turns over each Advance Week.</div>'}</div>
-      <div class="hint" style="text-align:left;padding:6px 0 0">Materials deliver to their room's store (ore → Forge, herbs → Laboratory, food → Kitchen); books shelve in the 📖 Library. Pelts &amp; surplus meat from the Wilds sell here. Stock refreshes each week.</div>
+      <div class="hint" style="text-align:left;padding:6px 0 0">Materials deliver to their room's store (ore → Forge, herbs → Laboratory, food → Kitchen); books shelve in the Library. Pelts &amp; surplus meat from the Wilds sell here. Stock refreshes each week.</div>
     </div>`;
 }
 
@@ -2367,11 +2399,11 @@ function recapPanel() {
   if (!rep) return '';
   const lines = rep.results.map((r) => {
     // The shelf taught the worker on the job — a small suffix on any trade line.
-    const learned = r.learned ? ` <span class="dim">· 📖 consulted “${r.learned.title}” — Theory +${r.learned.theoryGain}</span>` : '';
+    const learned = r.learned ? ` <span class="dim">· consulted “${r.learned.title}” — Theory +${r.learned.theoryGain}</span>` : '';
     if (r.type === 'forge' && r.refinePlus) {
       const f = r.refinePlus;
       if (f.ok && f.success) return `<div class="r-line"><b>${r.name}</b> refined <span class="up">${r.recipeName} → +${f.to}</span> <span class="dim">· ${f.chance}% held${f.to > 0 && f.chance < 100 ? ' — nerves of steel' : ''}</span>${learned}</div>`;
-      if (f.ok && f.broke) return `<div class="r-line"><b>${r.name}</b> <span class="down">💥 pushed ${r.recipeName} past +${f.from} — it SHATTERED on the anvil</span> <span class="dim">· ${f.chance}% missed</span>${learned}</div>`;
+      if (f.ok && f.broke) return `<div class="r-line"><b>${r.name}</b> <span class="down">✷ pushed ${r.recipeName} past +${f.from} — it SHATTERED on the anvil</span> <span class="dim">· ${f.chance}% missed</span>${learned}</div>`;
       if (f.ok && f.downgraded) return `<div class="r-line"><b>${r.name}</b> <span class="down">failed the refine — the Tempering Oil held the piece together at +${f.to}</span>${learned}</div>`;
       if (f.ok && f.kept) return `<div class="r-line"><b>${r.name}</b> <span class="down">failed the refine — the Smith's Blessing kept it at +${f.from}</span>${learned}</div>`;
       if (f.reason === 'struck') return `<div class="r-line"><b>${r.name}</b> <span class="dim">worked the anvil in person this week — that attempt is already spent</span>${learned}</div>`;
@@ -2404,7 +2436,7 @@ function recapPanel() {
     }
     if (r.type === 'enchant' && r.blessing) {
       const bl = r.blessing;
-      if (bl.ok) return `<div class="r-line"><b>${r.name}</b> crafted <span class="up">⭐ a Smith's Blessing</span> <span class="dim">· to the Forge stockroom · +${bl.practiceGain} practice</span>${learned}</div>`;
+      if (bl.ok) return `<div class="r-line"><b>${r.name}</b> crafted <span class="up">★ a Smith's Blessing</span> <span class="dim">· to the Forge stockroom · +${bl.practiceGain} practice</span>${learned}</div>`;
       const why = bl.reason === 'materials' ? 'out of ore' : (bl.reason === 'locked' ? 'lore not yet deep enough' : 'too tired to work');
       return `<div class="r-line"><b>${r.name}</b> <span class="down">couldn't craft the blessing — ${why}</span>${learned}</div>`;
     }
@@ -2429,8 +2461,8 @@ function recapPanel() {
     if (r.type === 'study') return `<div class="r-line"><b>${r.name}</b> studied ${((BOOK_SUBJECTS[r.discipline] || {}).label || 'metallurgy').toLowerCase()} — <span class="up">Theory +${r.study.theoryGain}</span>${r.book ? ` <span class="dim">· guided by “${r.book}”</span>` : ''}</div>`;
     if (r.type === 'retire') {
       const cr = r.career || {};
-      const titles = (cr.titles || []).length ? ` · 👑 ${(cr.titles || []).length} title${cr.titles.length > 1 ? 's' : ''}` : '';
-      return `<div class="r-line">🎓 <b>${r.name}</b> <span class="up">retires with honors</span> — ${cr.wins || 0}W–${cr.losses || 0}L${titles} · enshrined in the Hall of Fame (Quarters)</div>`;
+      const titles = (cr.titles || []).length ? ` · ♛ ${(cr.titles || []).length} title${cr.titles.length > 1 ? 's' : ''}` : '';
+      return `<div class="r-line"><b>${r.name}</b> <span class="up">retires with honors</span> — ${cr.wins || 0}W–${cr.losses || 0}L${titles} · enshrined in the Hall of Fame (Quarters)</div>`;
     }
     if (r.type === 'quest') {
       const wound = r.wounded ? ` <span class="down">· ⚠ ${r.wounded}</span>` : '';
@@ -2441,7 +2473,7 @@ function recapPanel() {
         const party = r.quest.party > 1 ? ` <span class="dim">(party of ${r.quest.party})</span>` : '';
         if (r.reward) {
           const loot = r.reward.loot ? ` +1 ${MATERIALS[r.reward.loot].name}` : '';
-          const bookTxt = r.reward.book ? ` · 📖 “${r.reward.book}” recovered` : '';
+          const bookTxt = r.reward.book ? ` · “${r.reward.book}” recovered` : '';
           return `<div class="r-line"><b>${r.name}</b> completed <span class="up">${r.quest.title}</span> — <span class="up">+${r.reward.gold}g · +${r.reward.rep} rep${loot}</span>${bookTxt} <span class="dim">· Field +${r.field}</span>${party}${led}${wound}</div>`;
         }
         return `<div class="r-line"><b>${r.name}</b> joined <span class="up">${r.quest.title}</span> <span class="dim">· Field +${r.field}</span>${party}${led}${wound}</div>`;
@@ -2456,8 +2488,8 @@ function recapPanel() {
       if (r.hunt && r.hunt.success) {
         const party = r.hunt.party > 1 ? ` <span class="dim">(party of ${r.hunt.party})</span>` : '';
         if (r.reward) {
-          const haul = [r.reward.meat > 0 ? `🥩${r.reward.meat}` : '', r.reward.pelt > 0 ? `🟫${r.reward.pelt}` : '', r.reward.loot ? `+1 ${MATERIALS[r.reward.loot].name}` : ''].filter(Boolean).join(' ');
-          return `<div class="r-line"><b>${r.name}</b> hunted the <span class="up">${r.hunt.glyph || '🏹'} ${r.hunt.prey}</span> — <span class="up">+${r.reward.gold}g${haul ? ' · ' + haul : ''}</span> <span class="dim">· Field +${r.field}</span>${party}${led}${wound}</div>`;
+          const haul = [r.reward.meat > 0 ? `${r.reward.meat}` : '', r.reward.pelt > 0 ? `${r.reward.pelt}` : '', r.reward.loot ? `+1 ${MATERIALS[r.reward.loot].name}` : ''].filter(Boolean).join(' ');
+          return `<div class="r-line"><b>${r.name}</b> hunted the <span class="up">${r.hunt.glyph || '➳'} ${r.hunt.prey}</span> — <span class="up">+${r.reward.gold}g${haul ? ' · ' + haul : ''}</span> <span class="dim">· Field +${r.field}</span>${party}${led}${wound}</div>`;
         }
         return `<div class="r-line"><b>${r.name}</b> joined the hunt for the <span class="up">${r.hunt.prey}</span> <span class="dim">· Field +${r.field}</span>${party}${led}${wound}</div>`;
       }
@@ -2468,15 +2500,15 @@ function recapPanel() {
     const ups = HERO_STATS.filter((s) => r.gains && r.gains[s]).map((s) => `<span class="up">${s}+${r.gains[s]}</span>`);
     const downs = HERO_STATS.filter((s) => r.drops && r.drops[s]).map((s) => `<span class="down">${s}−${r.drops[s]}</span>`);
     const body = ups.concat(downs).join(' ') || '<span class="down">no gain — too worn down</span>';
-    const bt = r.breakthrough ? ' <span class="up">✨ breakthrough!</span>' : '';
+    const bt = r.breakthrough ? ' <span class="up">✦ breakthrough!</span>' : '';
     const du = r.discUp ? ` <span class="up">${(disciplineById(r.discUp.disc) || {}).glyph || '⚔'} ${(disciplineById(r.discUp.disc) || {}).name} Lv${r.discUp.lvl}${r.discUp.tech ? ` — ${r.discUp.tech}!` : ''}</span>` : '';
     return `<div class="r-line"><b>${r.name}</b> · ${body}${bt}${du}${r.injury ? ` <span class="down">⚠ ${injuryLabel(r.injury)}!</span>` : ''} <span class="dim">(fat ${fmtDelta(r.fat)})</span></div>`;
   }).join('');
-  const qm = rep.issued ? `<div class="r-line dim">🎽 quartermaster issued ${rep.issued} item(s) from stores</div>` : '';
+  const qm = rep.issued ? `<div class="r-line dim">quartermaster issued ${rep.issued} item(s) from stores</div>` : '';
   const hungryN = rep.results.filter((r) => r.hungry).length;
-  const pantryLine = hungryN ? `<div class="r-line"><span class="down">🍞 The pantry ran short — ${hungryN} member${hungryN === 1 ? '' : 's'} ate plain rations. Restock at the Market.</span></div>` : '';
+  const pantryLine = hungryN ? `<div class="r-line"><span class="down">The pantry ran short — ${hungryN} member${hungryN === 1 ? '' : 's'} ate plain rations. Restock at the Market.</span></div>` : '';
   const tLines = (rep.tournaments || []).map((t) => {
-    const glyph = (EVENT_TYPES[t.eventType] || {}).glyph || '🏆';
+    const glyph = (EVENT_TYPES[t.eventType] || {}).glyph || '';
     if (t.casualty) return `<div class="r-line"><span class="down">☠ <b>${t.casualty}</b> fell at ${t.name} — enshrined in the Hall of Fame. A slot opens for the next to rise.</span></div>`;
     if (t.forfeit) return `<div class="r-line">${glyph} <b>${t.name}</b> <span class="down">${t.hadEntrants ? 'forfeited — entrants unfit to compete' : 'passed — no one entered'}</span></div>`;
     const loot = t.loot ? ` +1 ${MATERIALS[t.loot].name}` : '';
@@ -2486,9 +2518,9 @@ function recapPanel() {
     const hurtTxt = (t.hurt && t.hurt.length) ? ` <span class="down">⚠ ${t.hurt.join(', ')} hurt</span>` : '';
     return `<div class="r-line">${glyph} <b>${t.name}</b> · <span class="${t.champion ? 'up' : ''}">${t.placement}</span>${pay}${team}${played}${hurtTxt}</div>`;
   }).join('');
-  const wildsLines = (rep.wildsFound || []).map((l) => `<div class="r-line"><span class="up">🗺 A returning party mapped new ground — ${l.glyph} <b>${l.name}</b> is open in the Wilds.</span></div>`).join('');
+  const wildsLines = (rep.wildsFound || []).map((l) => `<div class="r-line"><span class="up">A returning party mapped new ground — ${l.glyph} <b>${l.name}</b> is open in the Wilds.</span></div>`).join('');
   return `<div class="week-report"><h4>Last week</h4>${tLines}${lines}${wildsLines}${qm}${pantryLine}<div class="r-line">income <span class="up">+${rep.income}g</span> · upkeep <span class="down">−${rep.upkeep}g</span>${rep.shortfall ? ' · <span class="down">insolvent — morale −8 all</span>' : ''}</div>
-    <button class="tb-toggle" style="margin:8px 0 0" onclick="__guild.openAssembly()">📋 Reopen the weekly assembly — praise &amp; scold</button></div>`;
+    <button class="tb-toggle" style="margin:8px 0 0" onclick="__guild.openAssembly()">Reopen the weekly assembly — praise &amp; scold</button></div>`;
 }
 
 // --- The Weekly Assembly: the whole roster's week on one screen ---------------
@@ -2499,9 +2531,9 @@ function recapPanel() {
 // reading conduct right matters: scolding honest work frays the Bond; praising a
 // hidden slack teaches them that coasting pays.
 const CONDUCT_BADGE = {
-  exceeded: { cls: 'exceeded', txt: '✨ Exceeded expectations' },
+  exceeded: { cls: 'exceeded', txt: '✦ Exceeded expectations' },
   solid:    { cls: 'solid',    txt: '✓ Did the work' },
-  cheated:  { cls: 'cheated',  txt: '🤥 Slacked off — and hid it' },
+  cheated:  { cls: 'cheated',  txt: 'Slacked off — and hid it' },
   failed:   { cls: 'failed',   txt: '✗ Fell short' },
 };
 
@@ -2510,7 +2542,7 @@ function assemblyOutcome(r) {
   if (r.type === 'forge' && r.refinePlus) {
     const f = r.refinePlus;
     if (f.ok && f.success) return `refined <span class="up">${r.recipeName} → +${f.to}</span> <span class="dim">· ${f.chance}%</span>`;
-    if (f.ok && f.broke) return `<span class="down">💥 shattered ${r.recipeName} at the anvil</span>`;
+    if (f.ok && f.broke) return `<span class="down">✷ shattered ${r.recipeName} at the anvil</span>`;
     if (f.ok && f.downgraded) return `<span class="down">failed — the oil held it at +${f.to}</span>`;
     if (f.ok && f.kept) return `<span class="down">failed — the blessing kept +${f.from}</span>`;
     if (f.reason === 'struck') return `<span class="dim">struck it at the anvil in person</span>`;
@@ -2540,7 +2572,7 @@ function assemblyOutcome(r) {
   }
   if (r.type === 'enchant' && r.blessing) {
     const bl = r.blessing;
-    return bl.ok ? `crafted <span class="up">⭐ a Smith's Blessing</span>`
+    return bl.ok ? `crafted <span class="up">★ a Smith's Blessing</span>`
       : `<span class="down">couldn't craft the blessing — ${bl.reason === 'materials' ? 'no ore' : bl.reason === 'locked' ? 'lore too shallow' : 'too tired'}</span>`;
   }
   if (r.type === 'enchant') {
@@ -2577,17 +2609,17 @@ function assemblyCard(r) {
   const h = heroById(r.id);
   if (r.type === 'retire') {
     return `<div class="as-member as-retire"><div class="as-head"><b>${r.name}</b></div>
-      <div class="as-outcome">🎓 <span class="up">retires with honors</span> — ${recordStr(r.career)} · enshrined in the Hall of Fame</div></div>`;
+      <div class="as-outcome"><span class="up">retires with honors</span> — ${recordStr(r.career)} · enshrined in the Hall of Fame</div></div>`;
   }
   const badge = CONDUCT_BADGE[r.conduct];
   const fb = r.feedback;
   const actions = h ? `<div class="as-actions">
-      <button class="as-praise ${fb === 'praised' ? 'on' : ''}" ${fb ? 'disabled' : ''} onclick="__guild.praiseHero('${r.id}')">${fb === 'praised' ? '👏 Praised' : '👏 Praise'}</button>
-      <button class="as-scold ${fb === 'scolded' ? 'on' : ''}" ${fb ? 'disabled' : ''} onclick="__guild.scoldHero('${r.id}')">${fb === 'scolded' ? '😠 Scolded' : '😠 Scold'}</button>
+      <button class="as-praise ${fb === 'praised' ? 'on' : ''}" ${fb ? 'disabled' : ''} onclick="__guild.praiseHero('${r.id}')">${fb === 'praised' ? 'Praised' : 'Praise'}</button>
+      <button class="as-scold ${fb === 'scolded' ? 'on' : ''}" ${fb ? 'disabled' : ''} onclick="__guild.scoldHero('${r.id}')">${fb === 'scolded' ? 'Scolded' : 'Scold'}</button>
     </div>${r.feedbackNote ? `<div class="as-note">${r.feedbackNote}</div>` : ''}` : '';
   return `<div class="as-member">
       <div class="as-head"><span class="rr-portrait">${h ? personSprite(h, 40) : ''}</span><b>${r.name}</b></div>
-      <div class="as-outcome">${assemblyOutcome(r)}${r.hungry ? ` <span class="down">· 🍞 wanted ${r.hungry} — pantry bare</span>` : ''}${r.mealReaction === 'loved' ? ` <span class="dim">· 🍽 cleaned the plate</span>` : ''}</div>
+      <div class="as-outcome">${assemblyOutcome(r)}${r.hungry ? ` <span class="down">· wanted ${r.hungry} — pantry bare</span>` : ''}${r.mealReaction === 'loved' ? ` <span class="dim">· cleaned the plate</span>` : ''}</div>
       ${badge ? `<div class="as-badge ${badge.cls}">${badge.txt}</div>` : '<div class="as-badge dim">— recovering —</div>'}
       ${actions}
     </div>`;
@@ -2602,18 +2634,18 @@ function showAssembly() {
   const keepScroll = prevOv ? prevOv.scrollTop : 0;
   closeAssembly();
   const tLines = (rep.tournaments || []).map((t) => {
-    const glyph = (EVENT_TYPES[t.eventType] || {}).glyph || '🏆';
+    const glyph = (EVENT_TYPES[t.eventType] || {}).glyph || '';
     if (t.casualty) return `<div class="as-event down">☠ <b>${t.casualty}</b> fell at ${t.name}</div>`;
     if (t.forfeit) return `<div class="as-event dim">${glyph} ${t.name} — ${t.hadEntrants ? 'forfeited' : 'no one entered'}</div>`;
     return `<div class="as-event">${glyph} <b>${t.name}</b> — <span class="${t.champion ? 'up' : ''}">${t.placement}</span>${t.gold ? ` <span class="up">+${t.gold}g</span>` : ''}${(t.hurt && t.hurt.length) ? ` <span class="down">⚠ ${t.hurt.join(', ')} hurt</span>` : ''}</div>`;
   }).join('');
   const apps = guild.apprentices || [];
   const ready = apps.filter((a) => a.readiness >= 1).length;
-  const appLine = apps.length ? `<div class="as-event dim">🎓 ${apps.length} apprentice${apps.length === 1 ? '' : 's'} in the academy${ready ? ` — <span class="up">${ready} ready to graduate</span>` : ''}</div>` : '';
+  const appLine = apps.length ? `<div class="as-event dim">${apps.length} apprentice${apps.length === 1 ? '' : 's'} in the academy${ready ? ` — <span class="up">${ready} ready to graduate</span>` : ''}</div>` : '';
   const ov = document.createElement('div');
   ov.className = 'assembly-overlay';
   ov.innerHTML = `<div class="assembly-card">
-      <div class="as-title">📋 The Weekly Assembly <span class="rr-sub">· ${rep.weekLabel || 'last week'}</span></div>
+      <div class="as-title">The Weekly Assembly <span class="rr-sub">· ${rep.weekLabel || 'last week'}</span></div>
       <div class="as-sub">The guild lines up. Praise the deserving, scold the coasting — they remember which.</div>
       ${tLines}${appLine}
       <div class="as-grid">${rep.results.map(assemblyCard).join('')}</div>
@@ -2725,7 +2757,7 @@ function recruitCard(r) {
   const afford = guild.gold >= cost && guild.roster.length < maxRoster(guild);
   return `<div class="recruit-card">
       <span class="rr-portrait rc-portrait">${personSprite(r, 76)}</span>
-      <span class="rc-info"><b>${r.name}</b><span class="rr-sub">${ARCH_GLYPH[r.archetype] || '☉'} ${r.archetype} · Σ${statTotal(r)} · ⚡${heroPower(r)}</span>${(r.traits || []).length ? `<span class="rr-sub trait-line">${r.traits.map((t) => `<span class="trait-chip" title="${(TRAITS[t] || {}).desc || ''}">${t}</span>`).join('')}</span>` : ''}</span>
+      <span class="rc-info"><b>${r.name}</b><span class="rr-sub">${ARCH_GLYPH[r.archetype] || '☉'} ${r.archetype} · Σ${statTotal(r)} · ↯${heroPower(r)}</span>${(r.traits || []).length ? `<span class="rr-sub trait-line">${r.traits.map((t) => `<span class="trait-chip" title="${(TRAITS[t] || {}).desc || ''}">${t}</span>`).join('')}</span>` : ''}</span>
       <button class="rc-hire ${afford ? '' : 'disabled'}" onclick="__guild.hire('${r.id}')">Hire · ${cost}g</button>
     </div>`;
 }
@@ -2757,7 +2789,7 @@ function roomStatus(id) {
 
 function rosterRoom() {
   const h = heroById(selectedId);
-  const list = `<div class="plan-card"><div class="plan-title">🛡 Roster · ${guild.roster.length}/${maxRoster(guild)}</div>
+  const list = `<div class="plan-card"><div class="plan-title">▣ Roster · ${guild.roster.length}/${maxRoster(guild)}</div>
       <div class="roster-list">${guild.roster.map(rosterRow).join('')}</div></div>`;
   if (!h) return list;
   // MR-style: the member card up top, then two columns — this week's drill menu
@@ -2770,7 +2802,7 @@ function rosterRoom() {
       <div class="plan-card">${trainPlan(h)}</div>
     </div>
     <div class="plan-card">
-      <div class="plan-title">🗺 Dispatch on a Quest</div>${questBody(h)}
+      <div class="plan-title">Dispatch on a Quest</div>${questBody(h)}
     </div>`;
 }
 
@@ -2803,7 +2835,7 @@ function wildsRoom() {
   const cost = scoutCost(guild);
   const scoutRow = nextFog
     ? `<button class="wild-area fog ${guild.gold >= cost ? '' : 'lack'}" onclick="__guild.scoutRegion()">
-        <span class="wa-glyph">❔</span>
+        <span class="wa-glyph">?</span>
         <span class="wa-main"><span class="wa-name">Unmapped ground</span><span class="wa-biome">commission a scout · ${cost}g</span></span></button>`
     : '';
 
@@ -2826,38 +2858,38 @@ function wildsRoom() {
           <span class="hunt-art">${artSprite(p.art, 'wild-standee')}</span>
           <span class="ho-body"><span class="o-name">${p.name} <span class="q-rank">R${p.rank}</span></span>
             <span class="o-desc"><span class="${odds.cls}">${odds.txt} ~${odds.pct}%</span>${partyTag}</span></span>
-          <span class="o-cost">${p.gold}g${rangeTxt(p.meat, '🥩')}${rangeTxt(p.pelt, '🟫')}</span></button>`;
+          <span class="o-cost">${p.gold}g${rangeTxt(p.meat, '')}${rangeTxt(p.pelt, '')}</span></button>`;
     }).join('');
     const cur = (subject.assignment.type === 'hunt' && subject.assignment.huntId) ? preyById(subject.assignment.huntId) : null;
     const curLoc = cur ? subject.assignment.localeId : null;
     const curKey = cur ? curLoc + '|' + cur.id : null;
     const lensBar = cur ? `<div class="tourney-lens quest-lens">
         <button class="tourney-play ${planFor('hunt', curKey) === 'action' ? 'on' : ''}" onclick="__guild.setPlayHunt('${curLoc}','${cur.id}','action')">${planFor('hunt', curKey) === 'action' ? '⚔ Leading the hunt live' : '⚔ Lead the hunt live'}</button>
-        <button class="tourney-play ${planFor('hunt', curKey) === 'spectate' ? 'on' : ''}" onclick="__guild.setPlayHunt('${curLoc}','${cur.id}','spectate')">${planFor('hunt', curKey) === 'spectate' ? '👁 Watching' : '👁 Watch'}</button>
+        <button class="tourney-play ${planFor('hunt', curKey) === 'spectate' ? 'on' : ''}" onclick="__guild.setPlayHunt('${curLoc}','${cur.id}','spectate')">${planFor('hunt', curKey) === 'spectate' ? 'Watching' : 'Watch'}</button>
         <button class="tourney-play ${planFor('hunt', curKey) === 'tactical' ? 'on' : ''}" onclick="__guild.setPlayHunt('${curLoc}','${cur.id}','tactical')">${planFor('hunt', curKey) === 'tactical' ? '♟ Commanding' : '♟ Command'}</button>
       </div>
-      <div class="hint" style="text-align:left;padding:0 2px 6px">On Advance Week the party's strongest marcher closes with <b>${cur.name}</b> — off screen, watched, or played by hand. Winning swings the luck; the party's ⚡ still decides.</div>`
+      <div class="hint" style="text-align:left;padding:0 2px 6px">On Advance Week the party's strongest marcher closes with <b>${cur.name}</b> — off screen, watched, or played by hand. Winning swings the luck; the party's ↯ still decides.</div>`
       : `<div class="hint" style="text-align:left;padding:4px 2px">Pick a quarry above to dispatch <b>${subject.name.split(' ')[0]}</b>.</div>`;
     // A charted locale can be WALKED — the Delve (delve.js): live 2.5D exploration.
     const delveRow = hasDelveMap(open.id)
-      ? `<div class="tourney-lens quest-lens"><button class="tourney-play" ${hCanMarch ? '' : 'disabled'} onclick="__guild.exploreLocale('${open.id}')">⛏ ${hCanMarch ? `Walk ${open.name} — take ${subject.name.split(' ')[0]} in on foot` : `${subject.name.split(' ')[0]} can't march right now`}</button>${hCanMarch ? `<button class="tourney-play" onclick="__guild.exploreLocale('${open.id}', true)">👁 Descend in first person</button>` : ''}</div>
-        <div class="hint" style="text-align:left;padding:0 2px 6px">The area is charted, and there are two ways to walk it. <b>From above</b>: move with WASD or the stick, close with a creature to fight it, bump a vein to mine it. <b>First person</b>: WASD steps and sidesteps, ←/→ turn, <b>Space</b> or a click strikes at what is in front of you — a creature within reach, or the seam in the wall. Fights happen <b>there, in the corridor</b>: you aim and time the blow, whether it lands is rolled from ⚡ against the creature (tiredness costs you accuracy), <b>Shift</b> guards and <b>R</b> drinks a draught from the Apothecary. Health only comes back part way between fights, so how deep you push is the question. Entering costs ${QUEST_STAMINA} stamina and kills pay real spoils on the spot (repeat marches the same week find thinner pickings) — losing a bout sends ${subject.name.split(' ')[0]} home.</div>`
+      ? `<div class="tourney-lens quest-lens"><button class="tourney-play" ${hCanMarch ? '' : 'disabled'} onclick="__guild.exploreLocale('${open.id}')">⚒ ${hCanMarch ? `Walk ${open.name} — take ${subject.name.split(' ')[0]} in on foot` : `${subject.name.split(' ')[0]} can't march right now`}</button>${hCanMarch ? `<button class="tourney-play" onclick="__guild.exploreLocale('${open.id}', true)">Descend in first person</button>` : ''}</div>
+        <div class="hint" style="text-align:left;padding:0 2px 6px">The area is charted, and there are two ways to walk it. <b>From above</b>: move with WASD or the stick, close with a creature to fight it, bump a vein to mine it. <b>First person</b>: WASD steps and sidesteps, ←/→ turn, <b>Space</b> or a click strikes at what is in front of you — a creature within reach, or the seam in the wall. Fights happen <b>there, in the corridor</b>: you aim and time the blow, whether it lands is rolled from ↯ against the creature (tiredness costs you accuracy), <b>Shift</b> guards and <b>R</b> drinks a draught from the Apothecary. Health only comes back part way between fights, so how deep you push is the question. Entering costs ${QUEST_STAMINA} stamina and kills pay real spoils on the spot (repeat marches the same week find thinner pickings) — losing a bout sends ${subject.name.split(' ')[0]} home.</div>`
       : '';
     preyPanel = `<div class="plan-title">${open.glyph} ${open.name} <span class="dim" style="font-weight:400;text-transform:none">— ${open.biome}</span></div>
       <div class="opt-list">${rows}</div>${delveRow}${lensBar}`;
   }
 
   return `<div class="plan-card">
-      <div class="plan-title">🏹 Who's hunting?</div>
+      <div class="plan-title">➳ Who's hunting?</div>
       <div class="hero-switch">${hunterChips}</div>
       <div class="rr-sub" style="margin:4px 2px 0">Dispatching <b>${subject ? subject.name : '—'}</b> · marching a hunt costs ${QUEST_STAMINA} stamina.</div>
     </div>
     <div class="plan-card">
-      <div class="plan-title">🗺 The Wilds · ${disc.length}/${Object.keys(LOCALES).length} mapped</div>
+      <div class="plan-title">The Wilds · ${disc.length}/${Object.keys(LOCALES).length} mapped</div>
       <div class="wild-map">${areaCards}${scoutRow}</div>
     </div>
     <div class="plan-card">${preyPanel || '<div class="hint">Scout an area to open the hunt.</div>'}</div>
-    <div class="hint" style="text-align:left;padding:2px 4px 0">A kill brings home 🥩 game meat (Kitchen pantry → the Hunter's Table diet), a 🟫 pelt (sold at the Market), gold, reputation, and field insight.</div>`;
+    <div class="hint" style="text-align:left;padding:2px 4px 0">A kill brings home game meat (Kitchen pantry → the Hunter's Table diet), a pelt (sold at the Market), gold, reputation, and field insight.</div>`;
 }
 
 /** A work department: shows ONLY the members assigned to this job, plus an "Assign a
@@ -2877,8 +2909,8 @@ function deptRoom(jobType, roleGlyph, roleName, bodyFn) {
     : `<div class="room-jobline">No one works the ${roleName.toLowerCase()} this week.</div>`;
   const trade = ELECTIVE_IDS.map((k) => ELECTIVES[k]).find((x) => x.assign === jobType);
   const addRow = available.length
-    ? `<div class="dept-lbl add">➕ Assign a member</div><div class="hero-switch">${addChips}</div>`
-    : (!workers.length && trade ? `<div class="hint" style="text-align:left;padding:4px 2px">No member has the ${trade.glyph} ${trade.name} elective — enroll one in their Roster → 🎓 Curriculum.</div>` : '');
+    ? `<div class="dept-lbl add">+ Assign a member</div><div class="hero-switch">${addChips}</div>`
+    : (!workers.length && trade ? `<div class="hint" style="text-align:left;padding:4px 2px">No member has the ${trade.glyph} ${trade.name} elective — enroll one in their Roster → Curriculum.</div>` : '');
   return `<div class="plan-card">
       ${workerRow}
       ${addRow}
@@ -2889,48 +2921,48 @@ function deptRoom(jobType, roleGlyph, roleName, bodyFn) {
 // Each work room carries its OWN inventory beneath the job picker: the Forge its
 // ore, the Laboratory its herbs, the Library its shelf of books.
 function forgeRoom() {
-  return deptRoom('forge', '🔨', 'Forge', forgeBody)
-    + storesPanel('🪨 Forge Stockroom · ore', 'forge', 'Ore bought at market or bartered from quests is delivered here. Forging and ♻ refining both draw from this stock.');
+  return deptRoom('forge', '', 'Forge', forgeBody)
+    + storesPanel('▲ Forge Stockroom · ore', 'forge', 'Ore bought at market or bartered from quests is delivered here. Forging and ♻ refining both draw from this stock.');
 }
-function libraryRoom() { return deptRoom('study', '📖', 'Library', studyBody) + libraryShelfPanel(); }
+function libraryRoom() { return deptRoom('study', '', 'Library', studyBody) + libraryShelfPanel(); }
 function laboratoryRoom() {
   return deptRoom('brew', '⚗', 'Laboratory', brewBody)
-    + storesPanel('🌿 Laboratory Stores · herbs', 'laboratory', 'Herbs for the Alchemist’s brews. Finished potions shelve next door in the 🏺 Apothecary.');
+    + storesPanel('Laboratory Stores · herbs', 'laboratory', 'Herbs for the Alchemist’s brews. Finished potions shelve next door in the Apothecary.');
 }
 
 /** The Kitchen is the guild MENU — everyone eats, so it lists every member's diet
  *  (not a worker roster). Pick a member to change their diet. */
 function kitchenRoom() {
   const h = heroById(selectedId);
-  const menu = `<div class="plan-card"><div class="plan-title">🍲 The Menu · who eats what</div>
+  const menu = `<div class="plan-card"><div class="plan-title">The Menu · who eats what</div>
       <div class="roster-list">${guild.roster.map((m) => `<button class="roster-row ${m.id === selectedId ? 'sel' : ''}" onclick="__guild.selectHero('${m.id}')">
           <span class="rr-portrait sm">${personSprite(m, 34)}</span>
-          <span class="rr-main"><span class="rr-name">${m.name}</span><span class="rr-assign">🍖 ${getDietPlan(m.assignment.dietId).name}</span></span>
+          <span class="rr-main"><span class="rr-name">${m.name}</span><span class="rr-assign">${getDietPlan(m.assignment.dietId).name}</span></span>
         </button>`).join('')}</div>
       <div class="hint" style="text-align:left;padding:6px 2px 0">Every diet draws its food from the pantry each week — plain tables eat grain, the rich ones salted meat. A short pantry means plain rations and grumbling.</div></div>`;
-  const pantry = storesPanel('🍞 The Pantry · provisions', 'kitchen', 'Restock at the ⚖ Market (Armory room), or set a Cook to work below. One unit feeds one member for a week.');
-  const cooks = deptRoom('cook', '🍳', 'Kitchen', cookBody); // Cooks (Cooking elective) produce rations here
+  const pantry = storesPanel('The Pantry · provisions', 'kitchen', 'Restock at the ⚖ Market (Armory room), or set a Cook to work below. One unit feeds one member for a week.');
+  const cooks = deptRoom('cook', '', 'Kitchen', cookBody); // Cooks (Cooking elective) produce rations here
   if (!h) return cooks + menu + pantry;
-  return `${cooks}${menu}<div class="plan-card"><div class="plan-title">🍖 ${h.name}'s Diet</div>${dietBody(h)}</div>${pantry}`;
+  return `${cooks}${menu}<div class="plan-card"><div class="plan-title">${h.name}'s Diet</div>${dietBody(h)}</div>${pantry}`;
 }
 function apothecaryRoom() {
   const inv = guild.inventory;
   const h = heroById(selectedId);
   const shelf = inv.potions || [];
   const shelfHTML = shelf.length ? shelf.map((b) => `<div class="armory-item">
-      <span class="ai-icon">${b.glyph || '🧪'}</span>
+      <span class="ai-icon">${b.glyph || ''}</span>
       <span class="ai-main"><b>${b.name} ×${b.qty}</b><span class="rr-sub">potency ${b.potency}${b.brewedByName ? ' · brewed by ' + b.brewedByName : ''}</span></span>
       <span class="ai-actions"><button class="rc-hire" onclick="__guild.usePotion('${b.id}')">Use</button></span>
     </div>`).join('') : '<div class="hint">Empty. Assign an Alchemist to the Laboratory to brew potions.</div>';
   const ctx = h ? `<div class="plan-card">
-      <div class="plan-title">🩹 Treating · ${h.name}</div>
+      <div class="plan-title">Treating · ${h.name}</div>
       ${heroSwitcher()}
       ${bar('Stamina', h.condition.stamina, 'var(--success)')}${bar('Fatigue', h.condition.fatigue, '#e08a3c')}${bar('Stress', h.condition.stress || 0, '#c05a8a')}
       ${h.condition.injury ? `<div class="injury-flag">⚠ ${injuryLabel(h.condition.injury)} — a potent draught (p70+) cures it outright</div>` : ''}
       <div class="room-jobline">Pick a member, then <b>Use</b> a potion below to treat them.</div>
     </div>` : '';
   return `${ctx}<div class="plan-card">
-      <div class="plan-title">🏺 Apothecary · ${potionCount(inv)} potion(s)</div>
+      <div class="plan-title">Apothecary · ${potionCount(inv)} potion(s)</div>
       <div class="armory-shelf">${shelfHTML}</div>
       <div class="hint" style="text-align:left;padding:6px 0 0">The Apothecary shelves finished brews only — raw herbs live in the ⚗ Laboratory's stores.</div>
     </div>`;
@@ -2941,12 +2973,12 @@ function armoryRoom() {
   // here — the shelf's Equip button would otherwise silently arm an off-screen hero.
   const h = heroById(selectedId);
   const ctx = h ? `<div class="plan-card">
-      <div class="plan-title">🎯 Equipping · ${h.name} <span class="rr-sub">⚡${combatPower(h)}</span></div>
+      <div class="plan-title">◎ Equipping · ${h.name} <span class="rr-sub">↯${combatPower(h)}</span></div>
       ${heroSwitcher()}
       ${equippedLine(h)}
       <div class="room-jobline">Pick a member, then <b>Equip</b> items from the armory below onto them.</div>
     </div>` : '';
-  const bench = deptRoom('enchant', '✨', "Enchanter's Bench", enchantBody); // Enchanters (Enchanting elective) craft & slot materia
+  const bench = deptRoom('enchant', '✦', "Enchanter's Bench", enchantBody); // Enchanters (Enchanting elective) craft & slot materia
   return `${ctx}${bench}<div class="room-cols">${armoryPanel()}${quartermasterPanel()}${marketPanel()}</div>`;
 }
 /** Appoint a Hall-of-Famer as the guild trainer (+15% training gains, one slot). */
@@ -2964,15 +2996,15 @@ function hallOfFamePanel() {
   if (!hof.length) return '';
   const rows = hof.slice().reverse().map((f) => {
     const cr = f.career || {};
-    const titles = (cr.titles || []).length ? ` · 👑${cr.titles.length}` : '';
+    const titles = (cr.titles || []).length ? ` · ♛${cr.titles.length}` : '';
     const isTrainer = guild.trainer && guild.trainer.id === f.id;
     return `<div class="opt hof-row">
-        <span><span class="o-name">🎓 ${f.name}</span> <span class="o-desc">${f.archetype} · ${cr.wins || 0}W–${cr.losses || 0}L${titles} · peak ⚡${f.peakPower || '?'}</span></span>
-        <button class="bout-btn ${isTrainer ? 'on' : ''}" onclick="__guild.appointTrainer('${f.id}')">${isTrainer ? '🏋 Head Trainer' : 'Appoint trainer'}</button>
+        <span><span class="o-name">${f.name}</span> <span class="o-desc">${f.archetype} · ${cr.wins || 0}W–${cr.losses || 0}L${titles} · peak ↯${f.peakPower || '?'}</span></span>
+        <button class="bout-btn ${isTrainer ? 'on' : ''}" onclick="__guild.appointTrainer('${f.id}')">${isTrainer ? 'Head Trainer' : 'Appoint trainer'}</button>
       </div>`;
   }).join('');
   return `<div class="plan-card">
-      <div class="plan-title">🏛 Hall of Fame ${guild.trainer ? `· <span class="rr-sub">trainer: ${guild.trainer.name} (+15% gains)</span>` : ''}</div>
+      <div class="plan-title">Hall of Fame ${guild.trainer ? `· <span class="rr-sub">trainer: ${guild.trainer.name} (+15% gains)</span>` : ''}</div>
       <div class="opt-list">${rows}</div>
     </div>`;
 }
@@ -2987,9 +3019,9 @@ function hallOfFamePanel() {
 function quartersRoom() {
   const housed = guild.roster.length, cap = maxRoster(guild);
   return `${hallOfFamePanel()}<div class="plan-card">
-      <div class="plan-title">🛏 Bunkrooms · ${housed}/${cap} housed</div>
-      <div class="hint" style="text-align:left">Your members sleep here between weeks. Beds come from Living Quarters — expand it in the 🏕 Grounds to house more.
-        Sell-swords for hire are down in the 🏘 Town; unnamed prospects train in the 🎓 Academy.</div>
+      <div class="plan-title">Bunkrooms · ${housed}/${cap} housed</div>
+      <div class="hint" style="text-align:left">Your members sleep here between weeks. Beds come from Living Quarters — expand it in the Grounds to house more.
+        Sell-swords for hire are down in the Town; unnamed prospects train in the Academy.</div>
     </div>`;
 }
 
@@ -3002,11 +3034,11 @@ function quartersRoom() {
 function townRoom() {
   const full = guild.roster.length >= maxRoster(guild);
   return `<div class="plan-card">
-      <div class="plan-title">🍺 The Wayhouse · sell-swords for hire · roster ${guild.roster.length}/${maxRoster(guild)}</div>
+      <div class="plan-title">The Wayhouse · sell-swords for hire · roster ${guild.roster.length}/${maxRoster(guild)}</div>
       <div class="hint" style="text-align:left">Grown fighters passing through town. They cost gold and come as they are — no
         upbringing, no loyalty, no say in what they became. New faces drift in each week.</div>
       <div class="recruit-list">${guild.recruits.map(recruitCard).join('')}</div>
-      ${full ? '<div class="hint">No room on the roster — expand Living Quarters in the 🏕 Grounds.</div>' : ''}
+      ${full ? '<div class="hint">No room on the roster — expand Living Quarters in the Grounds.</div>' : ''}
     </div>`;
 }
 
@@ -3018,9 +3050,9 @@ function apprenticeCard(a) {
   const pct = Math.round(a.readiness * 100);
   const ready = a.readiness >= 1;
   const rosterFull = guild.roster.length >= maxRoster(guild);
-  const gradLabel = ready ? (rosterFull ? '🎓 Roster full' : '🎓 Graduate → roster') : `Developing · ${pct}%`;
+  const gradLabel = ready ? (rosterFull ? 'Roster full' : 'Graduate → roster') : `Developing · ${pct}%`;
   return `<div class="app-card ${ready ? 'ready' : ''}">
-      <div class="app-head"><span class="app-face">${personSprite(a, 46)}</span><span class="app-lean">${LEAN_GLYPH[a.lean] || '🎓'} ${a.name || 'Leans ' + a.lean}</span><span class="app-stars" title="scouted potential">${starStr}</span></div>
+      <div class="app-head"><span class="app-face">${personSprite(a, 46)}</span><span class="app-lean">${LEAN_GLYPH[a.lean] || ''} ${a.name || 'Leans ' + a.lean}</span><span class="app-stars" title="scouted potential">${starStr}</span></div>
       <div class="app-bar"><span style="width:${pct}%"></span></div>
       <div class="app-meta">${ready ? '<b>Ready to graduate</b>' : `week ${a.weeks} in the academy`}${a.tuition ? ` · <span class="${a.tuition < 0 ? 'ap-refuse' : 'ap-dim'}">${a.tuition < 0 ? `scholarship ☉${-a.tuition}/wk` : `pays ☉${a.tuition}/wk`}</span>` : ''}</div>
       <div class="app-actions">
@@ -3075,7 +3107,7 @@ function academyRoom() {
     : '<div class="hint">No apprentices yet — answer one of the applications below.</div>';
   const netTxt = net > 0 ? `costs ☉${net}/wk` : net < 0 ? `earns ☉${-net}/wk` : 'pays for itself';
   return `<div class="plan-card">
-      <div class="plan-title">📜 Applications · ${letters.length} on the board</div>
+      <div class="plan-title">Applications · ${letters.length} on the board</div>
       <div class="hint" style="text-align:left">Hopefuls write in with their qualifications. You name the tuition; they accept or refuse.
         A poor prospect from a <b>wealthy house</b> will gladly pay their way — a <b>five-star</b> has every hall in the
         circuit writing back, and will only come on a scholarship the guild pays every week. Their exact price is never
@@ -3083,8 +3115,8 @@ function academyRoom() {
       <div class="ap-list">${letters.map(applicationCard).join('')}</div>
     </div>
     <div class="plan-card">
-      <div class="plan-title">🎓 Academy · ${apps.length}/${cap} bunks · board ☉${board}/wk · tuition ☉${tuition}/wk · ${netTxt}</div>
-      <div class="hint" style="text-align:left">Apprentices develop ~${rate}%/week${guild.trainer ? ' (your trainer mentors the class)' : ' — appoint a trainer to teach faster'}. When one is ready, graduate them into a named hero — a draft shaped by their lean &amp; potential. Bunks = the 🎓 Dormitory (expand in 🏕 Grounds).</div>
+      <div class="plan-title">Academy · ${apps.length}/${cap} bunks · board ☉${board}/wk · tuition ☉${tuition}/wk · ${netTxt}</div>
+      <div class="hint" style="text-align:left">Apprentices develop ~${rate}%/week${guild.trainer ? ' (your trainer mentors the class)' : ' — appoint a trainer to teach faster'}. When one is ready, graduate them into a named hero — a draft shaped by their lean &amp; potential. Bunks = the Dormitory (expand in Grounds).</div>
       <div class="app-list">${cards}</div>
     </div>`;
 }
@@ -3101,7 +3133,7 @@ function bidTuition(id, delta) {
 /** Put the standing offer to the applicant. They accept, refuse, or walk. */
 function sendOffer(id) {
   const a = (guild.applications || []).find((x) => x.id === id); if (!a) return;
-  if ((guild.apprentices || []).length >= dormCapacity(guild)) { notice = 'The Dormitory is full — expand it in the 🏕 Grounds.'; render(); return; }
+  if ((guild.apprentices || []).length >= dormCapacity(guild)) { notice = 'The Dormitory is full — expand it in the Grounds.'; render(); return; }
   const offer = applicationOffers[id] != null ? applicationOffers[id] : suggestedOffer(a, guild);
   const res = offerTuition(guild, a, offer);
   if (res.ok) {
@@ -3111,7 +3143,7 @@ function sendOffer(id) {
     delete applicationOffers[id];
     ensureApplications(guild);
     const terms = offer < 0 ? `a ☉${Math.abs(offer)}/wk scholarship` : offer === 0 ? 'a free place' : `☉${offer}/wk tuition`;
-    notice = `📜 ${a.origin} of ${a.place} accepts ${terms} — ${potentialStars(a.potential)}★, leans ${a.lean}.`;
+    notice = `${a.origin} of ${a.place} accepts ${terms} — ${potentialStars(a.potential)}★, leans ${a.lean}.`;
   } else if (res.reason === 'withdrawn') {
     closeApplication(guild, id);
     delete applicationOffers[id];
@@ -3135,7 +3167,7 @@ function promoteApprentice(id) {
   guild.roster.push(hero);
   guild.apprentices.splice(i, 1);
   selectedId = hero.id;
-  notice = `🎓 ${hero.name} graduated from the academy as a ${hero.archetype}!`;
+  notice = `${hero.name} graduated from the academy as a ${hero.archetype}!`;
   save(); render();
 }
 function dismissApprentice(id) {
@@ -3203,12 +3235,12 @@ function facilityCard(key) {
 /** The buildings in the compound scene, left→right. Each opens its room; the
  *  Bunkhouse (grow:'quarters') gains storeys as Living Quarters expand. */
 const COMPOUND_BUILDINGS = [
-  { room: 'quarters', glyph: '🏠', name: 'Bunkhouse', cls: 'bld-quarters', h: 50, grow: 'quarters' },
-  { room: 'library', glyph: '📖', name: 'Library', cls: 'bld-library', h: 60 },
-  { room: 'roster', glyph: '🏰', name: 'Great Hall', cls: 'bld-hall', h: 86, wide: true },
-  { room: 'forge', glyph: '🔨', name: 'Forge', cls: 'bld-forge', h: 52 },
-  { room: 'armory', glyph: '🗡', name: 'Armory', cls: 'bld-armory', h: 56 },
-  { room: 'kitchen', glyph: '🍲', name: 'Kitchen', cls: 'bld-kitchen', h: 46 },
+  { room: 'quarters', glyph: icon('mug'), name: 'Bunkhouse', cls: 'bld-quarters', h: 50, grow: 'quarters' },
+  { room: 'library', glyph: icon('book'), name: 'Library', cls: 'bld-library', h: 60 },
+  { room: 'roster', glyph: icon('town'), name: 'Great Hall', cls: 'bld-hall', h: 86, wide: true },
+  { room: 'forge', glyph: icon('hammer'), name: 'Forge', cls: 'bld-forge', h: 52 },
+  { room: 'armory', glyph: icon('sword'), name: 'Armory', cls: 'bld-armory', h: 56 },
+  { room: 'kitchen', glyph: icon('pot'), name: 'Kitchen', cls: 'bld-kitchen', h: 46 },
 ];
 function compoundScene() {
   const buildings = COMPOUND_BUILDINGS.map((b) => {
@@ -3246,12 +3278,12 @@ function weeklyBill(g) {
 const CONTACT_GOLD = 150;
 
 const DESK_SCROLLS = {
-  applications: { glyph: '📜', title: 'Letters of Application', render: () => deskApplications() },
-  ledger: { glyph: '🧾', title: 'The Weekly Ledger', render: () => deskLedger() },
-  contacts: { glyph: '🤝', title: 'Contacts Abroad', render: () => deskContacts() },
-  quests: { glyph: '🗺', title: 'The Quest Board', render: () => deskQuests() },
-  tourneys: { glyph: '🏆', title: 'Tournament Circulars', render: () => deskTourneys() },
-  map: { glyph: '🗾', title: 'Map of the Known World', render: () => deskFlatMap() },
+  applications: { glyph: icon('scroll'), title: 'Letters of Application', render: () => deskApplications() },
+  ledger: { glyph: icon('ledger'), title: 'The Weekly Ledger', render: () => deskLedger() },
+  contacts: { glyph: icon('handshake'), title: 'Contacts Abroad', render: () => deskContacts() },
+  quests: { glyph: icon('map'), title: 'The Quest Board', render: () => deskQuests() },
+  tourneys: { glyph: icon('trophy'), title: 'Tournament Circulars', render: () => deskTourneys() },
+  map: { glyph: icon('globe'), title: 'Map of the Known World', render: () => deskFlatMap() },
 };
 
 /** The flat map's last bake — a data URL, so the <img> survives every scroll
@@ -3276,8 +3308,8 @@ function deskFlatMap() {
   return `${_flatMapUrl
     ? `<img class="flatmap" src="${_flatMapUrl}" alt="The Known World, flat" style="aspect-ratio:1024/600">`
     : '<div class="hint" style="text-align:left">The cartographer is inking the plate…</div>'}
-    <div class="hint" style="text-align:left">The wall-scroll view — every hall at once, named where your letters reach. The 🌍 globe is the living version: turn it, and zoom in for towns and your charted delves.</div>
-    <div class="tourney-lens quest-lens"><button class="tourney-play" onclick="__guild.openGlobe()">🌍 Turn the globe instead</button></div>`;
+    <div class="hint" style="text-align:left">The wall-scroll view — every hall at once, named where your letters reach. The globe is the living version: turn it, and zoom in for towns and your charted delves.</div>
+    <div class="tourney-lens quest-lens"><button class="tourney-play" onclick="__guild.openGlobe()">Turn the globe instead</button></div>`;
 }
 
 function studyRoom() {
@@ -3294,7 +3326,7 @@ function studyRoom() {
       <i class="${hot ? 'due' : ''}">${badge}</i>
     </button>`;
   return `<div class="plan-card desk-card">
-      <div class="plan-title">🖋 The Guildmaster’s Desk</div>
+      <div class="plan-title">The Guildmaster’s Desk</div>
       <div class="desk-top">
         ${item('applications', 'Applications', letters.length ? letters.length + ' waiting' : 'none waiting', letters.length > 0)}
         ${item('ledger', 'Ledger', '−' + bill + 'g each week', false)}
@@ -3342,13 +3374,13 @@ function deskContacts() {
   const rows = REALMS.map((r) => {
     const lines = SEATS.filter((s) => s.realm === r.id && s.id !== 'home').map((s) => `
       <div class="contact-row"><span class="c-flag">${r.glyph}</span><b>${s.name}</b>
-        ${known[s.id] ? `<span class="c-known">🤝 since week ${known[s.id]}</span>`
+        ${known[s.id] ? `<span class="c-known">since week ${known[s.id]}</span>`
           : `<button class="contact-btn" ${guild.gold >= CONTACT_GOLD ? '' : 'disabled'} onclick="__guild.makeContact('${s.id}')">✉ Send envoy · ☉${CONTACT_GOLD}</button>`}
       </div>`).join('');
     return `<div class="contact-realm">${r.glyph} ${r.name} — ${r.blurb}</div>${lines}`;
   }).join('');
   return `<div class="hint" style="text-align:left">An envoy carries your seal to a rival hall: their keep lights up on the world map and their circulars reach this desk.</div>
-    <div class="tourney-lens quest-lens"><button class="tourney-play" onclick="__guild.openGlobe()">🌍 Open the world map — every hall on the circuit</button></div>
+    <div class="tourney-lens quest-lens"><button class="tourney-play" onclick="__guild.openGlobe()">Open the world map — every hall on the circuit</button></div>
     ${rows}`;
 }
 
@@ -3377,7 +3409,7 @@ function deskQuests() {
 function deskTourneys() {
   const cur = guild.calendar.week;
   const upcoming = (guild.schedule || []).filter((t) => !t.resolved && t.week >= cur).sort((a, b) => a.week - b.week).slice(0, 3);
-  const bar = `<div class="tourney-lens quest-lens"><button class="tourney-play" onclick="__guild.openGlobe()">🌍 See where the circuit fights — the world map</button></div>`;
+  const bar = `<div class="tourney-lens quest-lens"><button class="tourney-play" onclick="__guild.openGlobe()">See where the circuit fights — the world map</button></div>`;
   if (!upcoming.length) return bar + '<div class="hint" style="text-align:left">No circulars this season — advance a week and the calendar refills.</div>';
   return bar + upcoming.map(tournamentCard).join('');
 }
@@ -3406,11 +3438,11 @@ function makeContact(seatId) {
   if (guild.gold < CONTACT_GOLD) { notice = `The envoy's kit and road-purse run ☉${CONTACT_GOLD} — the chest is short.`; render(); return; }
   addGold(guild, -CONTACT_GOLD);
   guild.contacts[seatId] = guild.calendar.week;
-  notice = `🤝 An envoy rides for ${seat.name} — their circulars will reach your desk.`;
+  notice = `An envoy rides for ${seat.name} — their circulars will reach your desk.`;
   save(); render();
 }
 
-const calendarGlobeBar = () => `<div class="tourney-lens quest-lens"><button class="tourney-play" onclick="__guild.openGlobe()">🌍 The Known World — every hall, every venue</button></div>`;
+const calendarGlobeBar = () => `<div class="tourney-lens quest-lens"><button class="tourney-play" onclick="__guild.openGlobe()">The Known World — every hall, every venue</button></div>`;
 
 /** The World room — the globe's own front door on the rail, so nobody has to
  *  find it inside a scroll. Counts by realm, this season's venues, one button. */
@@ -3421,7 +3453,7 @@ function worldRoom() {
   const evLines = upcoming.map((t) => {
     const v = seatById(t.venueId || seatForEvent(t.id));
     const w = t.week - cur;
-    return `<div class="world-line">🏆 <b>${t.name}</b> · R${t.rank} — at <b>${v ? v.name : 'an unnamed hall'}</b>, ${w <= 0 ? 'this week' : 'in ' + w + 'w'}</div>`;
+    return `<div class="world-line"><b>${t.name}</b> · R${t.rank} — at <b>${v ? v.name : 'an unnamed hall'}</b>, ${w <= 0 ? 'this week' : 'in ' + w + 'w'}</div>`;
   }).join('');
   const realmLines = REALMS.map((r) => {
     const seats = SEATS.filter((s) => s.realm === r.id && s.id !== 'home');
@@ -3429,11 +3461,11 @@ function worldRoom() {
     return `<div class="world-line">${r.glyph} <b>${r.name}</b> — ${r.blurb} · <span class="${met ? 'up' : 'dim'}">${met}/${seats.length} known</span></div>`;
   }).join('');
   return `<div class="plan-card">
-      <div class="plan-title">🌍 The Known World</div>
-      <div class="hint" style="text-align:left">Four realms, thirty-two halls — yours among them. Drag the globe to turn it, pinch or ＋/− to zoom: closer in, the free towns and your charted Wilds delves appear. Tournaments pulse at the hall hosting them; envoys (☉${CONTACT_GOLD}, sent here or from the desk's 🤝 Contacts scroll) light a hall up with its dossier.</div>
+      <div class="plan-title">The Known World</div>
+      <div class="hint" style="text-align:left">Four realms, thirty-two halls — yours among them. Drag the globe to turn it, pinch or ＋/− to zoom: closer in, the free towns and your charted Wilds delves appear. Tournaments pulse at the hall hosting them; envoys (☉${CONTACT_GOLD}, sent here or from the desk's Contacts scroll) light a hall up with its dossier.</div>
       <div class="tourney-lens quest-lens">
-        <button class="tourney-play" onclick="__guild.openGlobe()">🌍 Turn the globe</button>
-        <button class="tourney-play" onclick="__guild.deskScroll('map')">🗾 Unroll the flat map</button>
+        <button class="tourney-play" onclick="__guild.openGlobe()">Turn the globe</button>
+        <button class="tourney-play" onclick="__guild.deskScroll('map')">Unroll the flat map</button>
       </div>
       ${realmLines}
       <div class="dept-lbl">This season's venues</div>
@@ -3502,15 +3534,15 @@ function groundsRoom() {
             <!-- The alchemical build cycler (Salt/Sulfur/Mercury) is retired with
                  the rest of that flavour; masterBuild() is kept if it ever returns.
                  <button class="tourney-play" onclick="__guild.masterBuild()">◑ Build</button> -->
-            <button class="tourney-play" onclick="__guild.masterReroll()">🎲 New look</button>
+            <button class="tourney-play" onclick="__guild.masterReroll()">New look</button>
           </span>
         </span>
       </div>
-      <div class="tourney-lens quest-lens"><button class="tourney-play" onclick="__guild.walkGuild()">🚶 Walk the grounds — enter any building through its door</button></div>
+      <div class="tourney-lens quest-lens"><button class="tourney-play" onclick="__guild.walkGuild()">Walk the grounds — enter any building through its door</button></div>
       <div class="fac-note">The estate plans are spread on the table in the Great Hall (and on the desk in your study). Read them to raise, move or pull down a building.</div>
     </div>
     <div class="plan-card">
-      <div class="plan-title">🏕 The Grounds · capacity</div>
+      <div class="plan-title">The Grounds · capacity</div>
       ${bar('Housing', cap ? housed / cap * 100 : 0, housed >= cap ? 'var(--danger)' : 'var(--success)', `${housed} / ${cap}`)}
       <div class="fac-note">Beds in the Living Quarters${housed >= cap ? ' — full; expand to recruit more' : ''}</div>
       ${bar('Fed', fed ? housed / fed * 100 : 0, housed > fed ? '#e08a3c' : '#8ab4d8', `${housed} / ${fed}`)}
@@ -3519,7 +3551,7 @@ function groundsRoom() {
       <div class="fac-note">Members drilling this week · upkeep −${upkeep}g/wk</div>
     </div>
     <div class="plan-card">
-      <div class="plan-title">👥 Headcount</div>
+      <div class="plan-title">Headcount</div>
       <div class="headcount">
         <span class="hc-cell"><b>${named}</b><span>Named heroes</span></span>
         <span class="hc-cell"><b>${trainees}</b><span>Trainees</span></span>
@@ -3529,7 +3561,7 @@ function groundsRoom() {
       <div class="dept-lbl" style="margin-top:10px">Members</div>
       <div class="hero-switch">${strip}</div>
     </div>
-    <div class="plan-title" style="margin:2px 2px 8px">🏗 Expand the compound</div>
+    <div class="plan-title" style="margin:2px 2px 8px">Expand the compound</div>
     <div class="fac-hub">${facGrid}</div>`;
 }
 
@@ -3599,31 +3631,31 @@ function tournamentCard(t) {
   const loot = t.rewards.loot ? ` · +1 ${MATERIALS[t.rewards.loot].name}` : '';
   const odds = !entrant ? '<span class="dim">Choose a champion to see your odds.</span>'
     : !fit ? '<span class="down">Injured — would forfeit. Heal them, or send someone else.</span>'
-    : `${entrant.name} <b>⚡${power}</b> · <span class="${oddsCls}">~${champ}% to win it all</span>`;
+    : `${entrant.name} <b>↯${power}</b> · <span class="${oddsCls}">~${champ}% to win it all</span>`;
   const chip = entrant
     ? `<button class="hs-chip sel ${entrant.condition.injury ? 'unfit' : ''}" title="${entrant.condition.injury ? entrant.name + ' — injured, cannot compete; withdraw?' : 'Withdraw ' + entrant.name}" onclick="__guild.leaveTournament('${t.id}','${entrant.id}')">${personSprite(entrant, 42)}</button>`
     : '<span class="dim" style="font-size:0.82em">No champion chosen.</span>';
   const avail = guild.roster.filter((h) => !entrant || h.id !== entrant.id);
   const addChips = avail.map((h) => `<button class="hs-chip add" title="Send ${h.name}" onclick="__guild.enterTournament('${t.id}','${h.id}')">${personSprite(h, 42)}</button>`).join('');
   return `<div class="plan-card tourney-card ${weeksOut <= 1 ? 'imminent' : ''} ${t.type === 'major' ? 'major' : ''} ${t.type === 'worldcup' ? 'worldcup' : ''}">
-      <div class="tourney-head"><span class="tourney-name">${(EVENT_TYPES[t.type] || {}).glyph || '🏆'} ${t.name}</span><span class="q-rank">R${t.rank}</span><span class="tourney-when">${when}</span></div>
-      ${t.type === 'major' ? '<div class="rr-sub major-tag">👑 The season’s tentpole — double purse, one rank up, a deeper bracket.</div>' : ''}
-      ${t.type === 'worldcup' ? '<div class="rr-sub major-tag worldcup-tag">🌍 The World Cup — once every four years. The richest purse in the game, and the only bracket that can kill.</div>' : ''}
+      <div class="tourney-head"><span class="tourney-name">${(EVENT_TYPES[t.type] || {}).glyph || ''} ${t.name}</span><span class="q-rank">R${t.rank}</span><span class="tourney-when">${when}</span></div>
+      ${t.type === 'major' ? '<div class="rr-sub major-tag">♛ The season’s tentpole — double purse, one rank up, a deeper bracket.</div>' : ''}
+      ${t.type === 'worldcup' ? '<div class="rr-sub major-tag worldcup-tag">The World Cup — once every four years. The richest purse in the game, and the only bracket that can kill.</div>' : ''}
       <div class="rr-sub stakes-line stakes-${t.type}">${stakesOf(t).glyph} <b>${stakesOf(t).tier}</b> · ${stakesOf(t).danger}</div>
-      ${(() => { const v = seatById(t.venueId || seatForEvent(t.id)); return v ? `<div class="rr-sub">🏛 Hosted at <b>${v.name}</b> — ${(realmById(v.realm) || {}).name || ''} <button class="tb-toggle" style="display:inline;width:auto;padding:1px 8px;margin-left:4px" onclick="__guild.openGlobe()">🌍 map</button></div>` : ''; })()}
-      <div class="rr-sub">Field ~${t.field}⚡ · best of ${t.rounds} · Champion <span class="up">${t.rewards.gold}g · +${t.rewards.reputation} rep${loot}</span></div>
+      ${(() => { const v = seatById(t.venueId || seatForEvent(t.id)); return v ? `<div class="rr-sub">Hosted at <b>${v.name}</b> — ${(realmById(v.realm) || {}).name || ''} <button class="tb-toggle" style="display:inline;width:auto;padding:1px 8px;margin-left:4px" onclick="__guild.openGlobe()">map</button></div>` : ''; })()}
+      <div class="rr-sub">Field ~${t.field}↯ · best of ${t.rounds} · Champion <span class="up">${t.rewards.gold}g · +${t.rewards.reputation} rep${loot}</span></div>
       <div class="tourney-odds">${odds}</div>
-      <button class="tb-toggle" onclick="__guild.toggleDraw('${t.id}')">${drawOpenId === t.id ? '🏟 Hide the draw' : `🏟 View the draw — who waits in each round`}</button>
+      <button class="tb-toggle" onclick="__guild.toggleDraw('${t.id}')">${drawOpenId === t.id ? 'Hide the draw' : `View the draw — who waits in each round`}</button>
       ${drawOpenId === t.id ? tourneyLadder(t, fit) : ''}
       ${fit && weeksOut <= 1
         ? `<div class="tourney-lens">
             <button class="tourney-play ${planFor('tournament', t.id) === 'action' ? 'on' : ''}" title="Real-time arena — move with the stick, tap to attack" onclick="__guild.setPlayNext('${t.id}','action')">${planFor('tournament', t.id) === 'action' ? '⚔ Fighting it live — winner take all' : '⚔ Fight it live'}</button>
             <button class="tourney-play ${planFor('tournament', t.id) === 'tactical' ? 'on' : ''}" title="Turn-based tactics — queue moves; both sides execute at once" onclick="__guild.setPlayNext('${t.id}','tactical')">${planFor('tournament', t.id) === 'tactical' ? '♟ Commanding it turn by turn' : '♟ Command it (tactics)'}</button>
           </div>`
-        : (fit ? '<div class="hint" style="text-align:left;padding:0 2px 8px">🎮 Playable once it’s a week out.</div>' : '')}
+        : (fit ? '<div class="hint" style="text-align:left;padding:0 2px 8px">Playable once it’s a week out.</div>' : '')}
       <div class="dept-lbl">Your champion</div>
       <div class="hero-switch">${chip}</div>
-      ${avail.length ? `<div class="dept-lbl add">➕ ${entrant ? 'Send someone else' : 'Choose a champion'}</div><div class="hero-switch">${addChips}</div>` : ''}
+      ${avail.length ? `<div class="dept-lbl add">+ ${entrant ? 'Send someone else' : 'Choose a champion'}</div><div class="hero-switch">${addChips}</div>` : ''}
     </div>`;
 }
 function calendarRoom() {
@@ -3654,7 +3686,7 @@ function calendarRoom() {
     for (let w = cur; w < cur + HORIZON; w++) {
       const ev = byWeek.get(w);
       if (ev && ev.rank === r) {
-        const g = (EVENT_TYPES[ev.type] || {}).glyph || '🏆';
+        const g = (EVENT_TYPES[ev.type] || {}).glyph || '';
         cells += `<button class="cg-cell booked ${ev.id === sel.id ? 'sel' : ''} ${w === cur ? 'now' : ''} ${ev.type}"
             title="${ev.name} (R${ev.rank})" onclick="__guild.selectCalEvent('${ev.id}')">${g}</button>`;
       } else {
@@ -3668,12 +3700,12 @@ function calendarRoom() {
   // as pills beneath it — the looming date you breed a successor for.
   const far = upcoming.filter((t) => t.week >= cur + HORIZON);
   const farRow = far.length
-    ? `<div class="dept-lbl" style="margin-top:10px">🔭 Further out</div><div class="cal-far">${far.map((t) =>
+    ? `<div class="dept-lbl" style="margin-top:10px">Further out</div><div class="cal-far">${far.map((t) =>
         `<button class="cal-far-pill ${t.id === sel.id ? 'sel' : ''} ${t.type}" onclick="__guild.selectCalEvent('${t.id}')">
-          ${(EVENT_TYPES[t.type] || {}).glyph || '🏆'} ${t.name} <span class="cfp-when">in ${t.week - cur} wks</span></button>`).join('')}</div>`
+          ${(EVENT_TYPES[t.type] || {}).glyph || ''} ${t.name} <span class="cfp-when">in ${t.week - cur} wks</span></button>`).join('')}</div>`
     : '';
   const gridCard = `<div class="plan-card cal-grid-card">
-      <div class="plan-title">📅 ${seasonOf(guild.calendar.weekOfYear)} · ${formatDate(guild.calendar)}</div>
+      <div class="plan-title">${seasonOf(guild.calendar.weekOfYear)} · ${formatDate(guild.calendar)}</div>
       <div class="cal-grid">
         <div class="cg-row head">${seasonRow}</div>
         <div class="cg-row head">${weekRow}</div>
@@ -3682,7 +3714,7 @@ function calendarRoom() {
       ${farRow}
       <div class="cal-note">Pick an event on the grid to read it — <b>nominate one champion and train them toward the date</b>. Each resolves on its week; an injured champion can't compete.</div>
       <button class="opt" onclick="__guild.setAskTournaments()" style="margin-top:8px;width:100%">
-        <span><span class="o-name">${ask ? '🔔' : '🔕'} Due-match chooser</span> <span class="o-desc">${ask ? 'each due match asks: fight, command, or simulate' : 'due matches simulate quietly'}</span></span>
+        <span><span class="o-name">${ask ? '' : ''} Due-match chooser</span> <span class="o-desc">${ask ? 'each due match asks: fight, command, or simulate' : 'due matches simulate quietly'}</span></span>
         <span class="o-cost">${ask ? 'ON' : 'OFF'}</span></button>
     </div>`;
   return `<div class="cal-layout">${gridCard}${tournamentCard(sel)}</div>`;
@@ -3733,12 +3765,12 @@ function arenaRoom() {
       <span class="bout-btns">
         <button class="bout-btn" title="Real-time — move with the stick, tap to attack" onclick="__guild.practiceBout('${h.id}','${oppId}','action')">⚔ Live</button>
         <button class="bout-btn" title="Turn-based — queue moves; both sides execute at once" onclick="__guild.practiceBout('${h.id}','${oppId}','tactical')">♟ Tactics</button>
-        <button class="bout-btn" title="The same turn-based bout, seen from inside your fighter" onclick="__guild.practiceBout('${h.id}','${oppId}','tactical-fp')">🙶 1st</button>
-        <button class="bout-btn" title="Watch it fought turn by turn — take control anytime" onclick="__guild.practiceBout('${h.id}','${oppId}','spectate')">👁</button>
+        <button class="bout-btn" title="The same turn-based bout, seen from inside your fighter" onclick="__guild.practiceBout('${h.id}','${oppId}','tactical-fp')">1st</button>
+        <button class="bout-btn" title="Watch it fought turn by turn — take control anytime" onclick="__guild.practiceBout('${h.id}','${oppId}','spectate')"></button>
       </span></div>`;
-  const dummy = boutRow('__dummy', '🥊 Training Dummy', 'a mirror of your own strength');
+  const dummy = boutRow('__dummy', 'Training Dummy', 'a mirror of your own strength');
   const oppList = guild.roster.filter((m) => m.id !== h.id)
-    .map((o) => boutRow(o.id, `⚔ vs ${o.name}`, `${o.archetype} Lv${o.level} · ⚡${combatPower(o)}`)).join('');
+    .map((o) => boutRow(o.id, `⚔ vs ${o.name}`, `${o.archetype} Lv${o.level} · ↯${combatPower(o)}`)).join('');
   return `<div class="plan-card">
       <div class="plan-title">⚔ The Arena · <span class="rr-sub">as ${h.name}</span></div>
       ${heroSwitcher()}
@@ -3828,7 +3860,7 @@ function roomScene(roomId) {
 function renderHub() {
   const nt = nextTournament(guild);
   const w = nt ? Math.max(0, nt.week - guild.calendar.week) : 0;
-  const teaser = nt ? `<button class="hub-tourney" onclick="__guild.openRoom('calendar')">🏆 Next: <b>${nt.name}</b> <span class="q-rank">R${nt.rank}</span> <span class="hub-tourney-when">${w === 0 ? 'this week' : w === 1 ? 'next week' : 'in ' + w + ' weeks'}</span></button>` : '';
+  const teaser = nt ? `<button class="hub-tourney" onclick="__guild.openRoom('calendar')">Next: <b>${nt.name}</b> <span class="q-rank">R${nt.rank}</span> <span class="hub-tourney-when">${w === 0 ? 'this week' : w === 1 ? 'next week' : 'in ' + w + ' weeks'}</span></button>` : '';
   return `${recapPanel()}
     <div class="hub-head">☙ <b>${guild.name}</b> — choose a room</div>
     ${teaser}
@@ -3884,7 +3916,7 @@ function railHTML() {
       </div>
       <div class="guild-meta"><span>☉ <b>${guild.gold}</b>g</span><span>✦ <b>${guild.reputation}</b></span><span>${formatDate(guild.calendar)}</span></div>
     </div>
-    <button class="room-chip hub-chip ${currentRoom === 'hub' ? 'on' : ''}" onclick="__guild.openRoom('hub')"><span class="rc-glyph">🏰</span><span class="rc-body"><span class="rc-name">Hub</span></span></button>
+    <button class="room-chip hub-chip ${currentRoom === 'hub' ? 'on' : ''}" onclick="__guild.openRoom('hub')"><span class="rc-glyph">${icon('town')}</span><span class="rc-body"><span class="rc-name">Hub</span></span></button>
     <div class="rail-rooms">${ROOMS.map(roomChip).join('')}</div>
     <button class="advance-btn rail-advance" onclick="__guild.advanceAll()">▶ ADVANCE WEEK <span class="ra-cost">−${upkeep}g</span></button>`;
 }
@@ -3950,7 +3982,7 @@ function openBuild() {
   buildView = true;
   stopRoomLoop(); stopRanchLoop();
   openScrollPane({
-    glyph: '📐', title: 'The Estate Plan',
+    glyph: icon('plan'), title: 'The Estate Plan',
     mount: () => mountBuildPane(),
     onClose: () => { if (buildView) { buildView = false; render({ top: true }); } },
   });

@@ -208,7 +208,7 @@ function buildOverlay(title, glyph) {
       <canvas class="scrollui-roll"></canvas>
       <div class="scrollui-body"><div class="scrollui-inner">
         <div class="scrollui-head">
-          <span class="scrollui-title">${glyph || '📜'} ${title}</span>
+          <span class="scrollui-title">${glyph || ''} ${title}</span>
           <button class="scrollui-x" title="Roll it up" onclick="__scrollUi.close()">✕</button>
         </div>
         <div class="scrollui-content"></div>

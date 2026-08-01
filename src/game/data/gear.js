@@ -5,28 +5,28 @@
 var GEAR_TYPES=[
   // Hand
   {type:'Sword',   pos:'Hand', sMin:1,sMax:3, icon:'⚔'},
-  {type:'Dagger',  pos:'Hand', sMin:0,sMax:2, icon:'🗡'},
+  {type:'Dagger',  pos:'Hand', sMin:0,sMax:2, icon:'†'},
   {type:'Wand',    pos:'Hand', sMin:1,sMax:3, icon:'✧'},
-  {type:'Bow',     pos:'Hand', sMin:1,sMax:3, icon:'🏹'},
-  {type:'Axe',     pos:'Hand', sMin:1,sMax:3, icon:'🪓'},
-  {type:'Hammer',  pos:'Hand', sMin:1,sMax:3, icon:'🔨'},
+  {type:'Bow',     pos:'Hand', sMin:1,sMax:3, icon:'➳'},
+  {type:'Axe',     pos:'Hand', sMin:1,sMax:3, icon:'⚒'},
+  {type:'Hammer',  pos:'Hand', sMin:1,sMax:3, icon:''},
   {type:'Club',    pos:'Hand', sMin:0,sMax:1, icon:'⌇'},
-  {type:'Buckler', pos:'Hand', sMin:0,sMax:2, icon:'🛡'},
+  {type:'Buckler', pos:'Hand', sMin:0,sMax:2, icon:'▣'},
   // Body
-  {type:'Plate',   pos:'Body', sMin:1,sMax:4, icon:'🛡'},
+  {type:'Plate',   pos:'Body', sMin:1,sMax:4, icon:'▣'},
   {type:'Mail',    pos:'Body', sMin:1,sMax:3, icon:'⛓'},
-  {type:'Robes',   pos:'Body', sMin:1,sMax:3, icon:'👘'},
-  {type:'Cloak',   pos:'Body', sMin:0,sMax:2, icon:'🧥'},
+  {type:'Robes',   pos:'Body', sMin:1,sMax:3, icon:''},
+  {type:'Cloak',   pos:'Body', sMin:0,sMax:2, icon:''},
   {type:'Vest',    pos:'Body', sMin:0,sMax:1, icon:'△'},
   // Head
-  {type:'Helm',    pos:'Head', sMin:1,sMax:3, icon:'⛑'},
-  {type:'Crown',   pos:'Head', sMin:1,sMax:2, icon:'👑'},
-  {type:'Cap',     pos:'Head', sMin:0,sMax:1, icon:'🧢'},
-  {type:'Hood',    pos:'Head', sMin:0,sMax:2, icon:'🪖'},
+  {type:'Helm',    pos:'Head', sMin:1,sMax:3, icon:''},
+  {type:'Crown',   pos:'Head', sMin:1,sMax:2, icon:'♛'},
+  {type:'Cap',     pos:'Head', sMin:0,sMax:1, icon:''},
+  {type:'Hood',    pos:'Head', sMin:0,sMax:2, icon:''},
   // Lower
-  {type:'Trousers',pos:'Lower', sMin:0,sMax:2, icon:'👖'},
-  {type:'Leggings',pos:'Lower', sMin:1,sMax:2, icon:'🦵'},
-  {type:'Skirt',   pos:'Lower', sMin:0,sMax:2, icon:'👗'}
+  {type:'Trousers',pos:'Lower', sMin:0,sMax:2, icon:''},
+  {type:'Leggings',pos:'Lower', sMin:1,sMax:2, icon:''},
+  {type:'Skirt',   pos:'Lower', sMin:0,sMax:2, icon:''}
 ];
 
 // Canonical ordering of equip slots. Drives every loop that iterates the

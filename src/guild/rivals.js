@@ -12,7 +12,7 @@
  * fall to one and they take the title — and next season they're back, fatter.
  *
  * Anti-lie invariant: a rival drawn into round `i` is RETUNED to exactly
- * `roundOpponentPower(t, i)` (they trained too), so the ⚡ on the board IS the
+ * `roundOpponentPower(t, i)` (they trained too), so the ↯ on the board IS the
  * number `resolveTournament` checks and the stat spread the played round fights.
  */
 import { roundOpponentPower } from './tournaments.js';
@@ -91,7 +91,7 @@ export function ensureField(guild, t) {
   const have = Array.isArray(t.rivalIds) ? t.rivalIds : [];
   if (have.length === rounds && have.every((id) => rivalById(guild, id))) return false;
   const week = guild.calendar ? guild.calendar.week : 1;
-  // A rival can't be drawn into two live events at once: drawing retunes their ⚡,
+  // A rival can't be drawn into two live events at once: drawing retunes their ↯,
   // which would silently desync the OTHER event's board from its resolver (anti-lie).
   const taken = new Set();
   for (const other of guild.schedule || []) {

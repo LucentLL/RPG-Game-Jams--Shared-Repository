@@ -54,7 +54,7 @@ export function cellClick(x, y) {
   if (tool === 'select') {
     _notice = b ? `${BUILDING_KINDS[b.kind].glyph} ${BUILDING_KINDS[b.kind].name} — ${kindWidth(b.kind)}×${kindHeight(b.kind)} tiles, door on row ${doorOf(b)[1]}.`
       : p ? `${PROP_KINDS[p.kind].glyph} ${PROP_KINDS[p.kind].name}.`
-      : treeAt(g, x, y) ? '🌳 A tree. The Fell tool clears it for building.'
+      : treeAt(g, x, y) ? 'A tree. The Fell tool clears it for building.'
       : `Open ground · ${x},${y}`;
   } else if (tool === 'move') {
     if (!moving) {
@@ -113,12 +113,12 @@ function blockedFor(g, x, y) {
 }
 
 const TOOLS = [
-  { id: 'select', glyph: '🔍', name: 'Inspect' },
+  { id: 'select', glyph: '?', name: 'Inspect' },
   { id: 'move', glyph: '✥', name: 'Move' },
-  { id: 'build', glyph: '🏗', name: 'Build' },
-  { id: 'prop', glyph: '🪵', name: 'Place' },
-  { id: 'fell', glyph: '🪓', name: 'Fell trees' },
-  { id: 'raze', glyph: '💥', name: 'Demolish' },
+  { id: 'build', glyph: '', name: 'Build' },
+  { id: 'prop', glyph: '', name: 'Place' },
+  { id: 'fell', glyph: '⚒', name: 'Fell trees' },
+  { id: 'raze', glyph: '✷', name: 'Demolish' },
 ];
 
 /** Render the whole tab into `#guildScreen`. */
@@ -174,15 +174,15 @@ export function renderBuild(guild, save) {
 
   view.innerHTML = `
     <div class="bv-bar">
-      <button class="bv-back" onclick="__guild.closeBuild()">⬅ Roll it up</button>
-      <span class="bv-title">🏗 Build · The Grounds</span>
+      <button class="bv-back" onclick="__guild.closeBuild()">← Roll it up</button>
+      <span class="bv-title">Build · The Grounds</span>
       <span class="bv-gold">☉${guild.gold}</span>
       <span class="bv-zoom">
         <button onclick="__guild.buildZoomOut()">−</button>
         <button onclick="__guild.buildZoomFit()">▣</button>
         <button onclick="__guild.buildZoomIn()">＋</button>
       </span>
-      <button class="bv-walk" onclick="__guild.walkGuild()">🚶 Walk it</button>
+      <button class="bv-walk" onclick="__guild.walkGuild()">Walk it</button>
     </div>
     <div class="bv-tools">${toolBtns}</div>
     ${palette ? `<div class="bv-palette">${palette}</div>` : ''}

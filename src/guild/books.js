@@ -18,10 +18,10 @@ const rand = (n) => Math.floor(Math.random() * n);
 
 /** Display identity per study subject (matches the professions the Scholar can study). */
 export const BOOK_SUBJECTS = {
-  blacksmithing: { glyph: '📕', label: 'Metallurgy' },
-  alchemy: { glyph: '📗', label: 'Alchemy' },
-  cooking: { glyph: '📙', label: 'Culinary Arts' },
-  enchanting: { glyph: '📘', label: 'Enchantment' },
+  blacksmithing: { glyph: '', label: 'Metallurgy' },
+  alchemy: { glyph: '', label: 'Alchemy' },
+  cooking: { glyph: '', label: 'Culinary Arts' },
+  enchanting: { glyph: '', label: 'Enchantment' },
 };
 export const BOOK_SUBJECT_IDS = Object.keys(BOOK_SUBJECTS);
 

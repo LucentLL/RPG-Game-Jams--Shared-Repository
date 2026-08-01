@@ -19,7 +19,7 @@
  *  emphasizes; training one of them feeds the discipline's growth. */
 export const DISCIPLINES = {
   melee:  { id: 'melee',  name: 'Melee',  glyph: '⚔', col: '#d98a5a', stats: ['POW', 'DEF', 'VIT'], drills: ['pow', 'def', 'vit'], blurb: 'blade & bulwark — close the distance' },
-  ranged: { id: 'ranged', name: 'Ranged', glyph: '🏹', col: '#8ab45a', stats: ['SKL', 'SPD'],        drills: ['skl', 'spd'],        blurb: 'bow & thrown steel — strike from afar' },
+  ranged: { id: 'ranged', name: 'Ranged', glyph: '➳', col: '#8ab45a', stats: ['SKL', 'SPD'],        drills: ['skl', 'spd'],        blurb: 'bow & thrown steel — strike from afar' },
   magic:  { id: 'magic',  name: 'Magic',  glyph: '✦', col: '#8a7bd0', stats: ['INT'],               drills: ['int'],               blurb: 'the aether — bend the elements' },
 };
 export const DISCIPLINE_IDS = ['melee', 'ranged', 'magic'];
@@ -46,11 +46,11 @@ export function disciplineForDrill(drillId) {
  * forge/brew/study jobs; Cooking and Enchanting are new.
  */
 export const ELECTIVES = {
-  blacksmithing: { id: 'blacksmithing', name: 'Blacksmithing',  glyph: '🔨', room: 'forge',      assign: 'forge',   prof: 'blacksmithing', blurb: 'forge weapons & armor' },
+  blacksmithing: { id: 'blacksmithing', name: 'Blacksmithing',  glyph: '', room: 'forge',      assign: 'forge',   prof: 'blacksmithing', blurb: 'forge weapons & armor' },
   potion:        { id: 'potion',        name: 'Potion-Crafting', glyph: '⚗', room: 'laboratory', assign: 'brew',    prof: 'alchemy',       blurb: 'brew potions & elixirs' },
-  historian:     { id: 'historian',     name: 'Historian',       glyph: '📖', room: 'library',    assign: 'study',   prof: 'historian',     blurb: 'study lore & technique' },
-  cooking:       { id: 'cooking',       name: 'Cooking',         glyph: '🍳', room: 'kitchen',    assign: 'cook',    prof: 'cooking',       blurb: 'cook rations from the pantry' },
-  enchanting:    { id: 'enchanting',    name: 'Enchanting',      glyph: '✨', room: 'armory',     assign: 'enchant', prof: 'enchanting',    blurb: 'craft & slot materia' },
+  historian:     { id: 'historian',     name: 'Historian',       glyph: '', room: 'library',    assign: 'study',   prof: 'historian',     blurb: 'study lore & technique' },
+  cooking:       { id: 'cooking',       name: 'Cooking',         glyph: '', room: 'kitchen',    assign: 'cook',    prof: 'cooking',       blurb: 'cook rations from the pantry' },
+  enchanting:    { id: 'enchanting',    name: 'Enchanting',      glyph: '✦', room: 'armory',     assign: 'enchant', prof: 'enchanting',    blurb: 'craft & slot materia' },
 };
 export const ELECTIVE_IDS = ['blacksmithing', 'potion', 'historian', 'cooking', 'enchanting'];
 export function electiveById(id) { return ELECTIVES[id] || null; }
@@ -87,19 +87,19 @@ export function techniquesFor(discId, lvl) { return (DISC_TECHNIQUES[discId] || 
 export const SPEC_UNLOCK_LVL = 2;
 export const SPECIALIZATIONS = {
   melee: [
-    { id: 'swords',    name: 'Swordsmanship',  glyph: '🗡', kinds: ['sword'],                  blurb: 'the blade — precise, versatile steel' },
-    { id: 'crushers',  name: 'Axes & Maces',   glyph: '🪓', kinds: ['axe', 'mace', 'hammer'],  blurb: 'weight and wrath — armor means nothing' },
-    { id: 'wards',     name: 'Shield & Guard', glyph: '🛡', kinds: ['armor', 'shield'],        blurb: 'the wall — protect and outlast' },
+    { id: 'swords',    name: 'Swordsmanship',  glyph: '†', kinds: ['sword'],                  blurb: 'the blade — precise, versatile steel' },
+    { id: 'crushers',  name: 'Axes & Maces',   glyph: '⚒', kinds: ['axe', 'mace', 'hammer'],  blurb: 'weight and wrath — armor means nothing' },
+    { id: 'wards',     name: 'Shield & Guard', glyph: '▣', kinds: ['armor', 'shield'],        blurb: 'the wall — protect and outlast' },
   ],
   ranged: [
-    { id: 'bows',      name: 'Bows',           glyph: '🏹', kinds: ['bow'],                    blurb: 'the long shot — patience rewarded' },
-    { id: 'crossbows', name: 'Crossbows',      glyph: '🎯', kinds: ['crossbow'],               blurb: 'the bolt — mechanical certainty' },
-    { id: 'thrown',    name: 'Thrown Blades',  glyph: '🔪', kinds: ['dagger', 'thrown'],       blurb: 'steel that leaves the hand' },
+    { id: 'bows',      name: 'Bows',           glyph: '➳', kinds: ['bow'],                    blurb: 'the long shot — patience rewarded' },
+    { id: 'crossbows', name: 'Crossbows',      glyph: '◎', kinds: ['crossbow'],               blurb: 'the bolt — mechanical certainty' },
+    { id: 'thrown',    name: 'Thrown Blades',  glyph: '', kinds: ['dagger', 'thrown'],       blurb: 'steel that leaves the hand' },
   ],
   magic: [
-    { id: 'offensive',   name: 'Offensive Magic',   glyph: '🔥', kinds: [], blurb: 'the aether as a weapon' },
-    { id: 'restorative', name: 'Restorative Magic', glyph: '💫', kinds: [], blurb: 'mend flesh, steady hearts' },
-    { id: 'warding',     name: 'Warding Magic',     glyph: '🌀', kinds: [], blurb: 'the unseen shield' },
+    { id: 'offensive',   name: 'Offensive Magic',   glyph: '', kinds: [], blurb: 'the aether as a weapon' },
+    { id: 'restorative', name: 'Restorative Magic', glyph: '✧', kinds: [], blurb: 'mend flesh, steady hearts' },
+    { id: 'warding',     name: 'Warding Magic',     glyph: '', kinds: [], blurb: 'the unseen shield' },
   ],
 };
 /** @param {string} discId @param {string} specId */

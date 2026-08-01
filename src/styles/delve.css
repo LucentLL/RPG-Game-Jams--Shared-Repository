@@ -413,6 +413,13 @@
   min-height: 100vh; height: 100vh;
   min-height: 100dvh; height: 100dvh;
 }
+/* The sky, behind the stage. A gradient that meets the fog colour exactly at
+   the stage's vertical centre — a level camera's horizon — plus tiled pixel
+   clouds and a sun, all set inline per map light (mountSky). */
+.fp-sky {
+  position: absolute; inset: 0; pointer-events: none;
+  image-rendering: pixelated;
+}
 .fp-stage {
   position: absolute; inset: 0; overflow: hidden;
   perspective: 500px; perspective-origin: 50% 50%; /* re-fitted per window by fitLens() */
@@ -479,6 +486,9 @@
   position: absolute; inset: 0; pointer-events: none; z-index: 200;
   background: radial-gradient(ellipse at 50% 50%, transparent 30%, rgba(4,4,8,0.55) 78%, rgba(2,2,4,0.92) 100%);
 }
+/* Daylight wants far less of it — a cave-tuned vignette over a sky reads as
+   smoked glass. */
+.fp-open .fp-vignette { opacity: 0.3; }
 .fp-compass { font-family: 'Cinzel', serif; color: var(--gold); letter-spacing: 0.14em; }
 
 /* ── Combat ───────────────────────────────────────────────────────────────
@@ -571,7 +581,7 @@
    corners belong to the hands now, and a minimap sitting on your own weapon
    was the reason you could not tell what you were holding. 58px clears a HUD
    whose height is pinned by the two rules below — the bar has no fixed height,
-   and on a phone a wrapping ⬅ Leave grew it to 70 and put the map on top of it. */
+   and on a phone a wrapping ← Leave grew it to 70 and put the map on top of it. */
 .fp-map {
   position: absolute; right: 10px; top: 62px; z-index: 500;
   width: 150px; height: 150px;
@@ -716,6 +726,12 @@
   border: 1px solid var(--border); border-radius: 50%;
 }
 .fp-help:hover { border-color: var(--gold); }
+/* The view button carries words, not a glyph — a pill, not a circle. */
+.fp-povbtn {
+  width: auto; height: 26px; padding: 0 10px;
+  border-radius: 13px; white-space: nowrap;
+  font-size: 0.78em; letter-spacing: 0.04em; text-transform: uppercase;
+}
 
 /* Touch pad — four ways to move and one way to hit. Legible at rest, because
    the first thing a first-person player looks for is how to walk. */
@@ -731,7 +747,8 @@
   background: rgba(20,17,12,0.86); color: var(--gold);
   border: 1px solid var(--border); border-radius: 9px;
 }
-.fp-pad button i { font-style: normal; font-size: 0.52em; color: var(--muted); letter-spacing: .04em; }
+.fp-pad button i:not(.gi) { font-style: normal; font-size: 0.52em; color: var(--muted); letter-spacing: .04em; }
+.fp-pad button .gi { font-size: 1.1em; }
 .fp-pad button:active { background: rgba(212,168,67,0.3); }
 .fp-pad button[data-k="turnL"] { grid-area: 1 / 1; }
 .fp-pad button[data-k="fwd"]   { grid-area: 1 / 2; }

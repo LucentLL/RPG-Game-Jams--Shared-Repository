@@ -2651,12 +2651,12 @@ function renderDraft(){
     // Dynamic label: show gear role (weapon/shield/armor/head/lower) plus main/off semantics
     var label;
     if(gear){
-      if(pos==='Body')  label='🛡 ARMOR';
-      else if(pos==='Head')  label='⛑ HEAD';
-      else if(pos==='Lower') label='👖 LOWER';
+      if(pos==='Body')  label='▣ ARMOR';
+      else if(pos==='Head')  label='HEAD';
+      else if(pos==='Lower') label='LOWER';
       else {
         var isWeapon=WEAPON_GEAR_TYPES.indexOf(gear.type)>=0;
-        label=(isWeapon?'⚔ WEAPON':'🛡 SHIELD')+' · '+handLabel(pos);
+        label=(isWeapon?'⚔ WEAPON':'▣ SHIELD')+' · '+handLabel(pos);
       }
     } else {
       if (pos==='Body')  label='ARMOR';
@@ -3151,8 +3151,8 @@ function tryUseItem(slot){
   var item = (_guildItems||[])[slot]; if (!item) return;
   if (!p1 || p1.hp <= 0 || p2.hp <= 0) return;
   if ((p1._atkCD||0) > 0) return;
-  if (item.qty <= 0){ actionLog('🧪 ' + item.name + ' — none left', 'miss'); return; }
-  if (p1.hp >= p1.maxHp){ actionLog('🧪 Already at full health', 'miss'); return; }
+  if (item.qty <= 0){ actionLog('' + item.name + ' — none left', 'miss'); return; }
+  if (p1.hp >= p1.maxHp){ actionLog('Already at full health', 'miss'); return; }
   item.qty--;
   var heal = Math.max(4, Math.round((item.potency || 30) * 0.35));
   p1.hp = Math.min(p1.maxHp, p1.hp + heal);
@@ -3160,7 +3160,7 @@ function tryUseItem(slot){
   setFighterAnim(p1, 'parry');
   _guildItemsUsed = _guildItemsUsed || {};
   _guildItemsUsed[item.batchId] = (_guildItemsUsed[item.batchId] || 0) + 1;
-  actionLog('🧪 You drink a ' + item.name + ' — +' + heal + ' HP', 'hit');
+  actionLog('You drink a ' + item.name + ' — +' + heal + ' HP', 'hit');
   var qEl = document.getElementById('actItemQty_' + slot); if (qEl) qEl.textContent = '×' + item.qty;
 }
 
@@ -3346,7 +3346,7 @@ function actionTick(dt){
   if (_guildBattle && p1._obey && (p1._atkCD||0) <= 0 && od < 1.3 && p1.attacks && p1.attacks.length){
     var _wil = 1 - Math.min(1, ((p1._obey.discipline||40) + (p1._obey.bond||60)) / 200 + (p1._obey.obeyMod||0));
     if (_wil > 0 && Math.random() < dt * 0.35 * _wil){
-      actionLog('🎭 '+(p1.name||'Your fighter')+' lashes out on instinct!', 'miss');
+      actionLog(''+(p1.name||'Your fighter')+' lashes out on instinct!', 'miss');
       tryActionAttack(p1, p2, p1.attacks[0]);
     }
   }
@@ -3458,7 +3458,7 @@ function tryActionAttack(attacker, defender, atkName, opts){
     if (defender.hp < 0) defender.hp = 0;
     if (attacker === p1 && run) run.totalDamage += dmg; // guard: guild battles have no `run`
     setFighterAnim(defender, defender.hp <= 0 ? 'death' : 'hurt');
-    var tag = chargeTier === 2 ? '⚡⚡ CHARGED ' : chargeTier === 1 ? '⚡ CHARGED ' : (crit ? '✦ CRIT ' : '⚔ ');
+    var tag = chargeTier === 2 ? '↯↯ CHARGED ' : chargeTier === 1 ? '↯ CHARGED ' : (crit ? '✦ CRIT ' : '⚔ ');
     actionLog(tag+aName+' '+atk.name+' — '+dmg+(crit?' (critical)':''), (crit||chargeTier===2)?'crit':'hit');
   } else {
     actionLog('⚔ '+aName+' '+atk.name+' misses', 'miss');
@@ -3792,7 +3792,7 @@ function startGuildTacticalBattle(p1Spec, p2Spec, label, opts){
     // and the player can grab the reins at any turn boundary. Otherwise hands-on.
     _tacAuto=!!(opts&&opts.spectate);
     var ab=document.getElementById('tacAutoBtn');
-    if(ab){ab.style.display='';ab.classList.toggle('on',_tacAuto);ab.textContent=_tacAuto?'🤖 Watching — tap to take control':'🤖 Watch';}
+    if(ab){ab.style.display='';ab.classList.toggle('on',_tacAuto);ab.textContent=_tacAuto?'Watching — tap to take control':'Watch';}
     var eb=document.getElementById('execBtn');if(eb)eb.disabled=false;
     var vb=document.getElementById('tacViewBtns');if(vb)vb.style.display='';
     var cf=document.getElementById('tacCamFp');if(cf)cf.style.display='';
@@ -3809,13 +3809,13 @@ function startGuildTacticalBattle(p1Spec, p2Spec, label, opts){
     // rounds re-passing fp:true no-op (already on).
     if(opts&&(!!opts.fp)!==tacFpActive())tacViewToggle();
     logMsg(_tacAuto
-      ? '👁 '+p1.name+' vs '+p2.name+' — spectating; take control any turn.'
+      ? ''+p1.name+' vs '+p2.name+' — spectating; take control any turn.'
       : '⚔ '+p1.name+' vs '+p2.name+' — queue your moves, then EXECUTE!','phase');
     if(_tacAuto)_maybeAutoPlan();
   });
 }
 // ─── Watch / autopilot tier (K5) ─────────────────────────────────────────────
-// Toggling 🤖 Watch hands each planning phase to the parameterized AI planner and
+// Toggling Watch hands each planning phase to the parameterized AI planner and
 // auto-executes — a pure-watch coach view. Toggle OFF any time: control returns at
 // the next turn boundary (never mid-turn — the timeline must finish its replay).
 var _tacAuto = false;
@@ -3823,8 +3823,8 @@ function toggleTacticalAuto(){
   if(!_guildBattle||_guildBattle.done)return;
   _tacAuto=!_tacAuto;
   var b=document.getElementById('tacAutoBtn');
-  if(b){b.classList.toggle('on',_tacAuto);b.textContent=_tacAuto?'🤖 Watching — tap to take control':'🤖 Watch';}
-  logMsg(_tacAuto?'🤖 Autopilot — '+(p1.name||'your fighter')+' fights on instinct; take control any turn.':'🎮 You have the reins again.','phase');
+  if(b){b.classList.toggle('on',_tacAuto);b.textContent=_tacAuto?'Watching — tap to take control':'Watch';}
+  logMsg(_tacAuto?'Autopilot — '+(p1.name||'your fighter')+' fights on instinct; take control any turn.':'You have the reins again.','phase');
   if(_tacAuto)_maybeAutoPlan();
 }
 // Plan + execute one turn on autopilot (only from a live guild plan phase).
@@ -4525,10 +4525,10 @@ function updateStatSheet(){
       if(pos==='Body'){slotLabels[pos]='Body';return}
       var g=f.gear[pos];
       if(g&&WEAPON_GEAR_TYPES.indexOf(g.type)>=0)slotLabels[pos]='⚔ Weapon · '+ssHand(pos);
-      else if(g&&SHIELD_GEAR_TYPES.indexOf(g.type)>=0)slotLabels[pos]='🛡 Shield · '+ssHand(pos);
+      else if(g&&SHIELD_GEAR_TYPES.indexOf(g.type)>=0)slotLabels[pos]='▣ Shield · '+ssHand(pos);
       else slotLabels[pos]=ssHand(pos)+' Hand';
     });
-    var slotIcons={LHand:'⚔',Body:'🛡',RHand:'⚔'};
+    var slotIcons={LHand:'⚔',Body:'▣',RHand:'⚔'};
     EQUIP_SLOTS.forEach(function(pos){
       var g=f.gear[pos];
       if(!g){
@@ -4597,7 +4597,7 @@ function buildDpad(){
 }
 function buildAutoMoves(){
   var el=document.getElementById('autoMoves');el.innerHTML='';
-  [{id:'pursue',sym:'🎯',lbl:'Pursue'},{id:'retreat',sym:'←',lbl:'Retreat'},{id:'kite',sym:'↗',lbl:'Kite'},{id:'flank',sym:'⚔',lbl:'Flank'}].forEach(function(t){
+  [{id:'pursue',sym:'◎',lbl:'Pursue'},{id:'retreat',sym:'←',lbl:'Retreat'},{id:'kite',sym:'↗',lbl:'Kite'},{id:'flank',sym:'⚔',lbl:'Flank'}].forEach(function(t){
     var btn=document.createElement('button');btn.className='auto-btn';
     btn.textContent=t.sym+' '+t.lbl;
     btn.onclick=function(){addAutoStep(t.id)};
@@ -4688,7 +4688,7 @@ function updateMoveQueueUI(){
   moveQueue.forEach(function(step,i){
     var dirs={'-1,-1':'↖','0,-1':'↑','-1,0':'←','1,-1':'↗','1,0':'→','1,1':'↘','0,1':'↓','-1,1':'↙'};
     var arrow=dirs[step.dx+','+step.dy]||'●';
-    if(step.type==='pursue')arrow='🎯';
+    if(step.type==='pursue')arrow='◎';
     else if(step.type==='flank')arrow='⚔';
     else if(step.type==='kite')arrow='↗';
     else if(step.type==='retreat')arrow='←';
@@ -4730,10 +4730,10 @@ function buildAttackBar(){
   });
   // ═══ ACTION OPTIONS (D&D 5e PHB) ═══
   var actions=[
-    {id:'_dash',sym:'🏃',lbl:'Dash',tip:'Double movement, skip attack'},
-    {id:'_disengage',sym:'🛡',lbl:'Disengage',tip:'No opportunity attacks, skip attack'},
-    {id:'_shove',sym:'🤜',lbl:'Shove',tip:'Contested STR check, push 1 tile + prone'},
-    {id:'_ready',sym:'🎯',lbl:'Ready',tip:'Hold attack as reaction when enemy enters range'}
+    {id:'_dash',sym:'',lbl:'Dash',tip:'Double movement, skip attack'},
+    {id:'_disengage',sym:'▣',lbl:'Disengage',tip:'No opportunity attacks, skip attack'},
+    {id:'_shove',sym:'',lbl:'Shove',tip:'Contested STR check, push 1 tile + prone'},
+    {id:'_ready',sym:'◎',lbl:'Ready',tip:'Hold attack as reaction when enemy enters range'}
   ];
   actions.forEach(function(a){
     var btn=document.createElement('button');btn.className='atk-btn action-opt'+(selectedAttack===a.id?' selected':'');
@@ -4755,13 +4755,13 @@ function selectAction(actionId){
     selectedAttack='_dash';
     // Clear move queue since speed changed (doubled)
     moveQueue=[];updateMoveQueueUI();
-    logMsg('🏃 Dash selected — '+p1.speed*2+' movement, no attack','phase');
+    logMsg('Dash selected — '+p1.speed*2+' movement, no attack','phase');
   } else if(actionId==='_disengage'){
     selectedAttack='_disengage';
-    logMsg('🛡 Disengage — safe movement, no attack','phase');
+    logMsg('▣ Disengage — safe movement, no attack','phase');
   } else if(actionId==='_shove'){
     selectedAttack='_shove';
-    logMsg('🤜 Shove — push enemy 1 tile if adjacent','phase');
+    logMsg('Shove — push enemy 1 tile if adjacent','phase');
   } else if(actionId==='_ready'){
     showReadyPopup();return;
   }
@@ -4773,7 +4773,7 @@ function showReadyPopup(){
   // Show attack list to pick which move to hold
   var html='<div id="readyOverlay" style="position:fixed;inset:0;background:rgba(0,0,0,0.8);z-index:999;display:flex;align-items:center;justify-content:center;padding:16px" onclick="this.remove()">';
   html+='<div style="background:#15151f;border:2px solid #d4a843;border-radius:12px;padding:16px;max-width:340px;width:100%" onclick="event.stopPropagation()">';
-  html+='<div style="text-align:center;font-family:Cinzel,serif;color:#d4a843;margin-bottom:10px">🎯 Ready — Hold Which Attack?</div>';
+  html+='<div style="text-align:center;font-family:Cinzel,serif;color:#d4a843;margin-bottom:10px">◎ Ready — Hold Which Attack?</div>';
   html+='<div style="color:#888;font-size:0.8em;text-align:center;margin-bottom:8px">Fires as reaction when enemy enters range</div>';
   p1.attacks.forEach(function(name){
     var atk=ATTACKS[name];if(!atk)return;
@@ -4791,7 +4791,7 @@ function pickReadyAttack(atkName){
   var el=document.getElementById('readyOverlay');if(el)el.remove();
   p1._readiedAction={name:atkName};
   selectedAttack='_ready';
-  logMsg('🎯 Readied: '+atkName+' — will fire when enemy enters range','phase');
+  logMsg('◎ Readied: '+atkName+' — will fire when enemy enters range','phase');
   buildAttackBar();
   document.getElementById('atkDetail').classList.remove('show');
   renderGrid();
@@ -4899,7 +4899,7 @@ function executeTurn(){
     if(Math.random()>_pObey){
       moveQueue=genAIMoves(p1,p2);
       selectedAttack=pickAIAttack(p1,p2);
-      logMsg('🎭 '+(p1.name||'Your fighter')+' ignores your orders and fights their own way!','dissolve');
+      logMsg(''+(p1.name||'Your fighter')+' ignores your orders and fights their own way!','dissolve');
       updateMoveQueueUI();
     }
   }
@@ -4942,11 +4942,11 @@ function executeTurn(){
     // ═══ ACTION RESOLUTION PHASE ═══
     if(selectedAttack==='_dash'){
       // Dash: no attack, already moved double
-      logMsg('🏃 You dashed — no attack this turn','phase');
+      logMsg('You dashed — no attack this turn','phase');
       finishTurn();
     } else if(selectedAttack==='_disengage'){
       // Disengage: no attack, safe movement done
-      logMsg('🛡 You disengaged — no attack this turn','phase');
+      logMsg('▣ You disengaged — no attack this turn','phase');
       // AI still attacks
       resolveOneAttack(p2,p1,aiAttack,function(){finishTurn()});
     } else if(selectedAttack==='_shove'){
@@ -4957,7 +4957,7 @@ function executeTurn(){
       });
     } else if(selectedAttack==='_ready'){
       // Ready: skip attack, hold reaction (already stored on p1._readiedAction)
-      logMsg('🎯 Holding action — waiting for opportunity','phase');
+      logMsg('◎ Holding action — waiting for opportunity','phase');
       // AI attacks normally
       resolveOneAttack(p2,p1,aiAttack,function(){finishTurn()});
     } else {
@@ -5006,7 +5006,7 @@ function resolveShove(attacker,defender,done){
   var atkTotal=atkRoll+atkStrMod+attacker.prof;
   var defTotal=defRoll+defBestMod+defender.prof;
 
-  logMsg('🤜 '+aName+' Shove! Athletics d20('+atkRoll+')+'+atkStrMod+'+'+attacker.prof+'='+atkTotal+' vs '+dName+' d20('+defRoll+')+'+defBestMod+'+'+defender.prof+'='+defTotal,'phase');
+  logMsg(''+aName+' Shove! Athletics d20('+atkRoll+')+'+atkStrMod+'+'+attacker.prof+'='+atkTotal+' vs '+dName+' d20('+defRoll+')+'+defBestMod+'+'+defender.prof+'='+defTotal,'phase');
 
   if(atkTotal>defTotal){
     // Push 1 tile away + prone
@@ -5019,9 +5019,9 @@ function resolveShove(attacker,defender,done){
     var nx=defender.x+pdx,ny=defender.y+pdy;
     if(nx>=0&&nx<GS&&ny>=0&&ny<GS&&!(nx===attacker.x&&ny===attacker.y)){
       defender.x=nx;defender.y=ny;
-      logMsg('💥 Shoved! '+dName+' pushed back and knocked PRONE!','crit');
+      logMsg('✷ Shoved! '+dName+' pushed back and knocked PRONE!','crit');
     } else {
-      logMsg('💥 Shove connects but '+dName+' can\'t be pushed (wall)! Knocked PRONE!','crit');
+      logMsg('✷ Shove connects but '+dName+' can\'t be pushed (wall)! Knocked PRONE!','crit');
     }
     defender._prone=true;
     setFighterAnim(defender,'prone');
@@ -5029,7 +5029,7 @@ function resolveShove(attacker,defender,done){
     if (attacker.anim && attacker.anim.name !== 'death') setFighterAnim(attacker,'parry');
     renderGrid();updateHUD();
   } else {
-    logMsg('🤜 Shove failed! '+dName+' holds ground.','miss');
+    logMsg('Shove failed! '+dName+' holds ground.','miss');
   }
   setTimeout(done,500);
 }
@@ -5455,7 +5455,7 @@ function animateTimeline(events,idx,done){
     var oaRoll=Math.floor(Math.random()*20)+1;
     var oaTotal=oaRoll+oaMod+other.prof;
     var oaAC=getFighterAC(f);
-    logMsg('⚡ '+oaName+' Opportunity Attack as '+mName+' moves away!','phase');
+    logMsg('↯ '+oaName+' Opportunity Attack as '+mName+' moves away!','phase');
     if(oaTotal>=oaAC||oaRoll===20){
       var oaDmg=Math.max(1,other.prof+oaMod);
       if(oaRoll===20)oaDmg*=2;
@@ -5464,11 +5464,11 @@ function animateTimeline(events,idx,done){
       if(f.hp<=0){setFighterAnim(f,'death')}else{setFighterAnim(f,'hurt');setFighterAnim(other,'slash')}
       updateHUD();renderGrid();
       if(f.hp<=0){
-        logMsg('💀 '+mName+' felled by Opportunity Attack!','crit');
+        logMsg('☠ '+mName+' felled by Opportunity Attack!','crit');
         setTimeout(function(){animateTimeline(events,idx+1,done)},600);return;
       }
     } else {
-      logMsg('⚡ OA misses! d20('+oaRoll+')+'+oaMod+'+'+other.prof+'='+oaTotal+' vs AC'+oaAC,'miss');
+      logMsg('↯ OA misses! d20('+oaRoll+')+'+oaMod+'+'+other.prof+'='+oaTotal+' vs AC'+oaAC,'miss');
     }
     setTimeout(function(){
       _checkReadied(f,other,function(){
@@ -5500,7 +5500,7 @@ function _checkReadied(mover,holder,cb){
   if(fires){
     holder._readiedActionFired=true;
     var hName=holder===p1?'You':'Opp';
-    logMsg('🎯 '+hName+'\'s readied '+ra.name+' triggers!','phase');
+    logMsg('◎ '+hName+'\'s readied '+ra.name+' triggers!','phase');
     resolveOneAttack(holder,mover,ra.name,function(){
       delete holder._readiedAction;
       updateHUD();renderGrid();
@@ -5544,7 +5544,7 @@ function _checkReadiedImmediate(holder,target,cb){
     holder._readiedActionFired=true;
     var hName=holder===p1?'You':'Opp';
     var reason = trig.selfCast ? 'self-cast' : 'target in range';
-    logMsg('🎯 '+hName+'\'s readied '+ra.name+' fires — '+reason+'!','phase');
+    logMsg('◎ '+hName+'\'s readied '+ra.name+' fires — '+reason+'!','phase');
     resolveOneAttack(holder,target,ra.name,function(){
       delete holder._readiedAction;
       updateHUD();renderGrid();
@@ -6006,7 +6006,7 @@ function renderLab(){
     var labHand=function(p){ return p.charAt(0)===labDom ? 'Main' : 'Off'; };
     if(pos==='Body')label='Body';
     else if(gear&&WEAPON_GEAR_TYPES.indexOf(gear.type)>=0)label='⚔ Weapon · '+labHand(pos);
-    else if(gear&&SHIELD_GEAR_TYPES.indexOf(gear.type)>=0)label='🛡 Shield · '+labHand(pos);
+    else if(gear&&SHIELD_GEAR_TYPES.indexOf(gear.type)>=0)label='▣ Shield · '+labHand(pos);
     else label=labHand(pos)+' Hand';
     if(gear){
       var hasEmptySockets=gear.materia.length<gear.sockets;
@@ -6017,8 +6017,8 @@ function renderLab(){
       var drillCost=(gear.sockets+1)*5;
       var linkCost=(gear.links+1)*8;
       var actionsHTML='<button class="lab-btn sell" onclick="unequipGear(\''+pos+'\')">Unequip</button>';
-      if(canRefine)actionsHTML+='<button class="lab-btn craft" onclick="craftRefine(\'eq\',\''+pos+'\')">🔨 Refine +'+(gear.refinement+1)+' ('+refineCost+'☿ · '+getRefineChance(gear)+'%)</button>';
-      if(canDrill)actionsHTML+='<button class="lab-btn craft" onclick="craftDrillSocket(\'eq\',\''+pos+'\')">⛏ Drill Socket ('+drillCost+'☿ · '+getDrillChance(gear)+'%)</button>';
+      if(canRefine)actionsHTML+='<button class="lab-btn craft" onclick="craftRefine(\'eq\',\''+pos+'\')">Refine +'+(gear.refinement+1)+' ('+refineCost+'☿ · '+getRefineChance(gear)+'%)</button>';
+      if(canDrill)actionsHTML+='<button class="lab-btn craft" onclick="craftDrillSocket(\'eq\',\''+pos+'\')">⚒ Drill Socket ('+drillCost+'☿ · '+getDrillChance(gear)+'%)</button>';
       if(canFuse)actionsHTML+='<button class="lab-btn craft" onclick="craftFuseLink(\''+pos+'\')">⛓ Fuse Link ('+linkCost+'☿ · '+getLinkChance(gear)+'%)</button>';
       if(hasEmptySockets&&hasLoose)actionsHTML+='<button class="lab-btn craft" onclick="showSlotPicker(\'eq\',\''+pos+'\')">Slot (3☿)</button>';
       if(gear.materia.length>0)actionsHTML+='<button class="lab-btn craft" onclick="showEqUnslotPicker(\''+pos+'\')">Unslot (5☿)</button>';
@@ -6044,7 +6044,7 @@ function renderLab(){
       }
       var canAfford=run.quicksilver>=item.price;
       if(item.type==='gear'){
-        card.innerHTML=gearCardHTML(item.gear)+'<div class="shop-price">'+(canAfford?'':'⚠ ')+'Buy: '+item.price+'☿</div><div class="lab-btn craft" style="margin-top:4px" onclick="event.stopPropagation();setLabPreview(\'shop\','+i+')">👁 Preview Stats</div>';
+        card.innerHTML=gearCardHTML(item.gear)+'<div class="shop-price">'+(canAfford?'':'⚠ ')+'Buy: '+item.price+'☿</div><div class="lab-btn craft" style="margin-top:4px" onclick="event.stopPropagation();setLabPreview(\'shop\','+i+')">Preview Stats</div>';
         card.onclick=function(){if(!item.sold&&canAfford)buyMerchantItem(i)};
       } else if(item.type==='materia'){
         var p=PLANETS[item.materia.planetIdx];
@@ -6062,7 +6062,7 @@ function renderLab(){
 
   // ── Stored gear section ──
   var stEl=document.getElementById('labStored');
-  stEl.innerHTML='<h3>📦 STORED GEAR ('+run.laboratory.length+')</h3><div class="lab-gear" id="labStoreGear"></div>';
+  stEl.innerHTML='<h3>STORED GEAR ('+run.laboratory.length+')</h3><div class="lab-gear" id="labStoreGear"></div>';
   var stGear=document.getElementById('labStoreGear');
   if(run.laboratory.length===0){
     stGear.innerHTML='<div style="font-size:0.75em;color:#444;padding:8px">No stored gear.</div>';
@@ -6084,8 +6084,8 @@ function renderLab(){
     var actionsHTML='';
     if(canEquip)actionsHTML+='<button class="lab-btn equip" onclick="equipFromLab('+i+')">Equip</button>';
     actionsHTML+='<button class="lab-btn sell" onclick="sellGear('+i+')">Sell ('+sellWithMat+'☿)</button>';
-    if(canRefine)actionsHTML+='<button class="lab-btn craft" onclick="craftRefine(\'lab\','+i+')">🔨 Refine +'+(gear.refinement+1)+' ('+refineCost+'☿ · '+getRefineChance(gear)+'%)</button>';
-    if(canDrill)actionsHTML+='<button class="lab-btn craft" onclick="craftDrillSocket(\'lab\','+i+')">⛏ Drill ('+drillCost+'☿ · '+getDrillChance(gear)+'%)</button>';
+    if(canRefine)actionsHTML+='<button class="lab-btn craft" onclick="craftRefine(\'lab\','+i+')">Refine +'+(gear.refinement+1)+' ('+refineCost+'☿ · '+getRefineChance(gear)+'%)</button>';
+    if(canDrill)actionsHTML+='<button class="lab-btn craft" onclick="craftDrillSocket(\'lab\','+i+')">⚒ Drill ('+drillCost+'☿ · '+getDrillChance(gear)+'%)</button>';
     if(gear.materia.length>0)actionsHTML+='<button class="lab-btn craft" onclick="showUnslotPicker('+i+')">Unslot (5☿)</button>';
     if(hasEmptySockets&&hasLoose)actionsHTML+='<button class="lab-btn craft" onclick="showSlotPicker(\'lab\','+i+')">Slot (3☿)</button>';
     var infoHTML='<div class="lab-gear-info" onclick="setLabPreview(\'lab\','+i+')" style="cursor:pointer" title="Click to preview stats with this gear">'+gearCardHTML(gear)+'</div>';
@@ -6257,7 +6257,7 @@ function showSmithOverlay(title,desc,cost,chance,stressed,smithFn){
   var ov=document.getElementById('craftOverlay');
   var panel=document.getElementById('craftPanel');
   var stressWarning=stressed?'<div style="color:#ef4444;font-weight:bold;margin:6px 0;font-size:0.85em">⚠ STRESSED — Failure will DESTROY this gear permanently!</div>':'';
-  panel.innerHTML='<h3>🔨 '+title+'</h3><div class="craft-desc">'+desc+'</div>'+
+  panel.innerHTML='<h3>'+title+'</h3><div class="craft-desc">'+desc+'</div>'+
     '<div class="craft-cost">Cost: '+cost+'</div>'+
     '<div style="font-size:1.2em;margin:8px 0;color:'+(chance>=60?'#4ade80':chance>=30?'#f59e0b':'#ef4444')+'">'+chance+'% success</div>'+
     stressWarning+
@@ -6868,25 +6868,25 @@ window.CharGen = {
 function tacViewToggle(){
   var on=tacFpToggle();
   var b=document.getElementById('tacViewBtn');
-  // Labels say where tapping TAKES you, not where you are — '👁 Board' read as
+  // Labels say where tapping TAKES you, not where you are — 'Board' read as
   // a board widget and nobody found the first-person view behind it.
-  if(b){b.classList.toggle('on',on);b.textContent=on?'♟ Board':'👁 1st Person';}
+  if(b){b.classList.toggle('on',on);b.textContent=on?'♟ Board':'1st Person';}
   var pv=document.getElementById('tacPovBtn'),wh=document.getElementById('tacWhoBtn');
   if(pv)pv.style.display=on?'':'none';
   if(wh)wh.style.display=on?'':'none';
   var gw=document.querySelector('#battleScreen .grid-wrap');
   if(gw)gw.style.visibility=on?'hidden':'';   // the board keeps running underneath
   // A fresh mount always stands in fighter 0, first person — the sibling
-  // buttons' labels must say so, or a re-entry shows '🙸 3rd' over a 1st-person
+  // buttons' labels must say so, or a re-entry shows '3rd' over a 1st-person
   // view (the labels kept whatever the LAST session ended on).
-  if(on){tacFpSetSubject(0);tacFpSync();_tacWho=0;if(pv)pv.textContent='🙶 1st';if(wh)wh.textContent='↔ Eyes';}
-  logMsg(on?'👁 Standing in '+(p1&&p1.name||'your fighter')+' — same turn, same rules.':'♟ Back to the board.','phase');
+  if(on){tacFpSetSubject(0);tacFpSync();_tacWho=0;if(pv)pv.textContent='1st';if(wh)wh.textContent='↔ Eyes';}
+  logMsg(on?'Standing in '+(p1&&p1.name||'your fighter')+' — same turn, same rules.':'♟ Back to the board.','phase');
 }
 function tacViewPov(){
   var next=tacFpPov()==='first'?'shoulder':'first';
   tacFpSetPov(next);
   var b=document.getElementById('tacPovBtn');
-  if(b)b.textContent=next==='shoulder'?'🙸 3rd':'🙶 1st';
+  if(b)b.textContent=next==='shoulder'?'3rd':'1st';
 }
 // Cycle whose eyes. A list from the outset, so a 3v3 roster needs nothing here.
 var _tacWho=0;
@@ -6897,7 +6897,7 @@ function tacViewWho(){
   tacFpSetSubject(list[_tacWho]);
   var b=document.getElementById('tacWhoBtn');
   if(b)b.textContent='↔ '+(list[_tacWho].name||'fighter').split(' ')[0];
-  logMsg('👁 Now looking through '+(list[_tacWho].name||'the other fighter')+'.','phase');
+  logMsg('Now looking through '+(list[_tacWho].name||'the other fighter')+'.','phase');
 }
 window.tacViewToggle=tacViewToggle;
 window.tacViewPov=tacViewPov;

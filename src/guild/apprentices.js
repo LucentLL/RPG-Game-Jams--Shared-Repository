@@ -24,7 +24,7 @@ export const APPRENTICE_INTAKE = 60;
 /** Preference leans = the archetype an apprentice will graduate into. */
 const LEANS = ARCHETYPES.map((a) => a.name);
 /** A glyph per lean for the scout report. */
-export const LEAN_GLYPH = { Knight: '🛡', Mage: '🔮', Ranger: '🏹', Cleric: '✨', Rogue: '🗡', Berserker: '🪓' };
+export const LEAN_GLYPH = { Knight: '▣', Mage: '', Ranger: '➳', Cleric: '✦', Rogue: '†', Berserker: '⚒' };
 
 const rand = (n) => Math.floor(Math.random() * n);
 let _seq = 0;

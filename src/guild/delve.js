@@ -687,7 +687,7 @@ function mountScene(prep, entry) {
       // The thing you climb, standing against the face of the ledge it serves.
       if (CLIMB[ch]) addProp(`<span class="dv-${CLIMB[ch]}"></span>`, x + 0.5, y + 1, 30);
       if (ch === 'w') addProp(artSprite('wagon', 'dv-wagon'), x + 0.5, y + 1, 82);
-      else if (ch === 't' && map.theme === 'meadow') addProp(artSprite('treeTall', 'dv-tree'), x + 0.5, y + 1, 86);
+      else if (ch === 't' && map.theme === 'meadow') addProp(artSprite('treeTall', 'dv-tree'), x + 0.5, y + 1, 96);
       else if (ch === 't') addPropCanvas('stalag', baked.sheets, x + 0.5, y + 0.97);
       else if (ch === 'r') addPropCanvas(theme.grayProps ? 'boulderGray' : 'boulder', baked.sheets, x + 0.5, y + 0.97);
       else if (ch === 'm') addPropCanvas('cart', baked.sheets, x + 0.5, y + 1);
@@ -766,35 +766,39 @@ function mountScene(prep, entry) {
   }
 
   const title = D.host.querySelector('.dv-title');
-  if (title) title.textContent = `${D.hooks.locale.glyph} ${map.name || D.hooks.locale.name}`;
+  if (title) title.textContent = `${D.hooks.locale.glyph || ''} ${map.name || D.hooks.locale.name}`.trim();
 }
 
-export async function openDelve(localeId, member, hooks) {
+export async function openDelve(localeId, member, hooks, carry) {
   const gfx = window.__ranchGfx;
   if (!mapForLocale(localeId) || !member || !gfx || D || opening) return false;
   opening = true;
   try {
-    const prep = await prepMap(localeId);
+    const prep = await prepMap(carry && carry.mapId ? carry.mapId : localeId);
     // The bake took real time (network, on a first load). Re-validate the
     // launch context: if the guild screen is no longer up — a played bout took
     // the screen, or the player left for the title — opening now would steal
     // the screen mid-scene and orphan its promise. Walk away instead; hall
-    // hasn't charged any stamina yet.
+    // hasn't charged any stamina yet. A view SWAP is the one exception: the
+    // first-person screen is the active one then, and the session it carries
+    // is the licence to take over from it.
     const guildUp = document.getElementById('guildScreen');
-    if (D || !guildUp || !guildUp.classList.contains('active')) return false;
+    if (D || (!(carry && carry.swap) && (!guildUp || !guildUp.classList.contains('active')))) return false;
 
     const host = document.getElementById('delveScreen');
     host.style.setProperty('--dvtilt', TILT + 'deg');
     host.innerHTML = `
     <div class="delve-stage"></div>
     <div class="delve-hud">
-      <button class="dv-leave" onclick="__delve.leave()">⬅ Leave</button>
+      <button class="dv-leave" onclick="__delve.leave()">&larr; Leave</button>
       <span class="dv-title"></span>
       <span class="dv-haul"></span>
+      <button class="dv-leave dv-view" title="See it through their eyes" onclick="__delve.view()">1st person</button>
     </div>
     <div class="delve-toasts"></div>
     <button class="dv-use" hidden onclick="__delve.use()"></button>`;
 
+    if (carry && !carry.swap) carry = null;   // only a live swap may carry state
     D = {
       map: null, theme: null, hooks, member, gfx, field: null, host,
       pass: null, tall: null, solids: [], uses: [], useNear: null, working: false,
@@ -811,11 +815,19 @@ export async function openDelve(localeId, member, hooks) {
       // ending the walk. Empty = the exit really is the way home.
       stack: [],
     };
+    // A swap brings the session's ledger across — the walk continues, it does
+    // not restart, so the haul, the doors behind you and the veins already
+    // worked all survive the change of camera.
+    if (carry) {
+      D.stack = (carry.stack || []).slice();
+      D.mined = new Set(carry.mined || []);
+      if (carry.haul) D.haul = carry.haul;
+    }
     // From here the session object exists, so a throw would leave a half-built
     // scene latched as "a delve is open" and lock the feature out for the rest
     // of the page. Tear it down and let the caller report the failure.
     try {
-      mountScene(prep, null);
+      mountScene(prep, carry ? carry.at : null);
       wireInput();
       updateHaul();
       showScreen('delveScreen');
@@ -827,7 +839,7 @@ export async function openDelve(localeId, member, hooks) {
       showScreen('guildScreen');
       throw e;
     }
-    toast(`${member.name.split(' ')[0]} enters ${prep.map.name || hooks.locale.name}.`);
+    if (!carry) toast(`${member.name.split(' ')[0]} enters ${prep.map.name || hooks.locale.name}.`);
     return true;
   } finally {
     opening = false;
@@ -1265,13 +1277,13 @@ const onClimb = (x, y) => {
  *  their feet, or halfway between levels while they are on the rungs. */
 const liftAt = (x, y) => (onClimb(x, y) ? CLIMB_LIFT : heightAt(x, y)) * BLOCK_H;
 /**
- * A step that CHANGES LEVEL is legal only when one end of it is a climb cell.
- * That single rule is what makes a ledge somewhere you climb up to rather than
- * somewhere you stroll onto, and it is why the ledge itself can stay ordinary
- * passable floor instead of needing a wall around three of its sides.
+ * A step UP a level is legal only when one end of it is a climb cell — that is
+ * what makes a ledge somewhere you climb to rather than stroll onto. A step
+ * DOWN is always legal: you can walk off the edge and drop, so the ladder is
+ * the way up, never a fence keeping you on top.
  */
 const stepOK = (fx, fy, x, y) =>
-  fx == null || heightAt(fx, fy) === heightAt(x, y) || onClimb(fx, fy) || onClimb(x, y);
+  fx == null || heightAt(fx, fy) >= heightAt(x, y) || onClimb(fx, fy) || onClimb(x, y);
 
 const canStand = (x, y, fx, fy) =>
   passAt(x - BODY_R, y - BODY_R) && passAt(x + BODY_R, y - BODY_R) &&
@@ -1415,7 +1427,7 @@ async function mineOre(o) {
     S.haul.gold += kind.gold;
     if (kind.mat) S.haul.mats[kind.mat] = (S.haul.mats[kind.mat] || 0) + 1;
     updateHaul();
-    toast(r && r.txt ? r.txt : `⛏ ${kind.name} · +${kind.gold}g`);
+    toast(r && r.txt ? r.txt : `⚒ ${kind.name} · +${kind.gold}g`);
   } finally {
     if (D === S) S.working = false;
   }
@@ -1844,11 +1856,11 @@ function endDelve(reason, beaten = false) {
   D.host.insertAdjacentHTML('beforeend', `
     <div class="delve-summary">
       <div class="ds-card">
-        <div class="ds-title">${beaten ? '🩸 Driven out' : '🏕 Back to daylight'}</div>
+        <div class="ds-title">${beaten ? 'Driven out' : 'Back to daylight'}</div>
         <div class="ds-sub">${D.member.name.split(' ')[0]} ${reason}.</div>
         ${killLines}${matLines}
-        ${h.gold ? `<div class="ds-line">🪙 +${h.gold} gold</div>` : ''}
-        ${h.field ? `<div class="ds-line">📜 +${h.field} field insight</div>` : ''}
+        ${h.gold ? `<div class="ds-line">+${h.gold} gold</div>` : ''}
+        ${h.field ? `<div class="ds-line">+${h.field} field insight</div>` : ''}
         <button class="dv-close" onclick="__delve.close()">Return to the Guild</button>
       </div>
     </div>`);
@@ -1882,7 +1894,36 @@ export function exitDelve() {
   hooks.onEnd(summary);
 }
 
-window.__delve = { leave, close, use: beginUse };
+/**
+ * Hand this walk to the first-person view, mid-stride. The carry is the whole
+ * session — where you stand, which map you are in, the doors behind you, the
+ * veins worked and the haul so far — so the swap is a change of CAMERA, not a
+ * re-entry: hall's swapView opens the twin on the same hooks and then calls
+ * closeDelveSilent to retire this one without paying out.
+ */
+function swapToFp() {
+  if (!D || D.ended || D.fighting || D.working || D.transiting) return;
+  const hooks = D.hooks;
+  if (!hooks.swapView) return;
+  D.transiting = true;   // freeze the sim while the other view bakes
+  const carry = {
+    swap: true, mapId: D.map.id, at: [D.player.x, D.player.y],
+    stack: D.stack.slice(), mined: [...D.mined], haul: D.haul,
+  };
+  hooks.swapView('fp', carry).then((ok) => { if (!ok && D) D.transiting = false; });
+}
+
+/** Retire the session with no ending — the view swap took it over. Everything
+ *  endDelve tears down, nothing it pays out, and no onEnd (the walk goes on). */
+export function closeDelveSilent() {
+  if (!D) return;
+  if (D.raf) cancelAnimationFrame(D.raf);
+  unwireInput();
+  D.host.innerHTML = '';
+  D = null;
+}
+
+window.__delve = { leave, close, use: beginUse, view: swapToFp };
 
 // Dev probe (headless verification: a hidden window never fires rAF — step the
 // sim by hand). Mirrors rooms.js __roomDebug/__roomStep.

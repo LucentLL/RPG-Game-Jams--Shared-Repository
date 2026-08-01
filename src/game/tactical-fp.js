@@ -73,6 +73,82 @@ function facePanel(key, base, dark) {
   return (_tex[key] = cv.toDataURL());
 }
 
+/** The trodden ground OUTSIDE the lists — the apron between the fence and the
+ *  stands. Mottled and dark so the bright play field stays the focus. */
+function apronPanel() {
+  if (_tex.apron) return _tex.apron;
+  const cv = document.createElement('canvas');
+  cv.width = 64; cv.height = 64;
+  const g = cv.getContext('2d');
+  g.fillStyle = '#3d4a2c';
+  g.fillRect(0, 0, 64, 64);
+  for (let i = 0; i < 240; i++) {
+    const h = (i * 2654435761) >>> 0;
+    g.fillStyle = ['#46543311', '#33402444', '#4e5c3a22', '#2c361e33'][h % 4];
+    g.fillRect(h % 64, (h >> 6) % 64, 2 + (h >> 12) % 3, 1 + (h >> 14) % 2);
+  }
+  return (_tex.apron = cv.toDataURL());
+}
+
+/** The stands: sandstone tiers with a crowd dotted along every row. This is
+ *  what turns "the grid stops being drawn" into somewhere a match happens. */
+function standsPanel() {
+  if (_tex.stands) return _tex.stands;
+  const cv = document.createElement('canvas');
+  cv.width = 128; cv.height = 96;
+  const g = cv.getContext('2d');
+  // Base masonry below the first tier.
+  const grd = g.createLinearGradient(0, 0, 0, 96);
+  grd.addColorStop(0, '#a08a5c'); grd.addColorStop(1, '#5c4c30');
+  g.fillStyle = grd; g.fillRect(0, 0, 128, 96);
+  // Tier rows, climbing away: a dark riser, a lit tread, and the crowd on it.
+  const CROWD = ['#d8b06a', '#b86a4a', '#7a94c8', '#88b06a', '#c8c8d0', '#a86a88'];
+  for (let t = 0; t < 5; t++) {
+    const y = 8 + t * 15;
+    g.fillStyle = '#4a3c24'; g.fillRect(0, y + 9, 128, 4);        // riser shadow
+    g.fillStyle = t % 2 ? '#b09a68' : '#a89060';                  // tread
+    g.fillRect(0, y + 4, 128, 5);
+    for (let x = 2; x < 128; x += 5) {                            // the crowd
+      const h = ((x * 31 + t * 131) * 2654435761) >>> 0;
+      if ((h & 7) < 6) {
+        g.fillStyle = CROWD[h % CROWD.length];
+        g.fillRect(x + (h >> 8) % 2, y, 3, 5);
+        g.fillStyle = '#e8c898';
+        g.fillRect(x + (h >> 8) % 2, y - 1, 3, 2);                // a face over each tunic
+      }
+    }
+  }
+  // Parapet at the foot of the stands.
+  g.fillStyle = '#8a744c'; g.fillRect(0, 88, 128, 8);
+  g.fillStyle = '#c8b088'; g.fillRect(0, 86, 128, 3);
+  return (_tex.stands = cv.toDataURL());
+}
+
+/** Pixel clouds for the sky behind everything. Deterministic — the sky must
+ *  bake the same every mount. */
+function cloudsPanel() {
+  if (_tex.clouds) return _tex.clouds;
+  const cv = document.createElement('canvas');
+  cv.width = 420; cv.height = 160;
+  const g = cv.getContext('2d');
+  const puff = (x, y, s) => {
+    const row = (dx, dy, w, h, c) => { g.fillStyle = c; g.fillRect(x + dx * s, y + dy * s, w * s, h * s); };
+    row(8, 10, 36, 9, 'rgba(255,255,255,0.9)');
+    row(0, 16, 52, 9, 'rgba(255,255,255,0.9)');
+    row(14, 3, 20, 9, 'rgba(255,255,255,0.85)');
+    row(4, 23, 44, 5, 'rgba(210,220,234,0.8)');
+  };
+  puff(24, 22, 1.2);
+  puff(200, 60, 0.8);
+  puff(310, 16, 1.0);
+  return (_tex.clouds = cv.toDataURL());
+}
+
+/** How far the apron runs past the lists, and how tall the stands rise. The
+ *  apron must out-reach the shoulder camera's pull-back (OTS_BACK tiles), or
+ *  stepping to the board's edge puts the eye outside the world again. */
+const APRON_T = 6, RING_H = 2400;
+
 // ---------------------------------------------------------------------------
 // Geometry — rebuilt only when the BOARD changes, never per frame
 // ---------------------------------------------------------------------------
@@ -141,13 +217,32 @@ function buildBoard() {
       }
     }
   }
-  // The lip of the world. You cannot leave the grid, so it should look like
-  // somewhere that ends rather than somewhere that stops being drawn.
+  // The lip of the lists. You cannot leave the grid, so its edge is a low
+  // fence — and past the fence the world KEEPS GOING: an apron of trodden
+  // ground, then the stands, then sky. The shoulder camera stands up to two
+  // tiles outside the board, and what it used to see out there was nothing.
   const B = BLOCK_H * 0.55, by = -B / 2;
   out.push(quad(edge, span, B, span / 2, by, 0, 'rotateY(180deg)', 'tfp-wall'));
   out.push(quad(edge, span, B, span / 2, by, span, '', 'tfp-wall'));
   out.push(quad(edge, span, B, 0, by, span / 2, 'rotateY(-90deg)', 'tfp-wall'));
   out.push(quad(edge, span, B, span, by, span / 2, 'rotateY(90deg)', 'tfp-wall'));
+
+  // The apron — four slabs of ground from the fence out to the stands.
+  const A = APRON_T * T, apron = apronPanel();
+  out.push(quad(apron, span + 2 * A, A, span / 2, 0, -A / 2, 'rotateX(90deg)', 'tfp-floor tfp-apron'));
+  out.push(quad(apron, span + 2 * A, A, span / 2, 0, span + A / 2, 'rotateX(90deg)', 'tfp-floor tfp-apron'));
+  out.push(quad(apron, A, span, -A / 2, 0, span / 2, 'rotateX(90deg)', 'tfp-floor tfp-apron'));
+  out.push(quad(apron, A, span, span + A / 2, 0, span / 2, 'rotateX(90deg)', 'tfp-floor tfp-apron'));
+
+  // The colosseum ring — crowd-dotted stands facing the field on all four
+  // sides, tall enough that no camera the view can produce sees past them
+  // except into sky. (tfp-ring tiles the texture along the wall instead of
+  // stretching one crowd across half a kilometre of masonry.)
+  const stands = standsPanel(), ry = -RING_H / 2, rl = span + 2 * A;
+  out.push(quad(stands, rl, RING_H, span / 2, ry, -A, '', 'tfp-wall tfp-ring'));
+  out.push(quad(stands, rl, RING_H, span / 2, ry, span + A, 'rotateY(180deg)', 'tfp-wall tfp-ring'));
+  out.push(quad(stands, rl, RING_H, -A, ry, span / 2, 'rotateY(90deg)', 'tfp-wall tfp-ring'));
+  out.push(quad(stands, rl, RING_H, span + A, ry, span / 2, 'rotateY(-90deg)', 'tfp-wall tfp-ring'));
 
   V.world.querySelector('.tfp-geo').innerHTML = out.join('');
   V.boardKey = boardKey();
@@ -392,6 +487,10 @@ function mount() {
   host.innerHTML = '<div class="tfp-stage"><div class="tfp-world">'
     + '<div class="tfp-geo"></div><div class="tfp-path"></div><div class="tfp-bbs"></div>'
     + '</div></div><div class="tfp-haze"></div>';
+  // The sky — behind everything the stage draws. Blue settling to the haze
+  // colour at the horizon (the stage's centre), pixel clouds riding high.
+  host.style.background = `url(${cloudsPanel()}) repeat-x 0 6% / auto 30%,`
+    + 'linear-gradient(rgb(92,132,188) 0%, rgb(128,156,196) 34%, rgb(156,174,196) 50%, rgb(112,120,132) 58%, rgb(74,80,92) 100%)';
   screen.appendChild(host);
   V = {
     host, world: host.querySelector('.tfp-world'),

@@ -27,6 +27,7 @@ import { THEMES, LIGHTS, DECALS, ORE_KINDS, oreKindAt, mapForLocale, validateMap
 import { preyById } from './locales.js';
 import { loadImg, SHEET_URLS } from './delve.js';
 import { ART, artSprite, WORN, wornWeapon, wornShield, wornPick } from './art.js';
+import { icon } from './icons.js';
 
 /**
  * World scale. These look arbitrary and are not: what a surface MEASURES on
@@ -170,7 +171,7 @@ const SWING_MS = 380, MELEE = 1.25, SWING_CONE = 0.3;
  *
  * You aim and time the blow yourself; whether it LANDS is a roll, and the roll
  * is made of the same numbers the rest of the game already uses. `hooks.power`
- * is the member's ⚡ (heroPower + gear) and `prey.power` is the recommended
+ * is the member's ↯ (heroPower + gear) and `prey.power` is the recommended
  * party power — the very ratio `huntOdds` prints on the hunt card — so a fight
  * the Wilds room calls Grim rolls Grim, and no second economy is invented here.
  * A kill still pays through `hooks.onKill`, which still runs `resolveHuntPlayed`
@@ -199,7 +200,7 @@ const NOTICE = { 1: 3.0, 2: 4.0, 3: 5.5, 4: 6.5, 5: 7.5 };
 const DEATH_MS = 520, CORPSE_CAP = 14;
 /**
  * A creature's blow carries the whole period between its blows — its cooldown
- * AND its wind-up — or the fight is decided by cooldowns rather than by ⚡.
+ * AND its wind-up — or the fight is decided by cooldowns rather than by ↯.
  * Without the rate term an EVEN match on the hunt card, where huntOdds prints
  * 50%, was a walkover in the corridor at nearly four times the damage per
  * second; and adding a 430ms telegraph on top would have quietly handed back
@@ -319,7 +320,10 @@ function bakeOreFace(wallCv, ores, kind) {
   return cv;
 }
 
-async function cutSurfaces(theme) {
+/** Once a hidden tab's rasteriser misses one toBlob deadline, stop asking. */
+let _blobOk = true;
+
+async function cutSurfaces(theme, opts = {}) {
   const need = new Set(['cliffs', theme.sheet, theme.walls && theme.walls.sheet].filter(Boolean));
   const sheets = {};
   for (const k of need) sheets[k] = await loadImg(SHEET_URLS[k] || (SHEET_URLS.cliffs));
@@ -368,25 +372,33 @@ async function cutSurfaces(theme) {
     if ((LIGHTS[theme.light] || {}).sky) {
       // OPEN AIR: the rim of a meadow is a FOREST EDGE, not a rock shaft —
       // the playtest read the cliff-faced ravines as "trapped in a dirt
-      // hole". Leaf-wall tiled from the campus tree's own canopy, with a
-      // shadowed foot where the hedge meets the grass.
+      // hole". Built the way the sheet was authored to build one: the dark
+      // canopy FILLER as the backdrop, the bright crown mass over it, and the
+      // trunk row at the ground — never the fillers alone as "trees".
       try {
         const tree = await loadImg(ART_BASE + 'tree_3x.png');
         const c = document.createElement('canvas');
         c.width = 96; c.height = 192;
         const g = c.getContext('2d');
         g.imageSmoothingEnabled = false;
-        for (let ty = 0; ty < 4; ty++) {
-          for (let tx = 0; tx < 2; tx++) {
-            const sx = 104 + ((tx + ty) % 2) * 24;
-            const sy = 16 + ((ty * 37) % 3) * 24;
-            g.drawImage(tree, sx, sy, 48, 48, tx * 48, ty * 48, 48, 48);
-          }
-        }
+        // Opaque base so the wall never shows fog rectangles through leaf gaps.
+        g.fillStyle = '#1a2812';
+        g.fillRect(0, 0, 96, 192);
+        g.drawImage(tree, 96, 144, 96, 96, 0, 0, 96, 96);    // dark canopy backdrop
+        g.drawImage(tree, 0, 144, 96, 96, 0, 96, 96, 96);    // the trunk row at the ground
+        g.drawImage(tree, 96, 0, 96, 120, 0, 0, 96, 120);    // bright crown over both
         g.fillStyle = 'rgba(18, 28, 10, 0.45)';
-        g.fillRect(0, 182, 96, 10);
+        g.fillRect(0, 182, 96, 10);                          // shadowed foot on the grass
         paint(wallCv, c, 0, 0, 96, 192);
-        paint(lowCv, c, 0, 96, 96, 96);
+        // Waist-high runs are the trunk band alone — a hedge you see over.
+        const lo = document.createElement('canvas');
+        lo.width = 96; lo.height = 96;
+        const lg = lo.getContext('2d');
+        lg.imageSmoothingEnabled = false;
+        lg.fillStyle = '#1a2812';
+        lg.fillRect(0, 0, 96, 96);
+        lg.drawImage(tree, 0, 144, 96, 96, 0, 0, 96, 96);
+        paint(lowCv, lo, 0, 0, 96, 96);
         walled = true;
       } catch (e) {
         console.warn('delve-fp: tree sheet missing — the rim stays rock', e);
@@ -395,12 +407,16 @@ async function cutSurfaces(theme) {
     if (!walled) cliffWall();
   }
   let ores = null;
-  try {
-    const oreImg = await loadImg(SHEET_URLS.ores);
-    ores = {};
-    for (const kind of Object.keys(ORE_KINDS)) ores[kind] = bakeOreFace(wallCv, oreImg, kind);
-  } catch (e) {
-    console.warn('delve-fp: ore sheet missing — seams will read as plain rock', e);
+  // Region themes never carry seams — baking four 4×-scale ore faces per
+  // stamped room was most of the campus's open time.
+  if (opts.ores !== false) {
+    try {
+      const oreImg = await loadImg(SHEET_URLS.ores);
+      ores = {};
+      for (const kind of Object.keys(ORE_KINDS)) ores[kind] = bakeOreFace(wallCv, oreImg, kind);
+    } catch (e) {
+      console.warn('delve-fp: ore sheet missing — seams will read as plain rock', e);
+    }
   }
   let rail = null;
   try {
@@ -426,12 +442,23 @@ async function cutSurfaces(theme) {
    * set when a portal swaps the scene.
    */
   const urls = [];
-  const urlOf = (cv) => new Promise((resolve, reject) => cv.toBlob((b) => {
-    if (!b) { reject(new Error('delve-fp: texture bake failed')); return; }
-    const u = URL.createObjectURL(b);
-    urls.push(u);
-    resolve(u);
-  }, 'image/png'));
+  // toBlob's callback comes off the rasteriser, and a HIDDEN tab's rasteriser
+  // may simply never run it (measured: prep() hung forever in a background
+  // pane). One timeout is allowed to discover that, then the whole session
+  // falls back to the synchronous data-URI path — bigger strings, but a delve
+  // that opens beats one that waits on a compositor that is not coming.
+  const urlOf = (cv) => new Promise((resolve) => {
+    if (!_blobOk) { resolve(cv.toDataURL()); return; }
+    let done = false;
+    const settle = (u, viaBlob) => { if (!done) { done = true; if (!viaBlob) _blobOk = false; resolve(u); } };
+    try {
+      cv.toBlob((b) => {
+        if (b) { const u = URL.createObjectURL(b); urls.push(u); settle(u, true); }
+        else settle(cv.toDataURL(), false);
+      }, 'image/png');
+    } catch (e) { settle(cv.toDataURL(), false); }
+    setTimeout(() => settle(cv.toDataURL(), false), 1200);
+  });
   const out = {
     floor: await urlOf(floor), ceil: await urlOf(ceil), lid: await urlOf(lid),
     wall: await urlOf(wallCv), low: await urlOf(lowCv),
@@ -443,6 +470,59 @@ async function cutSurfaces(theme) {
     for (const kind of Object.keys(ores)) out.ores[kind] = await urlOf(ores[kind]);
   }
   return out;
+}
+
+/**
+ * Pixel clouds for the open-air sky — drawn once, tiled repeat-x across the
+ * upper stage. Deterministic blobs (no randomness: the sky must bake the same
+ * every mount, and Math.random in a bake is a re-raster per session).
+ */
+let _cloudTex = null;
+function cloudTexture() {
+  if (_cloudTex) return _cloudTex;
+  const cv = document.createElement('canvas');
+  cv.width = 480; cv.height = 200;
+  const g = cv.getContext('2d');
+  const puff = (x, y, s) => {
+    // One cloud: stacked rows of rounded rect-blobs, shaded underneath.
+    const row = (dx, dy, w, h, c) => { g.fillStyle = c; g.fillRect(x + dx * s, y + dy * s, w * s, h * s); };
+    row(8, 12, 40, 10, 'rgba(255,255,255,0.92)');
+    row(0, 18, 58, 10, 'rgba(255,255,255,0.92)');
+    row(16, 4, 22, 10, 'rgba(255,255,255,0.88)');
+    row(4, 26, 48, 6, 'rgba(214,224,236,0.85)');
+    row(12, 30, 30, 4, 'rgba(190,202,220,0.7)');
+  };
+  puff(30, 26, 1.35);
+  puff(200, 70, 0.9);
+  puff(330, 20, 1.1);
+  puff(120, 120, 0.65);
+  puff(410, 110, 0.75);
+  return (_cloudTex = cv.toDataURL());
+}
+
+/**
+ * Dress the sky layer for this map's light. Open air gets a real sky — a blue
+ * that settles to the fog colour AT the horizon (the stage's vertical centre,
+ * where a level camera's horizon is), so geometry fading into `--fp-fog` and
+ * sky meeting the ground are the same colour and the seam disappears. A sun
+ * and a few pixel clouds sit high, clear of the treeline. Underground maps
+ * hide the layer and keep their void.
+ */
+function mountSky() {
+  const el = F.host.querySelector('.fp-sky');
+  if (!el) return;
+  F.host.classList.toggle('fp-open', !!L.sky);   // daylight softens the vignette
+  if (!L.sky) { el.style.display = 'none'; return; }
+  const [r, g, b] = L.rgb;
+  const top = `rgb(${Math.max(0, r - 66)},${Math.max(0, g - 42)},${Math.min(255, b + 6)})`;
+  const mid = `rgb(${Math.max(0, r - 26)},${Math.max(0, g - 16)},${b})`;
+  const hor = `rgb(${r},${g},${b})`;
+  el.style.display = '';
+  el.style.backgroundImage = `url(${cloudTexture()}),`
+    + 'radial-gradient(circle at 73% 20%, rgba(255,246,210,0.9) 0%, rgba(255,246,210,0.34) 3.5%, rgba(255,246,210,0) 9%),'
+    + `linear-gradient(${top} 0%, ${mid} 32%, ${hor} 50%, ${hor} 100%)`;
+  el.style.backgroundSize = 'auto 44%, 100% 100%, 100% 100%';
+  el.style.backgroundRepeat = 'repeat-x, no-repeat, no-repeat';
 }
 
 /** The rungs, drawn rather than cropped: no sheet in the kit has a head-on
@@ -475,15 +555,16 @@ const isLow = (x, y) => !!LOW[at(x, y)];
 const blocked = (x, y) => isWall(x, y) || isLow(x, y) || !!PROP[at(x, y)];
 const heightAt = (x, y) => (at(x, y) === '^' ? 1 : 0);
 const onClimb = (x, y) => { const c = at(x, y); return c === 'L' || c === 'v'; };
-/** A step is legal if the destination is open AND — the delve's own rule — any
- *  change of level happens across a ladder. A DIAGONAL stride additionally
- *  needs both shoulders clear: cutting a corner through a wall's edge put the
- *  camera briefly inside the rock. */
+/** A step is legal if the destination is open AND any climb UP happens across
+ *  a ladder. Stepping DOWN is always allowed — a ledge is a thing you must
+ *  climb to reach, not a pen you must climb to leave: you can simply walk off
+ *  the edge and drop. A DIAGONAL stride additionally needs both shoulders
+ *  clear: cutting a corner through a wall's edge put the camera in the rock. */
 function canStep(fx, fy, tx, ty) {
   if (blocked(tx, ty)) return false;
   const dx = tx - fx, dy = ty - fy;
   if (dx && dy && (blocked(fx + dx, fy) || blocked(fx, fy + dy))) return false;
-  return heightAt(fx, fy) === heightAt(tx, ty) || onClimb(fx, fy) || onClimb(tx, ty);
+  return heightAt(fx, fy) >= heightAt(tx, ty) || onClimb(fx, fy) || onClimb(tx, ty);
 }
 
 /** Re-fit the lens to the window. Called on mount and on every resize, because
@@ -574,6 +655,12 @@ const fogQ = (f) => Math.round(Math.min(1, Math.max(0, f)) * 40) / 40;
 
 function buildGeometry() {
   const S = F.surf;
+  // The surface set a cell draws from: its region's if it stands in one (the
+  // campus's stamped rooms), the map's own otherwise.
+  const surfAt = (x, y) => {
+    const t = F.regionThemeAt && F.regionThemeAt(x, y);
+    return (t && F.surfByTheme[t]) || S;
+  };
   const cx = Math.floor(F.px), cy = Math.floor(F.py);
   const R = viewR();
   const want = new Map();
@@ -586,10 +673,11 @@ function buildGeometry() {
       const ch = at(x, y);
       const wx = (x + 0.5) * T, wz = (y + 0.5) * T;
       const id = x + ',' + y;
+      const SC = surfAt(x, y);
       if (WALL[ch] || LOW[ch]) {
         const h = LOW[ch] ? LOW_H : WALL_H;
-        const tex = ch === 'o' ? ((S.ores && S.ores[oreKindAt(x, y)]) || S.wall)
-          : (LOW[ch] ? S.low : S.wall);
+        const tex = ch === 'o' ? ((S.ores && S.ores[oreKindAt(x, y)]) || SC.wall)
+          : (LOW[ch] ? SC.low : SC.wall);
         const yc = -h / 2;
         // A face is emitted only where it meets somewhere you could stand, so a
         // solid block of rock costs nothing and no face is ever seen from behind.
@@ -601,19 +689,32 @@ function buildGeometry() {
         if (!WALL[at(x + 1, y)] && !LOW[at(x + 1, y)]) add('e' + id, tex, T, h, (x + 1) * T, yc, wz, 'rotateY(90deg)', 'fp-wall', wf(x + 1, y + 0.5));
         if (!WALL[at(x - 1, y)] && !LOW[at(x - 1, y)]) add('w' + id, tex, T, h, x * T, yc, wz, 'rotateY(-90deg)', 'fp-wall', wf(x, y + 0.5));
         // A waist-high run needs a lid, or you look down into an open box.
-        // S.lid, not S.ceil: a lid is floor-lit (you look DOWN at it under the
+        // lid, not ceil: a lid is floor-lit (you look DOWN at it under the
         // room's light), and the ceil bake is tuned for the dark overhead.
-        if (LOW[ch]) add('d' + id, S.lid || S.ceil, T, T, wx, -h, wz, 'rotateX(90deg)', 'fp-floor', fog);
+        if (LOW[ch]) add('d' + id, SC.lid || SC.ceil, T, T, wx, -h, wz, 'rotateX(90deg)', 'fp-floor', fog);
         continue;
       }
       if (ch === '#') continue;
       const lift = -heightAt(x, y) * STEP_PX;
-      add('f' + id, S.floor, T, T, wx, lift, wz, 'rotateX(90deg)', 'fp-floor', fog);
-      if (!L.sky) add('c' + id, S.ceil, T, T, wx, -WALL_H, wz, 'rotateX(-90deg)', 'fp-ceil', fog);
+      add('f' + id, SC.floor, T, T, wx, lift, wz, 'rotateX(90deg)', 'fp-floor', fog);
+      // A cell inside a stamped room is INDOORS whatever the weather outside —
+      // it gets that room's ceiling even on a map whose light is open sky.
+      const roomed = SC !== S;
+      if (!L.sky || roomed) add('c' + id, SC.ceil, T, T, wx, -WALL_H, wz, 'rotateX(-90deg)', 'fp-ceil', fog);
       // Rails lie ON the floor, a hair above it so the two don't fight for depth.
       if (ch === '=' && S.rail) add('r' + id, S.rail, T, T, wx, lift - 1, wz, 'rotateX(90deg)', 'fp-floor', fog);
-      // A ledge's own riser, so a step up reads as a step and not a slope.
-      if (heightAt(x, y) && !heightAt(x, y + 1)) add('z' + id, S.low, T, STEP_PX, wx, -STEP_PX / 2, (y + 1) * T, '', 'fp-wall', fog);
+      // A ledge's risers — one per side that faces lower ground, or the shelf
+      // reads as a floor plane floating on nothing from every angle but the
+      // south (the playtest's "invisible sides"). A side that meets solid rock
+      // or the map edge is buried and costs nothing.
+      if (heightAt(x, y)) {
+        const ry = -STEP_PX / 2;
+        const lower = (nx, ny) => !heightAt(nx, ny) && !WALL[at(nx, ny)] && !LOW[at(nx, ny)];
+        if (lower(x, y + 1)) add('zs' + id, SC.low, T, STEP_PX, wx, ry, (y + 1) * T, '', 'fp-wall', fogAt(x + 0.5, y + 1));
+        if (lower(x, y - 1)) add('zn' + id, SC.low, T, STEP_PX, wx, ry, y * T, 'rotateY(180deg)', 'fp-wall', fogAt(x + 0.5, y));
+        if (lower(x + 1, y)) add('ze' + id, SC.low, T, STEP_PX, (x + 1) * T, ry, wz, 'rotateY(90deg)', 'fp-wall', fogAt(x + 1, y + 0.5));
+        if (lower(x - 1, y)) add('zw' + id, SC.low, T, STEP_PX, x * T, ry, wz, 'rotateY(-90deg)', 'fp-wall', fogAt(x, y + 0.5));
+      }
       // The rungs. A climb cell is the ONLY place the level may change, so the
       // ladder is drawn flat against whichever neighbouring face it serves —
       // a thing you can see and aim at, not a square that silently lifts you.
@@ -663,8 +764,8 @@ const GRID_DECOR = {
   t: () => 'stalagTall',
   m: () => 'cart',
 };
-/** The ways out, and what each one is. */
-const EXIT_SIGN = { s: ['⌃', 'Way out'], w: ['⌃', 'Way out'], d: ['🚪', 'Door'] };
+/** The ways out, and what each one is. Drawn icons, never platform emoji. */
+const EXIT_SIGN = { s: ['⌃', 'Way out'], w: ['⌃', 'Way out'], d: [icon('door'), 'Door'] };
 
 /** A decal stood up as a billboard, scaled to a real world height. */
 function decalBillboard(sheets, decalName, x, y, worldH) {
@@ -785,6 +886,17 @@ function buildDecor(sheets) {
   // the same size: `w` is that view's pixels against its 48px tile, so w/48 is
   // the thing's width in TILES and T/48 carries it straight across.
   for (const p of (map.props || [])) artBillboard(p.art, p.x, p.y, (p.w || 48) * (T / 48), p.label);
+  // The estate's buildings. A ROOMED one is its walls — the stamped ring is
+  // real geometry here — so it only needs its name over the door. An annex has
+  // no room behind its 'F' mass, so its facade art stands at the front.
+  for (const b of (map.facades || [])) {
+    if (b.roomed) {
+      const d = b.door || [b.x + Math.floor(b.w / 2), b.y + b.h - 1];
+      markerBillboard('', b.name, 'fpm-sign', d[0] + 0.5, d[1] + 1.4);
+    } else {
+      artBillboard(b.art, b.x + b.w / 2, b.y + b.h + 0.04, Math.min(b.w * T, (b.px || b.w * 48) * (T / 48)), b.name);
+    }
+  }
 }
 
 /** An art.js crop stood up. `worldW` is its width in world px; the height
@@ -1134,6 +1246,14 @@ async function prep(mapId) {
   validateMap(map);
   const theme = THEMES[map.theme];
   const surf = await cutSurfaces(theme);
+  // REGIONS — rooms stamped into this plane with textures of their own (the
+  // campus). One surface set per distinct theme, picked per cell at build time,
+  // so a kitchen's wall ring is scrubbed stone and the meadow around it grass.
+  // Baked in parallel and without ore faces — rooms have no seams.
+  const surfByTheme = {};
+  const names = [...new Set((map.regions || []).map((r) => r.theme))].filter((n) => THEMES[n]);
+  const sets = await Promise.all(names.map((n) => cutSurfaces(THEMES[n], { ores: false })));
+  names.forEach((n, i) => { surfByTheme[n] = sets[i]; });
   const props = await decorSheets(map);
   const spawns = [];
   for (const s of (map.spawns || [])) {
@@ -1142,15 +1262,24 @@ async function prep(mapId) {
     try { spawns.push({ prey, s, img: await loadImg(ART_BASE + prey.art + '.png') }); }
     catch (e) { console.warn('delve-fp: creature sheet missing for', s.prey, e); }
   }
-  return { map, theme, surf, props, spawns };
+  return { map, theme, surf, surfByTheme, props, spawns };
 }
 
 function mount(prep, entry) {
-  const { map, theme, surf, props, spawns } = prep;
+  const { map, theme, surf, surfByTheme, props, spawns } = prep;
   // The outgoing map's textures are blob URLs; the incoming set replaces every
   // reference to them in the same task, so they can be revoked here.
-  if (F.surf && F.surf._urls && F.surf !== surf) F.surf._urls.forEach((u) => URL.revokeObjectURL(u));
-  F.map = map; F.theme = theme; F.surf = surf;
+  for (const old of [F.surf, ...Object.values(F.surfByTheme || {})]) {
+    if (old && old._urls && old !== surf) old._urls.forEach((u) => URL.revokeObjectURL(u));
+  }
+  F.map = map; F.theme = theme; F.surf = surf; F.surfByTheme = surfByTheme || {};
+  // Region lookup for the texture pick — a handful of rects, checked per cell
+  // only while geometry is being (re)built.
+  F.regions = map.regions || [];
+  F.regionThemeAt = (x, y) => {
+    for (const r of F.regions) if (x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h) return r.theme;
+    return null;
+  };
   // The light comes with the place. Everything that fades — quads, sprites, the
   // stage behind them — reads it, so switching a map switches the whole mood in
   // one assignment rather than in six.
@@ -1158,6 +1287,7 @@ function mount(prep, entry) {
   F.host.style.background = `rgb(${L.rgb[0]},${L.rgb[1]},${L.rgb[2]})`;
   // The veil colour every quad's fog child paints in — one write, whole mood.
   F.host.style.setProperty('--fp-fog', `rgb(${L.rgb[0]},${L.rgb[1]},${L.rgb[2]})`);
+  mountSky();
   F.cols = map.grid[0].length; F.rows = map.grid.length;
   F.mined = F.mined || new Set();
   // A face already worked stays worked. `map.grid` is the module's own copy and
@@ -1189,7 +1319,7 @@ function mount(prep, entry) {
   for (const sp of spawns) spawnCreature(sp.prey, sp.img, sp.s.x + 0.5, sp.s.y + 0.5);
 
   const title = F.host.querySelector('.fp-title');
-  if (title) title.textContent = `${F.hooks.locale.glyph} ${map.name || F.hooks.locale.name}`;
+  if (title) title.textContent = `${F.hooks.locale.glyph || ''} ${map.name || F.hooks.locale.name}`.trim();
   drawMap();
 }
 
@@ -1198,29 +1328,33 @@ function mount(prep, entry) {
  * same object hall.js builds for the top-down walk, so the two modes cannot pay
  * different spoils. Resolves true only if it actually took the screen.
  */
-export async function openDelveFp(localeId, member, hooks) {
+export async function openDelveFp(localeId, member, hooks, carry) {
   if (!mapForLocale(localeId) || !member || F || opening) return false;
   opening = true;
   try {
-    const p = await prep(localeId);
+    if (carry && !carry.swap) carry = null;   // only a live swap may carry state
+    const p = await prep(carry ? carry.mapId : localeId);
+    // A view swap arrives with the TOP-DOWN screen active, not the guild's —
+    // the session it carries is the licence to take over from it.
     const guildUp = document.getElementById('guildScreen');
-    if (F || !guildUp || !guildUp.classList.contains('active')) return false;
+    if (F || (!carry && (!guildUp || !guildUp.classList.contains('active')))) return false;
 
     const host = document.getElementById('delveFpScreen');
     // The light tier's CSS switch (blur filters off, see delve.css). Keyed to
     // the device, not the session, so it is never removed.
     if (COARSE) document.body.classList.add('fp-lite');
     host.innerHTML = `
+      <div class="fp-sky"></div>
       <div class="fp-stage"></div>
       <div class="fp-hands"></div>
       <div class="fp-vignette"></div>
       <div class="fp-blood"></div>
       <div class="delve-hud">
-        <button class="dv-leave" onclick="__delveFp.leave()">⬅ Leave</button>
+        <button class="dv-leave" onclick="__delveFp.leave()">&larr; Leave</button>
         <span class="fp-title dv-title"></span>
         <span class="fp-compass"></span>
         <span class="dv-haul fp-haul"></span>
-        <button class="fp-help fp-povbtn" title="First / third person" onclick="__delveFp.pov()">👁</button>
+        <button class="fp-help fp-povbtn" title="Change view" onclick="__delveFp.pov()">3rd person</button>
         <button class="fp-help" title="Controls" onclick="__delveFp.help()">?</button>
       </div>
       <canvas class="fp-map" width="150" height="150"></canvas>
@@ -1240,10 +1374,10 @@ export async function openDelveFp(localeId, member, hooks) {
         <button data-k="turnL" aria-label="Turn left">◀<i>←</i></button>
         <button data-k="fwd" aria-label="Forward">▲<i>W</i></button>
         <button data-k="turnR" aria-label="Turn right">▶<i>→</i></button>
-        <button data-k="block" class="fp-block" aria-label="Guard">🛡<i>Shift</i></button>
+        <button data-k="block" class="fp-block" aria-label="Guard">${icon('guard')}<i>Shift</i></button>
         <button data-k="back" aria-label="Back">▼<i>S</i></button>
-        <button data-k="attack" class="fp-attack" aria-label="Strike">⚔<i>Space</i></button>
-        <button data-k="drink" class="fp-drink" aria-label="Drink a draught">🧪<b>0</b><i>R</i></button>
+        <button data-k="attack" class="fp-attack" aria-label="Strike">${icon('strike')}<i>Space</i></button>
+        <button data-k="drink" class="fp-drink" aria-label="Drink a draught">${icon('potion')}<b>0</b><i>R</i></button>
       </div>`;
 
     F = {
@@ -1259,8 +1393,15 @@ export async function openDelveFp(localeId, member, hooks) {
       haul: { kills: {}, gold: 0, mats: {}, field: 0, bouts: 0, swings: 0 },
       stack: [],
     };
+    // A swap carries the walk in: same ledger, same doors behind you, same
+    // worked veins, standing on the same cell.
+    if (carry) {
+      F.stack = (carry.stack || []).slice();
+      F.mined = new Set(carry.mined || []);
+      if (carry.haul) F.haul = { kills: {}, gold: 0, mats: {}, field: 0, bouts: 0, swings: 0, ...carry.haul };
+    }
     try {
-      mount(p, null);
+      mount(p, carry ? carry.at : null);
       wireInput();
       updateHaul();
       showScreen('delveFpScreen');
@@ -1281,9 +1422,12 @@ export async function openDelveFp(localeId, member, hooks) {
     updateVitals();
     updatePotions();
     const first = member.name.split(' ')[0];
-    toast(`${first} descends into ${p.map.name || hooks.locale.name}.`);
-    if (!(hooks.gear && hooks.gear.weapon)) toast(`${first} goes in bare-handed — nothing in the weapon slot.`);
-    helpUntil(8000);
+    if (!carry) {
+      toast(`${first} descends into ${p.map.name || hooks.locale.name}.`);
+      if (!(hooks.gear && hooks.gear.weapon)) toast(`${first} goes in bare-handed — nothing in the weapon slot.`);
+      helpUntil(8000);
+    }
+    povLabel();
     return true;
   } finally {
     opening = false;
@@ -1383,7 +1527,13 @@ function tryStep(sign, strafe) {
     if (at(tx, ty) === 'o') mineOre(tx, ty);
     return;
   }
-  F.stepping = { fx: fx + 0.5, fy: fy + 0.5, tx: tx + 0.5, ty: ty + 0.5, t: 0, ms: STEP_MS * (dx && dy ? DIAG_MS : 1) };
+  F.stepping = {
+    fx: fx + 0.5, fy: fy + 0.5, tx: tx + 0.5, ty: ty + 0.5, t: 0,
+    ms: STEP_MS * (dx && dy ? DIAG_MS : 1),
+    // The levels at both ends, so the camera can ride the drop instead of
+    // snapping the moment the cell boundary passes under the feet.
+    lf: heightAt(fx, fy), lt: heightAt(tx, ty),
+  };
 }
 
 function tryTurn(sign) {
@@ -1640,7 +1790,7 @@ function poseCreature(c, walking) {
 // Combat — fought HERE, in the corridor, at the size the corridor draws it
 // ---------------------------------------------------------------------------
 
-/** The matchup, as one number: the member's ⚡ over what the prey is worth. */
+/** The matchup, as one number: the member's ↯ over what the prey is worth. */
 const oddsVs = (prey) => (F.hooks.power || 100) / Math.max(1, prey.power || 100);
 
 /** Morrowind's question — you swung and connected, but did you HIT? Stats say.
@@ -1902,7 +2052,7 @@ function drink() {
   F.drinkUntil = now + 900;
   F.hp = Math.min(F.hpCeil, F.hp + (p.potency || 20));
   floater('+' + (p.potency || 20), 'fp-heal');
-  toast(`${p.glyph || '🧪'} ${p.name} — ${Math.ceil(F.hp)} left in you.`);
+  toast(`${p.name} — ${Math.ceil(F.hp)} left in you.`);
   updateVitals();
   updatePotions();
 }
@@ -1950,7 +2100,7 @@ function mineOre(x, y) {
   F.haul.gold += k.gold;
   if (k.mat) F.haul.mats[k.mat] = (F.haul.mats[k.mat] || 0) + 1;
   updateHaul();
-  toast(r && r.txt ? r.txt : `⛏ ${k.name} · +${k.gold}g`);
+  toast(r && r.txt ? r.txt : `${k.name} · +${k.gold}g`);
 }
 
 // ---------------------------------------------------------------------------
@@ -1964,7 +2114,13 @@ function render() {
   const [fvx, fvy] = DIRV[F.dir];
   const back = pov3 ? T * 1.25 : 0;
   const ex = F.px * T - fvx * back, ez = F.py * T - fvy * back;
-  const ey = -EYE - (pov3 ? EYE * 0.5 : 0) - heightAt(Math.floor(F.px), Math.floor(F.py)) * STEP_PX;
+  // The level under the eye, interpolated across a stride so a walk-off-the-
+  // ledge drop is a hop down rather than a mid-step teleport.
+  const s = F.stepping;
+  const lev = s && s.lf != null
+    ? s.lf + (s.lt - s.lf) * Math.min(1, ease(s.t))
+    : heightAt(Math.floor(F.px), Math.floor(F.py));
+  const ey = -EYE - (pov3 ? EYE * 0.5 : 0) - lev * STEP_PX;
   // rotateY(+yaw), not −yaw. Forward is −Z, and CSS rotateY maps (x,y,z) to
   // (x·cosθ + z·sinθ, y, −x·sinθ + z·cosθ) — so facing east (yaw 90) has to send
   // world +X to view −Z, which needs +90. The negative sign put east BEHIND the
@@ -2012,8 +2168,8 @@ function render() {
   if (F.self) {
     if (pov3 !== F.self._on) { F.self._on = pov3; F.self.el.style.display = pov3 ? '' : 'none'; }
     if (pov3) {
-      const lift = -heightAt(Math.floor(F.px), Math.floor(F.py)) * STEP_PX;
-      const tf = `translate3d(${(F.px * T).toFixed(1)}px,${lift}px,${(F.py * T).toFixed(1)}px) rotateY(${-F.yaw}deg)`;
+      const lift = -lev * STEP_PX;   // the same interpolated level the eye rides
+      const tf = `translate3d(${(F.px * T).toFixed(1)}px,${lift.toFixed(1)}px,${(F.py * T).toFixed(1)}px) rotateY(${-F.yaw}deg)`;
       if (tf !== F.self._tf) F.self.el.style.transform = (F.self._tf = tf);
       const moving = !!(F.stepping || F.turning);
       if (moving !== F.self.moving) { F.self.moving = moving; F.self.gfx.setAnim(F.self.actor, moving ? 'move' : 'idle'); }
@@ -2115,19 +2271,56 @@ function updateHaul() {
 }
 
 /**
- * First person ⇄ over-the-shoulder. The toggle moves only the CAMERA (render
- * pulls it back along the facing) and stands the member's own composited
- * sprite at the walker cell — same controls, same combat, same spoils. The
- * viewmodel hands hide via .fp-pov3 (you can't hold a sword to a screen you
- * are standing inside of).
+ * The view cycle: first person → over the shoulder → back to the top-down
+ * walk. The first two move only the CAMERA (render pulls it back along the
+ * facing) and stand the member's own composited sprite at the walker cell —
+ * same controls, same combat, same spoils. The viewmodel hands hide via
+ * .fp-pov3 (you can't hold a sword to a screen you are standing inside of).
+ * The third step hands the whole session back to the top-down engine.
  */
 function togglePov() {
-  if (!F || F.ended) return;
-  F.pov = F.pov === 3 ? 1 : 3;
-  F.host.classList.toggle('fp-pov3', F.pov === 3);
-  if (F.pov === 3 && !F.self) mountSelf();
+  if (!F || F.ended || F.transiting) return;
+  if (F.pov === 3) { swapToTop(); return; }
+  F.pov = 3;
+  F.host.classList.toggle('fp-pov3', true);
+  if (!F.self) mountSelf();
   F._wtf = '';                       // force the camera transform to rewrite
-  toast(F.pov === 3 ? 'Over the shoulder.' : 'Through their eyes.');
+  toast('Over the shoulder.');
+  povLabel();
+}
+
+/** The view button says where tapping TAKES you, in words — an eye glyph read
+ *  as decoration and nobody found the other camera behind it. */
+function povLabel() {
+  const b = F && F.host.querySelector('.fp-povbtn');
+  if (b) b.textContent = F.pov === 3 ? 'Top-down' : '3rd person';
+}
+
+/** Hand the session back to the top-down walk, mid-stride — the mirror of the
+ *  top-down HUD's "1st person". Same carry, same hooks, no payout. */
+function swapToTop() {
+  if (!F || F.ended || F.transiting) return;
+  const hooks = F.hooks;
+  if (!hooks.swapView) return;
+  F.transiting = true;
+  const carry = {
+    swap: true, mapId: F.map.id, at: [F.px, F.py],
+    stack: F.stack.slice(), mined: [...F.mined], haul: F.haul,
+  };
+  hooks.swapView('top', carry).then((ok) => { if (!ok && F) F.transiting = false; });
+}
+
+/** Retire the session with no ending — the view swap took it over. */
+export function closeDelveFpSilent() {
+  if (!F) return;
+  if (F.raf) cancelAnimationFrame(F.raf);
+  clearTimeout(F.helpTimer);
+  unwireInput();
+  for (const s of [F.surf, ...Object.values(F.surfByTheme || {})]) {
+    if (s && s._urls) s._urls.forEach((u) => URL.revokeObjectURL(u));
+  }
+  F.host.innerHTML = '';
+  F = null;
 }
 function mountSelf() {
   const gfx = window.__ranchGfx;
@@ -2158,11 +2351,11 @@ function endDelve(reason, beaten = false) {
   F.host.insertAdjacentHTML('beforeend', `
     <div class="delve-summary">
       <div class="ds-card">
-        <div class="ds-title">${beaten ? '🩸 Driven out' : '🏕 Back to daylight'}</div>
+        <div class="ds-title">${beaten ? 'Driven out' : 'Back to daylight'}</div>
         <div class="ds-sub">${F.member.name.split(' ')[0]} ${reason}.</div>
         ${killLines}${matLines}
-        ${h.gold ? `<div class="ds-line">🪙 +${h.gold} gold</div>` : ''}
-        ${h.field ? `<div class="ds-line">📜 +${h.field} field insight</div>` : ''}
+        ${h.gold ? `<div class="ds-line">${icon('coin')} +${h.gold} gold</div>` : ''}
+        ${h.field ? `<div class="ds-line">${icon('scroll')} +${h.field} field insight</div>` : ''}
         <button class="dv-close" onclick="__delveFp.close()">Return to the Guild</button>
       </div>
     </div>`);
@@ -2171,7 +2364,9 @@ function endDelve(reason, beaten = false) {
 function close() {
   if (!F) return;
   const hooks = F.hooks, summary = F.haul;
-  if (F.surf && F.surf._urls) F.surf._urls.forEach((u) => URL.revokeObjectURL(u));
+  for (const s of [F.surf, ...Object.values(F.surfByTheme || {})]) {
+    if (s && s._urls) s._urls.forEach((u) => URL.revokeObjectURL(u));
+  }
   F.host.innerHTML = '';
   F = null;
   hooks.onEnd(summary);

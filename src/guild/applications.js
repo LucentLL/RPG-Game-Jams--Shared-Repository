@@ -67,10 +67,10 @@ const PLACES = [
 
 /** Wealth band → the phrase shown on the card (the player's only read on means). */
 export function wealthBand(w) {
-  if (w >= 0.78) return { id: 'rich', label: 'wealthy house', glyph: '💰' };
-  if (w >= 0.52) return { id: 'comfortable', label: 'comfortable family', glyph: '🪙' };
-  if (w >= 0.26) return { id: 'modest', label: 'modest means', glyph: '🧺' };
-  return { id: 'poor', label: 'nothing to their name', glyph: '🥀' };
+  if (w >= 0.78) return { id: 'rich', label: 'wealthy house', glyph: '' };
+  if (w >= 0.52) return { id: 'comfortable', label: 'comfortable family', glyph: '' };
+  if (w >= 0.26) return { id: 'modest', label: 'modest means', glyph: '' };
+  return { id: 'poor', label: 'nothing to their name', glyph: '' };
 }
 
 /**

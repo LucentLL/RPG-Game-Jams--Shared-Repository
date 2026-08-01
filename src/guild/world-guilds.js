@@ -51,10 +51,11 @@ export const CHART = [
 ];
 
 export const REALMS = [
-  { id: 'veyra', name: 'Veyra', glyph: '🌿', blurb: 'the green heartland where the circuit began' },
+  // Typographic marks, one per realm — never platform emoji.
+  { id: 'veyra', name: 'Veyra', glyph: '☘', blurb: 'the green heartland where the circuit began' },
   { id: 'norvale', name: 'Norvale', glyph: '❄', blurb: 'the taiga holds of the north-east' },
-  { id: 'ashvara', name: 'Ashvara', glyph: '🏜', blurb: 'the dune courts of the south-east' },
-  { id: 'meridia', name: 'Meridia', glyph: '🌊', blurb: 'the scattered isles of the south-west' },
+  { id: 'ashvara', name: 'Ashvara', glyph: '☀', blurb: 'the dune courts of the south-east' },
+  { id: 'meridia', name: 'Meridia', glyph: '≈', blurb: 'the scattered isles of the south-west' },
 ];
 
 /**

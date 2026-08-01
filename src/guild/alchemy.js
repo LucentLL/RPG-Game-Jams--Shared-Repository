@@ -24,10 +24,10 @@ function nextPotionId() { return 'potion_' + _potionRun + (++_potionSeq).toStrin
  * @property {number} reqTheory @property {number} staminaCost @property {number} yield @property {string} blurb
  */
 export const POTION_RECIPES = [
-  { id: 'minor_heal', name: 'Healing Draught', kind: 'heal', glyph: '🧪',
+  { id: 'minor_heal', name: 'Healing Draught', kind: 'heal', glyph: '',
     cost: { sunleaf: 2 }, base: 22, ceil: 55, reqTheory: 0, staminaCost: 20, yield: 2,
     blurb: 'Restores stamina; mends light hurts.' },
-  { id: 'tonic', name: 'Vigor Tonic', kind: 'tonic', glyph: '🧉',
+  { id: 'tonic', name: 'Vigor Tonic', kind: 'tonic', glyph: '',
     cost: { emberroot: 2 }, base: 26, ceil: 62, reqTheory: 8, staminaCost: 20, yield: 2,
     blurb: 'Sheds fatigue & stress.' },
   { id: 'greater_heal', name: 'Greater Draught', kind: 'heal', glyph: '⚗',
@@ -35,7 +35,7 @@ export const POTION_RECIPES = [
     blurb: 'A potent heal that reliably cures injuries.' },
   // A REAGENT, not a potion: bottles land in the Forge stockroom as counted stock.
   // Guarding a refine with one turns a shattering failure into a mere −1 (RO's HD ore).
-  { id: 'tempering_oil', name: 'Tempering Oil', kind: 'oil', glyph: '🫙', material: 'tempering_oil',
+  { id: 'tempering_oil', name: 'Tempering Oil', kind: 'oil', glyph: '', material: 'tempering_oil',
     cost: { emberroot: 2, sunleaf: 1 }, base: 26, ceil: 70, reqTheory: 14, staminaCost: 22, yield: 1,
     blurb: 'Shields a refine — a failed attempt only knocks the piece −1.' },
 ];

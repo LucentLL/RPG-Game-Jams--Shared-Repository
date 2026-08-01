@@ -16,12 +16,12 @@ import { facilityTier } from './guild.js';
 /** Buildable station types — one per training drill. `boost` is the per-station gain
  *  bonus its drill gets; `cost` is the one-time gold price. */
 export const STATIONS = [
-  { type: 'sandbag', name: 'Sandbag',         glyph: '🥊', drill: 'pow', stat: 'POW', cost: 120, boost: 0.15 },
-  { type: 'pell',    name: 'Pell Post',       glyph: '🛡', drill: 'def', stat: 'DEF', cost: 120, boost: 0.15 },
-  { type: 'dummy',   name: 'Training Dummy',  glyph: '🎯', drill: 'skl', stat: 'SKL', cost: 120, boost: 0.15 },
-  { type: 'poles',   name: 'Agility Poles',   glyph: '🚩', drill: 'spd', stat: 'SPD', cost: 120, boost: 0.15 },
-  { type: 'stone',   name: 'Meditation Stone', glyph: '🗿', drill: 'int', stat: 'INT', cost: 140, boost: 0.15 },
-  { type: 'ruck',    name: 'Rucking Track',   glyph: '🎒', drill: 'vit', stat: 'VIT', cost: 120, boost: 0.15 },
+  { type: 'sandbag', name: 'Sandbag',         glyph: '', drill: 'pow', stat: 'POW', cost: 120, boost: 0.15 },
+  { type: 'pell',    name: 'Pell Post',       glyph: '▣', drill: 'def', stat: 'DEF', cost: 120, boost: 0.15 },
+  { type: 'dummy',   name: 'Training Dummy',  glyph: '◎', drill: 'skl', stat: 'SKL', cost: 120, boost: 0.15 },
+  { type: 'poles',   name: 'Agility Poles',   glyph: '', drill: 'spd', stat: 'SPD', cost: 120, boost: 0.15 },
+  { type: 'stone',   name: 'Meditation Stone', glyph: '', drill: 'int', stat: 'INT', cost: 140, boost: 0.15 },
+  { type: 'ruck',    name: 'Rucking Track',   glyph: '', drill: 'vit', stat: 'VIT', cost: 120, boost: 0.15 },
 ];
 export function stationDef(type) { return STATIONS.find((s) => s.type === type) || null; }
 

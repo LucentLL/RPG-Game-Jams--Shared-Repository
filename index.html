@@ -20,11 +20,11 @@
 <div class="screen active" id="titleScreen">
   <div class="title-logo">⚗ THE CRUCIBLE ⚗</div>
   <div class="title-sub">Athanor Mode — The Alchemical Furnace</div>
-  <button class="title-btn" onclick="openGuild()">🏰 HEROES GUILD 🏰</button>
+  <button class="title-btn" onclick="openGuild()">HEROES GUILD </button>
   <button class="title-btn secondary" onclick="startTurnFlow()">⚗ Enter the Athanor</button>
-  <button class="title-btn secondary" onclick="startActionFlow()">⚡ Action Arena</button>
+  <button class="title-btn secondary" onclick="startActionFlow()">↯ Action Arena</button>
   <button class="title-btn secondary" onclick="showPantheon()">☿ PANTHEON</button>
-  <button class="title-btn secondary" onclick="openDebug()">🔧 DEBUG ROOM</button>
+  <button class="title-btn secondary" onclick="openDebug()">DEBUG ROOM</button>
   <div class="pantheon-preview" id="titlePantheonPreview"></div>
 </div>
 
@@ -76,7 +76,7 @@
 <div class="screen" id="debugScreen">
   <div class="builder-shell">
     <div class="builder-header">
-      <h2>🔧 DEBUG ROOM</h2>
+      <h2>DEBUG ROOM</h2>
       <div class="sub">Pin a pose &amp; frame; cycle parts to inspect layering.</div>
     </div>
     <div class="builder-grid">
@@ -197,7 +197,7 @@
     <!-- The first-person toggle ALSO lives here, always in view: buried at the
          bottom of the scrollable control panel nobody ever found it. Guild
          matches show it (startGuildTacticalBattle); roguelike runs hide it. -->
-    <button class="cam-btn" id="tacCamFp" style="display:none" onclick="tacViewToggle()" title="First person — stand in the fighter">👁</button>
+    <button class="cam-btn" id="tacCamFp" style="display:none" onclick="tacViewToggle()" title="First person — stand in the fighter"></button>
   </div>
   <div class="controls" id="ctrlPanel">
     <div class="section-label">MOVEMENT</div>
@@ -212,12 +212,12 @@
     <div class="atk-detail" id="atkDetail"></div>
     <div class="exec-bar">
       <button class="exec-btn" id="execBtn" onclick="executeTurn()">⚗ EXECUTE TURN</button>
-      <button class="exec-btn btl-forfeit" id="tacAutoBtn" style="display:none" onclick="toggleTacticalAuto()">🤖 Watch</button>
+      <button class="exec-btn btl-forfeit" id="tacAutoBtn" style="display:none" onclick="toggleTacticalAuto()">Watch</button>
       <button class="exec-btn btl-forfeit" id="btlForfeitBtn" style="display:none" onclick="forfeitTactical()">↩ Forfeit Match</button>
       <!-- The same battle, from inside it. View only — every rule stays on the board. -->
       <span class="tfp-btns" id="tacViewBtns" style="display:none">
-        <button id="tacViewBtn" onclick="tacViewToggle()" title="Stand in the fighter">👁 1st Person</button>
-        <button id="tacPovBtn" onclick="tacViewPov()" style="display:none" title="First person / over the shoulder">🙶 1st</button>
+        <button id="tacViewBtn" onclick="tacViewToggle()" title="Stand in the fighter">1st Person</button>
+        <button id="tacPovBtn" onclick="tacViewPov()" style="display:none" title="First person / over the shoulder">1st</button>
         <button id="tacWhoBtn" onclick="tacViewWho()" style="display:none" title="Whose eyes">↔ Eyes</button>
       </span>
     </div>

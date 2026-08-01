@@ -101,6 +101,7 @@ export const THEMES = {
   // 'B' cells are room-height shelf walls, 'b' cells waist-high aisle stacks
   // you see over. Wall textures are cut from the wired bookshelf_3x sheet.
   interior: {
+    light: 'lit',
     sheet: 'floors', src: 16,
     fill: [[0, 4], [1, 4], [2, 4], [3, 4]],
     rimSheet: 'cliffs',
@@ -130,9 +131,11 @@ export const THEMES = {
       grayProps: false,
       wallH: 96,
     };
-    /** A room theme: floor tiles + one wall palette off an A4 wall sheet. */
+    /** A room theme: floor tiles + one wall palette off an A4 wall sheet.
+     *  Lit by someone's lamps — without a light they fell back to cave-dark,
+     *  and every room walked in first person read as a torch-lit mine. */
     const room = (sheet, src, fill, wallSheet, wx) => ({
-      ...rock, sheet, src, fill,
+      ...rock, light: 'lit', sheet, src, fill,
       walls: { sheet: wallSheet, tileFill: true, tall: [wx, 48, 48, 96], low: [wx, 96, 48, 48], crown: [wx, 0, 48, 48] },
     });
     return {
@@ -158,6 +161,10 @@ export const THEMES = {
     };
   })(),
 };
+// The Sparring Ring is OUTDOORS — raked sand under open sky, ringed by its
+// stone tiers. Daylight, not lamplight, and the first-person view builds no
+// ceiling over it (LIGHTS.open.sky).
+THEMES.arena.light = 'open';
 // Two rooms don't use the A4 wall strips:
 // The study hangs gold damask (a plain 48px tile that repeats down the face)
 // over its red damask carpet, both off the mansion sheet.

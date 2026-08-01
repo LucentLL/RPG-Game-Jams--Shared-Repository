@@ -159,9 +159,9 @@ export function championOdds(power, t) {
 // seasonal MAJORS carry real stakes, and the WORLD CUP can kill — which is what
 // forces you to keep a successor in training (the Academy loop).
 export const STAKES = {
-  tournament: { tier: 'Friendly',    glyph: '🕊', injury: 0.04, death: 0,     deathRamp: 0,   danger: 'Friendly — low injury risk, no danger to life.' },
+  tournament: { tier: 'Friendly',    glyph: '', injury: 0.04, death: 0,     deathRamp: 0,   danger: 'Friendly — low injury risk, no danger to life.' },
   major:      { tier: 'Competitive', glyph: '⚔', injury: 0.12, death: 0.006, deathRamp: 0.8, danger: 'Real stakes — injuries likely; a brutal loss can end a career.' },
-  worldcup:   { tier: 'World Cup',   glyph: '🌍', injury: 0.24, death: 0.03,  deathRamp: 1.6, danger: 'Lethal — losing an elimination match can KILL. Keep a successor ready.' },
+  worldcup:   { tier: 'World Cup',   glyph: '', injury: 0.24, death: 0.03,  deathRamp: 1.6, danger: 'Lethal — losing an elimination match can KILL. Keep a successor ready.' },
 };
 /** The stakes profile for an event (by type). */
 export function stakesOf(t) { return STAKES[(t && t.type)] || STAKES.tournament; }
