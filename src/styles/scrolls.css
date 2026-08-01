@@ -1,0 +1,175 @@
+/* ── The guildmaster's scrolls (scroll-ui.js) ────────────────────────────────
+   A modal that is ONE scroll: two rolled ends that start together in the
+   centre and travel apart as the parchment unrolls between them. The rollers
+   are a FIXED width (a roller's diameter does not grow with its length — the
+   first cut sized them off the modal height and a phone read them as two
+   detached pillars); the paper tucks UNDER them so the three elements read as
+   one object. The body's width is the only animated property. */
+
+.scrollui-veil {
+  position: fixed; inset: 0; z-index: 520;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(8, 6, 3, 0);
+  transition: background 0.32s ease;
+  --rollw: clamp(28px, 8vw, 42px);
+  --sw-open: calc(min(760px, 96vw) - 2 * var(--rollw));
+}
+.scrollui-veil.on { background: rgba(8, 6, 3, 0.62); }
+
+.scrollui {
+  display: flex; align-items: stretch;
+  height: min(78vh, 620px);
+  filter: drop-shadow(0 16px 36px rgba(0, 0, 0, 0.6));
+}
+canvas.scrollui-roll {
+  display: block; height: 100%; width: var(--rollw);
+  image-rendering: pixelated;
+  z-index: 2; flex: 0 0 auto;      /* the paper unrolls from UNDER the rollers */
+}
+.scrollui-rollR { transform: scaleX(-1); }
+
+/* The parchment. Width 0 → open; the inner column is fixed at the open width
+   so the content never reflows mid-unroll — it is REVEALED, not resized. The
+   paper is slightly shorter than the rollers and pulled UNDER them (negative
+   margins), which is what makes the sheet read as wound between the two. */
+.scrollui-body {
+  width: 0; overflow: hidden;
+  transition: width 460ms cubic-bezier(0.22, 0.75, 0.25, 1);
+  margin: 8px calc(var(--rollw) * -0.3);
+  background-color: #e4c996;
+  background-image: var(--scroll-parch);
+  border-top: 3px solid #55381f; border-bottom: 3px solid #55381f;
+  box-shadow: inset 0 5px 12px rgba(90, 55, 20, 0.3), inset 0 -5px 12px rgba(90, 55, 20, 0.35);
+}
+.scrollui-veil.on .scrollui-body { width: var(--sw-open); }
+.scrollui-inner {
+  width: var(--sw-open);
+  height: 100%;
+  display: flex; flex-direction: column;
+  padding: 0 calc(var(--rollw) * 0.35);   /* clear of the rollers overlapping the edges */
+}
+.scrollui-head {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  padding: 12px 8px 8px;
+  border-bottom: 2px solid rgba(85, 56, 31, 0.45);
+}
+.scrollui-title {
+  font-family: 'Cinzel', serif; font-weight: 700;
+  color: #3c250e; font-size: 1.12em; letter-spacing: 0.03em;
+}
+.scrollui-x {
+  background: rgba(85, 56, 31, 0.1); border: 1px solid rgba(85, 56, 31, 0.55);
+  color: #3c250e; border-radius: 6px; cursor: pointer;
+  font: inherit; padding: 2px 9px; flex: 0 0 auto;
+}
+.scrollui-x:hover { background: rgba(85, 56, 31, 0.22); }
+.scrollui-content {
+  flex: 1; overflow-y: auto;
+  padding: 10px 8px 16px;
+  color: #241708;
+  font-size: 0.95em;
+  opacity: 0; transition: opacity 0.28s ease 0.2s;
+}
+.scrollui-veil.on .scrollui-content { opacity: 1; }
+
+/* ── INK, not moonlight ──────────────────────────────────────────────────
+   Everything reused inside the scroll was styled for the app's dark theme;
+   on parchment those grays and golds wash out. Cards become parchment slips
+   (dark thin border, faint wash) and every muted/dim/gold text token is
+   re-inked dark. Buttons keep their dark chips — good contrast on paper. */
+.scrollui-content .plan-title { color: #4a2c10; }
+.scrollui-content .hint,
+.scrollui-content .rr-sub,
+.scrollui-content .ap-dim,
+.scrollui-content .o-desc,
+.scrollui-content .dim,
+.scrollui-content .desk-note { color: #55402a !important; text-shadow: none; }
+.scrollui-content .ap-card,
+.scrollui-content .app-card,
+.scrollui-content .plan-card,
+.scrollui-content .opt {
+  background: rgba(90, 60, 28, 0.08);
+  border: 1px solid rgba(85, 56, 31, 0.55);
+  color: inherit;
+}
+.scrollui-content .tourney-name,
+.scrollui-content .o-name { color: #2e1c0a; }
+.scrollui-content .ap-num { color: #6b3d0e; font-weight: 700; }
+.scrollui-content .ap-num.sch { color: #1f5a2a; }
+.scrollui-content .o-cost,
+.scrollui-content .up { color: #1f5a2a !important; font-weight: 700; }
+.scrollui-content .down { color: #8a1f14 !important; }
+.scrollui-content .ap-refuse { color: #8a1f14; }
+.scrollui-content .tourney-when,
+.scrollui-content .dept-lbl { color: #55402a; }
+.scrollui-content .tourney-odds { color: #241708; }
+.scrollui-content .ap-head { flex-wrap: wrap; }
+.scrollui-content .stakes-line b { color: #3c250e; }
+.scrollui-content .major-tag { color: #6b3d0e !important; }
+
+/* ── The desk itself (Study room) ──────────────────────────────────────── */
+.desk-card {
+  background-color: #241812;
+  background-image: var(--desk-wood);
+  background-size: 96px 192px;
+  image-rendering: pixelated;
+  border-color: #5a3d22;
+}
+.desk-card > .plan-title { color: #ffd98a; text-shadow: 0 2px 3px rgba(0, 0, 0, 0.85); }
+.desk-top { display: flex; flex-wrap: wrap; gap: 14px; padding: 8px 2px 4px; }
+.desk-scroll {
+  flex: 1 1 150px; max-width: 220px;
+  display: flex; flex-direction: column; align-items: center; gap: 7px;
+  background: rgba(12, 8, 5, 0.55);
+  border: 1px solid rgba(212, 168, 67, 0.4); border-radius: 10px;
+  padding: 12px 10px 10px;
+  cursor: pointer; font: inherit; color: #ffe9c0;
+  transition: transform 0.15s ease, border-color 0.15s, background 0.15s;
+}
+.desk-scroll:hover { transform: translateY(-3px); border-color: var(--gold); background: rgba(20, 13, 7, 0.72); }
+.ds-art {
+  display: block; width: 82%; aspect-ratio: 64 / 20;
+  background: var(--scroll-icon) center / contain no-repeat;
+  image-rendering: pixelated;
+  filter: drop-shadow(0 5px 6px rgba(0, 0, 0, 0.6));
+}
+.desk-scroll b { font-family: 'Cinzel', serif; letter-spacing: 0.05em; font-size: 0.92em; color: #ffd98a; }
+.desk-scroll i { font-style: normal; font-size: 0.8em; color: #d8c9a8; text-shadow: 0 1px 2px rgba(0, 0, 0, 0.9); }
+.desk-scroll i.due { color: #ffab93; }
+.desk-note { color: #cbbc9e; font-size: 0.85em; margin-top: 10px; text-shadow: 0 1px 2px rgba(0, 0, 0, 0.85); }
+
+/* ── The weekly ledger, itemised ───────────────────────────────────────── */
+.ledger-tbl { display: grid; grid-template-columns: 1fr auto; gap: 4px 14px; margin: 8px 0; }
+.ledger-row { display: contents; }
+.ledger-tbl .lr-l { color: #2e1c0a; }
+.ledger-tbl .lr-r { text-align: right; font-weight: 700; color: #3c250e; font-variant-numeric: tabular-nums; }
+.ledger-row.lr-sub .lr-l, .ledger-row.lr-sub .lr-r { color: #55402a; font-weight: 400; font-size: 0.9em; padding-left: 10px; }
+.ledger-row.lr-net .lr-l, .ledger-row.lr-net .lr-r {
+  border-top: 2px solid rgba(85, 56, 31, 0.55); margin-top: 6px; padding-top: 6px; font-size: 1.05em;
+}
+.lr-bad { color: #8a1f14 !important; }
+.lr-good { color: #1f5a2a !important; }
+
+/* ── Contacts abroad ───────────────────────────────────────────────────── */
+.contact-realm {
+  font-family: 'Cinzel', serif; color: #4a2c10;
+  margin: 14px 0 6px; font-size: 0.95em; letter-spacing: 0.06em;
+}
+.contact-row {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  padding: 6px 8px; border-bottom: 1px dashed rgba(85, 56, 31, 0.35);
+}
+.contact-row b { flex: 1; color: #241708; font-weight: 600; }
+.contact-row .c-flag { font-size: 1.15em; flex: 0 0 auto; }
+.contact-row .c-known { color: #1f5a2a; font-weight: 700; font-size: 0.9em; }
+.contact-btn {
+  background: rgba(85, 56, 31, 0.14); border: 1px solid rgba(85, 56, 31, 0.6);
+  color: #3c250e; border-radius: 8px; padding: 3px 10px;
+  cursor: pointer; font: inherit; font-size: 0.85em; flex: 0 0 auto;
+}
+.contact-btn:hover { background: rgba(85, 56, 31, 0.28); }
+.contact-btn:disabled { opacity: 0.45; cursor: default; }
+
+/* Compact quest dispatch chips inside the scroll reuse .hs-chip; the row just
+   needs breathing room on paper. */
+.scroll-quest .hero-switch { margin-top: 6px; }
