@@ -416,6 +416,20 @@
   backface-visibility: hidden;   /* a face is never seen from behind the rock */
   transform-style: flat;
 }
+/* The fog, as a solid-colour child whose OPACITY is the amount. A solid-colour
+   layer costs the compositor next to nothing and opacity changes re-rasterise
+   nothing — which is why walking can re-fog the whole scene for free (see the
+   retained-scene note in delve-fp.js). Backface-hidden like its parent, or the
+   veil of a wall seen from behind would float there without its wall. */
+.fp-veil {
+  position: absolute; inset: 0; display: block;
+  background: var(--fp-fog, #000);
+  backface-visibility: hidden;
+  pointer-events: none;
+}
+/* A flying thing's texture fills its billboard — without this the background
+   painted at its own native px and tiled. */
+.fp-shot { background-size: 100% 100%; background-repeat: no-repeat; image-rendering: pixelated; }
 /* NO filter on quads — a filter here is a private GPU buffer per surface, and
    75% of a scene is floors and ceilings; on a dpr-3 phone that alone was the
    frame budget. The floor/ceiling dim is baked into the TEXTURES instead
@@ -538,18 +552,20 @@
   image-rendering: pixelated;
 }
 /* Standing scenery and the signs on the ways out. Both are billboards, so the
-   sizes below are WORLD px — they shrink down the corridor like everything else. */
+   sizes below are WORLD px — they shrink down the corridor like everything else.
+   Tuned at T=900 as 16/210/86/46/6; the world now runs at T=300 (K=1/3, see
+   delve-fp.js) so every world px here carries the same K. */
 .fp-marker {
   display: flex; flex-direction: column; align-items: center; justify-content: flex-end;
-  gap: 16px; text-align: center;
+  gap: 5px; text-align: center;
 }
-.fpm-glyph { font-size: 210px; line-height: 0.9; }
+.fpm-glyph { font-size: 70px; line-height: 0.9; }
 .fpm-label {
-  font-family: 'Cinzel', serif; font-size: 86px; line-height: 1;
+  font-family: 'Cinzel', serif; font-size: 29px; line-height: 1;
   letter-spacing: 0.06em; text-transform: uppercase;
 }
-.fpm-exit   { color: #ffe6a4; text-shadow: 0 0 46px rgba(255,196,90,0.95), 0 6px 0 rgba(0,0,0,0.6); }
-.fpm-portal { color: #a8d4ff; text-shadow: 0 0 46px rgba(120,180,255,0.95), 0 6px 0 rgba(0,0,0,0.6); }
+.fpm-exit   { color: #ffe6a4; text-shadow: 0 0 15px rgba(255,196,90,0.95), 0 2px 0 rgba(0,0,0,0.6); }
+.fpm-portal { color: #a8d4ff; text-shadow: 0 0 15px rgba(120,180,255,0.95), 0 2px 0 rgba(0,0,0,0.6); }
 
 /* ── The hands ────────────────────────────────────────────────────────────
    What you are carrying, held where you can see it. Above the vignette (the
@@ -594,9 +610,22 @@
    the sword in the wrong hand. (The 32px item icons this replaced were drawn
    hilt-at-lower-left and DID need the flip; the rule is art-specific, not a
    general truth about viewmodels.) */
-/* Only the tilt lives here — fitHands() owns size, left/right and bottom. */
-.fp-hand-weapon, .fp-hand-pick { transform: rotate(-6deg); }
-.fp-hand-shield { transform: rotate(7deg); }
+/* Only the tilt lives here — fitHands() owns size, left/right and bottom.
+   The transition is for the duel stance below: hands drop and rise smoothly. */
+.fp-hand-weapon, .fp-hand-pick { transform: rotate(-6deg); transition: transform 220ms ease; }
+.fp-hand-shield { transform: rotate(7deg); transition: transform 220ms ease; }
+/* DUEL STANCE — something alive is inside two tiles. A rank-1 creature is
+   knee-high and stands exactly where the viewmodel is drawn, so the hands drop
+   clear of the fight while it lasts. Swinging, bracing, guarding and stowing
+   all outrank the duck (an animation outranks a transform anyway; the :not()s
+   keep the guard/stow transforms authoritative). */
+.fp-duel .fp-hand-weapon:not(.fp-swinging):not(.fp-stowed),
+.fp-duel .fp-hand-pick:not(.fp-swinging):not(.fp-stowed) {
+  transform: rotate(-18deg) translate(30%, 40%) scale(0.78);
+}
+.fp-duel .fp-hand-shield:not(.fp-bracing):not(.fp-guarding) {
+  transform: rotate(13deg) translate(-28%, 42%) scale(0.8);
+}
 /* The hand that isn't leading drops out of frame rather than vanishing — you
    put the pick away, you don't teleport it. */
 .fp-hand.fp-stowed { transform: rotate(-6deg) translateY(112%); transition: transform 180ms ease-in; }
