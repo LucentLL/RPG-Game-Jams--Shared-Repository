@@ -105,8 +105,12 @@ const PERSP = 500, PERSP_AT = 720;
  * other puts unfogged rock at the build edge.
  */
 const COARSE = typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches;
-const VIEW_CAP = COARSE ? 7 : 9;
-const viewR = () => Math.min(VIEW_CAP, Math.ceil(L.near + FOG_CULL * (L.far - L.near)) + 1);
+/** Open-air maps see a VISTA, underground ones a lamp's reach — so the cap is
+ *  the light's, not one number. The sky tiers are bounded in practice by the
+ *  meadow charts themselves (a build radius past the map edge costs nothing),
+ *  and phones still take the shorter lamp everywhere. */
+const viewCap = () => (L.sky ? (COARSE ? 11 : 17) : (COARSE ? 7 : 9));
+const viewR = () => Math.min(viewCap(), Math.ceil(L.near + FOG_CULL * (L.far - L.near)) + 1);
 const REACH = 0.75;      // how close a creature must be to engage
 
 /**
@@ -477,9 +481,9 @@ async function cutSurfaces(theme, opts = {}) {
  * upper stage. Deterministic blobs (no randomness: the sky must bake the same
  * every mount, and Math.random in a bake is a re-raster per session).
  */
-let _cloudTex = null;
-function cloudTexture() {
-  if (_cloudTex) return _cloudTex;
+let _cloudCv = null;
+function cloudCanvas() {
+  if (_cloudCv) return _cloudCv;
   const cv = document.createElement('canvas');
   cv.width = 480; cv.height = 200;
   const g = cv.getContext('2d');
@@ -497,32 +501,114 @@ function cloudTexture() {
   puff(330, 20, 1.1);
   puff(120, 120, 0.65);
   puff(410, 110, 0.75);
-  return (_cloudTex = cv.toDataURL());
+  return (_cloudCv = cv);
 }
 
 /**
- * Dress the sky layer for this map's light. Open air gets a real sky — a blue
- * that settles to the fog colour AT the horizon (the stage's vertical centre,
- * where a level camera's horizon is), so geometry fading into `--fp-fog` and
- * sky meeting the ground are the same colour and the seam disappears. A sun
- * and a few pixel clouds sit high, clear of the treeline. Underground maps
- * hide the layer and keep their void.
+ * The whole sky on one canvas, painted at the stage's own size.
+ *
+ * The old sky was a CSS gradient that settled to the fog colour at 50% and
+ * STAYED that colour to the bottom edge — so everywhere the geometry ended,
+ * the eye landed in a featureless grey field, and the playtest read the far
+ * half of every meadow as soup. What a level camera actually sees out there
+ * is a HORIZON: sky meeting ground on a line at eye height, a ridge of far
+ * woods standing on it, and hazier, greener country running down from it.
+ *
+ * The line lives at exactly 50% stage height (a level camera's horizon), and
+ * the colour AT the line is the fog colour on both sides — so geometry that
+ * has faded into `--fp-fog` hands off to the sky with no seam, and the far
+ * cull reads as atmosphere rather than as the world stopping.
+ *
+ * Deterministic (hash bumps, no randomness): the sky must bake the same every
+ * mount, or a portal repaints the weather.
+ */
+function skyTexture(w, h) {
+  const [r, g, b] = L.rgb;
+  const cv = document.createElement('canvas');
+  cv.width = w; cv.height = h;
+  const q = cv.getContext('2d');
+  const C = (rr, gg, bb, a) => `rgba(${Math.max(0, Math.min(255, Math.round(rr)))},`
+    + `${Math.max(0, Math.min(255, Math.round(gg)))},${Math.max(0, Math.min(255, Math.round(bb)))},${a == null ? 1 : a})`;
+  const hy = Math.round(h * 0.5);   // the level camera's horizon
+  // The sky, settling to the fog colour exactly at the line.
+  const sky = q.createLinearGradient(0, 0, 0, hy);
+  sky.addColorStop(0, C(r - 66, g - 42, b + 6));
+  sky.addColorStop(0.62, C(r - 26, g - 16, b));
+  sky.addColorStop(1, C(r, g, b));
+  q.fillStyle = sky;
+  q.fillRect(0, 0, w, hy);
+  // The sun, high and warm, its glow clipped at the line by the ground band.
+  const sx = w * 0.73, sy = h * 0.2, sr = h * 0.17;
+  const sun = q.createRadialGradient(sx, sy, 0, sx, sy, sr);
+  sun.addColorStop(0, 'rgba(255,246,210,0.9)');
+  sun.addColorStop(0.2, 'rgba(255,246,210,0.34)');
+  sun.addColorStop(1, 'rgba(255,246,210,0)');
+  q.fillStyle = sun;
+  q.fillRect(sx - sr, sy - sr, sr * 2, sr * 2);
+  q.fillStyle = 'rgba(255,250,226,0.95)';
+  q.beginPath(); q.arc(sx, sy, h * 0.024, 0, Math.PI * 2); q.fill();
+  // Clouds, riding the upper air.
+  const cc = cloudCanvas();
+  const ch = h * 0.44, cw = cc.width * (ch / cc.height);
+  for (let x = 0; x < w; x += cw) q.drawImage(cc, x, 0, cw, ch);
+  // The far country below the line: haze at the horizon greening as it nears.
+  const gnd = q.createLinearGradient(0, hy, 0, h);
+  gnd.addColorStop(0, C(r, g, b));
+  gnd.addColorStop(0.16, C(r * 0.72 + 24, g * 0.78 + 28, b * 0.62 + 18));
+  gnd.addColorStop(1, C(r * 0.5 + 18, g * 0.58 + 24, b * 0.42 + 10));
+  q.fillStyle = gnd;
+  q.fillRect(0, hy, w, h - hy);
+  // The horizon line itself — a pale seam of light where sky meets ground,
+  // with a breath of shadow under it. Subtle, but it is the line the eye
+  // anchors the whole scene to.
+  q.fillStyle = C(r + 44, g + 38, b + 24, 0.5);
+  q.fillRect(0, hy - 1, w, 1);
+  q.fillStyle = C(r - 34, g - 26, b - 20, 0.3);
+  q.fillRect(0, hy + 1, w, 1);
+  // Two ridges of far woods standing on the line — hazier behind, greener in
+  // front. Deterministic bumps; flats between them so it reads as canopy.
+  const ridge = (amp, base, col) => {
+    q.fillStyle = col;
+    q.beginPath();
+    q.moveTo(0, hy + base);
+    const stepW = Math.max(8, Math.round(w / 96));
+    for (let x = 0; x <= w + stepW; x += stepW) {
+      let s = ((x * 2654435761) ^ (amp * 977)) >>> 0;
+      s = ((s ^ (s >>> 13)) * 1274126177) >>> 0;
+      const bump = (s % 1000) / 1000;
+      q.lineTo(x, hy + base - (0.2 + 0.8 * bump) * amp);
+    }
+    q.lineTo(w, hy + base);
+    q.closePath();
+    q.fill();
+  };
+  ridge(h * 0.05, h * 0.014, C(r * 0.62 + 20, g * 0.68 + 26, b * 0.55 + 22, 0.85));
+  ridge(h * 0.032, h * 0.022, C(r * 0.5 + 12, g * 0.58 + 20, b * 0.45 + 12, 0.9));
+  return cv.toDataURL();
+}
+
+/**
+ * Dress the sky layer for this map's light. Open air gets the painted horizon
+ * above; underground maps hide the layer and keep their void. Sized to the
+ * stage and re-baked on resize (keyed, so idle calls cost nothing) — the
+ * horizon must sit at the REAL 50% of the real stage, not of a guess.
  */
 function mountSky() {
   const el = F.host.querySelector('.fp-sky');
   if (!el) return;
   F.host.classList.toggle('fp-open', !!L.sky);   // daylight softens the vignette
-  if (!L.sky) { el.style.display = 'none'; return; }
-  const [r, g, b] = L.rgb;
-  const top = `rgb(${Math.max(0, r - 66)},${Math.max(0, g - 42)},${Math.min(255, b + 6)})`;
-  const mid = `rgb(${Math.max(0, r - 26)},${Math.max(0, g - 16)},${b})`;
-  const hor = `rgb(${r},${g},${b})`;
+  if (!L.sky) { el.style.display = 'none'; F._skyKey = ''; return; }
+  // mount() runs while the screen is still hidden (clientHeight 0) — bake a
+  // placeholder now, and the post-show mountSky() call re-bakes at truth.
+  const w = Math.max(320, F.host.clientWidth || 1280);
+  const h = Math.max(240, F.host.clientHeight || 720);
+  const key = w + 'x' + h + '|' + L.rgb.join(',');
+  if (F._skyKey === key) { el.style.display = ''; return; }
+  F._skyKey = key;
   el.style.display = '';
-  el.style.backgroundImage = `url(${cloudTexture()}),`
-    + 'radial-gradient(circle at 73% 20%, rgba(255,246,210,0.9) 0%, rgba(255,246,210,0.34) 3.5%, rgba(255,246,210,0) 9%),'
-    + `linear-gradient(${top} 0%, ${mid} 32%, ${hor} 50%, ${hor} 100%)`;
-  el.style.backgroundSize = 'auto 44%, 100% 100%, 100% 100%';
-  el.style.backgroundRepeat = 'repeat-x, no-repeat, no-repeat';
+  el.style.backgroundImage = `url(${skyTexture(w, h)})`;
+  el.style.backgroundSize = '100% 100%';
+  el.style.backgroundRepeat = 'no-repeat';
 }
 
 /** The rungs, drawn rather than cropped: no sheet in the kit has a head-on
@@ -765,7 +851,7 @@ const GRID_DECOR = {
   m: () => 'cart',
 };
 /** The ways out, and what each one is. Drawn icons, never platform emoji. */
-const EXIT_SIGN = { s: ['⌃', 'Way out'], w: ['⌃', 'Way out'], d: [icon('door'), 'Door'] };
+const EXIT_SIGN = { s: ['⌃', 'Way out'], w: ['⌃', 'Home'], d: [icon('door'), 'Door'] };
 
 /** A decal stood up as a billboard, scaled to a real world height. */
 function decalBillboard(sheets, decalName, x, y, worldH) {
@@ -876,6 +962,12 @@ function buildDecor(sheets) {
       }
       const sign = EXIT_SIGN[ch];
       if (sign || ch === '+') {
+        // A way out must be a THING you can see, not a lucky patch of floor.
+        // The wagon exit stands the same wagon the top-down walk parks there
+        // (82px against a 48px tile, the width that view already chose), with
+        // the sign floating over it; bare exits keep the sign alone. Stood up
+        // BEFORE the marker so the label paints over the canvas, not under it.
+        if (ch === 'w') artBillboard('wagon', x + 0.5, y + 0.5, 82 * (T / 48), 'The wagon home');
         if (sign) markerBillboard(sign[0], sign[1], 'fpm-exit', x + 0.5, y + 0.5);
         else markerBillboard('◈', 'Onward', 'fpm-portal', x + 0.5, y + 0.5);
         F.doors.push({ x: x + 0.5, y: y + 0.5 });
@@ -1282,8 +1374,11 @@ function mount(prep, entry) {
   };
   // The light comes with the place. Everything that fades — quads, sprites, the
   // stage behind them — reads it, so switching a map switches the whole mood in
-  // one assignment rather than in six.
-  L = LIGHTS[theme.light] || LIGHTS.dark;
+  // one assignment rather than in six. A coarse-pointer device takes the
+  // light's `lite` weather where one is authored: same colour, shorter reach,
+  // so the haze still closes before the smaller build radius runs out.
+  const baseL = LIGHTS[theme.light] || LIGHTS.dark;
+  L = COARSE && baseL.lite ? { ...baseL, near: baseL.lite.near, far: baseL.lite.far } : baseL;
   F.host.style.background = `rgb(${L.rgb[0]},${L.rgb[1]},${L.rgb[2]})`;
   // The veil colour every quad's fog child paints in — one write, whole mood.
   F.host.style.setProperty('--fp-fog', `rgb(${L.rgb[0]},${L.rgb[1]},${L.rgb[2]})`);
@@ -1407,6 +1502,7 @@ export async function openDelveFp(localeId, member, hooks, carry) {
       showScreen('delveFpScreen');
       fitLens();               // now that the stage has a height to measure
       fitHands();              // and the hands with it
+      mountSky();              // and the horizon at the real 50% of it
       startLoop();
     } catch (e) {
       if (F && F.raf) cancelAnimationFrame(F.raf);
@@ -1489,7 +1585,7 @@ function wireInput() {
   };
   const stage = F.host.querySelector('.fp-stage');
   if (stage) stage.addEventListener('pointerdown', F.onStagePointer);
-  F.onResize = () => { fitLens(); fitHands(); };
+  F.onResize = () => { fitLens(); fitHands(); mountSky(); };
   window.addEventListener('resize', F.onResize);
 }
 function unwireInput() {
@@ -1566,10 +1662,12 @@ function trySwing() {
   const ax = Math.floor(F.px) + gx, ay = Math.floor(F.py) + gy;
   const seam = at(ax, ay) === 'o';
   playSwing(seam);
+  const w = F.hooks.gear && F.hooks.gear.weapon;
+  // The standee swings whatever the hands do — including the pick at a seam.
+  selfSwing(!seam && w && w.kind === 'bow');
   if (seam) { mineOre(ax, ay); return; }
   // A bow does not swing at anything. It looses, and the arrow finds out.
   F.haul.swings = (F.haul.swings || 0) + 1;
-  const w = F.hooks.gear && F.hooks.gear.weapon;
   if (w && w.kind === 'bow') {
     spawnShot('arrow', 'player', F.px + dx * 0.4, F.py + dy * 0.4, dx, dy, null);
     return;
@@ -1921,6 +2019,11 @@ function foeHit(prey, guarding) {
   if (guarding) { dmg = Math.max(1, Math.round(dmg * BLOCK_CUT)); braceShield(); }
   F.hp -= dmg;
   F.hurtUntil = performance.now() + 260;
+  // In third person the blow lands on someone you can SEE — recoil them.
+  if (F.self && F.pov === 3 && F.hp > 0) {
+    F.self.gfx.setAnim(F.self.actor, 'hurt');
+    F.self.busyUntil = performance.now() + 260;
+  }
   floater('−' + dmg, 'fp-hurt');
   const blood = F.host.querySelector('.fp-blood');
   if (blood) { blood.classList.remove('on'); void blood.getBoundingClientRect(); blood.classList.add('on'); }
@@ -2111,9 +2214,14 @@ function render() {
   // OVER THE SHOULDER: third person is the same camera pulled back along the
   // facing and lifted — the world, the controls and the combat don't move.
   const pov3 = F.pov === 3;
-  const [fvx, fvy] = DIRV[F.dir];
+  // The pull-back hangs off the LIVE yaw, not the settled facing. F.dir snaps
+  // to the new heading the instant a turn begins while the view lerps after
+  // it, so a pull-back along DIRV jumped 45° ahead of the camera's own
+  // rotation for the length of every turn — the one window in which the
+  // chase camera was NOT behind the walker.
+  const yr = F.yaw * Math.PI / 180;
   const back = pov3 ? T * 1.25 : 0;
-  const ex = F.px * T - fvx * back, ez = F.py * T - fvy * back;
+  const ex = F.px * T - Math.sin(yr) * back, ez = F.py * T + Math.cos(yr) * back;
   // The level under the eye, interpolated across a stride so a walk-off-the-
   // ledge drop is a hop down rather than a mid-step teleport.
   const s = F.stepping;
@@ -2171,9 +2279,34 @@ function render() {
       const lift = -lev * STEP_PX;   // the same interpolated level the eye rides
       const tf = `translate3d(${(F.px * T).toFixed(1)}px,${lift.toFixed(1)}px,${(F.py * T).toFixed(1)}px) rotateY(${-F.yaw}deg)`;
       if (tf !== F.self._tf) F.self.el.style.transform = (F.self._tf = tf);
-      const moving = !!(F.stepping || F.turning);
-      if (moving !== F.self.moving) { F.self.moving = moving; F.self.gfx.setAnim(F.self.actor, moving ? 'move' : 'idle'); }
-      F.self.actor.facing = Math.atan2(fvx, -fvy);
+      /**
+       * The pose is CAMERA-relative, like every rotation in this view
+       * (tactical-fp's drawActor does the identical subtraction). The chase
+       * camera looks along the walker's own facing, so the difference is ~0
+       * and the compositor draws the BACK row — you stand behind the member.
+       * Passing the WORLD facing here handed facingToRow a fixed-north
+       * camera's answer: face east and the standee turned its profile — or,
+       * facing south, its FACE — to a camera that was standing behind it,
+       * which is what the playtest reported as "the camera isn't behind me".
+       * During a turn the settled facing leads the lerping yaw by up to 45°,
+       * so the sprite leans into the turn for a beat, which is the one moment
+       * a profile is the true answer.
+       */
+      F.self.actor.facing = F.dir * 45 * Math.PI / 180 - yr;
+      const now = performance.now();
+      // One-shots (a swing, a bow draw, a hit taken) own the sprite while
+      // they play; the stance logic reasserts itself the moment they lapse.
+      if (now >= (F.self.busyUntil || 0)) {
+        const climbing = F.stepping && F.stepping.lf !== F.stepping.lt;
+        const desired = F.keys.block ? 'hold'
+          : climbing ? 'climb'
+            : (F.stepping || F.turning) ? 'move' : 'idle';
+        if (F.self.actor.anim.name !== desired) F.self.gfx.setAnim(F.self.actor, desired);
+      }
+      // Tick, THEN draw: the anim frames advance on the compositor's own
+      // stepper (walk cycle, slash follow-through), exactly as the top-down
+      // walker's do. Without the tick every anim froze on its first frame.
+      F.self.gfx.tickActor(F.self.actor, now);
       F.self.gfx.renderActor(F.self.cv, F.self.actor);
     }
   }
@@ -2330,8 +2463,23 @@ function mountSelf() {
   const cv = document.createElement('canvas');
   cv.width = 96; cv.height = 96;
   el.appendChild(cv);
-  F.self = { el, cv, gfx, actor: gfx.makeActor(F.member), moving: false, _on: false, _tf: '' };
+  F.self = { el, cv, gfx, actor: gfx.makeActor(F.member), busyUntil: 0, _on: false, _tf: '' };
   el.style.display = 'none';
+}
+
+/**
+ * The third-person half of a swing: the member's own standee plays the same
+ * compositor attack every other combat lens plays — blade drawn off the back
+ * (makeActor's sheatheWhenIdle) and swung, or the bow nocked and loosed. The
+ * hands' viewmodel is hidden in this view, so without this the only evidence
+ * of your own attack was the slash SVG flashing over an idle sprite.
+ */
+function selfSwing(bow) {
+  if (!F.self || F.pov !== 3) return;
+  F.self.gfx.setAnim(F.self.actor, bow ? 'nockBow' : 'slash');
+  // Slightly past the anim's own length, so the stance logic in render()
+  // cannot snatch the sprite back mid-follow-through.
+  F.self.busyUntil = performance.now() + (bow ? 460 : SWING_MS);
 }
 
 function leave() { if (F && !F.ended) endDelve('called it a day'); }

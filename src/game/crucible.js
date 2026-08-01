@@ -56,6 +56,7 @@ import {
 import { gearLevel, getRefineChance, getDrillChance, getLinkChance } from './items/blacksmithing.js';
 import { tileRng, elementsRng, rollDice, statMod, matXpNeeded, randInt, pick } from './engine/rng.js';
 import { tacFpToggle, tacFpSetSubject, tacFpSetPov, tacFpPov, tacFpSync, tacFpFrame, tacFpActive } from './tactical-fp.js';
+import { actFpToggle, actFpPov, actFpActive, actFpFrame, actFpMapInput } from './action-fp.js';
 
 // ══════════════════════════════════════════════════════════════
 // THE CRUCIBLE — ATHANOR MODE v1.0
@@ -3284,6 +3285,9 @@ function actionTick(dt){
   if (_actionKeys.a || _actionKeys.arrowleft) dx -= 1;
   if (_actionKeys.d || _actionKeys.arrowright) dx += 1;
   dx += _touchMove.x; dy += _touchMove.y;   // virtual joystick (touch) adds to keyboard input
+  // Inside the first-person camera, ▲ means "the way I am looking" — the held
+  // vector rotates into the camera's frame and nothing else about it changes.
+  if (actFpActive() && (dx || dy)){ var _fpv = actFpMapInput(dx, dy); dx = _fpv.x; dy = _fpv.y; }
   // Rungs cost time: crossing a ladder or a vine is deliberately slow, which is
   // what makes a ledge worth holding and a climber worth shooting at.
   p1._climbing = arenaOnClimb(_arenaT, p1.ax, p1.ay);
@@ -3626,6 +3630,8 @@ function actionRender(){
   });
   // Projectiles in flight (ranged attacks) fly across the field this frame.
   renderActionProjectiles(performance.now());
+  // The inside camera, when it is up — placement only, same state, same rules.
+  if (actFpActive()) actFpFrame();
 }
 
 function renderActionFighter(cv, fighter){
@@ -4194,11 +4200,18 @@ function startBattle(){
   document.getElementById('qsBadge').style.display=''; // may have been hidden by a guild tactical match
   var _fb=document.getElementById('btlForfeitBtn');if(_fb)_fb.style.display='none'; // runs end via game-over, not forfeit
   _tacAuto=false;var _ab=document.getElementById('tacAutoBtn');if(_ab)_ab.style.display='none'; // Watch is guild-only
-  // The inside view is guild-only too, and a roguelike run must not inherit a
-  // camera standing in a fighter from the last match.
-  if(tacFpActive())tacViewToggle();
-  var _vb=document.getElementById('tacViewBtns');if(_vb)_vb.style.display='none';
-  var _cf=document.getElementById('tacCamFp');if(_cf)_cf.style.display='none';
+  // The inside view rides the Athanor too — same battle, other camera. The
+  // toggles show exactly as they do for a guild match, and a view left ON
+  // carries across the run's rounds: each round replaces p1/p2 with fresh
+  // objects, so only the camera's subject needs rebinding (identity, not
+  // health, is tacFpSync's test). The sibling buttons' labels reset with it.
+  var _vb=document.getElementById('tacViewBtns');if(_vb)_vb.style.display='';
+  var _cf=document.getElementById('tacCamFp');if(_cf)_cf.style.display='';
+  if(tacFpActive()){
+    tacFpSetSubject(0);tacFpSync();_tacWho=0;
+    var _pv=document.getElementById('tacPovBtn');if(_pv)_pv.textContent=tacFpPov()==='shoulder'?'3rd':'1st';
+    var _wh=document.getElementById('tacWhoBtn');if(_wh)_wh.textContent='↔ Eyes';
+  }
   // Battles end mid-execution (checkWin), which leaves the exec button disabled —
   // re-arm it for the new battle (finishTurn only re-enables on turns nobody died).
   document.getElementById('execBtn').disabled=false;
@@ -6902,3 +6915,41 @@ function tacViewWho(){
 window.tacViewToggle=tacViewToggle;
 window.tacViewPov=tacViewPov;
 window.tacViewWho=tacViewWho;
+
+// ─── The arena, seen from inside it (src/game/action-fp.js) ──────────────────
+// View only, exactly like the tactical pair above: the camera moves, the fight
+// does not. The bridge is the module's whole window onto the battle — live
+// getters, never copies, so a new round's fresh p1/p2 are simply what the next
+// frame reads.
+function _actFpCharge(){
+  if(!_charge||!p1)return null;
+  var heldS=Math.max(0,(performance.now()-_charge.start)/1000);
+  var atk=ATTACKS[_charge.name];
+  var t2ok=atk?chargeTier2Allowed(p1,atk):false;
+  var full=t2ok?1.1:0.45;
+  return{prog:Math.min(1,heldS/full),tier2:t2ok&&heldS>=1.1};
+}
+var _actFpBridge={
+  fighters:function(){return[p1,p2];},
+  terrain:function(){return _arenaT;},
+  projectiles:function(){return _actionProjectiles;},
+  arenaEl:function(){return document.getElementById('actionArena');},
+  projImg:function(kind,c){return getProjectileImg(kind,c);},
+  charge:_actFpCharge,
+  tilesBase:TILES_BASE,
+};
+// One button, three stops: over the field → standing in your fighter → over
+// the shoulder → back over the field. The label says where tapping TAKES you.
+function actViewCycle(){
+  var next=!actFpActive()?'first':(actFpPov()==='first'?'shoulder':null);
+  actFpToggle(next,_actFpBridge);
+  var on=actFpActive();
+  var scr=document.getElementById('actionScreen');
+  if(scr)scr.classList.toggle('afp-on',on);
+  var b=document.getElementById('actCamFp');
+  if(b){b.classList.toggle('on',on);b.textContent=!on?'1st Person':(actFpPov()==='first'?'3rd Person':'Arena');}
+  actionLog(!on?'⊙ Back over the field.'
+    :(actFpPov()==='first'?'⚔ Standing in '+(p1&&p1.name||'your fighter')+' — same fight, same rules.'
+      :'⚔ Over the shoulder.'));
+}
+window.actViewCycle=actViewCycle;

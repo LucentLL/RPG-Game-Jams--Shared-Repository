@@ -56,8 +56,9 @@ export function tacFpActive() { return !!V; }
 const _tex = {};
 /** A flat colour panel with a little noise, for the sides of things. Drawn
  *  rather than cropped: the battlefield bake is a top-down sheet and has no
- *  vertical faces in it. */
-function facePanel(key, base, dark) {
+ *  vertical faces in it. (Exported: action-fp.js dresses the SAME colosseum
+ *  around the real-time arena, and two copies of these bakes would drift.) */
+export function facePanel(key, base, dark) {
   if (_tex[key]) return _tex[key];
   const cv = document.createElement('canvas');
   cv.width = 32; cv.height = 32;
@@ -75,7 +76,7 @@ function facePanel(key, base, dark) {
 
 /** The trodden ground OUTSIDE the lists — the apron between the fence and the
  *  stands. Mottled and dark so the bright play field stays the focus. */
-function apronPanel() {
+export function apronPanel() {
   if (_tex.apron) return _tex.apron;
   const cv = document.createElement('canvas');
   cv.width = 64; cv.height = 64;
@@ -92,7 +93,7 @@ function apronPanel() {
 
 /** The stands: sandstone tiers with a crowd dotted along every row. This is
  *  what turns "the grid stops being drawn" into somewhere a match happens. */
-function standsPanel() {
+export function standsPanel() {
   if (_tex.stands) return _tex.stands;
   const cv = document.createElement('canvas');
   cv.width = 128; cv.height = 96;
@@ -126,7 +127,7 @@ function standsPanel() {
 
 /** Pixel clouds for the sky behind everything. Deterministic — the sky must
  *  bake the same every mount. */
-function cloudsPanel() {
+export function cloudsPanel() {
   if (_tex.clouds) return _tex.clouds;
   const cv = document.createElement('canvas');
   cv.width = 420; cv.height = 160;
