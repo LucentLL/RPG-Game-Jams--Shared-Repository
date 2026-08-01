@@ -241,6 +241,9 @@
 }
 /* Over the shoulder wants a little less vignette — you are looking AT someone. */
 .tfp-ots .tfp-haze { opacity: 0.5; }
+/* The held viewmodel (shared fp-hands rig) belongs to a first-person frame
+   only — over the shoulder your hands are on the fighter you can see. */
+.tfp-ots .fp-hands { display: none; }
 /* The view toggles live with the other battle chrome. */
 .tfp-btns { display: inline-flex; gap: 4px; }
 .tfp-btns button {

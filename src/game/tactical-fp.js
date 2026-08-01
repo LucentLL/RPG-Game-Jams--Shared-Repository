@@ -23,6 +23,7 @@
  */
 import { S } from './state.js';
 import { GS } from './data/config.js';
+import { createFpHands, fighterHandsSpec } from './fp-hands.js';
 
 /** World scale. Shared with the delve so a person is the same size in both. */
 const T = 900;            // world px per tile
@@ -355,6 +356,24 @@ function fitLens() {
   st.style.perspective = (PERSP * (h / PERSP_AT)).toFixed(1) + 'px';
 }
 
+/** How far back the shoulder camera may pull before an impassable block
+ *  stands between it and the fighter. A block is only BLOCK_H tall and the
+ *  raised eye sees over its top — which cut the subject off at the waist and
+ *  read as "standing on a wall". Off-board is open ground (the apron). */
+function backOff(fx, fy, yaw, want) {
+  if (!S.arenaPassable) return want;
+  let ok = 0.45;
+  for (let s = 0.2; s <= want + 1e-6; s += 0.2) {
+    const cx = fx + 0.5 - Math.sin(yaw) * s, cy = fy + 0.5 + Math.cos(yaw) * s;
+    const tx = Math.floor(cx), ty = Math.floor(cy);
+    if (tx >= 0 && ty >= 0 && tx < GS && ty < GS && S.arenaPassable[ty][tx] === 0) {
+      return Math.max(0.45, s - 0.35);
+    }
+    ok = s;
+  }
+  return Math.max(0.45, ok);
+}
+
 /** Place the world so the subject's eye is at the origin, looking down its facing. */
 function aimCamera() {
   const f = V.subject;
@@ -364,14 +383,42 @@ function aimCamera() {
   const lift = liftAt(f.x, f.y);
   let ex = (f.x + 0.5) * T, ez = (f.y + 0.5) * T, ey = lift - EYE, pitch = 0;
   if (V.pov === 'shoulder') {
-    // Behind and above, looking slightly down — the fighter stays in frame.
-    ex -= Math.sin(yaw) * OTS_BACK * T;
-    ez += Math.cos(yaw) * OTS_BACK * T;
+    // Behind and above, looking slightly down — the fighter stays in frame,
+    // and the pull-back stops short of any rock that would hide them.
+    const back = backOff(f.x, f.y, yaw, OTS_BACK);
+    ex -= Math.sin(yaw) * back * T;
+    ez += Math.cos(yaw) * back * T;
     ey -= OTS_UP;
     pitch = OTS_PITCH;
   }
   V.yaw = yaw;
   V.world.style.transform = `rotateX(${pitch}deg) rotateY(${deg}deg) translate3d(${-ex}px,${-ey}px,${-ez}px)`;
+}
+
+/**
+ * The held viewmodel — the subject's real kit raised to the screen, exactly
+ * the delve's hands (shared module). Swings mirror the subject's own anim
+ * transitions during the turn replay, so what the hands do and what the
+ * rules resolved are one event. Hidden by CSS over the shoulder; transitions
+ * are swallowed while hidden so re-entry doesn't replay a stale swing.
+ */
+function syncHands() {
+  if (!V || !V.handsEl) return;
+  const f = V.subject;
+  if (!f) return;
+  if (V.handsFor !== f) {
+    if (V.hands) V.hands.dispose();
+    V.handsFor = f;
+    V.hands = createFpHands(V.handsEl, fighterHandsSpec(f));
+    V.lastAnim = '';
+  }
+  const anim = (f.anim && f.anim.name) || 'idle';
+  if (V.pov !== 'first') { V.lastAnim = anim; return; }
+  if (anim !== V.lastAnim) {
+    if (anim === 'slash' || anim === 'nockBow') V.hands.swing();
+    else if (anim === 'parry') V.hands.brace();
+    V.lastAnim = anim;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -386,6 +433,7 @@ export function tacFpToggle(on) {
     // The resize listener closes over the module-level V — left attached it
     // fires on a null V after exit (one throw per prior FP entry, per resize).
     if (V.onResize) window.removeEventListener('resize', V.onResize);
+    if (V.hands) V.hands.dispose();
     V.host.remove(); V = null;
   }
   if (V) { tacFpSync(); fitLens(); }
@@ -408,6 +456,7 @@ export function tacFpSetPov(kind) {
   V.pov = kind === 'shoulder' ? 'shoulder' : 'first';
   V.host.classList.toggle('tfp-ots', V.pov === 'shoulder');
   aimCamera();
+  if (V.hands) V.hands.fit();   // the hands layer may have just un-hidden
 }
 export function tacFpPov() { return V ? V.pov : 'first'; }
 
@@ -453,6 +502,7 @@ export function tacFpFrame() {
   if (!V || !V.subject) return;
   aimCamera();
   placeActors();
+  syncHands();
 }
 
 /**
@@ -487,7 +537,7 @@ function mount() {
   host.className = 'tfp-host';
   host.innerHTML = '<div class="tfp-stage"><div class="tfp-world">'
     + '<div class="tfp-geo"></div><div class="tfp-path"></div><div class="tfp-bbs"></div>'
-    + '</div></div><div class="tfp-haze"></div>';
+    + '</div></div><div class="tfp-haze"></div><div class="fp-hands"></div>';
   // The sky — behind everything the stage draws. Blue settling to the haze
   // colour at the horizon (the stage's centre), pixel clouds riding high.
   host.style.background = `url(${cloudsPanel()}) repeat-x 0 6% / auto 30%,`
@@ -497,7 +547,9 @@ function mount() {
     host, world: host.querySelector('.tfp-world'),
     subject: null, pov: 'first', yaw: 0,
     actors: new Map(), boardKey: '', pathKey: '',
+    handsEl: host.querySelector('.fp-hands'), hands: null, handsFor: null, lastAnim: '',
   };
   tacFpSetSubject(0);
-  if (!V.onResize) { V.onResize = () => { fitLens(); }; window.addEventListener('resize', V.onResize); }
+  syncHands();
+  if (!V.onResize) { V.onResize = () => { fitLens(); if (V && V.hands) V.hands.fit(); }; window.addEventListener('resize', V.onResize); }
 }

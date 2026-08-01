@@ -15,20 +15,23 @@
  * fighters at continuous coordinates moving every frame under a camera that
  * has to decide for itself where to look.
  *
- * THE CAMERA IS A SOFT LOCK-ON. In a real-time duel the one thing the player
- * must never lose is the opponent, and your fighter's own `facing` is set by
- * whichever way you last walked — a camera bolted to it whips with every
- * sidestep. So the yaw EASES toward the bearing to the opponent instead
- * (Z-targeting, by an older name): the foe stays framed, W closes, S opens
- * distance, A/D circle them. Movement input is rotated into that camera's
- * frame by actFpMapInput — actionTick calls it, which is the one and only
- * touch this view has on the input path, and it is pure rotation: the same
- * held keys move the same fighter at the same speed.
+ * YOU STEER THE CAMERA, the camera never steers you. The first cut eased the
+ * yaw toward the opponent's bearing (a soft lock-on) and the player's verdict
+ * was immediate: it forces your perspective. This is the Wilds' grammar now —
+ * the camera looks where YOUR fighter faces, and the controls are the delve's
+ * translated to real time: W/S walk the way you are looking (and back), A/D
+ * sidestep, ←/→ (and Q/E) turn, the stick turns on X and walks on Y.
+ * `actFpSteer` owns that mapping; actionTick calls it in place of its own
+ * key→vector build, and it also writes `p1.facing` — so the fighter's pose,
+ * a Blink's direction and the camera are all one fact: where you look.
  *
  * Nothing here can put the eye outside the world: the board's own fence,
- * apron and stands (tall past any pull-back) come with the dressing.
+ * apron and stands (tall past any pull-back) come with the dressing — and the
+ * shoulder camera CLAMPS at impassable rock, because a boulder standing
+ * between the eye and your own fighter reads as standing on a wall.
  */
 import { facePanel, apronPanel, standsPanel, cloudsPanel } from './tactical-fp.js';
+import { createFpHands, fighterHandsSpec } from './fp-hands.js';
 
 /** World scale — the delve's, via tactical-fp, so a person is the same size
  *  standing in any of the three grounds. */
@@ -40,22 +43,15 @@ const FOOT_PCT = 31.25;
 const PERSP = 500, PERSP_AT = 720;
 const OTS_BACK = 1.9, OTS_UP = 560, OTS_PITCH = 12;
 const APRON_T = 6, RING_H = 2400;
-/** How fast the lock-on settles, 1/s. Fast enough to keep a circling foe
- *  framed, slow enough that a blink-step reads as a swing, not a cut. */
-const YAW_EASE = 3.4;
+/** How fast held turn input swings the view, rad/s. The delve's 45° / 130ms
+ *  works out to ~6 rad/s in bursts; continuous steering wants less. */
+const TURN_RATE = 3.1;
 
 /** @type {?Object} the live view (null when the arena camera is off) */
 let V = null;
 
 export function actFpActive() { return !!V; }
 export function actFpPov() { return V ? V.pov : 'first'; }
-
-/** Shortest way round the circle. */
-const wrapA = (a) => {
-  while (a > Math.PI) a -= Math.PI * 2;
-  while (a < -Math.PI) a += Math.PI * 2;
-  return a;
-};
 
 // ---------------------------------------------------------------------------
 // Textures of its own — the arena's terrain props, drawn or cut once
@@ -359,38 +355,59 @@ function fitLens() {
 }
 
 /**
- * Rotate held input into the camera's frame: pressing ▲ walks the way the
- * camera looks. Called by actionTick — pure rotation, so speed is untouched.
- * When the view is off it is the identity, and the arena is exactly itself.
+ * Steer, the delve's grammar in real time. Called by actionTick IN PLACE of
+ * its own key→vector build while this view is up: `turn` swings the yaw,
+ * `fwd` walks along it, `strafe` slides across it, and the returned vector is
+ * in world tiles — same speed, same slide rules, nothing about movement
+ * changes but the frame it is read in. The returned `yaw` becomes the
+ * fighter's facing: where you look is one fact everywhere.
  */
-export function actFpMapInput(dx, dy) {
-  if (!V) return { x: dx, y: dy };
+export function actFpSteer(input, dt) {
+  if (!V) return null;
+  const turn = Math.max(-1, Math.min(1, input.turn || 0));
+  V.yaw += turn * TURN_RATE * dt;
+  const fwd = Math.max(-1, Math.min(1, input.fwd || 0));
+  const strafe = Math.max(-1, Math.min(1, input.strafe || 0));
   const s = Math.sin(V.yaw), c = Math.cos(V.yaw);
-  return { x: s * -dy + c * dx, y: -c * -dy + s * dx };
+  return {
+    x: s * fwd + c * strafe,
+    y: -c * fwd + s * strafe,
+    yaw: V.yaw,
+  };
 }
 
-/** Per frame, from actionRender. Eases the lock-on, places everyone. */
+/** How far back the shoulder camera may pull before rock stands between it
+ *  and the fighter — the "standing on a wall" illusion. Walked in small steps
+ *  along the back-ray; off-board is open (the apron is real ground). */
+function backOff(T0, x, y, yaw, want) {
+  if (!T0) return want;
+  let ok = 0.45;
+  for (let s = 0.2; s <= want + 1e-6; s += 0.2) {
+    const cx = x - Math.sin(yaw) * s, cy = y + Math.cos(yaw) * s;
+    const tx = Math.floor(cx), ty = Math.floor(cy);
+    if (tx >= 0 && ty >= 0 && tx < T0.cols && ty < T0.rows && !T0.pass[ty][tx]) {
+      return Math.max(0.45, s - 0.35);
+    }
+    ok = s;
+  }
+  return Math.max(0.45, ok);
+}
+
+/** Per frame, from actionRender. Placement only — yaw belongs to the input. */
 export function actFpFrame() {
   if (!V) return;
-  const [me, foe] = V.bridge.fighters() || [];
+  const me = (V.bridge.fighters() || [])[0];
   if (!me) return;
   const now = performance.now();
-  const dt = Math.min(0.08, (now - (V.last || now)) / 1000);
   V.last = now;
-
-  // The soft lock: settle the yaw toward the foe's bearing while they stand;
-  // once they fall, toward your own facing, which is the walk-away shot.
-  const want = (foe && foe.hp > 0)
-    ? Math.atan2(foe.ax - me.ax, -(foe.ay - me.ay))
-    : (typeof me.facing === 'number' ? me.facing : 0);
-  V.yaw += wrapA(want - V.yaw) * Math.min(1, dt * YAW_EASE);
 
   const T0 = V.bridge.terrain();
   const lift = liftAt(T0, me.ax, me.ay);
   let ex = me.ax * T, ez = me.ay * T, ey = lift - EYE, pitch = 0;
   if (V.pov === 'shoulder') {
-    ex -= Math.sin(V.yaw) * OTS_BACK * T;
-    ez += Math.cos(V.yaw) * OTS_BACK * T;
+    const back = backOff(T0, me.ax, me.ay, V.yaw, OTS_BACK);
+    ex -= Math.sin(V.yaw) * back * T;
+    ez += Math.cos(V.yaw) * back * T;
     ey -= OTS_UP;
     pitch = OTS_PITCH;
   }
@@ -420,6 +437,35 @@ export function actFpFrame() {
   }
   placeShots(V.yaw);
   drawCharge(me);
+  syncHands(me, now);
+}
+
+/**
+ * The held viewmodel — built from the fighter's REAL gear, swung when the
+ * fighter swings. The rig mirrors the fighter's anim transitions (slash /
+ * nockBow / parry), so the hands and the rules can never disagree about when
+ * a blow happened. Hidden (CSS) over the shoulder; while hidden the anim
+ * transitions are still swallowed so re-entering first person doesn't replay
+ * a stale swing.
+ */
+function syncHands(me, now) {
+  if (!V.handsEl) return;
+  if (V.handsFor !== me) {
+    if (V.hands) V.hands.dispose();
+    V.handsFor = me;
+    V.hands = createFpHands(V.handsEl, fighterHandsSpec(me));
+    V.lastAnim = '';
+  }
+  const anim = (me.anim && me.anim.name) || 'idle';
+  if (V.pov !== 'first') { V.lastAnim = anim; return; }
+  if (anim !== V.lastAnim) {
+    if (anim === 'slash' || anim === 'nockBow') V.hands.swing();
+    else if (anim === 'parry') V.hands.brace();
+    V.lastAnim = anim;
+  }
+  // The stride bob the delve's hands ride, keyed here to the move anim.
+  const bob = anim === 'move' ? (Math.sin(now / 150) * 14).toFixed(1) + 'px' : '0px';
+  if (bob !== V._bob) V.handsEl.style.setProperty('--fp-bob', (V._bob = bob));
 }
 
 // ---------------------------------------------------------------------------
@@ -436,6 +482,7 @@ export function actFpToggle(kind, bridge) {
   if (!kind) {
     if (V) {
       if (V.onResize) window.removeEventListener('resize', V.onResize);
+      if (V.hands) V.hands.dispose();
       V.host.remove();
       V = null;
     }
@@ -449,6 +496,7 @@ export function actFpToggle(kind, bridge) {
     host.innerHTML = '<div class="tfp-stage"><div class="tfp-world">'
       + '<div class="tfp-geo"></div><div class="tfp-bbs"></div>'
       + '</div></div><div class="tfp-haze"></div>'
+      + '<div class="fp-hands"></div>'
       + '<canvas class="afp-ring" width="72" height="72"></canvas>';
     host.style.background = `url(${cloudsPanel()}) repeat-x 0 6% / auto 30%,`
       + 'linear-gradient(rgb(92,132,188) 0%, rgb(128,156,196) 34%, rgb(156,174,196) 50%, rgb(112,120,132) 58%, rgb(74,80,92) 100%)';
@@ -458,15 +506,16 @@ export function actFpToggle(kind, bridge) {
       pov: 'first', yaw: 0, wtf: '', last: 0,
       actors: new Map(), shots: new Map(), dressing: [],
       boardKey: '', ringCv: host.querySelector('.afp-ring'),
+      handsEl: host.querySelector('.fp-hands'), hands: null, handsFor: null, lastAnim: '',
     };
-    // Open looking the way your fighter faces — the first eased frames then
-    // carry the eye onto the foe, which reads as finding them, not a cut.
+    // Open looking the way your fighter faces — the view begins as a change
+    // of camera, never a change of heading.
     const me = (bridge.fighters() || [])[0];
     if (me && typeof me.facing === 'number') V.yaw = me.facing;
     buildBoard();
     ensureActors();
     fitLens();
-    V.onResize = () => fitLens();
+    V.onResize = () => { fitLens(); if (V && V.hands) V.hands.fit(); };
     window.addEventListener('resize', V.onResize);
   } else {
     V.bridge = bridge || V.bridge;
@@ -474,6 +523,7 @@ export function actFpToggle(kind, bridge) {
   V.pov = kind === 'shoulder' ? 'shoulder' : 'first';
   V.host.classList.toggle('tfp-ots', V.pov === 'shoulder');
   actFpFrame();
+  if (V.hands) V.hands.fit();   // the layer may have just un-hidden
   return true;
 }
 
