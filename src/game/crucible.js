@@ -2628,11 +2628,31 @@ function goToDraft(){
   renderDraft();
 }
 
+// What the draft actually insists on before a fight: you are dressed. The hands
+// are yours to arrange — a two-handed bow, a sword and board, a shield alone, or
+// nothing at all — because every one of those is a loadout the engine can fight.
+var DRAFT_REQUIRED = ['Head','Body','Lower'];
+var SLOT_LABEL = { Head:'Head', Body:'Armor', Lower:'Lower', LHand:'Left hand', RHand:'Right hand' };
+
+/** The hands, read as one fact: which slot the weapon is in, whether it takes
+ *  both, and whether they are empty. The off-hand of a two-hander is not free —
+ *  it is holding the other end. */
+function handLoadout(){
+  var lh = run.equipped.LHand, rh = run.equipped.RHand;
+  var two = (lh && isTwoHandedType(lh.type)) ? lh : (rh && isTwoHandedType(rh.type)) ? rh : null;
+  return {
+    lh: lh, rh: rh, two: two,
+    twoAt: two ? (lh === two ? 'LHand' : 'RHand') : null,
+    none: !lh && !rh,
+  };
+}
+
 function renderDraft(){
   var eqEl=document.getElementById('equippedSlots');
   eqEl.innerHTML='';
   var totalSockets=0;
   var dom=run.dominantHand||'R';
+  var _hands=handLoadout();
   function handLabel(pos){ return pos==='Body' ? '' : (pos.charAt(0)===dom ? 'Main' : 'Off'); }
   EQUIP_SLOTS.forEach(function(pos){
     var gear=run.equipped[pos];
@@ -2679,6 +2699,12 @@ function renderDraft(){
       slot.innerHTML+='<div class="slot-name">'+gearIconHTML(gear,{size:20,slot:pos})+gear.name+'</div>'+
         '<div class="slot-sockets">'+gear.sockets+' socket'+(gear.sockets>1?'s':'')+'</div>'+
         '<div class="slot-clear" onclick="clearSlot(\''+pos+'\')">✕ remove</div>';
+    } else if(_hands.two && (pos==='LHand'||pos==='RHand')){
+      // Not empty — holding the other end of the two-hander. Saying "empty" here
+      // is what made the bow look like an unfinished loadout.
+      slot.classList.add('two-handed');
+      slot.innerHTML+='<div class="slot-name" style="color:#6b6154;font-style:italic">both hands on the '
+        + _hands.two.type.toLowerCase() + '</div>';
     } else {
       slot.innerHTML+='<div class="slot-name" style="color:#444">empty</div>';
     }
@@ -2736,13 +2762,26 @@ function renderDraft(){
     }
     pool.appendChild(card);
   });
-  // Confirm button — just need all 3 slots filled
+  // Confirm button. The rule is ARMOUR — head, body, lower — and it always was:
+  // the copy said "all three slots" while the check quietly demanded all FIVE of
+  // EQUIP_SLOTS, hands included. That made a two-handed weapon unenterable (a bow
+  // fills both hands but is stored in one, so the off-hand is forever null) and a
+  // shield-only or bare-handed loadout impossible, which is not a rule the game
+  // has anywhere else — the delve walks you in bare-handed and says so.
   var cf=document.getElementById('draftConfirm');
-  var allFilled = EQUIP_SLOTS.every(function(s){ return !!run.equipped[s]; });
-  if(allFilled){
-    cf.innerHTML='<button class="title-btn" onclick="confirmDraft()">⚔ ENTER BATTLE ⚔</button>';
+  var missing = DRAFT_REQUIRED.filter(function(s){ return !run.equipped[s]; });
+  if(!missing.length){
+    var hands = handLoadout();
+    // Not a gate — a warning. Choosing to fight bare-handed is a choice.
+    var warn = hands.none
+      ? '<div style="font-size:0.72em;color:var(--dim);padding:4px 8px 0">Both hands empty — you will fight bare-handed.</div>'
+      : '';
+    cf.innerHTML='<button class="title-btn" onclick="confirmDraft()">⚔ ENTER BATTLE ⚔</button>'+warn;
   } else {
-    cf.innerHTML='<div style="font-size:0.75em;color:var(--dim);padding:8px">Equip gear in all three slots to proceed.</div>';
+    // Say what is actually missing. A fixed sentence that names the wrong number
+    // of slots is how the old bug hid for so long.
+    cf.innerHTML='<div style="font-size:0.75em;color:var(--dim);padding:8px">Still need: '
+      + missing.map(function(s){ return SLOT_LABEL[s]||s; }).join(' &middot; ') + '</div>';
   }
   // Live character preview with the currently-equipped gear.
   renderDraftCharacter();
@@ -7079,6 +7118,32 @@ function tacViewWho(){
 window.tacViewToggle=tacViewToggle;
 window.tacViewPov=tacViewPov;
 window.tacViewWho=tacViewWho;
+
+// ─── The command list (narrow screens only) ──────────────────────────────────
+// A phone cannot show the whole control panel at once, and stacking it anyway
+// is what put the movement pad on top of the board and pushed EXECUTE off the
+// bottom edge. So on a narrow screen the panel becomes a Final-Fantasy command
+// list: one class on #battleScreen says which command is open, and CSS shows
+// that command's controls and only those. Nothing about the controls changes —
+// same buttons, same handlers, same rules — so desktop is untouched and this
+// cannot alter a turn.
+var _ffCmd = 'move';
+function ffPick(cmd){
+  var scr = document.getElementById('battleScreen'); if (!scr) return;
+  // Tapping the open command closes it, which is how you get the whole board.
+  _ffCmd = (_ffCmd === cmd) ? '' : cmd;
+  ['move','attack','view','sheet'].forEach(function(c){ scr.classList.toggle('ff-'+c, _ffCmd === c); });
+  document.querySelectorAll('#ffMenu .ff-cmd').forEach(function(b){
+    b.classList.toggle('on', b.getAttribute('data-ff') === _ffCmd);
+  });
+  // The sheet is a real disclosure elsewhere; keep the two in step rather than
+  // having a command that opens a panel the panel thinks is shut.
+  if (cmd === 'sheet' && _ffCmd === 'sheet'){
+    var body = document.getElementById('ssBody');
+    if (body && !body.classList.contains('open')) toggleStats();
+  }
+}
+window.ffPick = ffPick;
 
 // ─── The arena, seen from inside it (src/game/action-fp.js) ──────────────────
 // View only, exactly like the tactical pair above: the camera moves, the fight

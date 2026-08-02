@@ -178,6 +178,89 @@
 #battleScreen .move-info{display:none}
 #battleScreen .exec-bar{margin:4px 0 2px}
 #battleScreen .exec-btn{padding:8px 22px;font-size:0.9em}
+.ff-menu{display:none}
+
+/* ═══ THE COMMAND LIST — narrow screens only ══════════════════════════════════
+   The block above floats the whole control panel over the board, which is fine
+   on a laptop and hopeless on a phone held sideways: four stacked sections,
+   ~260px of content in a 420px viewport, so the movement pad lands on the
+   fighters and EXECUTE falls off the bottom edge entirely (the panel scrolls,
+   which is why it went unnoticed).
+
+   Below the breakpoint the panel becomes a Final Fantasy command list instead.
+   One command is open at a time; its controls appear in a box beside the list,
+   and everything else is off screen rather than underneath something. Tapping
+   the open command shuts it and gives the board the whole screen.
+
+   Nothing is rebuilt: the same #dpad, #atkBar and #execBtn move, and the only
+   JS is ffPick() setting a class. Desktop never enters this block. */
+@media (max-height: 620px), (max-width: 560px){
+  /* — the top band: HP, and nothing else — */
+  #battleScreen .header h1{display:none}
+  #battleScreen .header{padding:2px 8px 6px;gap:6px;font-size:0.86em}
+  #battleScreen .hud{top:20px;padding:0 4px}
+  #battleScreen .hud-panel{width:min(46%,190px);padding:2px 7px;font-size:0.58em}
+  #battleScreen .hud-panel .socket-chain{display:none}
+  #battleScreen .arena-name{display:none}
+  /* Below the HP cards, not through them. The cards are the tallest thing in
+     the band, so the log's top is measured from where they actually end. */
+  #battleScreen .log{top:74px;height:24px;max-height:24px;font-size:0.55em;line-height:1.15}
+
+  /* — the right rail: a short column under the top band, clear of both the
+       command list on the left and the open command's box on the right — */
+  #battleScreen .cam-controls{gap:4px;top:104px;bottom:auto;transform:none;right:8px}
+  #battleScreen .cam-btn{width:32px;height:32px;font-size:0.92em}
+
+  /* — the panel stops being a wall across the bottom — */
+  #battleScreen .controls{left:auto;right:52px;bottom:6px;width:min(62vw,340px);
+    max-height:none;overflow:visible;padding:0;background:none;z-index:24;pointer-events:none}
+  #battleScreen .controls > *{display:none}
+  #battleScreen .controls .section-label,
+  #battleScreen .controls .move-info{display:none !important}
+
+  /* The open command's controls, in one box beside the list. */
+  #battleScreen.ff-move .move-controls,
+  #battleScreen.ff-move .move-queue,
+  #battleScreen.ff-attack .atk-bar,
+  #battleScreen.ff-attack .atk-detail,
+  #battleScreen.ff-view .exec-bar{display:block;pointer-events:auto;
+    background:rgba(10,12,18,0.94);border:1px solid rgba(212,168,67,0.45);border-radius:8px;
+    padding:6px;margin:0 0 4px;box-shadow:0 6px 20px rgba(0,0,0,0.6)}
+  #battleScreen.ff-move .move-controls{display:flex}
+  #battleScreen.ff-attack .atk-bar{display:flex;flex-wrap:wrap;gap:4px;max-height:38dvh;overflow-y:auto}
+  #battleScreen.ff-view .exec-bar{display:flex;flex-wrap:wrap;gap:4px;justify-content:center}
+  /* EXECUTE has its own command; inside VIEW it would be a second copy. */
+  #battleScreen.ff-view #execBtn{display:none}
+  #battleScreen .atk-btn{padding:5px 9px;font-size:0.66em;min-width:56px}
+  #battleScreen .dpad{grid-template-columns:repeat(3,28px);grid-template-rows:repeat(3,28px)}
+  #battleScreen .auto-btn{padding:2px 6px;font-size:0.58em}
+  #battleScreen .move-queue{min-height:0;font-size:0.6em}
+
+  /* — the sheet: a bottom drawer on demand, never a band across the middle — */
+  #battleScreen .stat-sheet{display:none}
+  /* Left inset clears the command list, right inset clears the camera rail —
+     the sheet is the one panel wide enough to run into both. */
+  #battleScreen.ff-sheet .stat-sheet{display:block;top:auto;bottom:6px;left:120px;right:48px;
+    z-index:24;max-height:64dvh;border-radius:10px}
+  #battleScreen.ff-sheet .stat-sheet-body.open{max-height:calc(64dvh - 34px);overflow-y:auto}
+
+  /* — the list itself — */
+  .ff-menu{display:flex;flex-direction:column;gap:3px;
+    position:absolute;left:8px;bottom:calc(6px + env(safe-area-inset-bottom,0));z-index:25;
+    width:104px;padding:5px;border-radius:9px;
+    background:linear-gradient(160deg,rgba(18,22,38,0.96),rgba(8,10,18,0.96));
+    border:2px solid rgba(212,168,67,0.55);box-shadow:0 6px 22px rgba(0,0,0,0.65)}
+  .ff-cmd{padding:5px 6px 5px 16px;text-align:left;position:relative;
+    background:none;border:none;border-radius:4px;cursor:pointer;
+    font-family:'Cinzel',serif;font-size:0.68em;letter-spacing:0.08em;color:#e8e0d0;
+    -webkit-tap-highlight-color:transparent}
+  /* The pointing finger — an FF menu says which line it is on, and this one has
+     to survive a controller cursor landing on a different line. */
+  .ff-cmd.on::before{content:'▶';position:absolute;left:4px;color:var(--gold);font-size:0.85em}
+  .ff-cmd.on{color:var(--gold)}
+  .ff-cmd:active{background:rgba(212,168,67,0.2)}
+  .ff-go{margin-top:3px;border-top:1px solid rgba(212,168,67,0.3);padding-top:6px;color:var(--gold)}
+}
 
 /* Dice Overlay */
 .dice-overlay{position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.8);display:flex;flex-direction:column;align-items:center;justify-content:center;z-index:100;opacity:0;pointer-events:none;transition:opacity 0.2s}
@@ -211,13 +294,24 @@
   backface-visibility: hidden;   /* a face is never seen from behind the rock */
   transform-style: flat;
 }
-.tfp-floor { filter: brightness(0.96); }
-.tfp-wall  { filter: brightness(0.82); }
+/* NO filter on quads. This is the delve's rule (delve.css, "a filter here is a
+   private GPU buffer per surface") and these two battle views are the files
+   that never got it: a filtered element cannot be tiled, so the compositor must
+   allocate ONE texture the size of the whole element. The apron slabs are
+   18,900 CSS px long — far past any phone's maximum texture size — and a
+   surface that cannot be allocated is silently skipped, which is why most of
+   the colosseum simply did not draw on mobile. Both dims are baked into the
+   panels now (tactical-fp.js WALL_DIM / RING_DIM); the floor's was
+   brightness(0.96), four percent, and is simply gone. */
 .tfp-mark  { opacity: 0.85; }
+/* The lip of the lists is the one surface seen from BOTH sides — the shoulder
+   camera stands out on the apron looking back in. Everything else keeps the
+   cull, which is this view's only occlusion. */
+.tfp-2s    { backface-visibility: visible; }
 /* The world outside the lists: ground tiles at one-tile scale, stands tile
    along their length — never one texture stretched across the whole ring. */
 .tfp-apron { background-size: 900px 900px; background-repeat: repeat; }
-.tfp-ring  { background-size: auto 100%; background-repeat: repeat-x; filter: brightness(0.9); }
+.tfp-ring  { background-size: auto 100%; background-repeat: repeat-x; }
 /* Standing things: bottom-anchored on their ground point, turned to the camera. */
 .tfp-bb {
   position: absolute; left: 0; bottom: 0;
@@ -226,6 +320,10 @@
   pointer-events: none;
   filter: drop-shadow(0 6px 7px rgba(0,0,0,0.6));
 }
+/* A blur, per standee, re-run every frame the camera moves. On a phone that is
+   the frame budget — the same trade the delve makes for its viewmodel hands. */
+body.fp-lite .tfp-bb { filter: none; }
+body.fp-lite .tfp-haze { display: none; }
 .tfp-bb canvas { display: block; image-rendering: pixelated; }
 /* Each fighter carries their own bar, over their head, in world space. */
 .tfp-bb > i {
