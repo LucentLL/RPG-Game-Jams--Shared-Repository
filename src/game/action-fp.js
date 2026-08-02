@@ -247,18 +247,66 @@ function buildBoard() {
   buildDressing(T0);
 }
 
-/** Boulders, ladders and vines — the standing things the flat arena dresses
- *  with sprites. Billboards here, turned to the camera every frame. */
+/**
+ * The standing things — boulders, ladders, vines — with the volume the map
+ * says they have.
+ *
+ * THIS IS THE BUG THE PLAYER SAW. Every prop used to be one camera-facing card
+ * pinned to y=0: a boulder became a 700px wall balanced on its front edge that
+ * swung to follow the eye, and on a shelf it sank to the base of the world
+ * because nothing ever read the terrain under it. Two different mistakes with
+ * the same look — an object that touches the ground along one line and rises
+ * into the air.
+ *
+ * Doom's answer, and it is still the right one: A BILLBOARD IS FOR THINGS THAT
+ * FACE YOU, and structure is geometry. Doom's monsters are sprites (drawn in
+ * elevation, anchored to the sector floor, with eight rotations so they show
+ * you their real side) and its walls and floors are not sprites at all. It also
+ * never let the camera truly pitch — Heretic and Hexen "look up" by shearing
+ * the projection, not by rotating — precisely so you could never look down on a
+ * sprite and catch it being paper.
+ *
+ * We DO pitch, so we cannot rely on that. So:
+ *   • A boulder is round, and gets a CROSS — two quads through its centre at
+ *     right angles. It touches the ground on both axes, has depth from every
+ *     bearing, needs no per-frame rotation and costs one extra quad. This is
+ *     the trick every Doom-descendant used for trees and bushes.
+ *   • A ladder is genuinely flat, and is bolted to the shelf it serves — so it
+ *     takes THAT face's rotation, from the map, and never turns to follow you.
+ *   • Both stand on liftAt(), the same ground the fighters stand on.
+ *
+ * All of it is static: nothing here needs touching again until the board does.
+ */
+const FACE_YAW = { n: 0, s: 180, e: 90, w: -90 };
 function buildDressing(T0) {
   for (const d of V.dressing) d.el.remove();
   V.dressing = [];
   if (!T0) return;
+  const bbs = V.world.querySelector('.tfp-bbs');
   for (const p of T0.props) {
-    const el = document.createElement('div');
-    el.className = 'tfp-bb afp-prop';
-    let w, h;
-    if (p.kind === 'boulder') {
-      w = T * 0.78; h = T * 0.78;
+    const cx = (p.x + 0.5) * T, cz = (p.y + 0.5) * T;
+    const base = liftAt(T0, p.x + 0.5, p.y + 0.5);   // the ground THIS prop stands on
+    const h = (p.h || 1) * (p.kind === 'boulder' ? T : STEP);
+    if (p.flat) {
+      // Against its shelf, facing out of it. One quad, one rotation, forever.
+      const w = T * 0.42;
+      const el = document.createElement('div');
+      el.className = 'tfp-q afp-prop afp-flat';
+      el.style.cssText = `width:${w}px;height:${h}px;margin-left:${-w / 2}px;margin-top:${-h / 2}px;`
+        + `background-image:url(${p.kind === 'vine' ? vineTex() : ladderTex()});`
+        + `transform:translate3d(${cx}px,${base - h / 2}px,${cz}px) rotateY(${FACE_YAW[p.face] || 0}deg)`;
+      bbs.appendChild(el);
+      V.dressing.push({ el });
+      continue;
+    }
+    // Round things get the cross.
+    const w = T * 0.78;
+    const tex = facePanel('afpRock', '#8a8478', '#4a463e');
+    for (const rot of [0, 90]) {
+      const el = document.createElement('div');
+      el.className = 'tfp-q afp-prop afp-round';
+      el.style.cssText = `width:${w}px;height:${h}px;margin-left:${-w / 2}px;margin-top:${-h / 2}px;`
+        + `transform:translate3d(${cx}px,${base - h / 2}px,${cz}px) rotateY(${rot}deg)`;
       const cv = document.createElement('canvas');
       cv.width = 48; cv.height = 48;
       cv.style.width = '100%'; cv.style.height = '100%';
@@ -267,17 +315,10 @@ function buildDressing(T0) {
         const g = cv.getContext('2d');
         g.imageSmoothingEnabled = false;
         g.drawImage(im, 0, 0, 48, 48, 0, 0, 48, 48);
-      }).catch(() => { el.style.backgroundImage = `url(${facePanel('afpRock', '#8a8478', '#4a463e')})`; });
-    } else {
-      w = T * 0.42; h = STEP;
-      el.style.backgroundImage = `url(${p.kind === 'vine' ? vineTex() : ladderTex()})`;
-      el.style.backgroundSize = '100% 100%';
+      }).catch(() => { el.style.backgroundImage = `url(${tex})`; });
+      bbs.appendChild(el);
+      V.dressing.push({ el });
     }
-    el.style.width = w + 'px';
-    el.style.height = h + 'px';
-    el.style.marginLeft = (-w / 2) + 'px';
-    V.world.querySelector('.tfp-bbs').appendChild(el);
-    V.dressing.push({ el, x: p.x + 0.5, y: p.y + 0.5, h, tf: '' });
   }
 }
 
@@ -509,10 +550,9 @@ export function actFpFrame() {
     if (w !== a.hpw) { a.bar.style.width = (a.hpw = w); }
     drawActor(f, a, V.yaw);
   }
-  for (const d of V.dressing) {
-    const tf = `translate3d(${(d.x * T).toFixed(1)}px,0px,${(d.y * T).toFixed(1)}px) rotateY(${(-deg).toFixed(1)}deg)${bbP}`;
-    if (tf !== d.tf) d.el.style.transform = (d.tf = tf);
-  }
+  // The dressing does NOT move. It is placed once, in world space, standing on
+  // its own ground — see buildDressing. Rotating it to the camera every frame is
+  // what made a boulder read as a card that follows you.
   placeShots(V.yaw, bbP);
   drawCharge(me);
   syncHands(me, now);
