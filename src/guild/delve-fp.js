@@ -821,22 +821,33 @@ function buildGeometry() {
     q.el.remove();
     F.geo.delete(key);
   }
+  // A veil is a whole extra compositor layer per quad, and inside the clear
+  // radius (fog exactly 0 — everything within L.near) it paints nothing. So
+  // it is attached LAZILY, the first time a quad actually takes fog: in the
+  // open retune that spares every near floor and wall its second layer,
+  // which is a third of the meadow's whole layer count.
+  const veilFor = (rec) => {
+    if (!rec.veil) {
+      rec.veil = document.createElement('i');
+      rec.veil.className = 'fp-veil';
+      rec.el.appendChild(rec.veil);
+    }
+    return rec.veil;
+  };
   for (const [key, w] of want) {
     const have = F.geo.get(key);
     if (have) {
-      if (have.fog !== w.fog) { have.fog = w.fog; have.veil.style.opacity = w.fog; }
+      if (have.fog !== w.fog) { have.fog = w.fog; veilFor(have).style.opacity = w.fog; }
       continue;
     }
     const el = document.createElement('div');
     el.className = 'fp-q ' + w.cls;
     el.style.cssText = `width:${w.w}px;height:${w.h}px;margin-left:${-w.w / 2}px;margin-top:${-w.h / 2}px;`
       + `background-image:url(${w.tex});transform:translate3d(${w.tx}px,${w.ty}px,${w.tz}px) ${w.rot}`;
-    const veil = document.createElement('i');
-    veil.className = 'fp-veil';
-    veil.style.opacity = w.fog;
-    el.appendChild(veil);
     host.appendChild(el);
-    F.geo.set(key, { el, veil, fog: w.fog });
+    const rec = { el, veil: null, fog: w.fog };
+    if (w.fog > 0) veilFor(rec).style.opacity = w.fog;
+    F.geo.set(key, rec);
   }
 }
 
@@ -2220,7 +2231,23 @@ function render() {
   // rotation for the length of every turn — the one window in which the
   // chase camera was NOT behind the walker.
   const yr = F.yaw * Math.PI / 180;
-  const back = pov3 ? T * 1.25 : 0;
+  /**
+   * Third person frames like the reference action-RPG shot: about a tile
+   * back, eye barely over the member's head, lens tipped 9° down — head near
+   * screen centre, feet near the bottom edge, roughly half a screen of
+   * character. And the pull-back CLAMPS at solid cells (walls, ore faces,
+   * props): backed into rock, the camera slides in over your shoulder rather
+   * than leaving you watched from inside the hill.
+   */
+  let back = 0;
+  if (pov3) {
+    back = 1.1;
+    for (let s = 0.2; s <= 1.1 + 1e-6; s += 0.15) {
+      const cx = F.px - Math.sin(yr) * s, cy = F.py + Math.cos(yr) * s;
+      if (blocked(Math.floor(cx), Math.floor(cy))) { back = Math.max(0.4, s - 0.3); break; }
+    }
+    back *= T;
+  }
   const ex = F.px * T - Math.sin(yr) * back, ez = F.py * T + Math.cos(yr) * back;
   // The level under the eye, interpolated across a stride so a walk-off-the-
   // ledge drop is a hop down rather than a mid-step teleport.
@@ -2228,7 +2255,7 @@ function render() {
   const lev = s && s.lf != null
     ? s.lf + (s.lt - s.lf) * Math.min(1, ease(s.t))
     : heightAt(Math.floor(F.px), Math.floor(F.py));
-  const ey = -EYE - (pov3 ? EYE * 0.5 : 0) - lev * STEP_PX;
+  const ey = -EYE - (pov3 ? EYE * 0.18 : 0) - lev * STEP_PX;
   // rotateY(+yaw), not −yaw. Forward is −Z, and CSS rotateY maps (x,y,z) to
   // (x·cosθ + z·sinθ, y, −x·sinθ + z·cosθ) — so facing east (yaw 90) has to send
   // world +X to view −Z, which needs +90. The negative sign put east BEHIND the
@@ -2238,7 +2265,11 @@ function render() {
   // every standee (the top-down view learned this the hard way).
   // Guarded like every billboard write below: an idle frame must recomposite
   // nothing, and an unguarded write here recomposited the whole quad stack.
-  const wtf = `scale3d(${F.lens},${F.lens},${F.lens}) rotateY(${F.yaw}deg) translate3d(${-ex}px,${-ey}px,${-ez}px)`;
+  // The 9° pitch is CAMERA-space, so it sits left of the yaw (scale3d is a
+  // uniform similarity and commutes past it). Billboards only counter-yaw,
+  // so they lean 9° from true — the tactical shoulder ships 10-12° the same
+  // way and it reads as nothing.
+  const wtf = `scale3d(${F.lens},${F.lens},${F.lens})${pov3 ? ' rotateX(9deg)' : ''} rotateY(${F.yaw}deg) translate3d(${-ex}px,${-ey}px,${-ez}px)`;
   if (wtf !== F._wtf) F.world.style.transform = (F._wtf = wtf);
   // Billboards stand on the floor and counter-rotate to face the walker. Every
   // write is guarded by the value it would write: standing still, this loop
@@ -2458,7 +2489,17 @@ export function closeDelveFpSilent() {
 function mountSelf() {
   const gfx = window.__ranchGfx;
   if (!gfx) { console.warn('delve-fp: compositor missing — no third-person sprite'); return; }
-  const h = CREATURE_H[3];           // your own height — the rank the eye was tuned to
+  /**
+   * The BILLBOARD is not the ART. The compositor centres a small sprite in
+   * its 96px cell: ~31% of the canvas is empty under the feet and ~11% over
+   * the head, so the drawn member occupies only ~58% of the box. Sizing the
+   * billboard to CREATURE_H[3] therefore drew YOU at 58% of your own height —
+   * knee-high to the squirrels, and most of why the third-person camera read
+   * as "too small". Creatures don't share the problem (trimBox crops their
+   * art to fill the billboard exactly); the self canvas can't be trimmed per
+   * frame, so the box is scaled up until the ART inside it is a full person.
+   */
+  const h = CREATURE_H[3] * 1.73;
   const el = addBillboard('fp-self', '', h, h);
   const cv = document.createElement('canvas');
   cv.width = 96; cv.height = 96;

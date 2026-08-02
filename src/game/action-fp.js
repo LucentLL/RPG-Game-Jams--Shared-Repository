@@ -41,7 +41,9 @@ const STEP = 430;              // one terrain level, world px
 const FIGHTER_H = 1200;
 const FOOT_PCT = 31.25;
 const PERSP = 500, PERSP_AT = 720;
-const OTS_BACK = 1.9, OTS_UP = 560, OTS_PITCH = 12;
+// Tactical-fp's shoulder framing, kept in lockstep (head near centre, feet
+// near the bottom edge, ~half the screen of fighter — the reference shot).
+const OTS_BACK = 1.0, OTS_UP = 120, OTS_PITCH = 10;
 const APRON_T = 6, RING_H = 2400;
 /** How fast held turn input swings the view, rad/s. The delve's 45° / 130ms
  *  works out to ~6 rad/s in bursts; continuous steering wants less. */
