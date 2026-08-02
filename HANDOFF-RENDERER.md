@@ -63,7 +63,17 @@ reverting.
 
 ### The diagnostic to run FIRST
 
-On the player's actual phone, over USB:
+There is a **desktop half of this that needs no phone**, and it answers the
+K-scale question on its own: raster scale and texture memory are the same
+question, so render the same picture two ways and look at which one is sharp.
+A is authored at 900px with no ancestor scale; B is authored at 300px with
+`scale3d(3)` on the ancestor. If B is as crisp as A, Chrome took its raster
+scale from the effective transform and **the K-scale allocates the same texture
+and bought nothing**. If B is soft or blocky, the K-scale is a real 9× cut.
+The probe page is written and ready at `dev/rasterscale.html`; it needs a
+displayed browser pane to composite a frame, which this session did not have.
+
+Then, on the player's actual phone, over USB:
 
 ```
 chrome://inspect  →  remote-debug the device  →  DevTools → More tools → Layers
@@ -139,19 +149,46 @@ to, computed once at bake). The arena renders that honestly now:
 - **Both stand on `liftAt()`** — the placement transform used to hard-code `0px`
   on Y, so anything on a shelf sank a step into the world.
 
-### NOT DONE — the next clean piece of work
+### DONE 2026-08-02 — the delve got it too (not yet seen on a screen)
 
-`src/guild/delve-fp.js` has its **own decor system** which never got this. Desks
-and furniture there are still flat full-height billboards — a desk renders as a
-wall-sized panel instead of a waist-high box. The player asked for exactly the
-right thing:
+`src/guild/prop-volume.js` is the data model: form + height + depth, **in
+tiles**, keyed by art name, so each lens multiplies by its own world unit and
+the table outlives whichever renderer reads it. Width is *not* authored — it
+follows from the height and the crop's own proportions, which is the arena's
+rule and stops the two drifting.
 
-> "project the objects onto volumetric cube tiles" — the same transformation as
-> shifting a top-down map to isometric.
+`buildProps` in `delve-fp.js` emits four forms as static geometry: `box` (art is
+the front — four sides and a lid, the lid painted from the crop's centre band so
+it takes the object's own colour), `lie` (art is the TOP — the beds are drawn in
+plan, which is why they stood on their footboards), `cross`, and `wall` (bolted
+to whichever wall the map says is behind it, hanging at the height it hangs at).
 
-Concretely: give delve decor a footprint + height in tiles, and emit a box (or
-cross) sitting on its cell, mirroring what `buildDressing` in `action-fp.js`
-now does. A desk should be ~0.5 tiles tall with real sides.
+What the data was actually producing, measured — ceiling is 1.40 tiles:
+
+| prop | was | now |
+|---|---|---|
+| teacherDesk | 1.03 | 0.40 |
+| gmDesk | 1.49 | 0.55 |
+| bed | 1.26, on its end | 0.26, lying down |
+| wardrobe | 2.24 | 0.95 |
+| forgeFurnace | 3.00 | 1.05 |
+| statue | 2.92 | 1.15 |
+
+43 of 44 furnishings given a volume; 17 no longer pierce the ceiling, none still
+do. Audit script: `dev/check-volumes.mjs` (reads the real tables, so it
+cannot drift from the game).
+
+**Cost, since §1 is about layer count:** a box is 5 quads, a cross 2, a wall 1.
+The worst chart is the dormitory at 37 quads of furniture. Solids are born
+`display:none` and shown by the first fog pass — the estate's chart carries every
+stamped room's furniture at once, and creating them visible would put the lot on
+the compositor for the frame in between. `treeTall` is deliberately left OUT: the
+meadow grows trees from its grid as well, in numbers, and open ground is already
+the map that runs out of layers first.
+
+**Still unverified visually** — the Browser pane was closed for this session, so
+nothing below has been looked at on a screen. It builds and the numbers audit;
+that is not the same thing, and §7.4 applies.
 
 ---
 

@@ -1,0 +1,75 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>raster scale probe</title>
+<style>
+  html,body { margin:0; background:#101014; color:#ddd; font:13px/1.5 ui-monospace,Menlo,Consolas,monospace; }
+  h1 { font-size:14px; margin:10px 12px 4px; color:#9fe; font-weight:600; }
+  p.note { margin:0 12px 10px; color:#889; }
+  .row { margin:0 12px 14px; }
+  .cap { color:#fc9; margin-bottom:4px; }
+  .stage { width:980px; height:210px; position:relative; overflow:hidden;
+           border:1px solid #333; background:#000; }
+  .persp { perspective:500px; }
+  .world { position:absolute; left:0; top:0; width:0; height:0;
+           transform-style:preserve-3d; transform-origin:0 0; }
+  /* Every quad is its own composited surface, exactly like .tfp-q / .fp-q:
+     a 3D transform inside a preserve-3d subtree. */
+  .q { position:absolute; transform-origin:0 0; overflow:hidden;
+       background:#fff; color:#000; }
+  .q b { display:block; font-weight:800; letter-spacing:-.02em; white-space:nowrap; }
+  /* 1-device-px hairlines: if the layer is rastered at layout size and then
+     scaled up, these become fat 3px bars. If it is rastered at the effective
+     on-screen scale they stay hairlines. */
+  .q i { display:block; height:.34em;
+         background:repeating-linear-gradient(90deg,#000 0 1px,#fff 1px 2px); }
+</style>
+
+<h1>Does Chrome pick raster scale from LAYOUT size or from the EFFECTIVE transform?</h1>
+<p class="note">
+  All three rows paint the same picture at the same on-screen size (900&times;180 CSS px).<br>
+  A is authored at 900px with no ancestor scale. B and C are authored at 300px with
+  <code>scale3d(3)</code> on the ancestor &mdash; the K-scale.<br>
+  <b>If B and C look identical to A</b>, raster scale follows the effective transform:
+  the K-scale allocates the same texture and buys nothing.<br>
+  <b>If B and C look soft / blocky</b>, raster scale follows layout size: the K-scale is a real 9&times; memory cut.
+</p>
+
+<div class="row">
+  <div class="cap">A &mdash; authored 900px, ancestor scale 1 (the control)</div>
+  <div class="stage"><div class="world" style="transform:translate3d(0,0,0)">
+    <div class="q" style="width:900px;height:180px;transform:translate3d(20px,14px,0)">
+      <b style="font-size:74px">Raster 900</b><i></i>
+    </div>
+  </div></div>
+</div>
+
+<div class="row">
+  <div class="cap">B &mdash; authored 300px, ancestor scale3d(3) &mdash; no perspective</div>
+  <div class="stage"><div class="world" style="transform:scale3d(3,3,3)">
+    <div class="q" style="width:300px;height:60px;transform:translate3d(6.667px,4.667px,0)">
+      <b style="font-size:24.667px">Raster 900</b><i></i>
+    </div>
+  </div></div>
+</div>
+
+<div class="row">
+  <div class="cap">C &mdash; authored 300px, ancestor scale3d(3) &mdash; WITH perspective:500px, as the real camera has</div>
+  <div class="stage persp"><div class="world" style="transform:scale3d(3,3,3) rotateX(0deg) rotateY(0deg) translate3d(0,0,0)">
+    <div class="q" style="width:300px;height:60px;transform:translate3d(6.667px,4.667px,0)">
+      <b style="font-size:24.667px">Raster 900</b><i></i>
+    </div>
+  </div></div>
+</div>
+
+<pre id="out" style="margin:12px;color:#8d8"></pre>
+<script>
+  // Report what the page thinks the on-screen geometry is, so the comparison is
+  // provably like-for-like and not two different sizes being eyeballed.
+  const rows = [...document.querySelectorAll('.q')].map((q, i) => {
+    const r = q.getBoundingClientRect();
+    return ['ABC'[i], 'layout ' + q.offsetWidth + 'x' + q.offsetHeight,
+            'onscreen ' + r.width.toFixed(1) + 'x' + r.height.toFixed(1)].join('   ');
+  });
+  document.getElementById('out').textContent =
+    'devicePixelRatio ' + devicePixelRatio + '\n' + rows.join('\n');
+</script>
