@@ -647,17 +647,28 @@
    the sword in the wrong hand. (The 32px item icons this replaced were drawn
    hilt-at-lower-left and DID need the flip; the rule is art-specific, not a
    general truth about viewmodels.) */
-/* Only the tilt lives here — fitHands() owns size, left/right and bottom.
+/* NO TILT. fitHands() owns size, left/right and bottom; the ORIENTATION is the
+   sheet's own, which is the same north-facing pose the third-person standee
+   draws — hold the two side by side and the weapon sits at the same angle in
+   both. The old -6°/+7° were invented here and nowhere else, and they read as
+   exactly what they were: the weapon hung slightly wrong.
    The transition is for the duel stance below: hands drop and rise smoothly. */
-.fp-hand-weapon, .fp-hand-pick { transform: rotate(-6deg); transition: transform 220ms ease; }
-.fp-hand-shield { transform: rotate(7deg); transition: transform 220ms ease; }
+.fp-hand-weapon, .fp-hand-pick, .fp-hand-offhand { transition: transform 220ms ease; }
+.fp-hand-shield { transition: transform 220ms ease; }
+/* The off-hand weapon is NOT mirrored. It was, briefly, and the mirror fought
+   the transform-origin fitHands sets at the GRIP: scaleX about an off-centre
+   origin translates as well as flips, and the second weapon drifted into the
+   middle of the screen. Drawn the same way as the main hand it reads fine, and
+   the placement maths is the shield's, unchanged. */
+.fp-hand-offhand.fp-swinging { animation: fp-swing 380ms cubic-bezier(.3,.7,.3,1); }
 /* DUEL STANCE — something alive is inside two tiles. A rank-1 creature is
    knee-high and stands exactly where the viewmodel is drawn, so the hands drop
    clear of the fight while it lasts. Swinging, bracing, guarding and stowing
    all outrank the duck (an animation outranks a transform anyway; the :not()s
    keep the guard/stow transforms authoritative). */
 .fp-duel .fp-hand-weapon:not(.fp-swinging):not(.fp-stowed),
-.fp-duel .fp-hand-pick:not(.fp-swinging):not(.fp-stowed) {
+.fp-duel .fp-hand-pick:not(.fp-swinging):not(.fp-stowed),
+.fp-duel .fp-hand-offhand:not(.fp-swinging):not(.fp-stowed) {
   transform: rotate(-18deg) translate(30%, 40%) scale(0.78);
 }
 .fp-duel .fp-hand-shield:not(.fp-bracing):not(.fp-guarding) {
@@ -665,7 +676,7 @@
 }
 /* The hand that isn't leading drops out of frame rather than vanishing — you
    put the pick away, you don't teleport it. */
-.fp-hand.fp-stowed { transform: rotate(-6deg) translateY(112%); transition: transform 180ms ease-in; }
+.fp-hand.fp-stowed { transform: translateY(112%); transition: transform 180ms ease-in; }
 
 .fp-hand-weapon.fp-swinging, .fp-hand-pick.fp-swinging { animation: fp-swing 380ms cubic-bezier(.3,.7,.3,1); }
 .fp-hand-shield.fp-bracing  { animation: fp-brace 380ms ease-out; }
@@ -674,11 +685,11 @@
    fitHands sized the element to the swing union they resolved to ±350px and
    carried the weapon around the viewport. */
 @keyframes fp-swing {
-  0%   { transform: rotate(-6deg); }
-  18%  { transform: rotate(22deg)  translate(3%, 2%); }    /* draw back */
-  48%  { transform: rotate(-70deg) translate(-4%, -2%); }  /* through the arc */
-  70%  { transform: rotate(-32deg) translate(-2%, -1%); }
-  100% { transform: rotate(-6deg); }
+  0%   { transform: rotate(0deg); }
+  18%  { transform: rotate(24deg)  translate(3%, 2%); }    /* draw back */
+  48%  { transform: rotate(-64deg) translate(-4%, -2%); }  /* through the arc */
+  70%  { transform: rotate(-26deg) translate(-2%, -1%); }
+  100% { transform: rotate(0deg); }
 }
 @keyframes fp-brace {
   0%, 100% { transform: rotate(7deg) translate(0, 0) scale(1); }
@@ -718,7 +729,7 @@
 /* The pill is two lines now (mouse + controller), so the pure-circle radius
    would bulge; and the crawler hides the cursor once it has the mouse. */
 .fp-keys { border-radius: 14px; line-height: 1.7; }
-#delveFpScreen.fp-locked { cursor: none; }
+#delveFpScreen.fp-looking { cursor: none; }
 /* Both of these keep the HUD one line tall at any width, which is what .fp-map's
    `top` is measured against. flex-shrink also stops the circle squeezing oval. */
 .fp-compass, .fp-help { flex: 0 0 auto; }

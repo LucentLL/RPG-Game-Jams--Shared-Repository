@@ -131,14 +131,42 @@
   font-family:'Cinzel',serif;font-size:0.74em;letter-spacing:0.06em;white-space:nowrap;
   pointer-events:none;text-shadow:0 1px 3px #000}
 .afp-look b{color:#e8e0d0;font-weight:600}
-.afp-host.afp-locked .afp-look,.afp-host.afp-touch .afp-look{display:none}
-.afp-host.afp-locked{cursor:none}
+/* The hint fades once you have actually aimed — it has done its job then. */
+.afp-host.afp-aimed .afp-look,.afp-host.afp-touch .afp-look{display:none}
+/* Only WHILE the right button is down does the cursor get out of the way. The
+   rest of the time it belongs to the player and to the attack bar. */
+.afp-host.afp-looking{cursor:none}
 /* The bead sits where a shot goes, which in first person is the middle of the
    screen — and over the shoulder is NOT, so it stays a first-person mark. */
-.afp-host.afp-locked:not(.tfp-ots)::after{content:'';position:absolute;left:50%;top:50%;
+.afp-host:not(.tfp-ots):not(.afp-touch)::after{content:'';position:absolute;left:50%;top:50%;
   width:5px;height:5px;margin:-2px 0 0 -2px;border-radius:50%;
-  background:rgba(224,180,85,0.8);box-shadow:0 0 0 1px rgba(0,0,0,0.6);
-  pointer-events:none;z-index:31}
+  background:rgba(224,180,85,0.7);box-shadow:0 0 0 1px rgba(0,0,0,0.6);
+  pointer-events:none;z-index:31;transition:background 0.2s}
+.afp-host.afp-looking:not(.tfp-ots)::after{background:rgba(255,225,150,0.95)}
+
+/* ═══ THE CROSS HOTBAR — hold a trigger (src/game/crucible.js) ═══ */
+/* A pad has no cursor, so an attack list you click is a list a controller
+   cannot reach. Holding LT or RT lays the eight slots out the way the thumbs
+   already are: face cluster left, d-pad right. Shown only while held. */
+.act-xhb{position:absolute;left:50%;bottom:96px;transform:translateX(-50%) scale(0.96);
+  display:flex;gap:5px;z-index:32;pointer-events:none;
+  opacity:0;transition:opacity 0.12s ease,transform 0.12s ease}
+.act-xhb.on{opacity:1;transform:translateX(-50%) scale(1)}
+.xhb-slot{min-width:74px;max-width:120px;padding:5px 8px;border-radius:7px;text-align:center;
+  background:rgba(10,12,18,0.9);border:1px solid rgba(212,168,67,0.42);
+  box-shadow:0 4px 14px rgba(0,0,0,0.55)}
+.xhb-slot b{display:block;font-family:'Cinzel',serif;font-size:0.82em;color:var(--gold);line-height:1.1}
+.xhb-slot span{display:block;font-family:'Cormorant Garamond',serif;font-size:0.68em;color:#e8e0d0;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.xhb-slot.empty{opacity:0.32}
+/* The gap splits the face cluster from the d-pad, so the two halves read as the
+   two hands they are. */
+.xhb-slot.xhb-gap{margin-left:22px}
+@media (max-height:620px),(max-width:560px){
+  .act-xhb{bottom:70px;gap:3px}
+  .xhb-slot{min-width:56px;padding:3px 5px}
+  .xhb-slot.xhb-gap{margin-left:12px}
+}
 
 /* ═══ THE BEAT AFTER A WIN ═══ */
 /* Over the held scene, never instead of it: the arena, the stands and the

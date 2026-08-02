@@ -56,7 +56,7 @@ import {
 import { gearLevel, getRefineChance, getDrillChance, getLinkChance } from './items/blacksmithing.js';
 import { tileRng, elementsRng, rollDice, statMod, matXpNeeded, randInt, pick } from './engine/rng.js';
 import { tacFpToggle, tacFpSetSubject, tacFpSetPov, tacFpPov, tacFpSync, tacFpFrame, tacFpActive } from './tactical-fp.js';
-import { actFpToggle, actFpPov, actFpActive, actFpFrame, actFpSteer, actFpLookLocked } from './action-fp.js';
+import { actFpToggle, actFpPov, actFpActive, actFpFrame, actFpSteer } from './action-fp.js';
 import { readPad, padReset, touchPrimary, onTouchPrimary, PAD } from '../platform/input.js';
 import { claimPad } from '../platform/ui-pad.js';
 // While the arena's loop runs, the controller is steering a fighter and must
@@ -2945,7 +2945,6 @@ var _actionKeyUpHandler = null;
 var _touchMove = { x: 0, y: 0 };   // virtual-joystick vector (-1..1), added to keyboard movement
 var _padAtk = [];                  // per-slot "held on the controller" flags, for charge edges
 var _actionBlur = null;            // blur/visibility handler — see the held-key trap below
-var _actionLockChange = null;      // the same drop, when the mouse is handed back
 var _joyTouchOff = null;           // onTouchPrimary unsubscribe (subscribed once per page)
 var _actionClick = null;           // locked-mouse swing handler
 var _actionStage = null;           // the element it is bound to
@@ -3287,20 +3286,14 @@ function startActionLoop(){
   };
   window.addEventListener('blur', _actionBlur);
   document.addEventListener('visibilitychange', _actionBlur);
-  // Esc gives the mouse back WITHOUT a blur and without a pointerup, so a
-  // charge held on the mouse button at that moment would never be released and
-  // would sit there arming the next click. Losing the lock is its own kind of
-  // letting go — but TAKING it is not, or clicking to look would stop a walk
-  // already under way.
-  _actionLockChange = function(){ if (!actFpLookLocked()) _actionBlur(); };
-  document.addEventListener('pointerlockchange', _actionLockChange);
-  // Once the mouse belongs to the camera it may as well hold the sword: a
-  // locked left-click is the first attack, held to charge, exactly like the
-  // first button on the bar. Only ONCE LOCKED, though — the click that buys
-  // the lock is the player asking for the mouse, not swinging with it.
+  // LEFT-CLICK THE WORLD, SWING. The right button turns you (action-fp's look);
+  // the left one is simply the first attack, held to charge, exactly like the
+  // first button on the bar. Clicks that land on a control are the control's —
+  // the whole point of turning on a held button rather than a captured cursor
+  // is that the attack bar stays reachable while you aim.
   _actionClick = function(e){
-    if (!actFpLookLocked() || e.button !== 0) return;
-    if (e.target && e.target.closest && e.target.closest('#actionJoystick')) return;
+    if (!actFpActive() || e.button !== 0) return;
+    if (e.target && e.target.closest && e.target.closest('button,a,input,#actionJoystick')) return;
     var name = p1 && p1.attacks && p1.attacks[0]; if (!name) return;
     if (e.type === 'pointerdown') startCharge(name); else releaseCharge(name);
   };
@@ -3333,10 +3326,6 @@ function stopActionLoop(){
     window.removeEventListener('blur', _actionBlur);
     document.removeEventListener('visibilitychange', _actionBlur);
     _actionBlur = null;
-  }
-  if (_actionLockChange){
-    document.removeEventListener('pointerlockchange', _actionLockChange);
-    _actionLockChange = null;
   }
   if (_actionStage && _actionClick){
     _actionStage.removeEventListener('pointerdown', _actionClick);
@@ -3415,22 +3404,51 @@ function ensureActionJoystick(){
   syncActionJoyVis();
 }
 
-// The controller's face buttons ARE the attack bar: six slots, in the order
-// buildActionAttackBar lays them out. Routed through startCharge/releaseCharge
-// rather than tryActionAttack, so holding a button charges exactly as holding
-// the key or the on-screen button does — one rule, three ways to press it.
-//
-// The press is tracked here rather than read from `hit`/`down` alone because a
-// slot has TWO buttons on it (RT doubles for A, the reflex anyone arriving from
-// a shooter reaches for): the edge that matters is the slot's, not a button's.
-var PAD_SLOT = null;
+/**
+ * The cross hotbar — the controller's attack bar, FFXIV's answer to the same
+ * problem this game had: a pad has no cursor, so an attack list you click is an
+ * attack list a controller cannot reach.
+ *
+ * HOLD A TRIGGER AND THE BAR APPEARS, laid out the way your thumbs already are:
+ * the four face buttons are slots 1–4, the four d-pad directions are 5–8. While
+ * a trigger is held the d-pad stops walking and starts casting, which is the
+ * whole trick — eight actions on a pad that has four buttons free.
+ *
+ * Let the trigger go and it is a movement d-pad again, and the face buttons go
+ * back to firing slots 1–4 directly for anyone who would rather not hold
+ * anything. Both routes end at startCharge/releaseCharge, so holding to charge
+ * works identically on a trigger, a key, or the on-screen button.
+ */
+var PAD_SLOT = null, XHB_SLOT = null;
+var _xhbOn = false;
 function actionPadButtons(pad){
-  if (!PAD_SLOT) PAD_SLOT = [[PAD.A, PAD.RT], [PAD.B], [PAD.X], [PAD.Y], [PAD.RB], [PAD.LB]];
-  if (!pad){ _padAtk = []; return; }
-  for (var i = 0; i < PAD_SLOT.length; i++){
+  if (!PAD_SLOT){
+    // No trigger held: the face buttons and shoulders are the six slots.
+    PAD_SLOT = [[PAD.A, PAD.RT], [PAD.B], [PAD.X], [PAD.Y], [PAD.RB], [PAD.LB]];
+    // Trigger held: face cluster 1–4, d-pad 5–8. The order is the one your
+    // hand reads — down, left, up, right is not it; this is A B X Y then the
+    // d-pad clockwise from up.
+    XHB_SLOT = [[PAD.A], [PAD.B], [PAD.X], [PAD.Y], [PAD.UP], [PAD.RIGHT], [PAD.DOWN], [PAD.LEFT]];
+  }
+  if (!pad){ _padAtk = []; if (_xhbOn) showCrossHotbar(false); return; }
+  var xhb = pad.down(PAD.LT) || pad.down(PAD.RT);
+  if (xhb !== _xhbOn){
+    // Whatever was held under the old mapping is not held under the new one:
+    // drop every slot cleanly or a charge started on A survives into the d-pad.
+    for (var c = 0; c < _padAtk.length; c++){
+      if (_padAtk[c] && p1.attacks && p1.attacks[c]) cancelChargeFor(p1.attacks[c]);
+    }
+    _padAtk = [];
+    _xhbOn = xhb;
+    showCrossHotbar(xhb);
+  }
+  var map = xhb ? XHB_SLOT : PAD_SLOT;
+  for (var i = 0; i < map.length; i++){
     var name = p1.attacks && p1.attacks[i];
     var held = false;
-    for (var j = 0; j < PAD_SLOT[i].length; j++) if (pad.down(PAD_SLOT[i][j])) held = true;
+    for (var j = 0; j < map[i].length; j++) if (pad.down(map[i][j])) held = true;
+    // RT opens the hotbar; it must not also fire slot 1 while it is doing so.
+    if (xhb && map[i].indexOf(PAD.RT) >= 0) held = false;
     if (name){
       if (held && !_padAtk[i]) startCharge(name);
       else if (!held && _padAtk[i]) releaseCharge(name);
@@ -3441,6 +3459,33 @@ function actionPadButtons(pad){
   // and never confusable with a swing. Forfeit stays on the mouse and its
   // confirm(); no controller button ends a run.
   if (pad.hit(PAD.SELECT)) actViewCycle();
+}
+/** Is a trigger held? actionTick asks, because the d-pad cannot both walk and
+ *  cast, and while the hotbar is open casting wins. */
+function actionXhbOpen(){ return _xhbOn; }
+
+/** The hotbar itself. Built from the live attack list, so it always says what
+ *  the buttons will actually do. */
+var XHB_GLYPH = ['A', 'B', 'X', 'Y', '↑', '→', '↓', '←'];
+function showCrossHotbar(on){
+  var host = document.querySelector('#actionScreen .action-stage');
+  var el = document.getElementById('actXhb');
+  if (!on){ if (el) el.classList.remove('on'); return; }
+  if (!host) return;
+  if (!el){
+    el = document.createElement('div');
+    el.id = 'actXhb';
+    el.className = 'act-xhb';
+    host.appendChild(el);
+  }
+  var html = '';
+  for (var i = 0; i < 8; i++){
+    var nm = (p1.attacks && p1.attacks[i]) || '';
+    html += '<div class="xhb-slot' + (nm ? '' : ' empty') + (i === 4 ? ' xhb-gap' : '') + '">'
+      + '<b>' + XHB_GLYPH[i] + '</b><span>' + (nm || '—') + '</span></div>';
+  }
+  el.innerHTML = html;
+  el.classList.add('on');
 }
 
 function actionTick(dt){
@@ -3466,6 +3511,12 @@ function actionTick(dt){
   // ONE poll per tick, stashed: readPad's `hit` is an edge against the previous
   // read, so a second call this frame would swallow the press it belongs to.
   var _pad = readPad();
+  // The cross hotbar borrows the d-pad. While a trigger is held those four
+  // directions are attacks, so the STICK still walks but the d-pad does not —
+  // otherwise firing slot 7 also takes a step backwards.
+  var _xhb = _pad && (_pad.down(PAD.LT) || _pad.down(PAD.RT));
+  var _padMx = _pad ? (_xhb ? _pad.lx : _pad.mx) : 0;
+  var _padMy = _pad ? (_xhb ? _pad.ly : _pad.my) : 0;
   var sp1 = ((p1.speed||4) * 0.9);       // tiles/sec
   var dx = 0, dy = 0;
   if (actFpActive()){
@@ -3483,9 +3534,9 @@ function actionTick(dt){
     var _st = actFpSteer({
       turn: ((_actionKeys.arrowright || _actionKeys.e) ? 1 : 0) - ((_actionKeys.arrowleft || _actionKeys.q) ? 1 : 0)
         + _touchMove.x + (_pad ? _pad.rx : 0),
-      strafe: (_actionKeys.d ? 1 : 0) - (_actionKeys.a ? 1 : 0) + (_pad ? _pad.mx : 0),
+      strafe: (_actionKeys.d ? 1 : 0) - (_actionKeys.a ? 1 : 0) + (_pad ? _padMx : 0),
       fwd: ((_actionKeys.w || _actionKeys.arrowup) ? 1 : 0) - ((_actionKeys.s || _actionKeys.arrowdown) ? 1 : 0)
-        - _touchMove.y - (_pad ? _pad.my : 0),   // a stick pushed forward reads -1
+        - _touchMove.y - (_pad ? _padMy : 0),   // a stick pushed forward reads -1
       pitch: _pad ? _pad.ry : 0,
     }, dt);
     if (_st){ dx = _st.x; dy = _st.y; p1.facing = _st.yaw; }
@@ -3497,7 +3548,7 @@ function actionTick(dt){
     dx += _touchMove.x; dy += _touchMove.y;   // virtual joystick (touch) adds to keyboard input
     // Over the field there is no camera to look with — the facing is derived
     // from the walk (below) — so the pad only ever walks here.
-    if (_pad){ dx += _pad.mx; dy += _pad.my; }
+    if (_pad){ dx += _padMx; dy += _padMy; }
   }
   actionPadButtons(_pad);
   // Rungs cost time: crossing a ladder or a vine is deliberately slow, which is
