@@ -117,8 +117,12 @@
    over the field — drawn by action-fp on the fighter's own canvas.) */
 .afp-ring{position:absolute;left:50%;bottom:132px;transform:translateX(-50%);
   width:72px;height:72px;pointer-events:none;z-index:6}
-/* Terrain dressing and shots are plain billboards; fighters reuse .tfp-fighter. */
-.afp-prop{filter:drop-shadow(0 6px 9px rgba(0,0,0,0.45))}
+/* Dressing is world geometry now, not billboards — placed once, standing on its
+   own ground. A round prop is a CROSS of two quads, so it must be visible from
+   both sides (the cull that hides a wall's back would erase half the rock). */
+.afp-prop{background-size:100% 100%;background-repeat:no-repeat;image-rendering:pixelated}
+.afp-round,.afp-flat{backface-visibility:visible}
+.afp-round canvas{display:block;width:100%;height:100%;image-rendering:pixelated}
 .afp-shot{filter:drop-shadow(0 0 10px rgba(0,0,0,0.45))}
 
 /* ═══ The mouse as the head (src/platform/input.js) ═══ */

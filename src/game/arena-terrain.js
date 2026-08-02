@@ -136,11 +136,29 @@ export function readField(field) {
       // that test lives in hasLineOfSight where both are known.
       blocksSight[y].push(ch === BOULDER);
       bake += ch === LEDGE ? 'b' : '.';
-      if (ch === BOULDER) props.push({ kind: 'boulder', x, y });
-      else if (ch === LADDER) props.push({ kind: 'ladder', x, y });
-      else if (ch === VINE) props.push({ kind: 'vine', x, y });
+      // Props carry VOLUME, not just a place. A lens that is only told "a
+      // boulder is at 5,2" has to invent the rest, and the flat view and the
+      // first-person view invented differently — which is how a rock ended up
+      // standing on its front edge like a wall. `h` is its height in TILES, so
+      // every lens scales it by its own world unit; `flat` marks the things
+      // that genuinely are flat and belong against a face rather than in the
+      // round. @see the note on faceOf below.
+      if (ch === BOULDER) props.push({ kind: 'boulder', x, y, h: 0.55, flat: false });
+      else if (ch === LADDER) props.push({ kind: 'ladder', x, y, h: 1, flat: true });
+      else if (ch === VINE) props.push({ kind: 'vine', x, y, h: 1, flat: true });
     }
     bakeGrid.push(bake);
+  }
+  // A flat prop is attached to SOMETHING, and which way it faces is a fact about
+  // the map, not about where the camera happens to be. A ladder that swivels to
+  // follow you cannot look bolted to a shelf — it looks like it is hanging in
+  // the air, which is half of why the dressing read as floating. Work out the
+  // shelf each one serves, once, here, where the grid is in hand.
+  for (const p of props) {
+    if (!p.flat) continue;
+    const up = (x, y) => (y >= 0 && y < rows && x >= 0 && x < cols && height[y][x] === 1);
+    p.face = up(p.x, p.y - 1) ? 'n' : up(p.x, p.y + 1) ? 's'
+      : up(p.x - 1, p.y) ? 'w' : up(p.x + 1, p.y) ? 'e' : 'n';
   }
   return { name: field.name, cols, rows, height, pass, climb, blocksSight, bakeGrid, props };
 }
