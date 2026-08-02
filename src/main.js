@@ -14,5 +14,11 @@ import * as guild from './guild/index.js';
 import * as platform from './platform/index.js';
 import './guild/hall.js'; // Guild Hall screen — registers window.openGuild
 
+// --- Input ------------------------------------------------------------------
+// The menu cursor: a controller (or the arrow keys) can reach every screen in
+// the game, not just the combat lenses. Last, so every screen it navigates has
+// already registered itself. @see platform/ui-pad.js
+platform.startUiPad();
+
 // Expose the layers on a namespaced global for the devtools console.
 window.CRUCIBLE = { guild, platform };

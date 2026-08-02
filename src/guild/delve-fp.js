@@ -28,6 +28,8 @@ import { preyById } from './locales.js';
 import { loadImg, SHEET_URLS } from './delve.js';
 import { ART, artSprite, WORN, wornWeapon, wornShield, wornPick } from './art.js';
 import { icon } from './icons.js';
+import { createLook, readPad, padReset, touchPrimary, PAD } from '../platform/input.js';
+import { claimPad } from '../platform/ui-pad.js';
 
 /**
  * World scale. These look arbitrary and are not: what a surface MEASURES on
@@ -252,6 +254,10 @@ const screenActive = () => {
   const el = document.getElementById('delveFpScreen');
   return !!el && el.classList.contains('active');
 };
+
+// The crawler's twin of delve.js's claim: while it is being walked the pad is
+// the walker's, and the moment it ends the summary card becomes a menu again.
+claimPad(() => !!F && screenActive() && !F.ended && !F.transiting);
 
 // ---------------------------------------------------------------------------
 // Textures — one panel per surface, cut from the theme the map already names
@@ -1473,8 +1479,10 @@ export async function openDelveFp(localeId, member, hooks, carry) {
       </div>
       <div class="fp-keys">
         <b>W</b> forward · <b>S</b> back · <b>A</b>/<b>D</b> sidestep
-        · <b>←</b>/<b>→</b> turn · <b>Space</b> or <b>click</b> to strike
+        · <b>←</b>/<b>→</b> or the <b>mouse</b> turn · <b>Space</b> or <b>click</b> to strike
         · hold <b>Shift</b> to guard · <b>R</b> drink · <b>Esc</b> leave
+        <br>Click the world to take the mouse, <b>Esc</b> to give it back.
+        A controller works too: sticks walk and turn, <b>A</b> strikes, <b>LT</b> guards.
       </div>
       <div class="fp-pad">
         <button data-k="turnL" aria-label="Turn left">◀<i>←</i></button>
@@ -1490,7 +1498,8 @@ export async function openDelveFp(localeId, member, hooks, carry) {
       map: null, theme: null, surf: null, hooks, member, host, world: null,
       grid: null, cols: 0, rows: 0,
       px: 0, py: 0, dir: 2, yaw: 180, turning: null, stepping: null,
-      keys: {}, latched: {}, last: 0, raf: 0, ended: false, transiting: false,
+      keys: {}, latched: {}, padKeys: {}, look: null, lookAcc: 0,
+      last: 0, raf: 0, ended: false, transiting: false,
       creatures: [], decor: [], doors: [], shots: [], armed: false,
       seen: new Set(), mined: new Set(), settleUntil: 0,
       hands: null, swingUntil: 0, helpTimer: 0, lens: 1,
@@ -1554,6 +1563,20 @@ const KEYMAP = {
   shift: 'block', r: 'drink',
 };
 
+/**
+ * How far the mouse must travel to be worth a turn, in radians of would-be
+ * look. A crawler HAS no continuous yaw — `F.dir` is an eighth-turn index that
+ * seven other things read (the swing's aim, the creature sprite rows, the
+ * compass, the minimap arrow, the third-person self facing) and `tryStep` walks
+ * `DIRS[F.dir]` to a whole cell. So the mouse does not steer the camera here;
+ * it fills a bucket, and each bucketful spends itself as ONE eighth-turn on the
+ * same latch the ◀ ▶ buttons use. A flick turns you, a drift does not.
+ */
+const LOOK_SNAP = 0.62;
+/** Past this a stick is a direction, not a resting hand. The crawler's inputs
+ *  are all discrete, so an analog axis has to be squared off somewhere. */
+const PAD_ON = 0.5;
+
 function wireInput() {
   // Both guard on F: a throw during open leaves the listener attached with no
   // session behind it, and an unguarded handler then raises on every keypress
@@ -1591,11 +1614,23 @@ function wireInput() {
   // is: the thing you can see is the thing you can hit.
   F.onStagePointer = (e) => {
     if (!F || F.ended) return;
+    if (e.button !== 0) return;          // right-click is a menu, and never was a swing
     e.preventDefault();
+    // On a desktop the first click buys the mouse for the look; from then on
+    // every click is a swing. Spending that first one on a swing too would
+    // strike at whatever happened to be ahead when the player only meant to
+    // take hold of the view.
+    if (!touchPrimary() && !(F.look && F.look.locked())) return;
     trySwing();
   };
   const stage = F.host.querySelector('.fp-stage');
   if (stage) stage.addEventListener('pointerdown', F.onStagePointer);
+  F.look = createLook(F.host, {
+    enabled: () => !touchPrimary(),
+    ignore: '.delve-hud,.fp-pad,.fp-map,.fp-vitals',
+    onChange: (on) => { if (F) F.host.classList.toggle('fp-locked', on); },
+  });
+  F.lookAcc = 0;
   F.onResize = () => { fitLens(); fitHands(); mountSky(); };
   window.addEventListener('resize', F.onResize);
 }
@@ -1604,8 +1639,65 @@ function unwireInput() {
   window.removeEventListener('keyup', F.onKeyUp);
   const stage = F.host.querySelector('.fp-stage');
   if (stage && F.onStagePointer) stage.removeEventListener('pointerdown', F.onStagePointer);
+  if (F.look) { F.look.dispose(); F.look = null; }   // and hands the cursor back
+  padReset();
   if (F.onResize) window.removeEventListener('resize', F.onResize);
 }
+
+/**
+ * The mouse and the controller, in the crawler's own vocabulary.
+ *
+ * The pad gets its OWN bag rather than writing into `F.keys`, and that is not
+ * fastidiousness: a stick reports its resting position every frame, so a pad
+ * that shared the key table would write `fwd = false` sixty times a second and
+ * a held W would never walk anywhere while a controller was merely plugged in.
+ * `took` and `guarding` read both bags; nothing else has to know there are two.
+ *
+ * The mouse writes neither — it writes the LATCH, because a flick is a tap. And
+ * only on the crossing edge, never per frame from a held state: readInput bails
+ * out for the whole of a stride, so a latch armed during one is still sitting
+ * there when it ends and immediately spends itself on a second (the one-tap-
+ * two-cells bug documented on `took`).
+ */
+function readDevices() {
+  if (!F) return;
+  const was = F.padKeys || {};
+  const now = {};
+  const p = readPad();
+  if (p) {
+    now.fwd = p.my < -PAD_ON;
+    now.back = p.my > PAD_ON;
+    now.strafeL = p.mx < -PAD_ON || p.down(PAD.LB);
+    now.strafeR = p.mx > PAD_ON || p.down(PAD.RB);
+    now.turnL = p.rx < -PAD_ON;
+    now.turnR = p.rx > PAD_ON;
+    now.attack = p.down(PAD.A) || p.down(PAD.RT);
+    now.drink = p.down(PAD.X);
+    now.block = p.down(PAD.LT) || p.down(PAD.Y);
+    // A press too short to survive to the next frame still counts, exactly as
+    // it does for the on-screen pad.
+    for (const k in now) if (now[k] && !was[k]) F.latched[k] = true;
+    if (p.hit(PAD.SELECT)) togglePov();
+  }
+  F.padKeys = now;
+  // Mouse travel, banked until it is worth an eighth-turn. The remainder stays
+  // in the bucket, so a slow drag never loses the fraction it was owed and a
+  // steady sweep keeps turning you as fast as the 130ms tween allows. What it
+  // will NOT do is queue: a single frame carrying three turns' worth arms one
+  // latch, because a mouse that flew off the desk should not spin you round.
+  if (F.look && F.look.locked()) {
+    F.lookAcc += F.look.read().yaw;
+    while (F.lookAcc >= LOOK_SNAP) { F.lookAcc -= LOOK_SNAP; F.latched.turnR = true; }
+    while (F.lookAcc <= -LOOK_SNAP) { F.lookAcc += LOOK_SNAP; F.latched.turnL = true; }
+  } else if (F.look) {
+    F.look.read();          // drain, so an unlocked drift never banks
+    F.lookAcc = 0;
+  }
+}
+
+/** Is the shield up, by any hand? Read raw all over the fight — never through
+ *  `took`, because a guard is a state and not a press. */
+function guarding() { return !!(F.keys.block || (F.padKeys && F.padKeys.block)); }
 
 /** Show the control strip for a while. Shown on entry, and on ? or the HUD's
  *  own button — a crawler that never says which key walks is a maze. */
@@ -1666,7 +1758,7 @@ function trySwing() {
   // A raised shield is a CHOICE, not a free passive: behind it you cannot
   // strike. Guarding that cost nothing meant letting go of Shift was never the
   // right move, which is the same as having no guard at all.
-  if (F.keys.block) { toast('Shield up — no room to swing.'); return; }
+  if (guarding()) { toast('Shield up — no room to swing.'); return; }
   F.swingUntil = now + SWING_MS;
   const [gx, gy] = DIRS[F.dir];                          // the CELL ahead (grid step)
   const [dx, dy] = DIRV[F.dir];                          // the true aim (unit)
@@ -1704,7 +1796,7 @@ function trySwing() {
  * cells and one tap of ◀ turned a full 180°.
  */
 function took(k) {
-  const on = !!F.keys[k] || !!F.latched[k];
+  const on = !!F.keys[k] || !!(F.padKeys && F.padKeys[k]) || !!F.latched[k];
   F.latched[k] = false;
   return on;
 }
@@ -2008,7 +2100,7 @@ function advanceShots(dt) {
       const hit = F.creatures.find((c) => Math.hypot(c.x - s.x, c.y - s.y) < SHOT_HIT_R);
       if (hit) { strike(hit); done = true; }
     } else if (!done) {
-      if (Math.hypot(F.px - s.x, F.py - s.y) < SHOT_HIT_R) { foeHit(s.prey, F.keys.block); done = true; }
+      if (Math.hypot(F.px - s.x, F.py - s.y) < SHOT_HIT_R) { foeHit(s.prey, guarding()); done = true; }
     }
     if (done) { s.el.remove(); F.shots = F.shots.filter((q) => q !== s); }
   }
@@ -2022,7 +2114,7 @@ function foeHit(prey, guarding) {
   if (!rollHit((1 / oddsVs(prey)) * guard, 0)) {
     F.haul.dodged = (F.haul.dodged || 0) + 1;
     // Whose whiff it was has to be legible, or the fight is two identical words.
-    floater(F.keys.block ? 'blocked' : 'dodged', 'fp-parry');
+    floater(guarding() ? 'blocked' : 'dodged', 'fp-parry');
     return;
   }
   F.haul.taken = (F.haul.taken || 0) + 1;
@@ -2048,7 +2140,7 @@ function foeHit(prey, guarding) {
 /** Melee: the same blow, delivered by something standing on top of you. */
 function foeSwing(c, now) {
   c.atkAt = now + FOE_SWING_MS * (0.85 + Math.random() * 0.4);
-  foeHit(c.prey, !!F.keys.block);
+  foeHit(c.prey, guarding());
 }
 
 /**
@@ -2281,7 +2373,7 @@ function render() {
   // A raised shield has to LOOK raised, or the only feedback for a key you are
   // holding down is that you cannot attack.
   if (F.hands && F.hands.shield) {
-    const up = !!F.keys.block;
+    const up = guarding();
     if (up !== F.hands._guard) { F.hands._guard = up; F.hands.shield.el.classList.toggle('fp-guarding', up); }
   }
   // DUEL STANCE. A rank-1 creature stands 320 world px — knee height — and the
@@ -2329,7 +2421,7 @@ function render() {
       // they play; the stance logic reasserts itself the moment they lapse.
       if (now >= (F.self.busyUntil || 0)) {
         const climbing = F.stepping && F.stepping.lf !== F.stepping.lt;
-        const desired = F.keys.block ? 'hold'
+        const desired = guarding() ? 'hold'
           : climbing ? 'climb'
             : (F.stepping || F.turning) ? 'move' : 'idle';
         if (F.self.actor.anim.name !== desired) F.self.gfx.setAnim(F.self.actor, desired);
@@ -2390,6 +2482,9 @@ function stepSim(now) {
    * interrupted finish inside the room it had already left.
    */
   const busy = () => F.transiting || F.ended;
+  // Mouse and controller first: they speak into the same key table readInput
+  // reads, so they have to have spoken before it looks.
+  if (!busy()) readDevices();
   if (!busy()) readInput();
   if (!busy()) advanceMotion(dt);
   if (!busy()) moveCreatures(dt);
@@ -2594,5 +2689,16 @@ if (typeof window !== 'undefined') {
     }
     for (const k of keys) if (map[k]) F.keys[map[k]] = false;
     return window.__fpDebug();
+  };
+  // Mouse look, without a mouse: a headless pane can hold no pointer lock, so
+  // the bank the lock would have filled is handed to readDevices directly.
+  window.__fpLook = (rad, steps = 1) => {
+    if (!F || F.ended) return null;
+    const real = F.look;
+    let spent = false;
+    F.look = { locked: () => true, read: () => (spent ? { yaw: 0, pitch: 0 } : (spent = true, { yaw: rad || 0, pitch: 0 })) };
+    for (let i = 0; i < steps; i++) stepSim((F.last || performance.now()) + 16);
+    F.look = real;
+    return { ...window.__fpDebug(), lookAcc: +F.lookAcc.toFixed(3) };
   };
 }

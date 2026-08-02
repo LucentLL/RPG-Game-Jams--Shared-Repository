@@ -121,6 +121,25 @@
 .afp-prop{filter:drop-shadow(0 6px 9px rgba(0,0,0,0.45))}
 .afp-shot{filter:drop-shadow(0 0 10px rgba(0,0,0,0.45))}
 
+/* ═══ The mouse as the head (src/platform/input.js) ═══ */
+/* Under a pointer lock the cursor is gone and the stick is hidden, so without
+   these two the screen gives no proof the click landed. The hint says how to
+   take the mouse; the bead says the game has it. Both are off on touch, where
+   the stick is the control and there is no lock to take. */
+.afp-look{position:absolute;left:50%;top:56%;transform:translate(-50%,-50%);z-index:31;
+  padding:6px 13px;border-radius:8px;background:rgba(15,15,22,0.6);color:var(--gold);
+  font-family:'Cinzel',serif;font-size:0.74em;letter-spacing:0.06em;white-space:nowrap;
+  pointer-events:none;text-shadow:0 1px 3px #000}
+.afp-look b{color:#e8e0d0;font-weight:600}
+.afp-host.afp-locked .afp-look,.afp-host.afp-touch .afp-look{display:none}
+.afp-host.afp-locked{cursor:none}
+/* The bead sits where a shot goes, which in first person is the middle of the
+   screen — and over the shoulder is NOT, so it stays a first-person mark. */
+.afp-host.afp-locked:not(.tfp-ots)::after{content:'';position:absolute;left:50%;top:50%;
+  width:5px;height:5px;margin:-2px 0 0 -2px;border-radius:50%;
+  background:rgba(224,180,85,0.8);box-shadow:0 0 0 1px rgba(0,0,0,0.6);
+  pointer-events:none;z-index:31}
+
 /* Virtual movement stick (touch). Lives on the SCREEN-SPACE stage (never on the
    rotated plane — its pointer math is 2D); shown only while a battle loop runs. */
 .action-joystick{position:absolute;left:14px;bottom:14px;width:112px;height:112px;border-radius:50%;background:radial-gradient(circle,rgba(15,15,22,0.55),rgba(15,15,22,0.3));border:2px solid rgba(212,168,67,0.45);touch-action:none;z-index:30;display:none;align-items:center;justify-content:center}
