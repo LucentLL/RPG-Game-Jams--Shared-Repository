@@ -25,14 +25,35 @@ import { S } from './state.js';
 import { GS } from './data/config.js';
 import { createFpHands, fighterHandsSpec } from './fp-hands.js';
 
-/** World scale. Shared with the delve so a person is the same size in both. */
-const T = 900;            // world px per tile
-const EYE = 690;          // eye height above the floor a fighter stands on
-const STEP = 430;         // one elevation step
-const BLOCK_H = 900;      // an impassable cell's height
-const FIGHTER_H = 1200;   // the compositor's 96px canvas — ~31% of it is empty below the feet
-const FOOT_PCT = 31.25;   // …which is why the art slides down by this much to stand up
-const PERSP = 500, PERSP_AT = 720;
+/**
+ * World scale — and the reason a phone can draw this at all.
+ *
+ * WORLD UNITS ARE NOT SCREEN PIXELS, BUT THE COMPOSITOR CANNOT TELL. The
+ * framing here was measured at 900 px per tile, which made the apron slabs
+ * eighteen thousand CSS px long and the whole board some 350 megapixels of
+ * layout area. Every one of those is a layer the browser rasters at CSS size ×
+ * device pixel ratio, whether it covers the screen or four pixels of horizon —
+ * on a dpr-2.6 phone that is gigabytes of texture for a scene Hexen drew into
+ * 64 KB. Past the budget the compositor does not degrade; it silently drops
+ * surfaces, which is the hole in the stands the player photographed.
+ *
+ * Shrinking the UNIT and growing the world by the same factor is a SIMILARITY:
+ * the projection, the framing and every measured number below are unchanged —
+ * `aimCamera` carries the factor as one scale3d — but every raster is K² the
+ * memory. K = 1/3 takes 350 Mpx² to 40. This is the delve's trick, verbatim,
+ * and it is the one thing these two battle files never got. @see delve-fp.js.
+ *
+ * Everything measured in WORLD PX carries ×K. Percentages, degrees and tiles
+ * do not, and neither does the perspective — that is what keeps it a similarity.
+ */
+const T = 300;            // world px per tile   (was 900)
+const K = T / 900;        // ratio to the scale this view was TUNED at
+const EYE = 690 * K;      // eye height above the floor a fighter stands on
+const STEP = 430 * K;     // one elevation step
+const BLOCK_H = 900 * K;  // an impassable cell's height
+const FIGHTER_H = 1200 * K; // the compositor's 96px canvas — ~31% of it is empty below the feet
+const FOOT_PCT = 31.25;   // a PERCENTAGE — never scaled
+const PERSP = 500, PERSP_AT = 720;   // the lens is untouched; that is the point
 /**
  * Over-the-shoulder: how far back and up, and how far the lens tips down.
  * Tuned to the action-RPG reference the user gave: the fighter stands about
@@ -42,7 +63,7 @@ const PERSP = 500, PERSP_AT = 720;
  * fall out of the projection: eye at EYE+120 ≈ 810, one tile back, pitched
  * 10° → head ≈ screen centre, feet ≈ 92% down, span ≈ 46% of the stage.
  */
-const OTS_BACK = 1.0, OTS_UP = 120, OTS_PITCH = 10;
+const OTS_BACK = 1.0, OTS_UP = 120 * K, OTS_PITCH = 10;   // tiles, world px, degrees
 
 /** @type {?Object} the live view (null when first person is off) */
 let V = null;
@@ -194,7 +215,7 @@ export function cloudsPanel() {
  *  stepping to the board's edge puts the eye outside the world again — one
  *  tile is the requirement, and three is comfort. Six bought a twenty-one-tile
  *  ring whose far end nobody can see and every phone had to allocate. */
-const APRON_T = 3, RING_H = 2400;
+const APRON_T = 3, RING_H = 2400 * K;
 /** No layout box may run longer than this many tiles. A slab wider than the
  *  GPU's maximum texture is not clipped or downscaled — it is dropped, whole.
  *  Whole tiles, so the repeating apron and stands textures never seam. */
@@ -220,7 +241,7 @@ const passAt = (c, r) => (S.arenaPassable ? S.arenaPassable[r][c] === 1 : true);
  * step would tell the player something about movement that is not true, and a
  * view that lies about the rules is worse than no view.
  */
-const WADE = 90;
+const WADE = 90 * K;
 const liftAt = (c, r) => (elevAt(c, r) === 0 ? WADE : 0);
 
 function quad(tex, w, h, tx, ty, tz, rot, cls, tint) {
@@ -447,12 +468,12 @@ function buildPath() {
   const out = [];
   for (const s of q) {
     if (s.type !== 'direct') {                       // an intent, not a destination
-      out.push(quad(dyn, T * 0.42, T * 0.42, x * T + T / 2, liftAt(x, y) - 8, y * T + T / 2, 'rotateX(90deg)', 'tfp-mark'));
+      out.push(quad(dyn, T * 0.42, T * 0.42, x * T + T / 2, liftAt(x, y) - 8 * K, y * T + T / 2, 'rotateX(90deg)', 'tfp-mark'));
       break;
     }
     x += s.dx; y += s.dy;
     if (x < 0 || y < 0 || x >= GS || y >= GS) break;
-    out.push(quad(dot, T * 0.3, T * 0.3, x * T + T / 2, liftAt(x, y) - 8, y * T + T / 2, 'rotateX(90deg)', 'tfp-mark'));
+    out.push(quad(dot, T * 0.3, T * 0.3, x * T + T / 2, liftAt(x, y) - 8 * K, y * T + T / 2, 'rotateX(90deg)', 'tfp-mark'));
   }
   host.innerHTML = out.join('');
 }
@@ -511,7 +532,10 @@ function aimCamera() {
   // re-raster the surfaces under .tfp-world's will-change, which is the tearing
   // the player sees while turning. Both siblings already do this (action-fp's
   // V.wtf, the delve's F._wtf); this file is the one that never did.
-  const wtf = `rotateX(${pitch}deg) rotateY(${deg.toFixed(2)}deg) `
+  // The scale is OUTERMOST and undoes K exactly, so the image on screen is the
+  // one the framing was measured at — only the rasters underneath it shrank.
+  const s = (1 / K).toFixed(4);
+  const wtf = `scale3d(${s},${s},${s}) rotateX(${pitch}deg) rotateY(${deg.toFixed(2)}deg) `
     + `translate3d(${(-ex).toFixed(1)}px,${(-ey).toFixed(1)}px,${(-ez).toFixed(1)}px)`;
   if (wtf !== V.wtf) V.world.style.transform = (V.wtf = wtf);
 }
@@ -660,6 +684,11 @@ function mount() {
   if (!screen) return;
   const host = document.createElement('div');
   host.className = 'tfp-host';
+  // The tile, published to CSS. Anything in battle.css measured in WORLD px —
+  // the apron's repeat, the HP bar over a fighter's head, the standee shadow —
+  // lives INSIDE the scaled world and has to shrink with it, or it renders K
+  // times too big. This is the trap that makes K stop being a similarity.
+  host.style.setProperty('--tfp-t', T + 'px');
   host.innerHTML = '<div class="tfp-stage"><div class="tfp-world">'
     + '<div class="tfp-geo"></div><div class="tfp-path"></div><div class="tfp-bbs"></div>'
     + '</div></div><div class="tfp-haze"></div><div class="fp-hands"></div>';
