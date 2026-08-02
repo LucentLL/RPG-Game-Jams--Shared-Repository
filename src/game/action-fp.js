@@ -40,7 +40,7 @@
  * shoulder camera CLAMPS at impassable rock, because a boulder standing
  * between the eye and your own fighter reads as standing on a wall.
  */
-import { facePanel, apronPanel, standsPanel, cloudsPanel } from './tactical-fp.js';
+import { facePanel, apronPanel, standsPanel, cloudsPanel, WALL_DIM, SEG_T } from './tactical-fp.js';
 import { createFpHands, fighterHandsSpec } from './fp-hands.js';
 import { createLook, touchPrimary } from '../platform/input.js';
 
@@ -55,7 +55,10 @@ const PERSP = 500, PERSP_AT = 720;
 // Tactical-fp's shoulder framing, kept in lockstep (head near centre, feet
 // near the bottom edge, ~half the screen of fighter — the reference shot).
 const OTS_BACK = 1.0, OTS_UP = 120, OTS_PITCH = 10;
-const APRON_T = 6, RING_H = 2400;
+// Three tiles, matching the tactical board: the apron only has to out-reach the
+// shoulder camera's one-tile pull-back, and six bought a ring twice as wide as
+// anyone can see for twice the surface every device had to allocate.
+const APRON_T = 3, RING_H = 2400;
 /** How fast held turn input swings the view, rad/s. The delve's 45° / 130ms
  *  works out to ~6 rad/s in bursts; continuous steering wants less. */
 const TURN_RATE = 3.1;
@@ -127,6 +130,20 @@ function quad(tex, w, h, tx, ty, tz, rot, cls) {
     + `background-image:url(${tex});transform:translate3d(${tx}px,${ty}px,${tz}px) ${rot || ''}"></div>`;
 }
 
+/** The tactical board's slab-cutter, on this board's own quad(). @see
+ *  tactical-fp.js's strip() for why a long slab is not merely expensive. */
+function strip(out, tex, w, h, cx, cy, cz, axis, rot, cls, cut) {
+  const tall = cut === 'h';
+  const len = tall ? h : w;
+  const n = Math.max(1, Math.round(len / (SEG_T * T))), seg = len / n;
+  for (let i = 0; i < n; i++) {
+    const off = -len / 2 + seg * (i + 0.5);
+    out.push(quad(tex, tall ? w : seg, tall ? seg : h,
+      cx + (axis === 'x' ? off : 0), cy + (axis === 'y' ? off : 0), cz + (axis === 'z' ? off : 0),
+      rot, cls));
+  }
+}
+
 // ---------------------------------------------------------------------------
 // The board — rebuilt when the battlefield changes, which is once a match
 // ---------------------------------------------------------------------------
@@ -165,14 +182,27 @@ function buildBoard() {
   const cols = T0 ? T0.cols : 9, rows = T0 ? T0.rows : 9;
   const span = cols * T;
   const out = [];
-  const ground = groundURI();
-  if (ground) out.push(quad(ground, span, rows * T, span / 2, 0, rows * T / 2, 'rotateX(90deg)', 'tfp-floor'));
+  // The field is a picture, not a repeating tile, so it is panelled rather than
+  // stripped — see tactical-fp.js's field(). Same reason: 9 tiles square is
+  // past a phone's texture ceiling on the one quad you stand on.
+  const ground = groundURI() || facePanel('afpFieldFallback', '#3f5a2e', '#27381c');
+  const gn = Math.max(1, Math.ceil(Math.max(span, rows * T) / (SEG_T * T)));
+  const gw = span / gn, gh = (rows * T) / gn, gp = 100 / (gn - 1 || 1);
+  for (let r = 0; r < gn; r++) {
+    for (let c = 0; c < gn; c++) {
+      out.push('<div class="tfp-q tfp-floor" style="'
+        + `width:${gw}px;height:${gh}px;margin-left:${-gw / 2}px;margin-top:${-gh / 2}px;`
+        + `background-image:url(${ground});background-size:${gn * 100}% ${gn * 100}%;`
+        + `background-position:${(c * gp).toFixed(4)}% ${(r * gp).toFixed(4)}%;`
+        + `transform:translate3d(${(c + 0.5) * gw}px,0px,${(r + 0.5) * gh}px) rotateX(90deg)"></div>`);
+    }
+  }
 
   // The shelves. bakeGrid already told the flat view where the raised tops
   // are; here they get real sides and a lid at the height combat already
   // credits them with (heightAt/liftAt read the same grids).
   if (T0) {
-    const side = facePanel('afpLedge', '#7c8a52', '#42502c');
+    const side = facePanel('afpLedge', '#7c8a52', '#42502c', WALL_DIM);
     const lid = facePanel('afpLid', '#9cb06a', '#7a9050');
     for (let y = 0; y < rows; y++) {
       for (let x = 0; x < cols; x++) {
@@ -190,24 +220,28 @@ function buildBoard() {
 
   // The lip of the lists, the apron, the stands, exactly as the tactical
   // board dresses itself — the same match, the same colosseum.
-  const edge = facePanel('edge', '#4a4640', '#22201c');
-  const B = STEP * 1.15, by = -B / 2;
-  out.push(quad(edge, span, B, span / 2, by, 0, 'rotateY(180deg)', 'tfp-wall'));
-  out.push(quad(edge, span, B, span / 2, by, rows * T, '', 'tfp-wall'));
-  out.push(quad(edge, span, B, 0, by, rows * T / 2, 'rotateY(-90deg)', 'tfp-wall'));
-  out.push(quad(edge, span, B, span, by, rows * T / 2, 'rotateY(90deg)', 'tfp-wall'));
+  // Segmented for the same reason the tactical board is: an unsplit apron slab
+  // is a single compositor surface far larger than a phone will allocate, and
+  // one it cannot allocate it simply does not draw. The fence rotations are
+  // flipped here too — they faced outward, so the cull hid them from the board.
+  const edge = facePanel('edge', '#4a4640', '#22201c', WALL_DIM);
+  const B = STEP * 1.15, by = -B / 2, depth = rows * T;
+  strip(out, edge, span, B, span / 2, by, 0, 'x', '', 'tfp-wall tfp-2s', 'w');
+  strip(out, edge, span, B, span / 2, by, depth, 'x', 'rotateY(180deg)', 'tfp-wall tfp-2s', 'w');
+  strip(out, edge, span, B, 0, by, depth / 2, 'z', 'rotateY(90deg)', 'tfp-wall tfp-2s', 'w');
+  strip(out, edge, span, B, span, by, depth / 2, 'z', 'rotateY(-90deg)', 'tfp-wall tfp-2s', 'w');
 
   const A = APRON_T * T, apron = apronPanel();
-  out.push(quad(apron, span + 2 * A, A, span / 2, 0, -A / 2, 'rotateX(90deg)', 'tfp-floor tfp-apron'));
-  out.push(quad(apron, span + 2 * A, A, span / 2, 0, rows * T + A / 2, 'rotateX(90deg)', 'tfp-floor tfp-apron'));
-  out.push(quad(apron, A, rows * T, -A / 2, 0, rows * T / 2, 'rotateX(90deg)', 'tfp-floor tfp-apron'));
-  out.push(quad(apron, A, rows * T, span + A / 2, 0, rows * T / 2, 'rotateX(90deg)', 'tfp-floor tfp-apron'));
+  strip(out, apron, span + 2 * A, A, span / 2, 0, -A / 2, 'x', 'rotateX(90deg)', 'tfp-floor tfp-apron', 'w');
+  strip(out, apron, span + 2 * A, A, span / 2, 0, depth + A / 2, 'x', 'rotateX(90deg)', 'tfp-floor tfp-apron', 'w');
+  strip(out, apron, A, depth, -A / 2, 0, depth / 2, 'z', 'rotateX(90deg)', 'tfp-floor tfp-apron', 'h');
+  strip(out, apron, A, depth, span + A / 2, 0, depth / 2, 'z', 'rotateX(90deg)', 'tfp-floor tfp-apron', 'h');
 
   const stands = standsPanel(), ry = -RING_H / 2, rl = span + 2 * A;
-  out.push(quad(stands, rl, RING_H, span / 2, ry, -A, '', 'tfp-wall tfp-ring'));
-  out.push(quad(stands, rl, RING_H, span / 2, ry, rows * T + A, 'rotateY(180deg)', 'tfp-wall tfp-ring'));
-  out.push(quad(stands, rl, RING_H, -A, ry, rows * T / 2, 'rotateY(90deg)', 'tfp-wall tfp-ring'));
-  out.push(quad(stands, rl, RING_H, span + A, ry, rows * T / 2, 'rotateY(-90deg)', 'tfp-wall tfp-ring'));
+  strip(out, stands, rl, RING_H, span / 2, ry, -A, 'x', '', 'tfp-wall tfp-ring', 'w');
+  strip(out, stands, rl, RING_H, span / 2, ry, depth + A, 'x', 'rotateY(180deg)', 'tfp-wall tfp-ring', 'w');
+  strip(out, stands, rl, RING_H, -A, ry, depth / 2, 'z', 'rotateY(90deg)', 'tfp-wall tfp-ring', 'w');
+  strip(out, stands, rl, RING_H, span + A, ry, depth / 2, 'z', 'rotateY(-90deg)', 'tfp-wall tfp-ring', 'w');
 
   V.world.querySelector('.tfp-geo').innerHTML = out.join('');
   V.boardKey = boardKey();

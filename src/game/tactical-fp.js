@@ -63,11 +63,38 @@ export function tacFpActive() { return !!V; }
 // ---------------------------------------------------------------------------
 
 const _tex = {};
+
+/**
+ * Shade a baked panel, in the bake.
+ *
+ * THE DIM IS NEVER A CSS FILTER. The delve learned this the hard way and wrote
+ * it on the wall (delve.css: "NO filter on quads — a filter here is a private
+ * GPU buffer per surface"), and these two battle views are the files that never
+ * got the lesson. A filtered element cannot be tiled by the compositor: it has
+ * to be rendered into ONE render surface. The apron slabs here are 18,900 CSS
+ * px on their long edge — 49,000 device px on a phone at dpr 2.6, several times
+ * any mobile GPU's maximum texture size — and a surface that cannot be
+ * allocated is silently skipped. That is a whole colosseum that does not draw.
+ *
+ * Baking the same brightness into a 32px texture costs nothing and looks
+ * identical. @param k 1 = untouched, 0.82 = the old brightness(0.82).
+ */
+function bake(g, w, h, k) {
+  if (k >= 1) return;
+  g.globalAlpha = 1 - k;
+  g.globalCompositeOperation = 'source-atop';
+  g.fillStyle = '#000';
+  g.fillRect(0, 0, w, h);
+  g.globalCompositeOperation = 'source-over';
+  g.globalAlpha = 1;
+}
+
 /** A flat colour panel with a little noise, for the sides of things. Drawn
  *  rather than cropped: the battlefield bake is a top-down sheet and has no
  *  vertical faces in it. (Exported: action-fp.js dresses the SAME colosseum
- *  around the real-time arena, and two copies of these bakes would drift.) */
-export function facePanel(key, base, dark) {
+ *  around the real-time arena, and two copies of these bakes would drift.)
+ *  `dim` carries what .tfp-wall's filter used to — see bake(). */
+export function facePanel(key, base, dark, dim) {
   if (_tex[key]) return _tex[key];
   const cv = document.createElement('canvas');
   cv.width = 32; cv.height = 32;
@@ -80,8 +107,15 @@ export function facePanel(key, base, dark) {
     g.fillStyle = (i % 2) ? '#000' : '#fff';
     g.fillRect((i * 7) % 32, (i * 13) % 32, 2, 2);
   }
+  g.globalAlpha = 1;
+  bake(g, 32, 32, dim == null ? 1 : dim);
   return (_tex[key] = cv.toDataURL());
 }
+
+/** What .tfp-wall and .tfp-ring's filters were worth, now that the quads carry
+ *  no filter at all. WALL_DIM is the old brightness(0.82); the ring wore both
+ *  .tfp-wall and .tfp-ring, so it was 0.82 × 0.9. */
+export const WALL_DIM = 0.82, RING_DIM = 0.82 * 0.9;
 
 /** The trodden ground OUTSIDE the lists — the apron between the fence and the
  *  stands. Mottled and dark so the bright play field stays the focus. */
@@ -131,6 +165,7 @@ export function standsPanel() {
   // Parapet at the foot of the stands.
   g.fillStyle = '#8a744c'; g.fillRect(0, 88, 128, 8);
   g.fillStyle = '#c8b088'; g.fillRect(0, 86, 128, 3);
+  bake(g, 128, 96, RING_DIM);   // was .tfp-wall + .tfp-ring's two filters
   return (_tex.stands = cv.toDataURL());
 }
 
@@ -156,8 +191,14 @@ export function cloudsPanel() {
 
 /** How far the apron runs past the lists, and how tall the stands rise. The
  *  apron must out-reach the shoulder camera's pull-back (OTS_BACK tiles), or
- *  stepping to the board's edge puts the eye outside the world again. */
-const APRON_T = 6, RING_H = 2400;
+ *  stepping to the board's edge puts the eye outside the world again — one
+ *  tile is the requirement, and three is comfort. Six bought a twenty-one-tile
+ *  ring whose far end nobody can see and every phone had to allocate. */
+const APRON_T = 3, RING_H = 2400;
+/** No layout box may run longer than this many tiles. A slab wider than the
+ *  GPU's maximum texture is not clipped or downscaled — it is dropped, whole.
+ *  Whole tiles, so the repeating apron and stands textures never seam. */
+export const SEG_T = 3;
 
 // ---------------------------------------------------------------------------
 // Geometry — rebuilt only when the BOARD changes, never per frame
@@ -189,6 +230,60 @@ function quad(tex, w, h, tx, ty, tz, rot, cls, tint) {
 }
 
 /**
+ * The same quad, cut into panels no longer than SEG_T tiles.
+ *
+ * A slab is one compositor surface however far away it is, and the apron ran
+ * 18,900 px along its length — several times what a phone will allocate. It was
+ * not drawn small; it was not drawn at all. Panels repeat the same texture, so
+ * the surface is bounded and the seam falls on a tile boundary.
+ *
+ * `cut` says which of the ELEMENT's own dimensions is the long one, and `axis`
+ * which WORLD axis it runs along — the two differ under rotation, and guessing
+ * either from the other is how a wall ends up split across its height.
+ */
+/**
+ * The play field: ONE baked picture of the whole board, laid down as a grid of
+ * panels rather than a single slab.
+ *
+ * Every other surface here repeats a small tile, so `strip` can cut it anywhere.
+ * This one cannot — it is a picture, stretched to fit — so cutting it the same
+ * way would draw the entire board once per panel. Each panel instead blows the
+ * background up by N and shifts it to its own share: `background-size:N00%` with
+ * `background-position` at 0/50/100% is the standard way to take the k-th slice
+ * of an image, and it lands pixel-exact because the panels are equal.
+ *
+ * It is worth the trouble because 9 tiles at T=900 is 8,100 px square — 21,000
+ * device px on the reported phone, past every mobile GPU's texture ceiling on a
+ * quad the player is standing on.
+ */
+function field(out, tex, span) {
+  const n = Math.max(1, Math.ceil(span / (SEG_T * T)));
+  if (n === 1) { out.push(quad(tex, span, span, span / 2, 0, span / 2, 'rotateX(90deg)', 'tfp-floor')); return; }
+  const s = span / n, pct = 100 / (n - 1);
+  for (let r = 0; r < n; r++) {
+    for (let c = 0; c < n; c++) {
+      out.push('<div class="tfp-q tfp-floor" style="'
+        + `width:${s}px;height:${s}px;margin-left:${-s / 2}px;margin-top:${-s / 2}px;`
+        + `background-image:url(${tex});background-size:${n * 100}% ${n * 100}%;`
+        + `background-position:${(c * pct).toFixed(4)}% ${(r * pct).toFixed(4)}%;`
+        + `transform:translate3d(${(c + 0.5) * s}px,0px,${(r + 0.5) * s}px) rotateX(90deg)"></div>`);
+    }
+  }
+}
+
+function strip(out, tex, w, h, cx, cy, cz, axis, rot, cls, cut) {
+  const tall = cut === 'h';
+  const len = tall ? h : w;
+  const n = Math.max(1, Math.round(len / (SEG_T * T))), seg = len / n;
+  for (let i = 0; i < n; i++) {
+    const off = -len / 2 + seg * (i + 0.5);
+    out.push(quad(tex, tall ? w : seg, tall ? seg : h,
+      cx + (axis === 'x' ? off : 0), cy + (axis === 'y' ? off : 0), cz + (axis === 'z' ? off : 0),
+      rot, cls));
+  }
+}
+
+/**
  * Build the board. One big quad carries the whole 9×9 ground, because the
  * battlefield is already baked as a single image for the grid's background —
  * the same art, so the two views cannot disagree about what the field looks
@@ -196,13 +291,16 @@ function quad(tex, w, h, tx, ty, tz, rot, cls, tint) {
  */
 function buildBoard() {
   const out = [];
-  const ground = S.arenaGroundURI;
+  // A missing bake used to mean NO GROUND QUAD AT ALL — a hole where the field
+  // is, showing stage gradient. The URI is only written inside the 2D grid's
+  // own bake, so any path that reaches this view first left the board floorless.
+  const ground = S.arenaGroundURI || facePanel('fieldFallback', '#3f5a2e', '#27381c');
   const span = GS * T;
-  if (ground) out.push(quad(ground, span, span, span / 2, 0, span / 2, 'rotateX(90deg)', 'tfp-floor'));
+  field(out, ground, span);
 
-  const rock = facePanel('rock', '#6b6257', '#2e2a24');
+  const rock = facePanel('rock', '#6b6257', '#2e2a24', WALL_DIM);
   const rockTop = facePanel('rockTop', '#7d7466', '#5c5548');
-  const edge = facePanel('edge', '#4a4640', '#22201c');
+  const edge = facePanel('edge', '#4a4640', '#22201c', WALL_DIM);
 
   for (let r = 0; r < GS; r++) {
     for (let c = 0; c < GS; c++) {
@@ -231,28 +329,34 @@ function buildBoard() {
   // fence — and past the fence the world KEEPS GOING: an apron of trodden
   // ground, then the stands, then sky. The shoulder camera stands up to two
   // tiles outside the board, and what it used to see out there was nothing.
+  // Every one of these four faced OUTWARD — away from the board — and
+  // backface-visibility:hidden then made the fence invisible from the only
+  // place anyone stands. Compare the ring below: same north side, no rotation.
+  // It is two-sided because the shoulder camera does step out onto the apron.
   const B = BLOCK_H * 0.55, by = -B / 2;
-  out.push(quad(edge, span, B, span / 2, by, 0, 'rotateY(180deg)', 'tfp-wall'));
-  out.push(quad(edge, span, B, span / 2, by, span, '', 'tfp-wall'));
-  out.push(quad(edge, span, B, 0, by, span / 2, 'rotateY(-90deg)', 'tfp-wall'));
-  out.push(quad(edge, span, B, span, by, span / 2, 'rotateY(90deg)', 'tfp-wall'));
+  strip(out, edge, span, B, span / 2, by, 0, 'x', '', 'tfp-wall tfp-2s', 'w');
+  strip(out, edge, span, B, span / 2, by, span, 'x', 'rotateY(180deg)', 'tfp-wall tfp-2s', 'w');
+  strip(out, edge, span, B, 0, by, span / 2, 'z', 'rotateY(90deg)', 'tfp-wall tfp-2s', 'w');
+  strip(out, edge, span, B, span, by, span / 2, 'z', 'rotateY(-90deg)', 'tfp-wall tfp-2s', 'w');
 
-  // The apron — four slabs of ground from the fence out to the stands.
+  // The apron — four runs of trodden ground from the fence out to the stands.
+  // Under rotateX(90) the element's HEIGHT is what runs along world Z, which is
+  // why the east/west runs cut on 'h' while the north/south ones cut on 'w'.
   const A = APRON_T * T, apron = apronPanel();
-  out.push(quad(apron, span + 2 * A, A, span / 2, 0, -A / 2, 'rotateX(90deg)', 'tfp-floor tfp-apron'));
-  out.push(quad(apron, span + 2 * A, A, span / 2, 0, span + A / 2, 'rotateX(90deg)', 'tfp-floor tfp-apron'));
-  out.push(quad(apron, A, span, -A / 2, 0, span / 2, 'rotateX(90deg)', 'tfp-floor tfp-apron'));
-  out.push(quad(apron, A, span, span + A / 2, 0, span / 2, 'rotateX(90deg)', 'tfp-floor tfp-apron'));
+  strip(out, apron, span + 2 * A, A, span / 2, 0, -A / 2, 'x', 'rotateX(90deg)', 'tfp-floor tfp-apron', 'w');
+  strip(out, apron, span + 2 * A, A, span / 2, 0, span + A / 2, 'x', 'rotateX(90deg)', 'tfp-floor tfp-apron', 'w');
+  strip(out, apron, A, span, -A / 2, 0, span / 2, 'z', 'rotateX(90deg)', 'tfp-floor tfp-apron', 'h');
+  strip(out, apron, A, span, span + A / 2, 0, span / 2, 'z', 'rotateX(90deg)', 'tfp-floor tfp-apron', 'h');
 
   // The colosseum ring — crowd-dotted stands facing the field on all four
   // sides, tall enough that no camera the view can produce sees past them
   // except into sky. (tfp-ring tiles the texture along the wall instead of
   // stretching one crowd across half a kilometre of masonry.)
   const stands = standsPanel(), ry = -RING_H / 2, rl = span + 2 * A;
-  out.push(quad(stands, rl, RING_H, span / 2, ry, -A, '', 'tfp-wall tfp-ring'));
-  out.push(quad(stands, rl, RING_H, span / 2, ry, span + A, 'rotateY(180deg)', 'tfp-wall tfp-ring'));
-  out.push(quad(stands, rl, RING_H, -A, ry, span / 2, 'rotateY(90deg)', 'tfp-wall tfp-ring'));
-  out.push(quad(stands, rl, RING_H, span + A, ry, span / 2, 'rotateY(-90deg)', 'tfp-wall tfp-ring'));
+  strip(out, stands, rl, RING_H, span / 2, ry, -A, 'x', '', 'tfp-wall tfp-ring', 'w');
+  strip(out, stands, rl, RING_H, span / 2, ry, span + A, 'x', 'rotateY(180deg)', 'tfp-wall tfp-ring', 'w');
+  strip(out, stands, rl, RING_H, -A, ry, span / 2, 'z', 'rotateY(90deg)', 'tfp-wall tfp-ring', 'w');
+  strip(out, stands, rl, RING_H, span + A, ry, span / 2, 'z', 'rotateY(-90deg)', 'tfp-wall tfp-ring', 'w');
 
   V.world.querySelector('.tfp-geo').innerHTML = out.join('');
   V.boardKey = boardKey();
@@ -358,6 +462,7 @@ function buildPath() {
 // ---------------------------------------------------------------------------
 
 function fitLens() {
+  if (!V) return;
   const st = V.host.querySelector('.tfp-stage');
   const h = st && st.clientHeight;
   if (!h) return;                                    // measured before it is shown
@@ -400,7 +505,15 @@ function aimCamera() {
     pitch = OTS_PITCH;
   }
   V.yaw = yaw;
-  V.world.style.transform = `rotateX(${pitch}deg) rotateY(${deg}deg) translate3d(${-ex}px,${-ey}px,${-ez}px)`;
+  // GUARDED, and rounded. This ran unconditionally every frame with raw
+  // Math.sin output in the string, so the transform was "new" on every single
+  // rAF even with the camera parked — and every rewrite makes the compositor
+  // re-raster the surfaces under .tfp-world's will-change, which is the tearing
+  // the player sees while turning. Both siblings already do this (action-fp's
+  // V.wtf, the delve's F._wtf); this file is the one that never did.
+  const wtf = `rotateX(${pitch}deg) rotateY(${deg.toFixed(2)}deg) `
+    + `translate3d(${(-ex).toFixed(1)}px,${(-ey).toFixed(1)}px,${(-ez).toFixed(1)}px)`;
+  if (wtf !== V.wtf) V.world.style.transform = (V.wtf = wtf);
 }
 
 /**
@@ -440,7 +553,11 @@ export function tacFpToggle(on) {
   else if (!want && V) {
     // The resize listener closes over the module-level V — left attached it
     // fires on a null V after exit (one throw per prior FP entry, per resize).
-    if (V.onResize) window.removeEventListener('resize', V.onResize);
+    if (V.onResize) {
+      window.removeEventListener('resize', V.onResize);
+      window.removeEventListener('orientationchange', V.onResize);
+    }
+    if (V.ro) V.ro.disconnect();
     if (V.hands) V.hands.dispose();
     V.host.remove(); V = null;
   }
@@ -553,11 +670,30 @@ function mount() {
   screen.appendChild(host);
   V = {
     host, world: host.querySelector('.tfp-world'),
-    subject: null, pov: 'first', yaw: 0,
+    subject: null, pov: 'first', yaw: 0, wtf: '',
     actors: new Map(), boardKey: '', pathKey: '',
     handsEl: host.querySelector('.fp-hands'), hands: null, handsFor: null, lastAnim: '',
   };
+  // A phone's GPU is not a desktop's. The delve already tiers itself this way;
+  // the battle views never did, so every fighter carried a live blur.
+  if (typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches) {
+    document.body.classList.add('fp-lite');
+  }
   tacFpSetSubject(0);
   syncHands();
-  if (!V.onResize) { V.onResize = () => { fitLens(); if (V && V.hands) V.hands.fit(); }; window.addEventListener('resize', V.onResize); }
+  if (!V.onResize) {
+    V.onResize = () => { fitLens(); if (V && V.hands) V.hands.fit(); };
+    window.addEventListener('resize', V.onResize);
+    // A phone rotating, and Android's URL bar sliding away, both change the
+    // stage's height WITHOUT a resize event — and fitLens is what turns the
+    // stage height into the lens. Watch the element itself; the observer also
+    // fires once on observe, which self-heals the case where the view mounts
+    // while the screen is still display:none and clientHeight is 0.
+    const st = host.querySelector('.tfp-stage');
+    if (st && typeof ResizeObserver === 'function') {
+      V.ro = new ResizeObserver(V.onResize);
+      V.ro.observe(st);
+    }
+    window.addEventListener('orientationchange', V.onResize);
+  }
 }

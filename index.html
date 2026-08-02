@@ -226,6 +226,19 @@
       </span>
     </div>
   </div>
+  <!-- The command list. A phone has no room for the desktop panel's four
+       stacked sections, so below the breakpoint they become one Final-Fantasy
+       menu: pick a command, and only that command's controls are on screen.
+       The controls themselves are UNTOUCHED — the same #dpad, the same #atkBar,
+       the same handlers — this only decides which of them you are looking at.
+       Desktop never sees it (display:none until the media query). -->
+  <div class="ff-menu" id="ffMenu">
+    <button class="ff-cmd" data-ff="move" onclick="ffPick('move')">Move</button>
+    <button class="ff-cmd" data-ff="attack" onclick="ffPick('attack')">Attack</button>
+    <button class="ff-cmd" data-ff="view" onclick="ffPick('view')">View</button>
+    <button class="ff-cmd" data-ff="sheet" onclick="ffPick('sheet')">Etc</button>
+    <button class="ff-cmd ff-go" onclick="executeTurn()">Execute</button>
+  </div>
   <div class="log" id="log"></div>
 </div>
 
