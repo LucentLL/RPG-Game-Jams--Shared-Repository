@@ -332,6 +332,34 @@ export function wornPick() { return { url: weaponUrl(0, 'pickaxe1', 0) }; }
 
 
 /**
+ * The `background-*` declarations that crop a named sprite, as a CSS string.
+ *
+ * Split out of artSprite because not every caller can afford a <span>: a 3D
+ * renderer paints its crops straight onto the quad it already owns, and
+ * wrapping each one in an element would double a scene's layer count for
+ * nothing. @see delve-fp.js's solid decor.
+ *
+ * `sub` takes a sub-rectangle in CROP-LOCAL pixels. That is what lets a solid's
+ * lid be painted with the top edge of the thing's own art rather than an
+ * invented tint — the colour is right by construction, and stays right if the
+ * sheet is ever re-cut.
+ * @param {keyof typeof ART} name
+ * @param {{x:number,y:number,w:number,h:number}} [sub] crop-local rect
+ */
+export function artCropCss(name, sub) {
+  const s = ART[name];
+  if (!s) return '';
+  const sh = SHEETS[s.sheet];
+  const x = s.x + (sub ? sub.x : 0), y = s.y + (sub ? sub.y : 0);
+  const w = sub ? sub.w : s.w, h = sub ? sub.h : s.h;
+  const posX = sh.w === w ? 0 : (x / (sh.w - w)) * 100;
+  const posY = sh.h === h ? 0 : (y / (sh.h - h)) * 100;
+  return `background-image:url(${ART_BASE}${s.sheet}.png);background-repeat:no-repeat;`
+    + `background-size:${(sh.w / w * 100).toFixed(4)}% ${(sh.h / h * 100).toFixed(4)}%;`
+    + `background-position:${posX.toFixed(4)}% ${posY.toFixed(4)}%;`;
+}
+
+/**
  * A cropped sheet sprite as an HTML string. Size it from CSS/inline style
  * (width + the intrinsic aspect-ratio keeps it true); it scales pixel-crisp.
  * @param {keyof typeof ART} name @param {string} [cls] extra classes
@@ -340,11 +368,6 @@ export function wornPick() { return { url: weaponUrl(0, 'pickaxe1', 0) }; }
 export function artSprite(name, cls = '', style = '') {
   const s = ART[name];
   if (!s) return '';
-  const sh = SHEETS[s.sheet];
-  const posX = sh.w === s.w ? 0 : (s.x / (sh.w - s.w)) * 100;
-  const posY = sh.h === s.h ? 0 : (s.y / (sh.h - s.h)) * 100;
-  return `<span class="px-art ${cls}" style="aspect-ratio:${s.w}/${s.h};` +
-    `background-image:url(${ART_BASE}${s.sheet}.png);` +
-    `background-size:${(sh.w / s.w * 100).toFixed(4)}% ${(sh.h / s.h * 100).toFixed(4)}%;` +
-    `background-position:${posX.toFixed(4)}% ${posY.toFixed(4)}%;${style}"></span>`;
+  return `<span class="px-art ${cls}" style="aspect-ratio:${s.w}/${s.h};`
+    + `${artCropCss(name)}${style}"></span>`;
 }

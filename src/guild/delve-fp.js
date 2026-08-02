@@ -26,7 +26,8 @@ import { ART_BASE } from '../config/assets.js';
 import { THEMES, LIGHTS, DECALS, ORE_KINDS, oreKindAt, mapForLocale, validateMap } from './delve-maps.js';
 import { preyById } from './locales.js';
 import { loadImg, SHEET_URLS } from './delve.js';
-import { ART, artSprite, WORN, wornWeapon, wornShield, wornPick } from './art.js';
+import { ART, artSprite, artCropCss, WORN, wornWeapon, wornShield, wornPick } from './art.js';
+import { propVolume, footprint, REST_SLOP } from './prop-volume.js';
 import { icon } from './icons.js';
 import { createLook, readPad, padReset, touchPrimary, PAD } from '../platform/input.js';
 import { claimPad } from '../platform/ui-pad.js';
@@ -971,6 +972,176 @@ function markerBillboard(glyph, label, cls, x, y) {
   standDecor(el, x, y);
 }
 
+// ---------------------------------------------------------------------------
+// Solids — the furnishings that have a VOLUME, not just a picture
+// ---------------------------------------------------------------------------
+
+/**
+ * THE ARENA'S LESSON, APPLIED HERE.
+ *
+ * `buildDressing` in action-fp.js already learned this: a billboard is for
+ * things that FACE you, and furniture is not one of them. A desk turned into a
+ * camera-facing card is a desk that touches the floor along a single line and
+ * swings as you walk past it; and because its height was width × the crop's
+ * aspect ratio, it was also three times too tall. @see prop-volume.js for the
+ * measured list of what that produced.
+ *
+ * So a furnishing with an authored volume is emitted as GEOMETRY: static quads,
+ * placed once in world space, never rotated again. That is not only more
+ * honest, it is cheaper than what it replaces — a static face's transform
+ * string never changes, so the per-frame write guard rejects every write for
+ * the life of the map, where a billboard rewrote its transform on every turn.
+ *
+ * They live in `.fp-bbs` rather than `.fp-geo` because `.fp-geo` is diffed
+ * against the view radius every step and would evict anything it did not put
+ * there itself.
+ */
+const SOLID_HOST = () => F.world.querySelector('.fp-bbs');
+
+/**
+ * A static quad. Fog is a `.fp-veil` child, exactly as the walls do it, rather
+ * than the opacity a billboard uses — a solid standing against a wall must take
+ * the dark at the same rate as the wall behind it or it floats off the surface.
+ */
+function solidQuad(host, css, w, h, tx, ty, tz, rot, anchor, cls) {
+  const el = document.createElement('div');
+  el.className = 'fp-q fp-solid' + (cls ? ' ' + cls : '');
+  // BORN HIDDEN, and shown by the first fogSolids() that finds it in range.
+  // The estate's chart carries the furniture of every stamped room on it at
+  // once — a couple of hundred quads, nearly all of them a long way off — and
+  // creating them visible would put the whole lot on the compositor for the one
+  // frame between building the map and fogging it. That frame is exactly the
+  // budget a phone has no slack in.
+  el.style.cssText = `display:none;width:${w.toFixed(1)}px;height:${h.toFixed(1)}px;`
+    + `margin-left:${(-w / 2).toFixed(1)}px;margin-top:${(-h / 2).toFixed(1)}px;${css}`
+    + `transform:translate3d(${tx.toFixed(1)}px,${ty.toFixed(1)}px,${tz.toFixed(1)}px)${rot ? ' ' + rot : ''}`;
+  host.appendChild(el);
+  F.solids.push({ el, x: anchor.x, y: anchor.y, veil: null, fog: -1, off: true });
+  return el;
+}
+
+/**
+ * Fog every solid, once a frame. Same contract as the geometry's: quantised, so
+ * an idle frame writes nothing, and culled entirely past FOG_CULL — a solid
+ * that has faded into the light's own colour is indistinguishable from one that
+ * was never drawn, and `display:none` takes its layer out of the compositor
+ * rather than merely making it invisible.
+ */
+function fogSolids() {
+  for (const s of F.solids) {
+    const f = fogAt(s.x, s.y);
+    const off = f >= FOG_CULL;
+    if (off !== s.off) { s.el.style.display = (s.off = off) ? 'none' : ''; }
+    if (off) continue;
+    const q = fogQ(f);
+    if (q === s.fog) continue;
+    s.fog = q;
+    if (!q && !s.veil) continue;   // inside the clear radius: no second layer
+    if (!s.veil) {
+      s.veil = document.createElement('i');
+      s.veil.className = 'fp-veil';
+      s.el.appendChild(s.veil);
+    }
+    s.veil.style.opacity = q;
+  }
+}
+
+/**
+ * The dressing for a solid's sides.
+ *
+ * The ends take the SAME art as the front, squeezed to the depth. That is what
+ * every Doom-descendant did with a box, and it is deliberately not cleverer
+ * than that: an earlier cut sliced the crop's outermost column instead, which
+ * on a tight alpha-box crop is mostly transparent, and gave every cabinet
+ * see-through sides.
+ *
+ * The lid takes the crop's CENTRE BAND — a patch guaranteed to be inside the
+ * object's own mass, so the top of a thing is painted in the thing's own colour
+ * whatever the sheet is repainted to, and never in an invented tint.
+ */
+const lidCss = (name) => {
+  const a = ART[name];
+  return artCropCss(name, {
+    x: Math.round(a.w * 0.22), y: Math.round(a.h * 0.34),
+    w: Math.max(1, Math.round(a.w * 0.56)), h: Math.max(1, Math.round(a.h * 0.22)),
+  });
+};
+
+/** A solid whose ART IS ITS FRONT — a desk, a cabinet, a furnace. */
+function boxSolid(host, p, vol, fp, base) {
+  const w = fp.w * T, d = fp.d * T, h = vol.h * T;
+  const cx = fp.cx * T, cz = fp.cy * T, yc = base - h / 2;
+  const face = artCropCss(p.art);
+  const el = solidQuad(host, face, w, h, cx, yc, cz + d / 2, '', p);
+  if (p.label) el.title = p.label;
+  solidQuad(host, face, w, h, cx, yc, cz - d / 2, 'rotateY(180deg)', p);
+  solidQuad(host, face, d, h, cx + w / 2, yc, cz, 'rotateY(90deg)', p);
+  solidQuad(host, face, d, h, cx - w / 2, yc, cz, 'rotateY(-90deg)', p);
+  solidQuad(host, lidCss(p.art), w, d, cx, base - h, cz, 'rotateX(90deg)', p);
+}
+
+/**
+ * A solid whose ART IS ITS TOP — the beds. The sheet draws a bunk in PLAN, and
+ * standing a plan view up on its edge to face the camera is exactly how the
+ * dormitory came to be full of beds balanced on their footboards. Here the art
+ * goes where it was drawn to go: on the lid.
+ */
+function lieSolid(host, p, vol, fp, base) {
+  const w = fp.w * T, d = fp.d * T, h = vol.h * T;
+  const cx = fp.cx * T, cz = fp.cy * T, yc = base - h / 2;
+  const side = lidCss(p.art);   // the blanket's own colour, for the frame below it
+  solidQuad(host, side, w, h, cx, yc, cz + d / 2, '', p);
+  solidQuad(host, side, w, h, cx, yc, cz - d / 2, 'rotateY(180deg)', p);
+  solidQuad(host, side, d, h, cx + w / 2, yc, cz, 'rotateY(90deg)', p);
+  solidQuad(host, side, d, h, cx - w / 2, yc, cz, 'rotateY(-90deg)', p);
+  const el = solidQuad(host, artCropCss(p.art), w, d, cx, base - h, cz, 'rotateX(90deg)', p);
+  if (p.label) el.title = p.label;
+}
+
+/**
+ * Round or irregular: two quads at right angles through the centre. Ground
+ * contact on both axes, depth from every bearing, no per-frame rotation.
+ *
+ * `.fp-cross` restores backface-visibility, which `.fp-q` turns off — a wall
+ * face is never seen from behind and a barrel always is, and without this the
+ * cross vanished a quarter-turn at a time as you walked around it.
+ */
+function crossSolid(host, p, vol, base) {
+  const h = vol.h * T, w = h * (ART[p.art].w / ART[p.art].h);
+  const cx = p.x * T, cz = p.y * T, yc = base - h / 2;
+  const css = artCropCss(p.art);
+  const el = solidQuad(host, css, w, h, cx, yc, cz, '', p, 'fp-cross');
+  if (p.label) el.title = p.label;
+  solidQuad(host, css, w, h, cx, yc, cz, 'rotateY(90deg)', p, 'fp-cross');
+}
+
+/**
+ * Bolted to the wall it hangs on, at the height it hangs at.
+ *
+ * Which wall is read from the MAP, once, here — the arena's `face` lesson. The
+ * estate authors every hung thing a hair proud of its wall (`y: 2.02`), so the
+ * anchor is already in front of the stone; all this has to find is which of the
+ * four neighbours is the stone. A portrait with no wall behind it is a mistake
+ * in the chart, and falls back to a billboard rather than being silently
+ * pasted onto thin air.
+ */
+const WALL_FACE = [
+  [0, -1, ''],                 // stone to the north — face south
+  [0, 1, 'rotateY(180deg)'],
+  [1, 0, 'rotateY(-90deg)'],
+  [-1, 0, 'rotateY(90deg)'],
+];
+function wallSolid(host, p, vol, base) {
+  const tx = Math.floor(p.x), ty = Math.floor(p.y);
+  const face = WALL_FACE.find(([dx, dy]) => isWall(tx + dx, ty + dy) || isLow(tx + dx, ty + dy));
+  if (!face) return false;
+  const h = vol.h * T, w = h * (ART[p.art].w / ART[p.art].h);
+  const el = solidQuad(host, artCropCss(p.art), w, h,
+    p.x * T, base - vol.mid * T, p.y * T, face[2], p);
+  if (p.label) el.title = p.label;
+  return true;
+}
+
 /**
  * Stand up everything the chart says is in the room. The top-down walk has
  * always done this (delve.js decorates the same grid chars); first person
@@ -981,7 +1152,7 @@ function markerBillboard(glyph, label, cls, x, y) {
  * Built ONCE per map: none of it moves, and mining a face doesn't touch it.
  */
 function buildDecor(sheets) {
-  F.decor = []; F.doors = [];
+  F.decor = []; F.doors = []; F.solids = [];
   const theme = F.theme, map = F.map;
   for (let y = 0; y < F.rows; y++) {
     for (let x = 0; x < F.cols; x++) {
@@ -1009,10 +1180,7 @@ function buildDecor(sheets) {
       }
     }
   }
-  // Authored furnishings — the same art.js standees the top-down walk uses, at
-  // the same size: `w` is that view's pixels against its 48px tile, so w/48 is
-  // the thing's width in TILES and T/48 carries it straight across.
-  for (const p of (map.props || [])) artBillboard(p.art, p.x, p.y, (p.w || 48) * (T / 48), p.label);
+  buildProps(map.props || []);
   // The estate's buildings. A ROOMED one is its walls — the stamped ring is
   // real geometry here — so it only needs its name over the door. An annex has
   // no room behind its 'F' mass, so its facade art stands at the front.
@@ -1023,6 +1191,73 @@ function buildDecor(sheets) {
     } else {
       artBillboard(b.art, b.x + b.w / 2, b.y + b.h + 0.04, Math.min(b.w * T, (b.px || b.w * 48) * (T / 48)), b.name);
     }
+  }
+}
+
+/**
+ * The authored furnishings, in three passes: what shape each one is, what is
+ * standing ON what, and only then the quads.
+ *
+ * The middle pass is the one worth explaining. `gmLedgers` is authored to
+ * OVERLAP `gmDesk` because that is what reads as "ledgers on the desk" in the
+ * top-down view; taken literally in three dimensions it is a stack of books
+ * hovering beside a desk at floor level. Rather than re-author the charts (and
+ * move the thing in the view it was tuned for), a small solid whose anchor
+ * falls inside a taller solid's footprint is lifted onto that solid's lid. The
+ * rule needs no new authoring, it is checked against the volumes the props
+ * already declare, and it starts working the moment a chart is nudged.
+ *
+ * A prop with no volume keeps the old billboard exactly — see prop-volume.js
+ * for why that is the right default rather than a gap.
+ */
+function buildProps(props) {
+  const host = SOLID_HOST();
+  /** May a solid grow its depth this way, or is that way masonry? */
+  const openBack = (fx, fy) => {
+    const x = Math.floor(fx), y = Math.floor(fy);
+    return !isWall(x, y) && !isLow(x, y);
+  };
+  const plan = props.map((p) => {
+    const a = ART[p.art];
+    const vol = a ? propVolume(p.art) : null;
+    if (!vol) return { p, vol: null };
+    // A box is as wide as its own art says, given the height; a `lie` is drawn
+    // in plan, so its LENGTH is the authored number and the width follows that.
+    if (vol.form === 'box') return { p, vol, fp: footprint(p, vol.h * (a.w / a.h), vol.d, openBack) };
+    if (vol.form === 'lie') return { p, vol, fp: footprint(p, vol.d * (a.w / a.h), vol.d, openBack) };
+    return { p, vol };
+  });
+  const shelves = plan.filter((q) => q.fp);
+  /** How high the ground under this prop really is — 0, or a taller solid's lid. */
+  const restOn = (q) => {
+    let top = 0;
+    for (const s of shelves) {
+      if (s === q || s.vol.h <= q.vol.h || s.vol.h <= top) continue;
+      if (q.p.x < s.fp.x0 - REST_SLOP || q.p.x > s.fp.x1 + REST_SLOP) continue;
+      if (q.p.y < s.fp.y0 - REST_SLOP || q.p.y > s.fp.y1 + REST_SLOP) continue;
+      top = s.vol.h;
+    }
+    return top;
+  };
+  for (const q of plan) {
+    const { p, vol } = q;
+    if (!vol) {
+      // `w` is the top-down view's pixels against its 48px tile, so w/48 is the
+      // thing's width in TILES and T/48 carries it straight across.
+      artBillboard(p.art, p.x, p.y, (p.w || 48) * (T / 48), p.label);
+      continue;
+    }
+    const ground = -heightAt(Math.floor(p.x), Math.floor(p.y)) * STEP_PX;
+    if (vol.form === 'wall') {
+      // Nothing to bolt it to is a fault in the chart, not something to paper
+      // over: fall back to the billboard so it is still visible and still wrong.
+      if (!wallSolid(host, p, vol, ground)) artBillboard(p.art, p.x, p.y, (p.w || 48) * (T / 48), p.label);
+      continue;
+    }
+    const base = ground - restOn(q) * T;   // up is negative
+    if (vol.form === 'cross') crossSolid(host, p, vol, base);
+    else if (vol.form === 'lie') lieSolid(host, p, vol, q.fp, base);
+    else boxSolid(host, p, vol, q.fp, base);
   }
 }
 
@@ -1429,7 +1664,7 @@ function mount(prep, entry) {
   F.px = Math.floor(at0[0]) + 0.5; F.py = Math.floor(at0[1]) + 0.5;
   F.dir = openestDir(Math.floor(F.px), Math.floor(F.py));
   F.yaw = F.dir * 45; F.turning = null; F.stepping = null;
-  F.creatures = []; F.decor = []; F.doors = []; F.shots = []; F.armed = false;
+  F.creatures = []; F.decor = []; F.solids = []; F.doors = []; F.shots = []; F.armed = false;
   F.settleUntil = performance.now() + 250;
 
   const stage = F.host.querySelector('.fp-stage');
@@ -1518,7 +1753,7 @@ export async function openDelveFp(localeId, member, hooks, carry) {
       px: 0, py: 0, dir: 2, yaw: 180, turning: null, stepping: null,
       keys: {}, latched: {}, padKeys: {}, look: null, lookAcc: 0,
       last: 0, raf: 0, ended: false, transiting: false,
-      creatures: [], decor: [], doors: [], shots: [], armed: false,
+      creatures: [], decor: [], solids: [], doors: [], shots: [], armed: false,
       seen: new Set(), mined: new Set(), settleUntil: 0,
       hands: null, swingUntil: 0, helpTimer: 0, lens: 1,
       pov: 1, self: null,
@@ -2382,6 +2617,9 @@ function render() {
   // re-rasterises 30 layers a frame and one that does nothing.
   for (const c of F.creatures) place(c, c.x, c.y, -heightAt(Math.floor(c.x), Math.floor(c.y)) * STEP_PX);
   for (const d of F.decor) place(d, d.x, d.y, d.lift);
+  // The solids do NOT move. They were placed once in world space, standing on
+  // their own ground (@see buildProps) — all a frame owes them is the dark.
+  fogSolids();
   for (const s of F.shots) place(s, s.x, s.y, s.lift);
   // A raised shield has to LOOK raised, or the only feedback for a key you are
   // holding down is that you cannot attack.
@@ -2677,6 +2915,12 @@ if (typeof window !== 'undefined') {
     map: F.map && F.map.id, x: +F.px.toFixed(2), y: +F.py.toFixed(2), dir: COMPASS[F.dir], yaw: F.yaw,
     moving: !!(F.stepping || F.turning), hp: Math.ceil(F.hp), hpCeil: F.hpCeil, armed: F.armed,
     quads: F.world.querySelectorAll('.fp-q').length, creatures: F.creatures.length,
+    // Split out because the two are bounded by different things and the phone
+    // falls over on the total: geometry is the view radius squared, solids are
+    // whatever the chart furnished the map with. `drawn` excludes the ones fog
+    // has taken out of the compositor entirely.
+    decor: F.decor.length, solids: F.solids.length,
+    solidsDrawn: F.solids.filter((s) => !s.off).length,
     haul: F.haul.gold, seen: F.seen.size, power: F.hooks.power, fatigue: F.hooks.fatigue,
     fight: { swings: F.haul.swings|0, landed: F.haul.landed|0, missed: F.haul.missed|0, foeHits: F.haul.taken|0, foeMisses: F.haul.dodged|0, bouts: F.haul.bouts },
     // The three numbers that decide whether a swing lands: how far the nearest

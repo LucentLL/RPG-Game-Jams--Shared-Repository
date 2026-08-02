@@ -452,6 +452,15 @@
   backface-visibility: hidden;
   pointer-events: none;
 }
+/* A furnishing that has a VOLUME (@see prop-volume.js) is geometry, not a
+   billboard: placed once in world space and never rotated again, so its
+   transform string never changes and the per-frame write guard rejects every
+   write for the life of the map. Cheaper than the card it replaces. */
+.fp-solid { pointer-events: none; }
+/* .fp-q hides its back because a wall face is never seen from behind. A crossed
+   pair always is — without this a barrel vanished a quarter-turn at a time as
+   you walked around it. */
+.fp-cross { backface-visibility: visible; }
 /* Over the shoulder: the hands belong to a first-person frame only, and the
    member's own composited back stands at the walker cell instead. The canvas
    rides down by the compositor's empty under-feet band so the soles ground. */
