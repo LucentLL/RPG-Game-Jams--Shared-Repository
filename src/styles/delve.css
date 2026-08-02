@@ -715,6 +715,10 @@
 }
 .fp-keys.on { opacity: 1; }
 .fp-keys b { color: var(--gold); font-weight: 700; }
+/* The pill is two lines now (mouse + controller), so the pure-circle radius
+   would bulge; and the crawler hides the cursor once it has the mouse. */
+.fp-keys { border-radius: 14px; line-height: 1.7; }
+#delveFpScreen.fp-locked { cursor: none; }
 /* Both of these keep the HUD one line tall at any width, which is what .fp-map's
    `top` is measured against. flex-shrink also stops the circle squeezing oval. */
 .fp-compass, .fp-help { flex: 0 0 auto; }

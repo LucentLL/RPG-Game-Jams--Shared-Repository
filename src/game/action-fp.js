@@ -25,6 +25,16 @@
  * key→vector build, and it also writes `p1.facing` — so the fighter's pose,
  * a Blink's direction and the camera are all one fact: where you look.
  *
+ * AND THE MOUSE IS THE HEAD. Turning began life on a painted thumb-stick,
+ * which on a desktop meant dragging a knob to do what a mouse does natively;
+ * the stage now takes a pointer lock and mouse travel goes straight into the
+ * yaw as an ANGLE, not a rate — the distance your hand moved is the distance
+ * the view turned, which is the whole reason a mouse aims better than a key.
+ * Mouse Y tips a small free pitch on top, and the billboards counter it about
+ * their own feet so the standees stay standing; the shoulder camera's built-in
+ * 10° is deliberately NOT countered, because that lean is the portrait framing
+ * this view was tuned to and not something a mouse should quietly restyle.
+ *
  * Nothing here can put the eye outside the world: the board's own fence,
  * apron and stands (tall past any pull-back) come with the dressing — and the
  * shoulder camera CLAMPS at impassable rock, because a boulder standing
@@ -32,6 +42,7 @@
  */
 import { facePanel, apronPanel, standsPanel, cloudsPanel } from './tactical-fp.js';
 import { createFpHands, fighterHandsSpec } from './fp-hands.js';
+import { createLook, touchPrimary } from '../platform/input.js';
 
 /** World scale — the delve's, via tactical-fp, so a person is the same size
  *  standing in any of the three grounds. */
@@ -48,12 +59,21 @@ const APRON_T = 6, RING_H = 2400;
 /** How fast held turn input swings the view, rad/s. The delve's 45° / 130ms
  *  works out to ~6 rad/s in bursts; continuous steering wants less. */
 const TURN_RATE = 3.1;
+/** How far the free look may tip, degrees. Small on purpose: the world here is
+ *  billboards, and a steep pitch shows a fighter's cardboard edge. Enough to
+ *  read the ledge above you and the ground at your feet, no more. */
+const PITCH_MAX = 24;
+/** Right-stick pitch speed, degrees/sec at full deflection. */
+const PAD_PITCH_RATE = 90;
 
 /** @type {?Object} the live view (null when the arena camera is off) */
 let V = null;
 
 export function actFpActive() { return !!V; }
 export function actFpPov() { return V ? V.pov : 'first'; }
+/** Does the mouse currently belong to the camera? Crucible asks before it
+ *  reads a click as a swing — an unlocked click is only ever "take the mouse". */
+export function actFpLookLocked() { return !!(V && V.look && V.look.locked()); }
 
 // ---------------------------------------------------------------------------
 // Textures of its own — the arena's terrain props, drawn or cut once
@@ -306,7 +326,7 @@ function drawCharge(subject) {
 /** Mirror the live projectile list as billboards. Keyed on the projectile
  *  objects themselves — crucible owns their lifetime, this view only shows
  *  them, rolled to their flight angle relative to the camera. */
-function placeShots(yaw) {
+function placeShots(yaw, bbP) {
   const list = V.bridge.projectiles() || [];
   const now = performance.now();
   for (const p of list) {
@@ -336,8 +356,10 @@ function placeShots(yaw) {
       g.drawImage(im, 0, 0);
     }
     const roll = (p.angDeg || 0) - yaw * 180 / Math.PI;
+    // The counter-pitch goes BEFORE the roll: the arrow rolls in the camera's
+    // plane, and a roll applied to an un-pitched billboard tips out of it.
     const tf = `translate3d(${(x * T).toFixed(1)}px,${(-EYE * 0.55).toFixed(1)}px,${(y * T).toFixed(1)}px)`
-      + ` rotateY(${(-yaw * 180 / Math.PI).toFixed(1)}deg) rotateZ(${roll.toFixed(1)}deg)`;
+      + ` rotateY(${(-yaw * 180 / Math.PI).toFixed(1)}deg)${bbP || ''} rotateZ(${roll.toFixed(1)}deg)`;
     if (tf !== m.tf) m.el.style.transform = (m.tf = tf);
   }
   for (const [p, m] of V.shots) {
@@ -363,11 +385,27 @@ function fitLens() {
  * in world tiles — same speed, same slide rules, nothing about movement
  * changes but the frame it is read in. The returned `yaw` becomes the
  * fighter's facing: where you look is one fact everywhere.
+ *
+ * `turn` and `pitch` are RATES (-1..1, held input). The mouse is neither: its
+ * travel is an absolute angle already banked by the pointer-lock look, drained
+ * here once per frame and added straight to the yaw. That is the whole reason
+ * a mouse turns better than a key — the distance your hand moved IS the angle,
+ * with no ramp in between — and it is why the drain lives inside the one
+ * function the tick already calls exactly once.
  */
 export function actFpSteer(input, dt) {
   if (!V) return null;
+  const look = V.look ? V.look.read() : null;
   const turn = Math.max(-1, Math.min(1, input.turn || 0));
-  V.yaw += turn * TURN_RATE * dt;
+  V.yaw += turn * TURN_RATE * dt + (look ? look.yaw : 0);
+  // Wrap. Key turning could never outrun a float; a mouse can spin the view a
+  // hundred times a minute, and an ever-growing yaw both lengthens the
+  // transform string every frame and eventually costs real precision.
+  if (V.yaw > Math.PI) V.yaw -= 2 * Math.PI;
+  else if (V.yaw <= -Math.PI) V.yaw += 2 * Math.PI;
+  const dp = (look ? look.pitch * 180 / Math.PI : 0)
+    + Math.max(-1, Math.min(1, input.pitch || 0)) * PAD_PITCH_RATE * dt;
+  if (dp) V.pitch = Math.max(-PITCH_MAX, Math.min(PITCH_MAX, V.pitch + dp));
   const fwd = Math.max(-1, Math.min(1, input.fwd || 0));
   const strafe = Math.max(-1, Math.min(1, input.strafe || 0));
   const s = Math.sin(V.yaw), c = Math.cos(V.yaw);
@@ -405,16 +443,21 @@ export function actFpFrame() {
 
   const T0 = V.bridge.terrain();
   const lift = liftAt(T0, me.ax, me.ay);
-  let ex = me.ax * T, ez = me.ay * T, ey = lift - EYE, pitch = 0;
+  let ex = me.ax * T, ez = me.ay * T, ey = lift - EYE, pitch = V.pitch;
   if (V.pov === 'shoulder') {
     const back = backOff(T0, me.ax, me.ay, V.yaw, OTS_BACK);
     ex -= Math.sin(V.yaw) * back * T;
     ez += Math.cos(V.yaw) * back * T;
     ey -= OTS_UP;
-    pitch = OTS_PITCH;
+    pitch += OTS_PITCH;
   }
   const deg = V.yaw * 180 / Math.PI;
-  const wtf = `rotateX(${pitch}deg) rotateY(${deg.toFixed(2)}deg) translate3d(${(-ex).toFixed(1)}px,${(-ey).toFixed(1)}px,${(-ez).toFixed(1)}px)`;
+  // Billboards counter the FREE pitch only, never the shoulder camera's own
+  // 10° — that lean is the portrait framing this view was tuned to, and
+  // cancelling it would restyle the third-person shot as a side effect of
+  // adding a mouse. At rest the string is byte-identical to the old one.
+  const bbP = V.pitch ? ` rotateX(${(-V.pitch).toFixed(1)}deg)` : '';
+  const wtf = `rotateX(${pitch.toFixed(2)}deg) rotateY(${deg.toFixed(2)}deg) translate3d(${(-ex).toFixed(1)}px,${(-ey).toFixed(1)}px,${(-ez).toFixed(1)}px)`;
   if (wtf !== V.wtf) V.world.style.transform = (V.wtf = wtf);
 
   if (boardKey() !== V.boardKey) buildBoard();
@@ -426,7 +469,7 @@ export function actFpFrame() {
     if (self !== a.selfHidden) { a.el.style.visibility = (a.selfHidden = self) ? 'hidden' : ''; }
     if (self) continue;
     const fl = liftAt(T0, f.ax, f.ay);
-    const tf = `translate3d(${(f.ax * T).toFixed(1)}px,${fl.toFixed(1)}px,${(f.ay * T).toFixed(1)}px) rotateY(${(-deg).toFixed(1)}deg)`;
+    const tf = `translate3d(${(f.ax * T).toFixed(1)}px,${fl.toFixed(1)}px,${(f.ay * T).toFixed(1)}px) rotateY(${(-deg).toFixed(1)}deg)${bbP}`;
     if (tf !== a.tf) a.el.style.transform = (a.tf = tf);
     const hp = Math.max(0, Math.min(1, f.hp / (f.maxHp || f.hp || 1)));
     const w = (hp * 100).toFixed(0) + '%';
@@ -434,10 +477,10 @@ export function actFpFrame() {
     drawActor(f, a, V.yaw);
   }
   for (const d of V.dressing) {
-    const tf = `translate3d(${(d.x * T).toFixed(1)}px,0px,${(d.y * T).toFixed(1)}px) rotateY(${(-deg).toFixed(1)}deg)`;
+    const tf = `translate3d(${(d.x * T).toFixed(1)}px,0px,${(d.y * T).toFixed(1)}px) rotateY(${(-deg).toFixed(1)}deg)${bbP}`;
     if (tf !== d.tf) d.el.style.transform = (d.tf = tf);
   }
-  placeShots(V.yaw);
+  placeShots(V.yaw, bbP);
   drawCharge(me);
   syncHands(me, now);
 }
@@ -484,6 +527,7 @@ export function actFpToggle(kind, bridge) {
   if (!kind) {
     if (V) {
       if (V.onResize) window.removeEventListener('resize', V.onResize);
+      if (V.look) V.look.dispose();     // and hands the cursor back to the HUD
       if (V.hands) V.hands.dispose();
       V.host.remove();
       V = null;
@@ -499,17 +543,32 @@ export function actFpToggle(kind, bridge) {
       + '<div class="tfp-geo"></div><div class="tfp-bbs"></div>'
       + '</div></div><div class="tfp-haze"></div>'
       + '<div class="fp-hands"></div>'
-      + '<canvas class="afp-ring" width="72" height="72"></canvas>';
+      + '<canvas class="afp-ring" width="72" height="72"></canvas>'
+      // Everything a locked player cannot reach with a cursor, said before they
+      // lock: V is the only way back out of this camera once the mouse is taken,
+      // and the attack bar is unclickable but every slot is still a number key.
+      + '<div class="afp-look">Click to look &middot; <b>Esc</b> frees the mouse'
+      + ' &middot; <b>V</b> changes camera &middot; <b>1</b>&ndash;<b>6</b> attack</div>';
     host.style.background = `url(${cloudsPanel()}) repeat-x 0 6% / auto 30%,`
       + 'linear-gradient(rgb(92,132,188) 0%, rgb(128,156,196) 34%, rgb(156,174,196) 50%, rgb(112,120,132) 58%, rgb(74,80,92) 100%)';
     stage.appendChild(host);
     V = {
       host, world: host.querySelector('.tfp-world'), bridge,
-      pov: 'first', yaw: 0, wtf: '', last: 0,
+      pov: 'first', yaw: 0, pitch: 0, wtf: '', last: 0,
       actors: new Map(), shots: new Map(), dressing: [],
       boardKey: '', ringCv: host.querySelector('.afp-ring'),
       handsEl: host.querySelector('.fp-hands'), hands: null, handsFor: null, lastAnim: '',
+      look: null,
     };
+    // The mouse becomes the head. Taken on the host (which fills the stage),
+    // never on the HUD around it, and never on a touch device — where the
+    // stick IS the control and a pointer lock is a cursor thrown away.
+    V.look = createLook(host, {
+      enabled: () => !touchPrimary(),
+      ignore: '#actionJoystick',
+      onChange: (on) => { host.classList.toggle('afp-locked', on); },
+    });
+    host.classList.toggle('afp-touch', touchPrimary());
     // Open looking the way your fighter faces — the view begins as a change
     // of camera, never a change of heading.
     const me = (bridge.fighters() || [])[0];
@@ -541,4 +600,16 @@ if (typeof window !== 'undefined') {
     boardKey: V.boardKey,
   });
   window.__actFpStep = () => { actFpFrame(); return window.__actFpDebug(); };
+  // Look, without a mouse: a headless pane can never hold a pointer lock, so
+  // the only way to prove the steer's angle path is to hand it the same numbers
+  // the lock would have banked. Goes through actFpSteer, not around it.
+  window.__actFpLook = (yawRad, pitchRad) => {
+    if (!V) return null;
+    const prev = V.look;
+    V.look = { read: () => ({ yaw: yawRad || 0, pitch: pitchRad || 0 }), locked: () => true };
+    actFpSteer({}, 0);
+    V.look = prev;
+    actFpFrame();
+    return { ...window.__actFpDebug(), pitchDeg: +V.pitch.toFixed(2) };
+  };
 }

@@ -56,7 +56,15 @@ import {
 import { gearLevel, getRefineChance, getDrillChance, getLinkChance } from './items/blacksmithing.js';
 import { tileRng, elementsRng, rollDice, statMod, matXpNeeded, randInt, pick } from './engine/rng.js';
 import { tacFpToggle, tacFpSetSubject, tacFpSetPov, tacFpPov, tacFpSync, tacFpFrame, tacFpActive } from './tactical-fp.js';
-import { actFpToggle, actFpPov, actFpActive, actFpFrame, actFpSteer } from './action-fp.js';
+import { actFpToggle, actFpPov, actFpActive, actFpFrame, actFpSteer, actFpLookLocked } from './action-fp.js';
+import { readPad, padReset, touchPrimary, onTouchPrimary, PAD } from '../platform/input.js';
+import { claimPad } from '../platform/ui-pad.js';
+// While the arena's loop runs, the controller is steering a fighter and must
+// not also be walking the menu cursor. The loop self-stops the moment
+// #actionScreen goes inactive, so this is exactly the window that matters.
+// (The tactical board reads no input at all, so it needs no claim — its buttons
+// SHOULD be pad-navigable.)
+claimPad(function(){ return !!actionLoopRunning; });
 
 // ══════════════════════════════════════════════════════════════
 // THE CRUCIBLE — ATHANOR MODE v1.0
@@ -2896,6 +2904,12 @@ var _actionKeys = {};
 var _actionKeyHandler = null;
 var _actionKeyUpHandler = null;
 var _touchMove = { x: 0, y: 0 };   // virtual-joystick vector (-1..1), added to keyboard movement
+var _padAtk = [];                  // per-slot "held on the controller" flags, for charge edges
+var _actionBlur = null;            // blur/visibility handler — see the held-key trap below
+var _actionLockChange = null;      // the same drop, when the mouse is handed back
+var _joyTouchOff = null;           // onTouchPrimary unsubscribe (subscribed once per page)
+var _actionClick = null;           // locked-mouse swing handler
+var _actionStage = null;           // the element it is bound to
 var _guildBattle = null;           // { resolve, done } while a guild (non-run) battle is live
 var _koTimer = null;               // pending "battle decided" timeout, so it can be cancelled/tracked
 var _charge = null;                // { name, start } while the player HOLDS an attack (Shining-Soul hold-to-charge)
@@ -3044,6 +3058,18 @@ if (typeof window !== 'undefined'){
     p1._climbing = arenaOnClimb(_arenaT, p1.ax, p1.ay);
     return window.__arenaDebug();
   };
+  // Step the real-time loop by hand — a headless pane runs no rAF, so this is
+  // the only way to exercise input THROUGH the tick (the mouse, the pad, the
+  // charge edges) rather than around it.
+  window.__arenaStep = function(n, dt){
+    var steps = (n == null ? 1 : n);   // 0 means "just read", not "one tick"
+    for (var i = 0; i < steps; i++) actionTick(dt || 1 / 60);
+    return {
+      p1: p1 && { x: +p1.ax.toFixed(2), y: +p1.ay.toFixed(2), facing: +p1.facing.toFixed(2), anim: p1.anim && p1.anim.name },
+      charge: _charge && _charge.name,
+      fp: actFpActive() ? actFpPov() : null,
+    };
+  };
 }
 
 /** Nudge a fighter to the nearest spot they can legally stand, spiralling out
@@ -3174,7 +3200,16 @@ function startActionLoop(){
   _actionKeyHandler = function(e){
     var scr = document.getElementById('actionScreen');
     if (!scr || !scr.classList.contains('active')) return;
+    // Ctrl-W is the browser's tab, not a step forward. (The delve has always
+    // guarded this; the arena swallowed every shortcut on the keyboard.)
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
     var k = e.key.toLowerCase();
+    // The camera key. Under a pointer lock the mouse cannot reach #actCamFp, so
+    // without a key the inside camera would be a room with no door. Its own
+    // branch, above the movement whitelist, so 'v' never lands in _actionKeys;
+    // and e.repeat-guarded, or holding it would tear the FP host down and
+    // rebuild it several times a second.
+    if (k === 'v'){ if (!e.repeat) actViewCycle(); e.preventDefault(); return; }
     // q/e are the first-person turn keys (the delve's); dead weight otherwise.
     if (k === 'w'||k === 'a'||k === 's'||k === 'd'||k === 'q'||k === 'e'||k === 'arrowup'||k === 'arrowdown'||k === 'arrowleft'||k === 'arrowright'){
       _actionKeys[k] = true; e.preventDefault();
@@ -3195,7 +3230,43 @@ function startActionLoop(){
   document.addEventListener('keydown', _actionKeyHandler);
   document.addEventListener('keyup', _actionKeyUpHandler);
   _touchMove.x = 0; _touchMove.y = 0;
+  _padAtk = [];
+  padReset();
   ensureActionJoystick();
+  // NOTHING FIRES A KEYUP when the window goes away — not Esc leaving a pointer
+  // lock, not alt-tab, not forfeitAction's own confirm(). A held W would stay
+  // true in _actionKeys and the fighter would keep walking into the fence while
+  // you read the dialog. Drop every held input whenever focus does.
+  _actionBlur = function(){
+    _actionKeys = {};
+    _touchMove.x = 0; _touchMove.y = 0;
+    _padAtk = [];
+    if (_charge) cancelChargeFor(_charge.name);
+  };
+  window.addEventListener('blur', _actionBlur);
+  document.addEventListener('visibilitychange', _actionBlur);
+  // Esc gives the mouse back WITHOUT a blur and without a pointerup, so a
+  // charge held on the mouse button at that moment would never be released and
+  // would sit there arming the next click. Losing the lock is its own kind of
+  // letting go — but TAKING it is not, or clicking to look would stop a walk
+  // already under way.
+  _actionLockChange = function(){ if (!actFpLookLocked()) _actionBlur(); };
+  document.addEventListener('pointerlockchange', _actionLockChange);
+  // Once the mouse belongs to the camera it may as well hold the sword: a
+  // locked left-click is the first attack, held to charge, exactly like the
+  // first button on the bar. Only ONCE LOCKED, though — the click that buys
+  // the lock is the player asking for the mouse, not swinging with it.
+  _actionClick = function(e){
+    if (!actFpLookLocked() || e.button !== 0) return;
+    if (e.target && e.target.closest && e.target.closest('#actionJoystick')) return;
+    var name = p1 && p1.attacks && p1.attacks[0]; if (!name) return;
+    if (e.type === 'pointerdown') startCharge(name); else releaseCharge(name);
+  };
+  _actionStage = document.querySelector('#actionScreen .action-stage');
+  if (_actionStage){
+    _actionStage.addEventListener('pointerdown', _actionClick);
+    _actionStage.addEventListener('pointerup', _actionClick);
+  }
 
   function loop(now){
     if (!actionLoopRunning) return;
@@ -3216,13 +3287,45 @@ function stopActionLoop(){
   if (_actionKeyHandler) document.removeEventListener('keydown', _actionKeyHandler);
   if (_actionKeyUpHandler) document.removeEventListener('keyup', _actionKeyUpHandler);
   _actionKeyHandler = _actionKeyUpHandler = null;
+  if (_actionBlur){
+    window.removeEventListener('blur', _actionBlur);
+    document.removeEventListener('visibilitychange', _actionBlur);
+    _actionBlur = null;
+  }
+  if (_actionLockChange){
+    document.removeEventListener('pointerlockchange', _actionLockChange);
+    _actionLockChange = null;
+  }
+  if (_actionStage && _actionClick){
+    _actionStage.removeEventListener('pointerdown', _actionClick);
+    _actionStage.removeEventListener('pointerup', _actionClick);
+  }
+  _actionStage = _actionClick = null;
   _touchMove.x = 0; _touchMove.y = 0;
-  var joy = document.getElementById('actionJoystick'); if (joy) joy.classList.remove('active');
+  _padAtk = [];
+  padReset();   // a trigger still held as the fight ends is not a fresh press in the next one
+  syncActionJoyVis();
 }
 
-// Virtual movement stick for touch devices (the arena is otherwise WASD-only).
+// Show or hide the movement stick, and never leave it half-thrown: a stick that
+// disappears mid-drag never gets its pointerup, so _touchMove keeps whatever it
+// last held and the fighter walks into a wall for the rest of the match.
+function syncActionJoyVis(){
+  var joy = document.getElementById('actionJoystick'); if (!joy) return;
+  var on = touchPrimary() && actionLoopRunning;
+  joy.classList.toggle('active', on);
+  if (!on){ _touchMove.x = 0; _touchMove.y = 0; }
+}
+
+// Virtual movement stick — for THUMBS ONLY (the arena is otherwise WASD-only).
 // Lives inside #actionScreen; a pointer drag sets _touchMove, which actionTick adds
 // to the keyboard vector. Attacks are already tappable (buildActionAttackBar buttons).
+//
+// It used to appear everywhere, and on a desktop that made a painted knob the
+// only way to turn: you dragged it with a mouse that could have simply BEEN the
+// look. It is gated on the primary pointer now — not on touch capability, which
+// every touchscreen laptop reports — and comes back the instant someone on a
+// hybrid machine actually puts a finger on the glass, mid-battle if need be.
 function ensureActionJoystick(){
   // Screen-space host — the arena itself is a tilted 3D plane now, and a joystick
   // must never live on a rotated surface (its pointer math is 2D).
@@ -3264,7 +3367,38 @@ function ensureActionJoystick(){
     joy.addEventListener('pointerup', release);
     joy.addEventListener('pointercancel', release);
   }
-  joy.classList.add('active');
+  // Once per page, not once per battle: ensureActionJoystick runs on every loop
+  // start but only builds the element the first time.
+  if (!_joyTouchOff) _joyTouchOff = onTouchPrimary(syncActionJoyVis);
+  syncActionJoyVis();
+}
+
+// The controller's face buttons ARE the attack bar: six slots, in the order
+// buildActionAttackBar lays them out. Routed through startCharge/releaseCharge
+// rather than tryActionAttack, so holding a button charges exactly as holding
+// the key or the on-screen button does — one rule, three ways to press it.
+//
+// The press is tracked here rather than read from `hit`/`down` alone because a
+// slot has TWO buttons on it (RT doubles for A, the reflex anyone arriving from
+// a shooter reaches for): the edge that matters is the slot's, not a button's.
+var PAD_SLOT = null;
+function actionPadButtons(pad){
+  if (!PAD_SLOT) PAD_SLOT = [[PAD.A, PAD.RT], [PAD.B], [PAD.X], [PAD.Y], [PAD.RB], [PAD.LB]];
+  if (!pad){ _padAtk = []; return; }
+  for (var i = 0; i < PAD_SLOT.length; i++){
+    var name = p1.attacks && p1.attacks[i];
+    var held = false;
+    for (var j = 0; j < PAD_SLOT[i].length; j++) if (pad.down(PAD_SLOT[i][j])) held = true;
+    if (name){
+      if (held && !_padAtk[i]) startCharge(name);
+      else if (!held && _padAtk[i]) releaseCharge(name);
+    }
+    _padAtk[i] = held;
+  }
+  // Select cycles the camera — the pad's only route out of the inside view,
+  // and never confusable with a swing. Forfeit stays on the mouse and its
+  // confirm(); no controller button ends a run.
+  if (pad.hit(PAD.SELECT)) actViewCycle();
 }
 
 function actionTick(dt){
@@ -3278,19 +3412,31 @@ function actionTick(dt){
     _koTimer = setTimeout(endActionBattle, 500);
     return;
   }
-  // ─── Player movement (held keys) ─────────────────────────────
+  // ─── Player movement (held keys, the stick, the mouse, the pad) ──
+  // ONE poll per tick, stashed: readPad's `hit` is an edge against the previous
+  // read, so a second call this frame would swallow the press it belongs to.
+  var _pad = readPad();
   var sp1 = ((p1.speed||4) * 0.9);       // tiles/sec
   var dx = 0, dy = 0;
   if (actFpActive()){
     // The delve's controls, in real time: W/S walk the way you are looking
     // (and back), A/D sidestep, ←/→ and Q/E turn, the stick turns on X and
-    // walks on Y. The steer owns the camera yaw and hands back a WORLD
-    // vector — same speed, same slide rules — and the yaw becomes the
-    // fighter's facing, so pose, Blink direction and camera are one fact.
+    // walks on Y, the LEFT pad stick walks and the RIGHT one looks. The steer
+    // owns the camera yaw and hands back a WORLD vector — same speed, same
+    // slide rules — and the yaw becomes the fighter's facing, so pose, Blink
+    // direction and camera are one fact.
+    //
+    // Every term here is a RATE the steer multiplies by dt. The mouse is not:
+    // its travel is already an angle, so it is drained inside actFpSteer and
+    // added straight to the yaw. Feeding it through `turn` would clip it at ±1
+    // and make sensitivity depend on the frame rate.
     var _st = actFpSteer({
-      turn: ((_actionKeys.arrowright || _actionKeys.e) ? 1 : 0) - ((_actionKeys.arrowleft || _actionKeys.q) ? 1 : 0) + _touchMove.x,
-      strafe: (_actionKeys.d ? 1 : 0) - (_actionKeys.a ? 1 : 0),
-      fwd: ((_actionKeys.w || _actionKeys.arrowup) ? 1 : 0) - ((_actionKeys.s || _actionKeys.arrowdown) ? 1 : 0) - _touchMove.y,
+      turn: ((_actionKeys.arrowright || _actionKeys.e) ? 1 : 0) - ((_actionKeys.arrowleft || _actionKeys.q) ? 1 : 0)
+        + _touchMove.x + (_pad ? _pad.rx : 0),
+      strafe: (_actionKeys.d ? 1 : 0) - (_actionKeys.a ? 1 : 0) + (_pad ? _pad.mx : 0),
+      fwd: ((_actionKeys.w || _actionKeys.arrowup) ? 1 : 0) - ((_actionKeys.s || _actionKeys.arrowdown) ? 1 : 0)
+        - _touchMove.y - (_pad ? _pad.my : 0),   // a stick pushed forward reads -1
+      pitch: _pad ? _pad.ry : 0,
     }, dt);
     if (_st){ dx = _st.x; dy = _st.y; p1.facing = _st.yaw; }
   } else {
@@ -3299,7 +3445,11 @@ function actionTick(dt){
     if (_actionKeys.a || _actionKeys.arrowleft) dx -= 1;
     if (_actionKeys.d || _actionKeys.arrowright) dx += 1;
     dx += _touchMove.x; dy += _touchMove.y;   // virtual joystick (touch) adds to keyboard input
+    // Over the field there is no camera to look with — the facing is derived
+    // from the walk (below) — so the pad only ever walks here.
+    if (_pad){ dx += _pad.mx; dy += _pad.my; }
   }
+  actionPadButtons(_pad);
   // Rungs cost time: crossing a ladder or a vine is deliberately slow, which is
   // what makes a ledge worth holding and a climber worth shooting at.
   p1._climbing = arenaOnClimb(_arenaT, p1.ax, p1.ay);

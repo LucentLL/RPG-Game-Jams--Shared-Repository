@@ -2,7 +2,8 @@
  * @file The Delve — walk a guild member through a 2.5D explorable locale.
  *
  * Opened from the Wilds room (hall.js). One member marches in on foot: WASD /
- * arrows (or the touch stick) drive them across a baked tile map in the
+ * arrows, a controller's left stick or d-pad, or (on a touch device, and only
+ * there) the on-screen stick drive them across a baked tile map in the
  * top-down cliff style — plateau tops, rubble lips, rock faces over chasm.
  * Creatures from the locale's food chain roam the ground; closing with one
  * hands off to the REAL battle engine (hall's `fight` hook → battle-bridge
@@ -26,6 +27,8 @@ import { TILES_BASE, ART_BASE } from '../config/assets.js';
 import { preyById } from './locales.js';
 import { THEMES, DECALS, ORE_KINDS, oreKindAt, mapForLocale, validateMap } from './delve-maps.js';
 import { artSprite } from './art.js';
+import { readPad, padReset, touchPrimary, onTouchPrimary, PAD } from '../platform/input.js';
+import { claimPad } from '../platform/ui-pad.js';
 
 const TILE = 48;
 const TILT = 52;               // plane tilt in degrees — matches the ranch's diorama
@@ -99,6 +102,14 @@ const screenActive = () => {
   const el = document.getElementById('delveScreen');
   return !!el && el.classList.contains('active');
 };
+
+// While the walk is live the controller is walking someone, not a menu. Every
+// clause earns its place: `screenActive` rather than "a delve exists", because
+// an encounter hands the SCREEN to the arena (which claims the pad itself); and
+// `!ended` / `!working` because the end-of-day summary and the work chooser are
+// plain DOM cards with no pad binding of their own — releasing the claim is
+// what makes them navigable at all.
+claimPad(() => !!D && screenActive() && !D.ended && !D.working && !D.fighting);
 
 const _imgCache = {};
 /** Shared with the first-person view (delve-fp.js), which needs the same sheets. */
@@ -652,7 +663,7 @@ function mountScene(prep, entry) {
   // Arriving in a room must not carry the walk that brought you here: drop held
   // input (as a bout does) and ignore movement for a beat, so a key still down
   // from stepping through the door can't march you straight back out.
-  D.keys = {}; D.joy = null;
+  D.keys = {}; D.joy = null; D.pad = null;
   D.settleUntil = performance.now() + 350;
 
   // Raised blocks over a tile high hide people too — a room-height shelf wall
@@ -1204,42 +1215,55 @@ function wireInput() {
   window.addEventListener('keyup', D.onKeyUp);
 
   // Touch stick — appears under the thumb anywhere on the lower-left half.
-  if ('ontouchstart' in window || navigator.maxTouchPoints > 0) {
-    const joy = document.createElement('div');
-    joy.className = 'delve-joy';
-    joy.innerHTML = '<div class="dj-base"><div class="dj-knob"></div></div>';
-    D.host.appendChild(joy);
-    D.joyEl = joy;
-    const base = joy.querySelector('.dj-base'), knob = joy.querySelector('.dj-knob');
-    let pid = null, cx = 0, cy = 0;
-    joy.addEventListener('pointerdown', (e) => {
-      pid = e.pointerId; cx = e.clientX; cy = e.clientY;
-      base.style.left = cx + 'px'; base.style.top = cy + 'px';
-      base.classList.add('on');
-      joy.setPointerCapture(pid);
-    });
-    joy.addEventListener('pointermove', (e) => {
-      if (e.pointerId !== pid) return;
-      let dx = e.clientX - cx, dy = e.clientY - cy;
-      const m = Math.hypot(dx, dy);
-      if (m > 42) { dx = dx / m * 42; dy = dy / m * 42; }
-      knob.style.transform = `translate(${dx}px,${dy}px)`;
-      D.joy = m > 8 ? { x: dx / 42, y: dy / 42 } : null;
-    });
-    const end = (e) => {
-      if (e.pointerId !== pid) return;
-      pid = null; D.joy = null;
-      base.classList.remove('on');
-      knob.style.transform = '';
-    };
-    joy.addEventListener('pointerup', end);
-    joy.addEventListener('pointercancel', end);
-  }
+  //
+  // Only where a thumb is the pointer. The old gate was touch CAPABILITY, which
+  // every touchscreen laptop answers yes to, so a desktop player got a painted
+  // stick over a field they were already walking with WASD. `touchPrimary` asks
+  // which device is actually driving, and the subscription below puts the stick
+  // back the moment somebody on a hybrid machine reaches for the glass.
+  D.joyTouchOff = onTouchPrimary(() => { if (D && !D.joyEl) buildTouchStick(); });
+  if (touchPrimary()) buildTouchStick();
+}
+
+/** The stick itself, split out so the touch latch can build it late. */
+function buildTouchStick() {
+  if (!D || !D.host) return;
+  const joy = document.createElement('div');
+  joy.className = 'delve-joy';
+  joy.innerHTML = '<div class="dj-base"><div class="dj-knob"></div></div>';
+  D.host.appendChild(joy);
+  D.joyEl = joy;
+  const base = joy.querySelector('.dj-base'), knob = joy.querySelector('.dj-knob');
+  let pid = null, cx = 0, cy = 0;
+  joy.addEventListener('pointerdown', (e) => {
+    pid = e.pointerId; cx = e.clientX; cy = e.clientY;
+    base.style.left = cx + 'px'; base.style.top = cy + 'px';
+    base.classList.add('on');
+    joy.setPointerCapture(pid);
+  });
+  joy.addEventListener('pointermove', (e) => {
+    if (e.pointerId !== pid) return;
+    let dx = e.clientX - cx, dy = e.clientY - cy;
+    const m = Math.hypot(dx, dy);
+    if (m > 42) { dx = dx / m * 42; dy = dy / m * 42; }
+    knob.style.transform = `translate(${dx}px,${dy}px)`;
+    D.joy = m > 8 ? { x: dx / 42, y: dy / 42 } : null;
+  });
+  const end = (e) => {
+    if (e.pointerId !== pid) return;
+    pid = null; D.joy = null;
+    base.classList.remove('on');
+    knob.style.transform = '';
+  };
+  joy.addEventListener('pointerup', end);
+  joy.addEventListener('pointercancel', end);
 }
 
 function unwireInput() {
   window.removeEventListener('keydown', D.onKeyDown);
   window.removeEventListener('keyup', D.onKeyUp);
+  if (D.joyTouchOff) { D.joyTouchOff(); D.joyTouchOff = null; }
+  padReset();   // a button held as you leave is not a fresh press on the way back in
 }
 
 // ---------------------------------------------------------------------------
@@ -1308,6 +1332,10 @@ function movePlayer(dt) {
   let ux = (D.keys.d || D.keys.arrowright ? 1 : 0) - (D.keys.a || D.keys.arrowleft ? 1 : 0);
   let uy = (D.keys.s || D.keys.arrowdown ? 1 : 0) - (D.keys.w || D.keys.arrowup ? 1 : 0);
   if (D.joy) { ux += D.joy.x; uy += D.joy.y; }
+  // The camera here has no yaw to steer (a fixed tilt, delve.js TILT), so a
+  // controller only ever walks: left stick and d-pad both, in field space, the
+  // same screen-relative axes the keys use.
+  if (D.pad) { ux += D.pad.mx; uy += D.pad.my; }
   const m = Math.hypot(ux, uy);
   if (m > 0.01) {
     ux /= Math.max(1, m); uy /= Math.max(1, m);
@@ -1666,7 +1694,7 @@ async function engage(c) {
   if (D.fighting || D.ended) return;
   D.fighting = true;
   D.gfx.setAnim(D.player.actor, 'idle'); D.player.moving = false;
-  D.keys = {}; D.joy = null;
+  D.keys = {}; D.joy = null; D.pad = null;
   let bout = null;
   try { bout = await D.hooks.fight(c.prey.id); }
   catch (e) { console.error('delve: bout failed', e); } // null bout → graceful end below
@@ -1784,6 +1812,14 @@ function stepSim(now) {
   // about) but the walker holds still, so input left over from the doorway
   // can't walk them back through it.
   const settling = now < D.settleUntil;
+  // One controller read per frame, kept for this frame only — the edges in it
+  // are spent by whoever looks first. Polled OUT here rather than in movePlayer
+  // because A-to-work has to keep answering while the walk is frozen.
+  D.pad = readPad();
+  if (D.pad && !D.ended && !D.fighting && !D.transiting){
+    if (D.pad.hit(PAD.A)) beginUse();          // the E / Enter / Space key
+    if (D.pad.hit(PAD.SELECT)) swapToFp();     // the HUD's "1st person"
+  }
   // `working` freezes the walk the same way a bout does — the work animation
   // owns the actor while it runs.
   if (!D.fighting && !D.transiting && !D.working) {

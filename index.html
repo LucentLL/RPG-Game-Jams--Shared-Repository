@@ -35,7 +35,7 @@
     <div class="sub">Will you shape your vessel by hand, or let fate cast it?</div>
     <button class="title-btn" onclick="openBuilder()">✦ FORGE BY HAND ✦</button>
     <button class="title-btn" onclick="startRunRandom()">☉ RANDOM VESSEL ☉</button>
-    <button class="title-btn secondary" onclick="returnToTitle()">↩ back</button>
+    <button class="title-btn secondary" data-pad-back onclick="returnToTitle()">↩ back</button>
   </div>
 </div>
 
@@ -60,7 +60,7 @@
       <div class="builder-controls" id="builderControls"></div>
     </div>
     <div class="builder-actions">
-      <button class="builder-back" onclick="showForgeChoice()">↩ back</button>
+      <button class="builder-back" data-pad-back onclick="showForgeChoice()">↩ back</button>
       <button class="builder-randomize" onclick="randomizeBuilder()">↻ randomize</button>
       <button class="title-btn" style="display:inline-block;width:auto;padding:10px 28px" onclick="confirmBuilder()">⚗ ENTER ⚗</button>
     </div>
@@ -93,7 +93,7 @@
       <div class="builder-controls" id="debugControls"></div>
     </div>
     <div class="builder-actions">
-      <button class="builder-back" onclick="returnToTitle()">↩ back to title</button>
+      <button class="builder-back" data-pad-back onclick="returnToTitle()">↩ back to title</button>
       <button class="builder-randomize" onclick="randomizeDebug()">↻ randomize parts</button>
     </div>
   </div>
@@ -161,7 +161,7 @@
       <div class="action-actor" id="actionP2Wrap"><div class="aa-standee"><canvas id="actionP2Cv" class="action-fighter" width="96" height="96"></canvas></div></div>
     </div>
   </div>
-  <div class="action-help">Move: WASD / arrows / drag the stick · Attack: tap a button or 1–4</div>
+  <div class="action-help">Move: WASD / arrows / left stick · Look: mouse (click the view) or right stick · Attack: 1–6, a button, or A/RT · <b>V</b> changes camera</div>
   <div class="cam-controls" id="actCam">
     <button class="cam-btn" onclick="actZoom(1.2)" title="Zoom in">＋</button>
     <button class="cam-btn" onclick="actZoom(0.83)" title="Zoom out">－</button>
@@ -263,7 +263,7 @@
 <div class="screen" id="gameOverScreen">
   <div class="go-title" style="color:var(--danger)">☠ DEFEAT ☠</div>
   <div class="go-stats" id="goStats"></div>
-  <button class="title-btn" style="margin-top:20px" onclick="returnToTitle()">RETURN TO TITLE</button>
+  <button class="title-btn" style="margin-top:20px" data-pad-back onclick="returnToTitle()">RETURN TO TITLE</button>
 </div>
 
 <!-- ═══ VICTORY ═══ -->
@@ -279,7 +279,7 @@
 <div class="screen" id="pantheonScreen">
   <div class="pantheon-title">☿ THE PANTHEON ☿</div>
   <div class="pantheon-list" id="pantheonList"></div>
-  <button class="title-btn secondary" style="margin-top:16px" onclick="returnToTitle()">RETURN</button>
+  <button class="title-btn secondary" style="margin-top:16px" data-pad-back onclick="returnToTitle()">RETURN</button>
 </div>
 
 <!-- Dice Overlay -->

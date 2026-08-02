@@ -1,0 +1,25 @@
+/* ═══ THE MENU CURSOR (src/platform/ui-pad.js) ═══
+   Where a controller or the arrow keys currently are. Shown ONLY while one of
+   those is steering — `body.pad-nav` — so a mouse player never sees it.
+
+   Deliberately NOT gold: a gold outline already means something in three places
+   (a kept globe marker, a building being moved, a lab preview), and a fourth
+   meaning would make all four ambiguous. Near-white, and a box-shadow rather
+   than a border or an outline, so nothing reflows when the cursor lands. */
+:root { --pad-ring: #f2ece0; }
+
+body.pad-nav .pad-focus {
+  /* !important is load-bearing: several :hover rules in battle.css and guild.css
+     are more specific than this and would overwrite the ring with their own glow
+     whenever the mouse happened to be resting on the cursor's element. */
+  box-shadow: 0 0 0 2px var(--bg), 0 0 0 4px var(--pad-ring), 0 0 14px rgba(242,236,224,0.4) !important;
+  border-radius: inherit;
+  position: relative;
+  z-index: 3;              /* or a tight grid's neighbour clips the ring */
+  animation: padPulse 1.6s ease-in-out infinite;
+}
+/* Our own .focus() must never draw the browser's ring on top of ours. */
+body.pad-nav .pad-focus:focus { outline: none; }
+
+@keyframes padPulse { 0%,100% { filter: brightness(1); } 50% { filter: brightness(1.13); } }
+@media (prefers-reduced-motion: reduce) { body.pad-nav .pad-focus { animation: none; } }
