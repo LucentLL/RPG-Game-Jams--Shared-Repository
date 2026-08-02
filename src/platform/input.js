@@ -112,65 +112,76 @@ export function invertLook(on) {
 }
 
 /**
- * Pointer-lock look over a host element.
+ * Look, on a held mouse button — the MMO grammar, and for the same reason.
  *
- * Clicking the host takes the lock and hides the cursor; the browser's own Esc
- * gives it back. While locked, mouse travel banks into a yaw/pitch pair that
- * the lens drains once a frame. Clicks on real controls are LEFT ALONE — a HUD
- * button inside the host must stay a button, so anything that looks like a
- * control (or opts out with `data-nolook`) never triggers the grab.
+ * This began as a pointer lock: click and the cursor is gone until Esc. It
+ * aims beautifully and it took the whole HUD away with it. Attacks two through
+ * six live on buttons, and while the game owned the cursor there was no way to
+ * press them; the player's report was simply "when I use the mouse to aim, I am
+ * unable to select attacks", which is the honest description of a game that has
+ * taken your mouse and left the interface it needs.
  *
- * @param {HTMLElement} host          the element the lock is taken on
+ * So: RIGHT-DRAG TURNS, and the cursor is never taken. Hold the right button
+ * and the mouse aims; let go and it is a cursor again, over an attack bar that
+ * was clickable the entire time. It is what FFXI and FFXIV do, and it is what
+ * makes one screen serve both hands. Left-click is left entirely alone for the
+ * lens to use as a swing.
+ *
+ * The drag captures the pointer, so travel keeps arriving after the cursor
+ * leaves the window — the one thing a lock genuinely did better, bought back.
+ *
+ * @param {HTMLElement} host          the element the drag is taken on
  * @param {object}     [opts]
- * @param {(locked:boolean)=>void} [opts.onChange] told when the lock flips
- * @param {()=>boolean}            [opts.enabled]  gate — false means "don't grab"
- * @param {string}                 [opts.ignore]   selector whose clicks are not a grab
+ * @param {(looking:boolean)=>void} [opts.onChange] told when the drag starts/stops
+ * @param {()=>boolean}             [opts.enabled]  gate — false means "don't look"
+ * @param {string}                  [opts.ignore]   selector whose drags are not a look
  * @returns {{locked():boolean, request():void, release():void,
  *            read():{yaw:number,pitch:number}, dispose():void}}
  */
 export function createLook(host, opts = {}) {
-  let yaw = 0, pitch = 0, dead = false;
-  const owns = () => document.pointerLockElement === host;
+  let yaw = 0, pitch = 0, dead = false, dragId = null;
+  const owns = () => dragId !== null;
 
   const onMove = (e) => {
-    if (!owns()) return;
+    if (!owns() || e.pointerId !== dragId) return;
     const mx = e.movementX || 0, my = e.movementY || 0;
+    // A single event carrying a screen's worth of travel is a warp, not a hand.
     if (Math.abs(mx) > LOOK_SANE_PX || Math.abs(my) > LOOK_SANE_PX) return;
     yaw += mx * LOOK_RAD_PER_PX * _sens;
     pitch += my * LOOK_RAD_PER_PX * _sens * (_invertY ? -1 : 1);
   };
-  const onLockChange = () => {
-    if (dead) return;
-    // Whatever travel was banked at the boundary belongs to the last frame of
-    // the last lock, and firing it into the first frame of the next one snaps
-    // the camera. Drop it.
-    yaw = pitch = 0;
-    if (opts.onChange) opts.onChange(owns());
-  };
   const onDown = (e) => {
     if (dead || owns()) return;
     if (opts.enabled && !opts.enabled()) return;
-    if (e.button != null && e.button !== 0) return;      // right-click is a menu, not a grab
-    // A control inside the host stays a control. The virtual stick is the one
-    // that bites: it lives on the same stage, calls preventDefault and STILL
-    // bubbles, so a thumb-drag would take the mouse away from a HUD it needs.
+    if (e.button !== 2) return;                 // the RIGHT button, and only it
+    // A control inside the host stays a control.
     const t = e.target;
     const skip = 'button,a,input,select,textarea,[data-nolook]' + (opts.ignore ? ',' + opts.ignore : '');
     if (t && t.closest && t.closest(skip)) return;
-    request();
+    dragId = e.pointerId;
+    yaw = pitch = 0;                            // never carry travel across a drag
+    try { host.setPointerCapture(e.pointerId); } catch (_) {}
+    e.preventDefault();
+    if (opts.onChange) opts.onChange(true);
   };
+  const onUp = (e) => {
+    if (!owns() || e.pointerId !== dragId) return;
+    try { host.releasePointerCapture(dragId); } catch (_) {}
+    dragId = null;
+    yaw = pitch = 0;
+    if (opts.onChange) opts.onChange(false);
+  };
+  // Right-dragging a 3D view must not also open the browser's menu on release.
+  const onMenu = (e) => { if (!dead && (!opts.enabled || opts.enabled())) e.preventDefault(); };
 
-  function request() {
-    if (dead || owns()) return;
-    try { host.requestPointerLock(); } catch (_) { /* denied, or no lock in this browser */ }
-  }
-  function release() {
-    if (owns()) { try { document.exitPointerLock(); } catch (_) {} }
-  }
+  function request() { /* nothing to request: looking is a held button */ }
+  function release() { if (owns()) onUp({ pointerId: dragId }); }
 
   host.addEventListener('pointerdown', onDown);
-  document.addEventListener('mousemove', onMove);
-  document.addEventListener('pointerlockchange', onLockChange);
+  host.addEventListener('pointermove', onMove);
+  host.addEventListener('pointerup', onUp);
+  host.addEventListener('pointercancel', onUp);
+  host.addEventListener('contextmenu', onMenu);
 
   return {
     locked: owns,
@@ -185,8 +196,10 @@ export function createLook(host, opts = {}) {
       dead = true;
       release();
       host.removeEventListener('pointerdown', onDown);
-      document.removeEventListener('mousemove', onMove);
-      document.removeEventListener('pointerlockchange', onLockChange);
+      host.removeEventListener('pointermove', onMove);
+      host.removeEventListener('pointerup', onUp);
+      host.removeEventListener('pointercancel', onUp);
+      host.removeEventListener('contextmenu', onMenu);
     },
   };
 }

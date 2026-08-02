@@ -1479,9 +1479,9 @@ export async function openDelveFp(localeId, member, hooks, carry) {
       </div>
       <div class="fp-keys">
         <b>W</b> forward · <b>S</b> back · <b>A</b>/<b>D</b> sidestep
-        · <b>←</b>/<b>→</b> or the <b>mouse</b> turn · <b>Space</b> or <b>click</b> to strike
+        · <b>←</b>/<b>→</b> or <b>right-drag</b> turn · <b>Space</b> or <b>click</b> to strike
         · hold <b>Shift</b> to guard · <b>R</b> drink · <b>Esc</b> leave
-        <br>Click the world to take the mouse, <b>Esc</b> to give it back.
+        <br>Hold the <b>right</b> mouse button to turn; the left one strikes.
         A controller works too: sticks walk and turn, <b>A</b> strikes, <b>LT</b> guards.
       </div>
       <div class="fp-pad">
@@ -1614,13 +1614,8 @@ function wireInput() {
   // is: the thing you can see is the thing you can hit.
   F.onStagePointer = (e) => {
     if (!F || F.ended) return;
-    if (e.button !== 0) return;          // right-click is a menu, and never was a swing
+    if (e.button !== 0) return;          // the right button turns; the left one strikes
     e.preventDefault();
-    // On a desktop the first click buys the mouse for the look; from then on
-    // every click is a swing. Spending that first one on a swing too would
-    // strike at whatever happened to be ahead when the player only meant to
-    // take hold of the view.
-    if (!touchPrimary() && !(F.look && F.look.locked())) return;
     trySwing();
   };
   const stage = F.host.querySelector('.fp-stage');
@@ -1628,7 +1623,7 @@ function wireInput() {
   F.look = createLook(F.host, {
     enabled: () => !touchPrimary(),
     ignore: '.delve-hud,.fp-pad,.fp-map,.fp-vitals',
-    onChange: (on) => { if (F) F.host.classList.toggle('fp-locked', on); },
+    onChange: (on) => { if (F) F.host.classList.toggle('fp-looking', on); },
   });
   F.lookAcc = 0;
   F.onResize = () => { fitLens(); fitHands(); mountSky(); };

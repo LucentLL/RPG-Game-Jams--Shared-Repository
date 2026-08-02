@@ -74,9 +74,8 @@ let V = null;
 
 export function actFpActive() { return !!V; }
 export function actFpPov() { return V ? V.pov : 'first'; }
-/** Does the mouse currently belong to the camera? Crucible asks before it
- *  reads a click as a swing — an unlocked click is only ever "take the mouse". */
-export function actFpLookLocked() { return !!(V && V.look && V.look.locked()); }
+/** Is the right button down, turning the view? */
+export function actFpLooking() { return !!(V && V.look && V.look.locked()); }
 
 // ---------------------------------------------------------------------------
 // Textures of its own — the arena's terrain props, drawn or cut once
@@ -578,11 +577,11 @@ export function actFpToggle(kind, bridge) {
       + '</div></div><div class="tfp-haze"></div>'
       + '<div class="fp-hands"></div>'
       + '<canvas class="afp-ring" width="72" height="72"></canvas>'
-      // Everything a locked player cannot reach with a cursor, said before they
-      // lock: V is the only way back out of this camera once the mouse is taken,
-      // and the attack bar is unclickable but every slot is still a number key.
-      + '<div class="afp-look">Click to look &middot; <b>Esc</b> frees the mouse'
-      + ' &middot; <b>V</b> changes camera &middot; <b>1</b>&ndash;<b>6</b> attack</div>';
+      // Said once, in the order you need it: how to aim, how to hit, how to
+      // leave. The cursor is never taken, so the attack bar below is clickable
+      // the whole time — which is the entire reason the look is a held button.
+      + '<div class="afp-look"><b>Right-drag</b> to look &middot; <b>Left-click</b> or <b>1</b>&ndash;<b>6</b> to attack'
+      + ' &middot; <b>V</b> changes camera</div>';
     host.style.background = `url(${cloudsPanel()}) repeat-x 0 6% / auto 30%,`
       + 'linear-gradient(rgb(92,132,188) 0%, rgb(128,156,196) 34%, rgb(156,174,196) 50%, rgb(112,120,132) 58%, rgb(74,80,92) 100%)';
     stage.appendChild(host);
@@ -600,7 +599,10 @@ export function actFpToggle(kind, bridge) {
     V.look = createLook(host, {
       enabled: () => !touchPrimary(),
       ignore: '#actionJoystick',
-      onChange: (on) => { host.classList.toggle('afp-locked', on); },
+      onChange: (on) => {
+        host.classList.toggle('afp-looking', on);
+        if (on) host.classList.add('afp-aimed');   // the hint has been read
+      },
     });
     host.classList.toggle('afp-touch', touchPrimary());
     // Open looking the way your fighter faces — the view begins as a change
