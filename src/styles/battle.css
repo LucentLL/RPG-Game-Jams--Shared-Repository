@@ -310,7 +310,7 @@
 .tfp-2s    { backface-visibility: visible; }
 /* The world outside the lists: ground tiles at one-tile scale, stands tile
    along their length — never one texture stretched across the whole ring. */
-.tfp-apron { background-size: 900px 900px; background-repeat: repeat; }
+.tfp-apron { background-size: var(--tfp-t,900px) var(--tfp-t,900px); background-repeat: repeat; }
 .tfp-ring  { background-size: auto 100%; background-repeat: repeat-x; }
 /* Standing things: bottom-anchored on their ground point, turned to the camera. */
 .tfp-bb {
@@ -318,7 +318,7 @@
   transform-origin: 50% 100%;
   image-rendering: pixelated;
   pointer-events: none;
-  filter: drop-shadow(0 6px 7px rgba(0,0,0,0.6));
+  filter: drop-shadow(0 calc(var(--tfp-t,900px)/150) calc(var(--tfp-t,900px)/128) rgba(0,0,0,0.6));
 }
 /* A blur, per standee, re-run every frame the camera moves. On a phone that is
    the frame budget — the same trade the delve makes for its viewmodel hands. */
@@ -328,9 +328,9 @@ body.fp-lite .tfp-haze { display: none; }
 /* Each fighter carries their own bar, over their head, in world space. */
 .tfp-bb > i {
   position: absolute; left: 12%; right: 12%; top: -4%;
-  display: block; height: 3%; min-height: 6px;
+  display: block; height: 3%; min-height: calc(var(--tfp-t,900px)/150);
   background: linear-gradient(#7fe08a, #2f8f3c);
-  box-shadow: 0 0 0 3px rgba(0,0,0,0.55);
+  box-shadow: 0 0 0 calc(var(--tfp-t,900px)/300) rgba(0,0,0,0.55);
 }
 /* Depth, not decoration: the arena is outdoors, so distance goes pale. */
 .tfp-haze {

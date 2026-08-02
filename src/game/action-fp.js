@@ -45,20 +45,24 @@ import { createFpHands, fighterHandsSpec } from './fp-hands.js';
 import { createLook, touchPrimary } from '../platform/input.js';
 
 /** World scale — the delve's, via tactical-fp, so a person is the same size
- *  standing in any of the three grounds. */
-const T = 900;
-const EYE = 690;
-const STEP = 430;              // one terrain level, world px
-const FIGHTER_H = 1200;
-const FOOT_PCT = 31.25;
-const PERSP = 500, PERSP_AT = 720;
+ *  standing in any of the three grounds, and shrunk by the same K for the same
+ *  reason: a world unit is not a screen pixel, but the compositor rasters as if
+ *  it were. @see tactical-fp.js's note — this file is its twin in every respect
+ *  and the two must never drift on this. */
+const T = 300;
+const K = T / 900;
+const EYE = 690 * K;
+const STEP = 430 * K;          // one terrain level, world px
+const FIGHTER_H = 1200 * K;
+const FOOT_PCT = 31.25;        // a PERCENTAGE — never scaled
+const PERSP = 500, PERSP_AT = 720;   // the lens is untouched; that is the point
 // Tactical-fp's shoulder framing, kept in lockstep (head near centre, feet
 // near the bottom edge, ~half the screen of fighter — the reference shot).
-const OTS_BACK = 1.0, OTS_UP = 120, OTS_PITCH = 10;
+const OTS_BACK = 1.0, OTS_UP = 120 * K, OTS_PITCH = 10;   // tiles, world px, degrees
 // Three tiles, matching the tactical board: the apron only has to out-reach the
 // shoulder camera's one-tile pull-back, and six bought a ring twice as wide as
 // anyone can see for twice the surface every device had to allocate.
-const APRON_T = 3, RING_H = 2400;
+const APRON_T = 3, RING_H = 2400 * K;
 /** How fast held turn input swings the view, rad/s. The delve's 45° / 130ms
  *  works out to ~6 rad/s in bursts; continuous steering wants less. */
 const TURN_RATE = 3.1;
@@ -531,7 +535,10 @@ export function actFpFrame() {
   // cancelling it would restyle the third-person shot as a side effect of
   // adding a mouse. At rest the string is byte-identical to the old one.
   const bbP = V.pitch ? ` rotateX(${(-V.pitch).toFixed(1)}deg)` : '';
-  const wtf = `rotateX(${pitch.toFixed(2)}deg) rotateY(${deg.toFixed(2)}deg) translate3d(${(-ex).toFixed(1)}px,${(-ey).toFixed(1)}px,${(-ez).toFixed(1)}px)`;
+  // The scale is OUTERMOST and undoes K exactly: the picture is the one the
+  // framing was measured at, only the rasters underneath it shrank.
+  const sc = (1 / K).toFixed(4);
+  const wtf = `scale3d(${sc},${sc},${sc}) rotateX(${pitch.toFixed(2)}deg) rotateY(${deg.toFixed(2)}deg) translate3d(${(-ex).toFixed(1)}px,${(-ey).toFixed(1)}px,${(-ez).toFixed(1)}px)`;
   if (wtf !== V.wtf) V.world.style.transform = (V.wtf = wtf);
 
   if (boardKey() !== V.boardKey) buildBoard();
@@ -612,6 +619,7 @@ export function actFpToggle(kind, bridge) {
     if (!stage) return false;
     const host = document.createElement('div');
     host.className = 'tfp-host afp-host';
+    host.style.setProperty('--tfp-t', T + 'px');   // world px that live in CSS — see tactical-fp
     host.innerHTML = '<div class="tfp-stage"><div class="tfp-world">'
       + '<div class="tfp-geo"></div><div class="tfp-bbs"></div>'
       + '</div></div><div class="tfp-haze"></div>'
