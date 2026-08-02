@@ -193,11 +193,17 @@ export function createFpHands(layer, spec) {
 
   H.fit = () => {
     const W = layer.clientWidth || 1280, Hh = layer.clientHeight || 720;
+    // Size against the SMALLER axis, not the height. A held weapon is a
+    // fraction of your field of view, and in a tall portrait window "62% of the
+    // height" is most of the screen: on a phone held upright the sword filled
+    // the room. Landscape is unaffected — there the height is already the
+    // smaller term — so this only bites where it was wrong.
+    const base = Math.min(Hh, W * 0.78);
     for (const h of [H.weapon, H.offhand, H.shield]) {
       if (!h) continue;
       const b = h.box, r = h.rest;
       const share = r.h / b.h;                       // how much of the crop the rest pose is
-      const restH = (h.kind === 'shield' ? SHIELD_H : REST_H) * Hh;
+      const restH = (h.kind === 'shield' ? SHIELD_H : REST_H) * base;
       const elH = Math.round(restH / share);
       const elW = Math.round(elH * (b.w / b.h));
       const restW = elW * (r.w / b.w);

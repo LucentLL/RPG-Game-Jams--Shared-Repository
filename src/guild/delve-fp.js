@@ -111,7 +111,25 @@ const COARSE = typeof matchMedia === 'function' && matchMedia('(pointer: coarse)
  *  the light's, not one number. The sky tiers are bounded in practice by the
  *  meadow charts themselves (a build radius past the map edge costs nothing),
  *  and phones still take the shorter lamp everywhere. */
-const viewCap = () => (L.sky ? (COARSE ? 11 : 17) : (COARSE ? 7 : 9));
+/**
+ * ON AN OPEN MAP THE COST IS LAYER COUNT, NOT TEXTURE SIZE.
+ *
+ * Underground, most of a view radius is solid rock that emits nothing — a
+ * corridor at R=9 is a few dozen quads. Out on the estate almost every cell in
+ * range is open ground, and open ground emits a floor quad each: R=11 is a
+ * 23×23 window, ~500 floor quads before a single wall, and at R=17 it measured
+ * 629 live quads. Each one is a separate compositing layer the GPU has to hold,
+ * sort and re-raster whenever the camera moves, and a phone falls over on the
+ * COUNT long before the pixels — which is why the estate flickered a step at a
+ * time while the 9×9 arena, at eighty quads, did not.
+ *
+ * So the sky tiers are radius-capped by what the count can afford rather than
+ * by what the light would reach. It costs distant scenery; it buys the estate
+ * being drawable at all. The real fix is to stop spending one layer per floor
+ * cell — merge far ground into blocks, or move the whole scene onto a canvas —
+ * and until then this is the honest lever.
+ */
+const viewCap = () => (L.sky ? (COARSE ? 8 : 13) : (COARSE ? 7 : 9));
 const viewR = () => Math.min(viewCap(), Math.ceil(L.near + FOG_CULL * (L.far - L.near)) + 1);
 const REACH = 0.75;      // how close a creature must be to engage
 
