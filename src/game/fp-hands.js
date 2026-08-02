@@ -36,11 +36,17 @@ const REST_H = 0.44, SHIELD_H = 0.36, HAND_INSET = 0.045;
  * the worn-art helpers speak. Engine gear lives in typed slots (RHand/LHand,
  * 'Sword'/'Buckler'/…); the sheets are keyed by guild item kinds + materials.
  * Tier (or refinement) stands in for material — a veteran's blade reads finer.
- * Wands and staves have no worn sheet, so a caster shows honest empty hands.
+ *
+ * EVERY armed hand shows its arm. This table used to stop at the blades, with
+ * a note claiming wands and staves had no worn sheet — they do (art.js's
+ * ITEM_WEAPON, wand1 and staff1), and the note had simply outlived the kit. A
+ * caster standing in first person held nothing whatsoever, which reads as a bug
+ * in the view rather than a choice about casters.
  */
 const TYPE_KIND = {
   Sword: 'sword', Dagger: 'dagger', Axe: 'axe', Bow: 'bow', Crossbow: 'bow',
   Hammer: 'hammer', Mace: 'mace', Club: 'mace',
+  Wand: 'wand', Staff: 'staff', Rod: 'wand',
 };
 export function fighterHandsSpec(fighter) {
   const g = (fighter && fighter.gear) || {};

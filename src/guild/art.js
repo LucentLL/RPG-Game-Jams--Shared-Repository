@@ -242,6 +242,11 @@ const ITEM_WEAPON = {
   bow:    { pack: 0, stem: 'bow1',    maxC: 0 },
   mace:   { pack: 0, stem: 'mace1',   maxC: 5 },
   hammer: { pack: 2, stem: 'hammer',  maxC: 3 },
+  // A caster held nothing at all in first person — not because the kit has no
+  // wand, but because this table never listed one. ce1/weapon/wand1*.png and
+  // core/weapon/staff1*.png were sitting there the whole time.
+  wand:   { pack: 1, stem: 'wand1',   maxC: 8 },
+  staff:  { pack: 0, stem: 'staff1',  maxC: 3 },
 };
 /** Material → colour variant, so a mithril blade reads finer than an iron one.
  *  Mirrors crucible.js weaponTierToColor: variant 0 is the base file. */

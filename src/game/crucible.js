@@ -2951,6 +2951,8 @@ var _actionClick = null;           // locked-mouse swing handler
 var _actionStage = null;           // the element it is bound to
 var _guildBattle = null;           // { resolve, done } while a guild (non-run) battle is live
 var _koTimer = null;               // pending "battle decided" timeout, so it can be cancelled/tracked
+var _koAt = 0;                     // when the last fighter fell — the death beat's clock
+var KO_HOLD = 1400;                // ms the scene holds on the fall before anything asks you to move on
 var _charge = null;                // { name, start } while the player HOLDS an attack (Shining-Soul hold-to-charge)
 var _guildItems = null;            // [{batchId,name,glyph,potency,qty}] withdrawn consumables (guild battles only)
 var _guildItemsUsed = null;        // { batchId: count } drunk this battle — reported in the resolve payload
@@ -3270,6 +3272,7 @@ function startActionLoop(){
   document.addEventListener('keyup', _actionKeyUpHandler);
   _touchMove.x = 0; _touchMove.y = 0;
   _padAtk = [];
+  _koAt = 0;
   padReset();
   ensureActionJoystick();
   // NOTHING FIRES A KEYUP when the window goes away — not Esc leaving a pointer
@@ -3447,8 +3450,16 @@ function actionTick(dt){
     // THEN we stop and cue the result beat. Without this the decisive arrow would be
     // cleared by stopActionLoop the very frame it spawned (never visibly flies).
     if (_actionProjectiles.length) return; // still airborne — keep looping
+    // THE KILLING BLOW GETS TO LAND. The loop used to stop on the very frame a
+    // fighter hit zero, which froze the death animation on its first cell and
+    // then swapped the screen out from under it. Here the loop keeps turning —
+    // animations only, no input, no AI, nobody can be hurt — so the fall plays
+    // out and the camera holds on it.
+    if (!_koAt) _koAt = performance.now();
+    tickAnimations(performance.now());
+    if (performance.now() - _koAt < KO_HOLD) return;
     stopActionLoop();
-    _koTimer = setTimeout(endActionBattle, 500);
+    _koTimer = setTimeout(endActionBattle, 120);
     return;
   }
   // ─── Player movement (held keys, the stick, the mouse, the pad) ──
@@ -3876,10 +3887,51 @@ function endActionBattle(){
   // and handleVictory/showGameOver dereference run.*). This is the null-run crash guard.
   if (!run) return;
   if (p2.hp <= 0){
-    handleVictory();
+    // NOT straight to the loot screen. You beat someone in an arena you are
+    // standing in; the moment belongs to you, not to the next menu. The scene
+    // stays exactly as it is — the fallen opponent, the stands, whichever
+    // camera you were using — and you leave it when you choose to.
+    actionVictoryBeat(handleVictory);
   } else if (p1.hp <= 0){
     showGameOver();
   }
+}
+
+/**
+ * The beat after a win. An overlay over the held scene, not a new screen: the
+ * arena is still there behind it, which is the whole point.
+ *
+ * Built as ordinary buttons, so the controller cursor and the arrow keys reach
+ * it for free, and Enter or A carries on.
+ */
+function actionVictoryBeat(then){
+  var scr = document.getElementById('actionScreen');
+  if (!scr){ then(); return; }
+  var old = document.getElementById('actVictory'); if (old) old.remove();
+  var metal = ROUND_METALS[run.round - 1] || { sym: '', name: '' };
+  var el = document.createElement('div');
+  el.id = 'actVictory';
+  el.className = 'act-victory';
+  el.innerHTML = '<div class="av-card">'
+    + '<div class="av-title">Victory</div>'
+    + '<div class="av-sub">' + metal.sym + ' Round ' + run.round + ' &mdash; ' + metal.name + '</div>'
+    + '<div class="av-line">' + (p1.name || 'You') + ' &mdash; ' + Math.max(0, Math.ceil(p1.hp)) + '/' + p1.maxHp + ' HP remaining</div>'
+    + '<button class="title-btn" id="avGo">Claim your spoils</button>'
+    + '<div class="av-hint">Look around as long as you like.</div>'
+    + '</div>';
+  scr.appendChild(el);
+  var go = function(){
+    if (!el.parentNode) return;    // already taken — a key and a click can race
+    el.remove();
+    then();
+  };
+  el.querySelector('#avGo').onclick = go;
+  // A timeout, not requestAnimationFrame: the transition needs one frame between
+  // insertion and the class, and a tab that is backgrounded or throttled runs no
+  // rAF at all — which would leave the card mounted at opacity 0 and the player
+  // staring at a scene they cannot leave.
+  setTimeout(function(){ el.classList.add('on'); }, 20);
+  setTimeout(function(){ var b = el.querySelector('#avGo'); if (b) b.focus(); }, 60);
 }
 
 function forfeitAction(){

@@ -181,10 +181,21 @@ export function canStandAt(T, x, y, fromX, fromY) {
     if (tx < 0 || ty < 0 || tx >= T.cols || ty >= T.rows) return false;
     if (!T.pass[ty][tx]) return false;
   }
-  // Level change is only legal across a ladder or vine.
+  // CLIMBING is what needs a ladder. DROPPING never did.
+  //
+  // This used to refuse any change of level without a climb cell, in either
+  // direction — which meant the first shelf you climbed onto was a shelf you
+  // could not leave. Every step off it, on all four sides, was silently
+  // rejected: you walked, nothing happened, and in first person the eye stayed
+  // a full step up while the ground you thought you were crossing went by. The
+  // player's words were "twice the height of the other character, and it stays
+  // that way after moving off", which is exactly what being quietly refused
+  // looks like from inside the fighter.
+  //
+  // A ledge is one step. You can always take a drop.
   if (fromX != null) {
     const hFrom = heightAt(T, fromX, fromY), hTo = heightAt(T, x, y);
-    if (hFrom !== hTo && !onClimb(T, fromX, fromY) && !onClimb(T, x, y)) return false;
+    if (hTo > hFrom && !onClimb(T, fromX, fromY) && !onClimb(T, x, y)) return false;
   }
   return true;
 }

@@ -140,6 +140,33 @@
   background:rgba(224,180,85,0.8);box-shadow:0 0 0 1px rgba(0,0,0,0.6);
   pointer-events:none;z-index:31}
 
+/* ═══ THE BEAT AFTER A WIN ═══ */
+/* Over the held scene, never instead of it: the arena, the stands and the
+   fighter you just put down are all still there behind the card, and you leave
+   when you choose to rather than when a timer decides. Deliberately not a full
+   blackout — a scrim heavy enough to read the card against and light enough to
+   keep looking at what you did. */
+.act-victory{position:absolute;inset:0;z-index:40;display:flex;align-items:center;justify-content:center;
+  background:radial-gradient(ellipse at 50% 45%,rgba(8,7,5,0.15),rgba(8,7,5,0.72));
+  opacity:0;transition:opacity 0.5s ease}
+.act-victory.on{opacity:1}
+.av-card{text-align:center;padding:20px 34px;border-radius:14px;
+  background:linear-gradient(160deg,rgba(24,20,14,0.92),rgba(12,10,8,0.92));
+  border:2px solid var(--gold);box-shadow:0 16px 54px rgba(0,0,0,0.7);
+  transform:translateY(10px);transition:transform 0.5s cubic-bezier(.2,.9,.3,1)}
+.act-victory.on .av-card{transform:translateY(0)}
+.av-title{font-family:'Cinzel',serif;font-size:2em;letter-spacing:0.24em;color:var(--gold);
+  text-shadow:0 2px 14px rgba(212,168,67,0.45),0 1px 3px #000}
+.av-sub{font-family:'Cinzel',serif;font-size:0.82em;letter-spacing:0.14em;color:#e8e0d0;margin-top:4px}
+.av-line{font-family:'Cormorant Garamond',serif;color:var(--muted);font-size:0.92em;margin:8px 0 14px}
+.av-card .title-btn{display:inline-block;width:auto;padding:9px 26px;font-size:0.9em}
+.av-hint{margin-top:8px;font-size:0.7em;color:var(--dim);font-style:italic}
+@media (max-height:620px),(max-width:560px){
+  .av-card{padding:12px 22px}
+  .av-title{font-size:1.4em}
+  .av-line{margin:5px 0 9px;font-size:0.82em}
+}
+
 /* Virtual movement stick (touch). Lives on the SCREEN-SPACE stage (never on the
    rotated plane — its pointer math is 2D); shown only while a battle loop runs. */
 .action-joystick{position:absolute;left:14px;bottom:14px;width:112px;height:112px;border-radius:50%;background:radial-gradient(circle,rgba(15,15,22,0.55),rgba(15,15,22,0.3));border:2px solid rgba(212,168,67,0.45);touch-action:none;z-index:30;display:none;align-items:center;justify-content:center}
