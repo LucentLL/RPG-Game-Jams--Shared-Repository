@@ -148,10 +148,11 @@
   pointer-events:none;z-index:31;transition:background 0.2s}
 .afp-host.afp-looking:not(.tfp-ots)::after{background:rgba(255,225,150,0.95)}
 
-/* ═══ THE CROSS HOTBAR — hold a trigger (src/game/crucible.js) ═══ */
+/* ═══ THE CROSS HOTBAR — hold LT (src/game/crucible.js) ═══ */
 /* A pad has no cursor, so an attack list you click is a list a controller
-   cannot reach. Holding LT or RT lays the eight slots out the way the thumbs
-   already are: face cluster left, d-pad right. Shown only while held. */
+   cannot reach. Holding LT lays the eight slots out the way the thumbs
+   already are: face cluster left, d-pad right. Shown only while held.
+   LT and not RT: RT is the swing, the same as it is in the estate crawl. */
 .act-xhb{position:absolute;left:50%;bottom:96px;transform:translateX(-50%) scale(0.96);
   display:flex;gap:5px;z-index:32;pointer-events:none;
   opacity:0;transition:opacity 0.12s ease,transform 0.12s ease}

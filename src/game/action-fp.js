@@ -30,10 +30,11 @@
  * the stage now takes a pointer lock and mouse travel goes straight into the
  * yaw as an ANGLE, not a rate — the distance your hand moved is the distance
  * the view turned, which is the whole reason a mouse aims better than a key.
- * Mouse Y tips a small free pitch on top, and the billboards counter it about
- * their own feet so the standees stay standing; the shoulder camera's built-in
- * 10° is deliberately NOT countered, because that lean is the portrait framing
- * this view was tuned to and not something a mouse should quietly restyle.
+ * Mouse Y tips a small free pitch on top, and that pitch SHEARS the lens rather
+ * than rotating the world (@see aimLens — it is Hexen's trick, and it is the fix
+ * for "enemies look massive when I look up"). The shoulder camera's built-in 10°
+ * stays a rotation, because that lean is the portrait framing this view was
+ * tuned to and not something a mouse should quietly restyle.
  *
  * Nothing here can put the eye outside the world: the board's own fence,
  * apron and stands (tall past any pull-back) come with the dressing — and the
@@ -66,9 +67,11 @@ const APRON_T = 3, RING_H = 2400 * K;
 /** How fast held turn input swings the view, rad/s. The delve's 45° / 130ms
  *  works out to ~6 rad/s in bursts; continuous steering wants less. */
 const TURN_RATE = 3.1;
-/** How far the free look may tip, degrees. Small on purpose: the world here is
- *  billboards, and a steep pitch shows a fighter's cardboard edge. Enough to
- *  read the ledge above you and the ground at your feet, no more. */
+/** How far the free look may tip, degrees. The original reason for keeping this
+ *  small — a steep pitch showing a fighter's cardboard edge — no longer applies
+ *  now that pitch is a shear (@see aimLens); billboards never rotate, so they
+ *  cannot be caught being paper at any angle. Left at 24 because that is what
+ *  the fight was tuned at; it can be opened up whenever the feel wants it. */
 const PITCH_MAX = 24;
 /** Right-stick pitch speed, degrees/sec at full deflection. */
 const PAD_PITCH_RATE = 90;
@@ -270,7 +273,9 @@ function buildBoard() {
  * the projection, not by rotating — precisely so you could never look down on a
  * sprite and catch it being paper.
  *
- * We DO pitch, so we cannot rely on that. So:
+ * WE SHEAR TOO NOW (aimLens), so that protection is back — but it only covers
+ * the free look, and the shoulder camera still leans 10° for its framing. A
+ * standee must stand up under that on its own. So:
  *   • A boulder is round, and gets a CROSS — two quads through its centre at
  *     right angles. It touches the ground on both axes, has depth from every
  *     bearing, needs no per-frame rotation and costs one extra quad. This is
@@ -404,7 +409,7 @@ function drawCharge(subject) {
 /** Mirror the live projectile list as billboards. Keyed on the projectile
  *  objects themselves — crucible owns their lifetime, this view only shows
  *  them, rolled to their flight angle relative to the camera. */
-function placeShots(yaw, bbP) {
+function placeShots(yaw) {
   const list = V.bridge.projectiles() || [];
   const now = performance.now();
   for (const p of list) {
@@ -434,10 +439,11 @@ function placeShots(yaw, bbP) {
       g.drawImage(im, 0, 0);
     }
     const roll = (p.angDeg || 0) - yaw * 180 / Math.PI;
-    // The counter-pitch goes BEFORE the roll: the arrow rolls in the camera's
-    // plane, and a roll applied to an un-pitched billboard tips out of it.
+    // No counter-pitch to sequence around any more — the free pitch is a shear
+    // on the lens, so a shot is already in the camera's plane and the roll is
+    // the only thing that has to happen in it.
     const tf = `translate3d(${(x * T).toFixed(1)}px,${(-EYE * 0.55).toFixed(1)}px,${(y * T).toFixed(1)}px)`
-      + ` rotateY(${(-yaw * 180 / Math.PI).toFixed(1)}deg)${bbP || ''} rotateZ(${roll.toFixed(1)}deg)`;
+      + ` rotateY(${(-yaw * 180 / Math.PI).toFixed(1)}deg) rotateZ(${roll.toFixed(1)}deg)`;
     if (tf !== m.tf) m.el.style.transform = (m.tf = tf);
   }
   for (const [p, m] of V.shots) {
@@ -450,10 +456,50 @@ function placeShots(yaw, bbP) {
 // ---------------------------------------------------------------------------
 
 function fitLens() {
-  const st = V.host.querySelector('.tfp-stage');
-  const h = st && st.clientHeight;
+  const h = V.stage && V.stage.clientHeight;
   if (!h) return;
-  st.style.perspective = (PERSP * (h / PERSP_AT)).toFixed(1) + 'px';
+  V.stage.style.perspective = (PERSP * (h / PERSP_AT)).toFixed(1) + 'px';
+}
+
+/**
+ * PITCH IS A SHEAR, NOT A ROTATION — Hexen's answer, and the reason its
+ * monsters read as solid.
+ *
+ * THIS IS THE BUG THE PLAYER SAW, in both of its halves: "I feel taller than
+ * enemies when looking down, and enemies look massive when I look up."
+ *
+ * Rotating the world about the eye moves a standee's FEET toward or away from
+ * the projection plane, because the feet sit a whole eye-height below the pivot.
+ * With the eye at 690 world px, that lever arm enters the perspective divide
+ * directly: apparent size = P / (P + d·cosθ − 690·sinθ). Look up and the
+ * subtraction shrinks the denominator and the fighter swells; look down and it
+ * grows and the fighter shrinks. At half a tile — melee, where you actually
+ * read an opponent's size — the sweep from −24° to +24° changes a fighter's
+ * on-screen height by a factor of 1.6. Nothing was wrong with the standee; the
+ * camera was zooming and calling it looking.
+ *
+ * Doom, Heretic and Hexen never had this, and not by luck: they "look up" by
+ * SHEARING the projection — sliding the horizon along the screen — instead of
+ * rotating the camera. A shear leaves every object's depth exactly where it
+ * was, so nothing changes size, and it leaves billboards screen-parallel, so
+ * you can never look down on one and catch it being paper.
+ *
+ * In CSS the shear is one property. `perspective-origin` IS the vanishing
+ * point: a point at infinity straight ahead projects there and nowhere else. A
+ * rotation by θ puts the horizon at screen `P·tanθ` from centre, so moving the
+ * origin by exactly that much reproduces the rotation's framing with none of
+ * its depth change. And because fitLens keeps `perspective` proportional to the
+ * stage height, `P/H` is the constant `PERSP/PERSP_AT` — the shear needs no
+ * measurement and no resize handling.
+ *
+ * The knock-on: billboards no longer need their counter-rotation at all. That
+ * whole term is gone from every per-frame transform string, which is a write
+ * saved per standee per frame on the one lens that has a free look.
+ */
+function aimLens() {
+  const oy = 50 + (PERSP / PERSP_AT) * Math.tan(V.pitch * Math.PI / 180) * 100;
+  const po = `50% ${oy.toFixed(2)}%`;
+  if (po !== V.po) V.stage.style.perspectiveOrigin = (V.po = po);
 }
 
 /**
@@ -521,24 +567,25 @@ export function actFpFrame() {
 
   const T0 = V.bridge.terrain();
   const lift = liftAt(T0, me.ax, me.ay);
-  let ex = me.ax * T, ez = me.ay * T, ey = lift - EYE, pitch = V.pitch;
+  let ex = me.ax * T, ez = me.ay * T, ey = lift - EYE, lean = 0;
   if (V.pov === 'shoulder') {
     const back = backOff(T0, me.ax, me.ay, V.yaw, OTS_BACK);
     ex -= Math.sin(V.yaw) * back * T;
     ez += Math.cos(V.yaw) * back * T;
     ey -= OTS_UP;
-    pitch += OTS_PITCH;
+    lean = OTS_PITCH;
   }
   const deg = V.yaw * 180 / Math.PI;
-  // Billboards counter the FREE pitch only, never the shoulder camera's own
-  // 10° — that lean is the portrait framing this view was tuned to, and
-  // cancelling it would restyle the third-person shot as a side effect of
-  // adding a mouse. At rest the string is byte-identical to the old one.
-  const bbP = V.pitch ? ` rotateX(${(-V.pitch).toFixed(1)}deg)` : '';
+  // The free pitch is a SHEAR on the lens, not a term in here — see aimLens for
+  // why, and for the measured size-swing that rotating it used to cause. The
+  // shoulder camera's own 10° stays a rotation: it is a fixed framing lean the
+  // portrait shot was tuned to, it never moves while you play, and a constant
+  // cannot produce a swing. Billboards therefore counter NOTHING now.
+  aimLens();
   // The scale is OUTERMOST and undoes K exactly: the picture is the one the
   // framing was measured at, only the rasters underneath it shrank.
   const sc = (1 / K).toFixed(4);
-  const wtf = `scale3d(${sc},${sc},${sc}) rotateX(${pitch.toFixed(2)}deg) rotateY(${deg.toFixed(2)}deg) translate3d(${(-ex).toFixed(1)}px,${(-ey).toFixed(1)}px,${(-ez).toFixed(1)}px)`;
+  const wtf = `scale3d(${sc},${sc},${sc})${lean ? ` rotateX(${lean}deg)` : ''} rotateY(${deg.toFixed(2)}deg) translate3d(${(-ex).toFixed(1)}px,${(-ey).toFixed(1)}px,${(-ez).toFixed(1)}px)`;
   if (wtf !== V.wtf) V.world.style.transform = (V.wtf = wtf);
 
   if (boardKey() !== V.boardKey) buildBoard();
@@ -550,7 +597,7 @@ export function actFpFrame() {
     if (self !== a.selfHidden) { a.el.style.visibility = (a.selfHidden = self) ? 'hidden' : ''; }
     if (self) continue;
     const fl = liftAt(T0, f.ax, f.ay);
-    const tf = `translate3d(${(f.ax * T).toFixed(1)}px,${fl.toFixed(1)}px,${(f.ay * T).toFixed(1)}px) rotateY(${(-deg).toFixed(1)}deg)${bbP}`;
+    const tf = `translate3d(${(f.ax * T).toFixed(1)}px,${fl.toFixed(1)}px,${(f.ay * T).toFixed(1)}px) rotateY(${(-deg).toFixed(1)}deg)`;
     if (tf !== a.tf) a.el.style.transform = (a.tf = tf);
     const hp = Math.max(0, Math.min(1, f.hp / (f.maxHp || f.hp || 1)));
     const w = (hp * 100).toFixed(0) + '%';
@@ -560,7 +607,7 @@ export function actFpFrame() {
   // The dressing does NOT move. It is placed once, in world space, standing on
   // its own ground — see buildDressing. Rotating it to the camera every frame is
   // what made a boulder read as a card that follows you.
-  placeShots(V.yaw, bbP);
+  placeShots(V.yaw);
   drawCharge(me);
   syncHands(me, now);
 }
@@ -635,6 +682,10 @@ export function actFpToggle(kind, bridge) {
     stage.appendChild(host);
     V = {
       host, world: host.querySelector('.tfp-world'), bridge,
+      // The stage owns the LENS: `perspective` is the field of view and
+      // `perspective-origin` is where the horizon sits, which is how this view
+      // pitches. Held rather than re-queried — both are written per frame.
+      stage: host.querySelector('.tfp-stage'), po: '',
       pov: 'first', yaw: 0, pitch: 0, wtf: '', last: 0,
       actors: new Map(), shots: new Map(), dressing: [],
       boardKey: '', ringCv: host.querySelector('.afp-ring'),

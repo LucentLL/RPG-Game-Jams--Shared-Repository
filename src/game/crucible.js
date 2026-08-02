@@ -3409,29 +3409,39 @@ function ensureActionJoystick(){
  * problem this game had: a pad has no cursor, so an attack list you click is an
  * attack list a controller cannot reach.
  *
- * HOLD A TRIGGER AND THE BAR APPEARS, laid out the way your thumbs already are:
+ * HOLD LT AND THE BAR APPEARS, laid out the way your thumbs already are:
  * the four face buttons are slots 1–4, the four d-pad directions are 5–8. While
- * a trigger is held the d-pad stops walking and starts casting, which is the
- * whole trick — eight actions on a pad that has four buttons free.
+ * it is held the d-pad stops walking and starts casting, which is the whole
+ * trick — eight actions on a pad that has four buttons free.
  *
- * Let the trigger go and it is a movement d-pad again, and the face buttons go
- * back to firing slots 1–4 directly for anyone who would rather not hold
- * anything. Both routes end at startCharge/releaseCharge, so holding to charge
- * works identically on a trigger, a key, or the on-screen button.
+ * Let it go and it is a movement d-pad again, and the face buttons go back to
+ * firing slots 1–4 directly for anyone who would rather not hold anything. Both
+ * routes end at startCharge/releaseCharge, so holding to charge works
+ * identically on a trigger, a key, or the on-screen button.
+ *
+ * LT ONLY — RT IS THE SWING. The first cut opened the bar on either trigger,
+ * which quietly made `[PAD.A, PAD.RT]` below unreachable: RT being down is what
+ * set `xhb`, so by the time the slot loop ran the mapping had already changed to
+ * one that does not mention RT, and the guard written to stop RT double-firing
+ * was guarding something that could never happen. The playtest verdict was the
+ * plain one — the right trigger swings in the estate crawl (delve-fp's
+ * `now.attack = A || RT`) and did nothing at all in the arena. One trigger opens
+ * the bar, the other hits things, in both places.
  */
 var PAD_SLOT = null, XHB_SLOT = null;
 var _xhbOn = false;
 function actionPadButtons(pad){
   if (!PAD_SLOT){
-    // No trigger held: the face buttons and shoulders are the six slots.
+    // Bar closed: the face buttons and shoulders are the six slots, and RT is
+    // slot 1 — the swing, where your finger already is.
     PAD_SLOT = [[PAD.A, PAD.RT], [PAD.B], [PAD.X], [PAD.Y], [PAD.RB], [PAD.LB]];
-    // Trigger held: face cluster 1–4, d-pad 5–8. The order is the one your
+    // LT held: face cluster 1–4, d-pad 5–8. The order is the one your
     // hand reads — down, left, up, right is not it; this is A B X Y then the
     // d-pad clockwise from up.
     XHB_SLOT = [[PAD.A], [PAD.B], [PAD.X], [PAD.Y], [PAD.UP], [PAD.RIGHT], [PAD.DOWN], [PAD.LEFT]];
   }
   if (!pad){ _padAtk = []; if (_xhbOn) showCrossHotbar(false); return; }
-  var xhb = pad.down(PAD.LT) || pad.down(PAD.RT);
+  var xhb = pad.down(PAD.LT);
   if (xhb !== _xhbOn){
     // Whatever was held under the old mapping is not held under the new one:
     // drop every slot cleanly or a charge started on A survives into the d-pad.
@@ -3447,8 +3457,6 @@ function actionPadButtons(pad){
     var name = p1.attacks && p1.attacks[i];
     var held = false;
     for (var j = 0; j < map[i].length; j++) if (pad.down(map[i][j])) held = true;
-    // RT opens the hotbar; it must not also fire slot 1 while it is doing so.
-    if (xhb && map[i].indexOf(PAD.RT) >= 0) held = false;
     if (name){
       if (held && !_padAtk[i]) startCharge(name);
       else if (!held && _padAtk[i]) releaseCharge(name);
@@ -3511,10 +3519,11 @@ function actionTick(dt){
   // ONE poll per tick, stashed: readPad's `hit` is an edge against the previous
   // read, so a second call this frame would swallow the press it belongs to.
   var _pad = readPad();
-  // The cross hotbar borrows the d-pad. While a trigger is held those four
-  // directions are attacks, so the STICK still walks but the d-pad does not —
-  // otherwise firing slot 7 also takes a step backwards.
-  var _xhb = _pad && (_pad.down(PAD.LT) || _pad.down(PAD.RT));
+  // The cross hotbar borrows the d-pad. While LT is held those four directions
+  // are attacks, so the STICK still walks but the d-pad does not — otherwise
+  // firing slot 7 also takes a step backwards. LT only, matching
+  // actionPadButtons: RT is the swing and must never cost you your d-pad.
+  var _xhb = _pad && _pad.down(PAD.LT);
   var _padMx = _pad ? (_xhb ? _pad.lx : _pad.mx) : 0;
   var _padMy = _pad ? (_xhb ? _pad.ly : _pad.my) : 0;
   var sp1 = ((p1.speed||4) * 0.9);       // tiles/sec
