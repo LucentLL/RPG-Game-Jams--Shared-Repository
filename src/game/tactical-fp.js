@@ -33,8 +33,16 @@ const BLOCK_H = 900;      // an impassable cell's height
 const FIGHTER_H = 1200;   // the compositor's 96px canvas — ~31% of it is empty below the feet
 const FOOT_PCT = 31.25;   // …which is why the art slides down by this much to stand up
 const PERSP = 500, PERSP_AT = 720;
-/** Over-the-shoulder: how far back and up, and how far the lens tips down. */
-const OTS_BACK = 1.9, OTS_UP = 560, OTS_PITCH = 12;
+/**
+ * Over-the-shoulder: how far back and up, and how far the lens tips down.
+ * Tuned to the action-RPG reference the user gave: the fighter stands about
+ * HALF the screen tall, head near centre, feet near the bottom edge. The
+ * first cut (1.9 back, 560 up, 12°) was a crane shot — the character landed
+ * in the bottom sixth of the frame at a sixth of its height. The numbers
+ * fall out of the projection: eye at EYE+120 ≈ 810, one tile back, pitched
+ * 10° → head ≈ screen centre, feet ≈ 92% down, span ≈ 46% of the stage.
+ */
+const OTS_BACK = 1.0, OTS_UP = 120, OTS_PITCH = 10;
 
 /** @type {?Object} the live view (null when first person is off) */
 let V = null;
