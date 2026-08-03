@@ -64,11 +64,13 @@ const FOOT_PCT = 31.25;        // a PERCENTAGE — never scaled
 // the default and anything you see is a deliberate change. @see view-prefs.js.
 const PERSP = 500, PERSP_AT = 720;
 /**
- * The shoulder camera, kept in lockstep with tactical-fp.
+ * The shoulder camera's ORBIT RADIUS from the subject's eye, in tiles — the one
+ * fixed number it has left. Kept in lockstep with tactical-fp.
  *
- * THE LEAN IS NO LONGER A CONSTANT — it is `camLean()`, a slider (@see
- * view-prefs.js), because it had been tuned four times by screenshot and the
- * loop was the wrong shape. What stays fixed here is the pull-back and the lift.
+ * There is no lift constant any more: the rise is `R·sin(angle)` and the
+ * pull-back `R·cos(angle)`, so the camera rides a circle around the aim and
+ * `camLean()` points it at the centre of that circle. That is what stops the
+ * subject climbing the frame as the angle steepens.
  *
  * The lean is NEGATIVE, and the sign is the whole point: CSS `rotateX(+θ)` puts
  * a point straight ahead BELOW the screen centre, which means the camera is
@@ -77,7 +79,7 @@ const PERSP = 500, PERSP_AT = 720;
  * edge and nothing on the ground readable. `camLean()` returns the negation of
  * a positive "degrees down", so the sign can only be got wrong in one place.
  */
-const OTS_BACK = 1.0, OTS_UP = 120 * K;   // tiles, world px
+const OTS_BACK = 1.0;
 // Three tiles, matching the tactical board: the apron only has to out-reach the
 // shoulder camera's one-tile pull-back, and six bought a ring twice as wide as
 // anyone can see for twice the surface every device had to allocate.
@@ -629,11 +631,19 @@ export function actFpFrame() {
   const lift = liftAt(T0, me.ax, me.ay);
   let ex = me.ax * T, ez = me.ay * T, ey = lift - EYE, lean = 0;
   if (V.pov === 'shoulder') {
-    const back = backOff(T0, me.ax, me.ay, V.yaw, OTS_BACK);
-    ex -= Math.sin(V.yaw) * back * T;
-    ez += Math.cos(V.yaw) * back * T;
-    ey -= OTS_UP;
+    // THE CAMERA ORBITS THE FIGHTER'S EYE. A camera parked behind-and-above by
+    // fixed amounts sees the subject at a fixed angle below its horizontal, so
+    // tipping the lens walks them UP the frame — the playtest's "as I change the
+    // camera angle, the player character seems to shift up on screen". Resolving
+    // the pull-back on a circle instead puts the camera exactly `angle` above
+    // the aim, and camLean() then points it exactly at the aim, so the subject
+    // lands in the same place at every angle. @see delve-fp.js's twin of this.
     lean = camLean();
+    const orb = -lean * Math.PI / 180;
+    const back = backOff(T0, me.ax, me.ay, V.yaw, OTS_BACK) * T;
+    ex -= Math.sin(V.yaw) * back * Math.cos(orb);
+    ez += Math.cos(V.yaw) * back * Math.cos(orb);
+    ey -= back * Math.sin(orb);   // the rise IS the angle now; OTS_UP is gone
   }
   const deg = V.yaw * 180 / Math.PI;
   // The free pitch is a SHEAR on the lens, not a term in here — see aimLens for

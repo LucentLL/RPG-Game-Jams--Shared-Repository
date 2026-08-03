@@ -805,11 +805,24 @@
 
 /* Touch pad — four ways to move and one way to hit. Legible at rest, because
    the first thing a first-person player looks for is how to walk. */
-/* Centred, not cornered: both bottom corners are the hands, and a pad drawn on
-   top of your own shield is a pad you read as part of the shield. */
+/* CORNERED, not centred — and this reverses an earlier decision, so both halves
+   are worth keeping.
+   It was centred because both bottom corners are the hands, and a pad drawn on
+   top of your own shield reads as part of the shield. True in FIRST person. But
+   third person puts your character dead centre at the bottom of the frame,
+   which is exactly where the pad was: on a phone you were covering the one
+   thing you were trying to watch. A control you can see past matters more than
+   a control that never overlaps art — the hands are decoration and take no
+   pointer events, your character is the game.
+   Bottom RIGHT rather than left because the left is where a thumb-stick goes,
+   and because the crawler's own vitals bar runs along the top left. */
 .fp-pad {
-  position: absolute; left: 50%; bottom: 12px; transform: translateX(-50%); z-index: 500;
+  position: absolute; right: 12px; bottom: 12px; z-index: 500;
   display: grid; grid-template-columns: repeat(4, 52px); grid-template-rows: 52px 52px; gap: 5px;
+}
+/* A phone in portrait has no room for four 52px columns beside anything else. */
+@media (max-width: 560px) {
+  .fp-pad { grid-template-columns: repeat(4, 46px); grid-template-rows: 46px 46px; gap: 4px; right: 8px; }
 }
 .fp-pad button {
   font: inherit; font-size: 1.05em; cursor: pointer;

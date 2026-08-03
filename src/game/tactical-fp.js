@@ -56,15 +56,17 @@ const FIGHTER_H = 1200 * K; // the compositor's 96px canvas — ~31% of it is em
 const FOOT_PCT = 31.25;   // a PERCENTAGE — never scaled
 const PERSP = 500, PERSP_AT = 720;   // the lens is untouched; that is the point
 /**
- * Over-the-shoulder: how far back and up, and how far the lens tips down.
- * Tuned to the action-RPG reference the user gave: the fighter stands about
- * HALF the screen tall, head near centre, feet near the bottom edge. The
- * first cut (1.9 back, 560 up, 12°) was a crane shot — the character landed
- * in the bottom sixth of the frame at a sixth of its height. The numbers
- * fall out of the projection: eye at EYE+120 ≈ 810, one tile back, pitched
- * 10° → head ≈ screen centre, feet ≈ 92% down, span ≈ 46% of the stage.
+ * Over-the-shoulder: the ORBIT RADIUS from the subject's eye, in tiles, and the
+ * only fixed number this camera has left.
+ *
+ * The reference framing is unchanged — head near screen centre, feet near the
+ * bottom edge — but it now falls out of the geometry rather than being tuned
+ * into it: the camera orbits the EYE, so aiming at the eye puts the head near
+ * the centre and hangs the body below it at every angle. The rise is
+ * `R·sin(angle)` and the pull-back `R·cos(angle)`; there is no lift constant,
+ * which is what stops the subject climbing the frame as the lean steepens.
  */
-const OTS_BACK = 1.0, OTS_UP = 120 * K;   // tiles, world px
+const OTS_BACK = 1.0;
 // The lean is `camLean()` — a slider, shared with action-fp and the crawler, so
 // the three third-person cameras cannot drift. NEGATIVE is looking down, and
 // that sign is the point: CSS `rotateX(+θ)` aims the camera UP, so the `+10`
@@ -527,13 +529,17 @@ function aimCamera() {
   const lift = liftAt(f.x, f.y);
   let ex = (f.x + 0.5) * T, ez = (f.y + 0.5) * T, ey = lift - EYE, pitch = 0;
   if (V.pov === 'shoulder') {
-    // Behind and above, looking slightly down — the fighter stays in frame,
-    // and the pull-back stops short of any rock that would hide them.
-    const back = backOff(f.x, f.y, yaw, OTS_BACK);
-    ex -= Math.sin(yaw) * back * T;
-    ez += Math.cos(yaw) * back * T;
-    ey -= OTS_UP;
+    // ORBITS the fighter's eye rather than sitting behind-and-above and tipping:
+    // a fixed offset walks the subject up the frame as the lean steepens, and
+    // framing that moves when you change the angle is not framing. @see
+    // action-fp.js's twin. The pull-back still stops short of any rock that
+    // would hide them.
     pitch = camLean();
+    const orb = -pitch * Math.PI / 180;
+    const back = backOff(f.x, f.y, yaw, OTS_BACK) * T;
+    ex -= Math.sin(yaw) * back * Math.cos(orb);
+    ez += Math.cos(yaw) * back * Math.cos(orb);
+    ey -= back * Math.sin(orb);
   }
   V.yaw = yaw;
   // GUARDED, and rounded. This ran unconditionally every frame with raw

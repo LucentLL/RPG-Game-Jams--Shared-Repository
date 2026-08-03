@@ -2570,14 +2570,36 @@ function render() {
     }
     back *= T;
   }
-  const ex = F.px * T - Math.sin(yr) * back, ez = F.py * T + Math.cos(yr) * back;
+  /**
+   * THE CAMERA ORBITS THE WALKER'S OWN EYE — it does not sit at a fixed offset
+   * and tip.
+   *
+   * The difference is the whole of "as I change the camera angle, the player
+   * character seems to shift up on screen". A camera parked behind and above by
+   * fixed amounts sees the walker at a fixed angle α below its horizontal, so
+   * tipping the lens by θ puts them at screen `P·tan(α − θ)`: the steeper the
+   * lean, the further up the frame they climb, until at 45° they are near the
+   * middle. Framing that moves when you change the angle is not framing.
+   *
+   * So the pull-back is resolved on a CIRCLE around the aim point instead —
+   * horizontal `R·cos(angle)`, rise `R·sin(angle)` — which puts the camera
+   * exactly `angle` above the aim, and `camLean()` (which is −angle) then points
+   * it exactly at that aim. The aim projects to the middle of the screen at
+   * EVERY angle, so the walker cannot move.
+   *
+   * The aim is the walker's own EYE, and that is what gets the framing for free:
+   * head near the centre, body hanging below it, feet at ~82% down the frame.
+   */
+  const orb = pov3 ? camLean() * -Math.PI / 180 : 0;
+  const horiz = back * Math.cos(orb);
+  const ex = F.px * T - Math.sin(yr) * horiz, ez = F.py * T + Math.cos(yr) * horiz;
   // The level under the eye, interpolated across a stride so a walk-off-the-
   // ledge drop is a hop down rather than a mid-step teleport.
   const s = F.stepping;
   const lev = s && s.lf != null
     ? s.lf + (s.lt - s.lf) * Math.min(1, ease(s.t))
     : heightAt(Math.floor(F.px), Math.floor(F.py));
-  const ey = -EYE - (pov3 ? EYE * 0.18 : 0) - lev * STEP_PX;
+  const ey = -EYE - lev * STEP_PX - back * Math.sin(orb);
   // rotateY(+yaw), not −yaw. Forward is −Z, and CSS rotateY maps (x,y,z) to
   // (x·cosθ + z·sinθ, y, −x·sinθ + z·cosθ) — so facing east (yaw 90) has to send
   // world +X to view −Z, which needs +90. The negative sign put east BEHIND the
