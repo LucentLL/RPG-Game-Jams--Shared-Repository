@@ -40,71 +40,85 @@
 /**
  * How a thing occupies its cell.
  *
- * `cross` — two quads at right angles through the centre, for things that look
- *           the SAME FROM EVERY BEARING: barrels, statues, cauldrons, lamp
- *           posts. Ground contact on both axes, depth from any angle, no
- *           per-frame rotation, two quads. The trick every Doom descendant used.
- * `slab`  — the same cross, for a thing that has a FRONT. The front quad is the
- *           art at full width; the side quad is narrowed to `d` and dressed in
- *           the object's own colour, because a desk seen end-on is not a picture
- *           of a desk front. A lid appears only if the thing is shorter than eye
- *           height — you cannot see the top of a wardrobe, and a quad you cannot
- *           see is a compositor layer spent on nothing.
- * `lie`   — a solid whose ART IS ITS TOP. Beds: the sheet draws them in plan,
- *           and standing a plan view up on its edge is precisely the bug above.
- *           The lid takes the art; `d` is the long axis and width follows it.
- * `wall`  — one quad bolted flat to the wall it hangs on, taking THAT wall's
+ * `stand` — ONE camera-facing sprite, standing on the floor at the authored
+ *           height. This is what Hexen does, and it is now what almost
+ *           everything here does. See below for the two rounds it took to get
+ *           back to it.
+ * `lie`   — ONE quad flat on the floor, for art drawn in PLAN. The beds: their
+ *           sheet draws them from above, so a camera-facing sprite would stand
+ *           them on their footboards. `d` is the long axis and width follows it.
+ *           Doom's floor detail, and the same single quad as `stand` — just in
+ *           the plane the picture was actually painted for.
+ * `wall`  — ONE quad bolted flat to the wall it hangs on, taking THAT wall's
  *           rotation from the map and never turning to follow the camera.
  *           `mid` is the centre height above the floor: a portrait hangs, it
- *           does not stand on the skirting.
+ *           does not stand on the skirting. This is a texture on something that
+ *           genuinely has volume — the wall — which is the other half of the
+ *           rule below.
  *
- * THERE IS NO BOX, AND THERE CANNOT BE ONE. The first cut emitted `slab` things
- * as a real six-sided box — and since every crop in this game is a single
- * elevation, all four walls of that box got the SAME picture. The playtest
- * verdict was immediate and correct: "the furnace is placed 4 times around the
- * sides of an invisible cube — this is not acceptable." It was never fixable by
- * tuning. A box needs four pictures and we own one, so any box built from that
- * one picture is a cube with the front of a furnace painted on each face.
+ * ── WHAT HEXEN DOES, AND WHY WE ARRIVED BACK AT IT ────────────────────────
  *
- * A cross has the same information and none of that failure, because its second
- * quad is edge-on exactly when it would have been showing you a lie. The same
- * playtest picked the lamp post as the best-looking of the three forms and
- * described it as "rotating as the player walks around" — it does not rotate;
- * it is a cross, and the silhouette change as the two quads trade prominence is
- * what reads as a solid turning. That is the whole endorsement, and it is why
- * everything with a volume is a cross of one dressing or another now.
+ * Hexen has exactly two kinds of thing. ARCHITECTURE — walls, floors, ceilings
+ * — is geometry with textures on it. EVERYTHING ELSE is a single sprite that
+ * always turns to face you. There are no crossed quads, no lids, no boxes. Not
+ * a limitation they worked around: it is the answer, because one drawing can
+ * only ever be honest from one angle, and a sprite that always faces you is
+ * only ever seen from that angle.
  *
- * A name absent from this table keeps the old camera-facing billboard. That is
- * the right default for anything genuinely flat or too small to have sides, and
- * it means adding an entry is always a considered act.
+ * Two rounds of building otherwise, and the playtest killed both:
  *
- * @typedef {{form:'slab'|'lie'|'cross'|'wall', h:number, d?:number, mid?:number}} Volume
- * `h` height in tiles · `d` depth in tiles (slab/lie) · `mid` centre height (wall)
+ * 1. A real six-sided BOX. Every crop in this game is a single elevation, so
+ *    all four walls of the box got the same picture. "The Furnace/Anvil are
+ *    placed 4 times around the sides of an invisible cube — this is not
+ *    acceptable." Correct, and not tunable: a box needs four pictures.
+ * 2. A CROSS — two quads at right angles, the trick used for trees. "I'm not a
+ *    fan of the perpendicular images intersecting or the 'tops' placed on
+ *    objects like the desk and anvils. Either the object should rotate
+ *    smoothly, or be a texture on an object with actual volume."
+ *
+ * Both failed the same way. A cross and a box are attempts to fake volume out
+ * of a picture, and near enough to see, you can always tell — the intersection
+ * shows, the lid reads as a lid. The sprite does not fake anything: it declines
+ * to have a side, and because it turns, you never look for one.
+ *
+ * SO WHAT WAS THE POINT? The heights. Every number below is the durable half of
+ * this work and none of it changed across the three rounds: it is what stopped
+ * a desk being 1.03 tiles tall in a 1.4-tile room. Rendering a correctly-sized
+ * sprite was always the goal; the volume detour was how we learned that sizing,
+ * not shape, was the whole bug.
+ *
+ * A name absent from this table keeps the OLD billboard, sized from the
+ * top-down view's pixel width — which is the sizing this file exists to
+ * replace, so an absent name is a gap and not a default.
+ *
+ * @typedef {{form:'stand'|'lie'|'wall', h:number, d?:number, mid?:number}} Volume
+ * `h` height in tiles · `d` depth in tiles (lie, and the resting test) ·
+ * `mid` centre height (wall)
  */
 export const PROP_VOL = /** @type {Record<string, Volume>} */ ({
   // ── Desks, benches, counters ──────────────────────────────────────────────
-  teacherDesk:  { form: 'slab', h: 0.40, d: 0.30 },
-  gmDesk:       { form: 'slab', h: 0.55, d: 0.38 },   // a raised bench-desk, not a table
-  classDesk:    { form: 'slab', h: 0.40, d: 0.30 },
-  lectern:      { form: 'slab', h: 0.55, d: 0.35 },
-  potionCounter:{ form: 'slab', h: 0.44, d: 0.30 },
-  abacus:       { form: 'slab', h: 0.30, d: 0.14 },
-  gmLedgers:    { form: 'slab', h: 0.12, d: 0.16 },
-  breadPile:    { form: 'slab', h: 0.14, d: 0.22 },
+  teacherDesk:  { form: 'stand', h: 0.40, d: 0.30 },
+  gmDesk:       { form: 'stand', h: 0.55, d: 0.38 },   // a raised bench-desk, not a table
+  classDesk:    { form: 'stand', h: 0.40, d: 0.30 },
+  lectern:      { form: 'stand', h: 0.55, d: 0.35 },
+  potionCounter:{ form: 'stand', h: 0.44, d: 0.30 },
+  abacus:       { form: 'stand', h: 0.30, d: 0.14 },
+  gmLedgers:    { form: 'stand', h: 0.12, d: 0.16 },
+  breadPile:    { form: 'stand', h: 0.14, d: 0.22 },
 
   // ── Cabinets and cases: tall solids against a wall ────────────────────────
-  gmBookshelf:  { form: 'slab', h: 0.90, d: 0.28 },
-  jarCabinet:   { form: 'slab', h: 0.95, d: 0.30 },
-  gearCubbies:  { form: 'slab', h: 0.85, d: 0.28 },
-  wardrobe:     { form: 'slab', h: 0.95, d: 0.30 },
-  footlocker:   { form: 'slab', h: 0.24, d: 0.24 },
-  gmThrone:     { form: 'slab', h: 0.60, d: 0.30 },
+  gmBookshelf:  { form: 'stand', h: 0.90, d: 0.28 },
+  jarCabinet:   { form: 'stand', h: 0.95, d: 0.30 },
+  gearCubbies:  { form: 'stand', h: 0.85, d: 0.28 },
+  wardrobe:     { form: 'stand', h: 0.95, d: 0.30 },
+  footlocker:   { form: 'stand', h: 0.24, d: 0.24 },
+  gmThrone:     { form: 'stand', h: 0.60, d: 0.30 },
 
   // ── Fire and iron ─────────────────────────────────────────────────────────
-  forgeFurnace: { form: 'slab', h: 1.05, d: 0.55 },
-  stoneOven:    { form: 'slab', h: 0.85, d: 0.42 },
-  kitchenStove: { form: 'slab', h: 0.85, d: 0.40 },
-  anvilBare:    { form: 'slab', h: 0.35, d: 0.28 },
+  forgeFurnace: { form: 'stand', h: 1.05, d: 0.55 },
+  stoneOven:    { form: 'stand', h: 0.85, d: 0.42 },
+  kitchenStove: { form: 'stand', h: 0.85, d: 0.40 },
+  anvilBare:    { form: 'stand', h: 0.35, d: 0.28 },
 
   // ── Beds: drawn in plan, so they lie down ─────────────────────────────────
   bed:          { form: 'lie', h: 0.26, d: 0.95 },
@@ -112,26 +126,26 @@ export const PROP_VOL = /** @type {Record<string, Volume>} */ ({
   bunkPosted:   { form: 'lie', h: 0.30, d: 0.95 },
 
   // ── Round and irregular uprights ──────────────────────────────────────────
-  provisionBarrel: { form: 'cross', h: 0.42 },
-  quenchBarrel:    { form: 'cross', h: 0.42 },
-  storeBarrel:     { form: 'cross', h: 0.42 },
-  cauldronBoil:    { form: 'cross', h: 0.52 },
-  herbBasket:      { form: 'cross', h: 0.26 },
-  potionGreen:     { form: 'cross', h: 0.20 },
-  bedCandle:       { form: 'cross', h: 0.34 },
-  globe:           { form: 'cross', h: 0.55 },   // a floor globe on its stand
-  gmBust:          { form: 'cross', h: 0.70 },
-  armorKnight:     { form: 'cross', h: 0.88 },
-  armorSteel:      { form: 'cross', h: 0.88 },
-  trainDummy:      { form: 'cross', h: 0.88 },
-  statue:          { form: 'cross', h: 1.15 },
+  provisionBarrel: { form: 'stand', h: 0.42 },
+  quenchBarrel:    { form: 'stand', h: 0.42 },
+  storeBarrel:     { form: 'stand', h: 0.42 },
+  cauldronBoil:    { form: 'stand', h: 0.52 },
+  herbBasket:      { form: 'stand', h: 0.26 },
+  potionGreen:     { form: 'stand', h: 0.20 },
+  bedCandle:       { form: 'stand', h: 0.34 },
+  globe:           { form: 'stand', h: 0.55 },   // a floor globe on its stand
+  gmBust:          { form: 'stand', h: 0.70 },
+  armorKnight:     { form: 'stand', h: 0.88 },
+  armorSteel:      { form: 'stand', h: 0.88 },
+  trainDummy:      { form: 'stand', h: 0.88 },
+  statue:          { form: 'stand', h: 1.15 },
   // Outdoors, where nothing has a ceiling to pierce but you still walk around
   // it. These are PLACEABLES — a handful per estate, bought one at a time — so
   // the second quad each costs is a rounding error against the ground they
   // stand on.
-  well:            { form: 'cross', h: 1.10 },
-  stall:           { form: 'cross', h: 1.05 },
-  lampPost:        { form: 'cross', h: 1.25 },
+  well:            { form: 'stand', h: 1.10 },
+  stall:           { form: 'stand', h: 1.05 },
+  lampPost:        { form: 'stand', h: 1.25 },
   // NOT treeTall, deliberately. The meadow grows trees from its GRID as well as
   // from the placeable list, and the grid ones are legion — the estate's open
   // ground is already the map that runs out of compositor layers first (@see

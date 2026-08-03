@@ -91,30 +91,16 @@ console.log(`ceiling ${CEIL.toFixed(2)} tiles · ${rows.length} distinct props �
   + `${rows.filter((r) => r.form && r.form !== 'billboard').length} given a volume · `
   + `${fixed} no longer pierce the ceiling · ${over} still do`);
 
-// Quad cost, per form, so the layer budget is a number and not a hope. Every
-// solid is a CROSS now (there is no box — see prop-volume.js); a slab adds a lid
-// only when it is shorter than the eye, because you cannot see the top of a
-// wardrobe and an invisible quad is a compositor layer spent on nothing.
-const EYE_T = 690 / 900;   // eye height in tiles, K cancels
-const cost = (v) => {
-  if (!v) return 1;                                   // billboard
-  if (v.form === 'wall') return 1;
-  if (v.form === 'lie') return 3;                     // crossed frame + art lid
-  if (v.form === 'slab') return v.h < EYE_T ? 3 : 2;
-  return 2;                                           // cross
-};
-const byMap = {};
-for (let k = 0; ;) {
-  const at = mapSrc.indexOf('props: [', k);
-  if (at < 0) break;
-  const id = (mapSrc.slice(0, at).match(/(\w+): \{\s*\n\s*id: '(\w+)'/g) || []).pop() || '?';
-  const lit = literal(mapSrc.slice(at), /props: /, '[', ']');
-  const list = eval('(' + lit + ')');
-  const name = (id.match(/id: '(\w+)'/) || [, '?'])[1];
-  byMap[name] = list.reduce((s, q) => s + cost(PROP_VOL[q.art]), 0);
-  k = at + 8;
-}
-console.log('\nquads spent on furnishings, per chart (was 1 each):');
-for (const [m, n] of Object.entries(byMap).sort((a, b) => b[1] - a[1])) {
-  console.log('  ' + m.padEnd(14) + String(n).padStart(3) + ' quads');
-}
+// Layer cost is no longer worth tabulating: EVERY furnishing is exactly one
+// quad now — a sprite that turns to face you, a bed flat on the floor, or a
+// portrait flat on a wall. That is Hexen's rule and it is also, by some way,
+// the cheapest of the three things this project tried. The interim box (5
+// quads) and cross (2–3) cost the dormitory 37 and 22 quads of furniture
+// respectively; it is 8 now, one per prop. Assert it rather than print it, so
+// a future form that quietly costs two is a failure and not a footnote.
+const many = [...seen.keys()].filter((n) => {
+  const v = PROP_VOL[n];
+  return v && !['stand', 'lie', 'wall'].includes(v.form);
+});
+console.log('\nlayers: one quad per furnishing'
+  + (many.length ? '  ** EXCEPT ' + many.join(', ') : ' — every form, no exceptions'));

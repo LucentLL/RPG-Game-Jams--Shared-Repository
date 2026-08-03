@@ -907,8 +907,10 @@ function decalBillboard(sheets, decalName, x, y, worldH) {
 
 /** Decor turns to the walker every frame for the same reason a creature does:
  *  a billboard is a flat plane, and a flat plane seen edge-on is nothing. */
-function standDecor(el, x, y) {
-  F.decor.push({ el, x, y, lift: -heightAt(Math.floor(x), Math.floor(y)) * STEP_PX });
+function standDecor(el, x, y, rest) {
+  // `rest` is what it is STANDING ON — 0 for the floor, a taller prop's height
+  // for the ledgers on the desk. Up is negative.
+  F.decor.push({ el, x, y, lift: -heightAt(Math.floor(x), Math.floor(y)) * STEP_PX - (rest || 0) });
 }
 
 /**
@@ -1047,83 +1049,20 @@ function fogSolids() {
 }
 
 /**
- * THE OBJECT'S OWN COLOUR — the crop's CENTRE BAND, a patch guaranteed to be
- * inside the thing's own mass.
+ * FLAT ON THE FLOOR — for art drawn in PLAN. The beds: their sheet draws a bunk
+ * from ABOVE, so a camera-facing sprite stands them on their footboards, which
+ * is how the dormitory came to be full of beds on end. One quad, in the plane
+ * the picture was actually painted for. Doom's floor detail, and no more
+ * geometry than the sprite it replaces.
  *
- * It dresses the two surfaces that must not be a picture: a slab's side and its
- * lid. Sampling the crop's outer edge instead was the obvious idea and the wrong
- * one — a tight alpha-box crop is mostly transparent along its rim, so cabinets
- * came out with see-through sides. The centre is always paint, so the top and
- * ends of a thing are painted in that thing's own colour, and stay right if the
- * sheet is ever recut.
- */
-const lidCss = (name) => {
-  const a = ART[name];
-  return artCropCss(name, {
-    x: Math.round(a.w * 0.22), y: Math.round(a.h * 0.34),
-    w: Math.max(1, Math.round(a.w * 0.56)), h: Math.max(1, Math.round(a.h * 0.22)),
-  });
-};
-
-/** Eye height in TILES — what decides whether a lid is a surface you can see or
- *  a compositor layer spent on the top of a wardrobe. */
-const EYE_T = EYE / T;
-
-/**
- * A solid whose ART IS ITS TOP — the beds. The sheet draws a bunk in PLAN, and
- * standing a plan view up on its edge to face the camera is exactly how the
- * dormitory came to be full of beds balanced on their footboards. Here the art
- * goes where it was drawn to go: on the lid.
+ * A hair above the floor for the same reason the rails are: two coplanar quads
+ * fight for depth and flicker.
  */
 function lieSolid(host, p, vol, fp, base) {
-  const w = fp.w * T, d = fp.d * T, h = vol.h * T;
-  const cx = fp.cx * T, cz = fp.cy * T, yc = base - h / 2;
-  // The same crossed frame every other solid stands on, in the blanket's own
-  // colour, with the plan-view art where it was drawn to go: on top.
-  const side = lidCss(p.art);
-  solidQuad(host, side, w, h, cx, yc, cz, '', p, 'fp-cross');
-  solidQuad(host, side, d, h, cx, yc, cz, 'rotateY(90deg)', p, 'fp-cross');
-  const el = solidQuad(host, artCropCss(p.art), w, d, cx, base - h, cz, 'rotateX(90deg)', p);
+  const w = fp.w * T, d = fp.d * T;
+  const el = solidQuad(host, artCropCss(p.art), w, d,
+    fp.cx * T, base - Math.max(2, vol.h * T * 0.5), fp.cy * T, 'rotateX(90deg)', p);
   if (p.label) el.title = p.label;
-}
-
-/**
- * TWO QUADS AT RIGHT ANGLES THROUGH THE CENTRE — the only volume you can build
- * honestly out of one picture, and now the only one this file builds.
- *
- * The first cut also emitted a real six-sided BOX for anything with a front,
- * and since every crop in the game is a single elevation, all four walls of that
- * box got the same picture. The playtest verdict was immediate: "the furnace is
- * placed 4 times around the sides of an invisible cube — this is not
- * acceptable." Correct, and not tunable: a box needs four pictures and we own
- * one. A cross carries the same information and never shows you the lie,
- * because its second quad goes edge-on exactly when it would have started
- * facing you. @see prop-volume.js.
- *
- * `fp` (a footprint) is what separates the two dressings:
- *   • WITHOUT one — a barrel, a statue, a lamp post — the thing looks the same
- *     from every bearing, so both quads are the art at full width.
- *   • WITH one — a desk, a cabinet, a furnace — the front quad is the art and
- *     the side quad narrows to the real depth and takes the object's own colour,
- *     because a desk seen end-on is not a picture of a desk front. It also gets
- *     a lid, but only when it is shorter than the eye: you cannot look down on
- *     a wardrobe, and an invisible quad is a layer spent on nothing.
- *
- * `.fp-cross` restores backface-visibility, which `.fp-q` turns off — a wall
- * face is never seen from behind and a barrel always is, and without this the
- * cross vanished a quarter-turn at a time as you walked around it.
- */
-function crossSolid(host, p, vol, fp, base) {
-  const a = ART[p.art];
-  const h = vol.h * T;
-  const w = (fp ? fp.w : vol.h * (a.w / a.h)) * T;
-  const d = fp ? fp.d * T : w;
-  const cx = (fp ? fp.cx : p.x) * T, cz = (fp ? fp.cy : p.y) * T, yc = base - h / 2;
-  const face = artCropCss(p.art);
-  const el = solidQuad(host, face, w, h, cx, yc, cz, '', p, 'fp-cross');
-  if (p.label) el.title = p.label;
-  solidQuad(host, fp ? lidCss(p.art) : face, d, h, cx, yc, cz, 'rotateY(90deg)', p, 'fp-cross');
-  if (fp && vol.h < EYE_T) solidQuad(host, lidCss(p.art), w, d, cx, base - h, cz, 'rotateX(90deg)', p);
 }
 
 /**
@@ -1206,24 +1145,33 @@ function buildDecor(sheets) {
 }
 
 /**
- * The authored furnishings, in three passes: what shape each one is, what is
- * standing ON what, and only then the quads.
+ * The authored furnishings — HEXEN'S RULE. Architecture is geometry; everything
+ * standing in the room is ONE sprite that turns to face you. No crossed quads,
+ * no lids, no boxes. @see prop-volume.js for the two rounds of building volume
+ * out of a single elevation and the playtest killing both.
  *
- * The middle pass is the one worth explaining. `gmLedgers` is authored to
- * OVERLAP `gmDesk` because that is what reads as "ledgers on the desk" in the
- * top-down view; taken literally in three dimensions it is a stack of books
- * hovering beside a desk at floor level. Rather than re-author the charts (and
- * move the thing in the view it was tuned for), a small solid whose anchor
- * falls inside a taller solid's footprint is lifted onto that solid's lid. The
- * rule needs no new authoring, it is checked against the volumes the props
- * already declare, and it starts working the moment a chart is nudged.
+ * What the volume table is FOR, then, is the size: `artBillboardH` takes the
+ * authored HEIGHT and lets the crop's own proportions give the width, which is
+ * the whole of what was ever wrong (a desk 1.03 tiles tall in a 1.4-tile room).
+ * Shape was never the bug.
  *
- * A prop with no volume keeps the old billboard exactly — see prop-volume.js
- * for why that is the right default rather than a gap.
+ * `lie` and `wall` are the two exceptions, and both are single quads too: a bed
+ * is drawn in PLAN so it goes flat on the floor, and a hung portrait is a
+ * texture on the one thing in the room that genuinely has volume — the wall.
+ *
+ * Footprints survive for ONE job: deciding what is standing on what. `gmLedgers`
+ * is authored to OVERLAP `gmDesk`, because that reads as "ledgers on the desk"
+ * in the top-down view; taken literally in three dimensions it is a stack of
+ * books at floor level beside a desk. A small prop whose anchor falls inside a
+ * taller one's footprint stands on it instead. No new authoring, checked against
+ * the heights the props already declare.
+ *
+ * A prop with no volume keeps the OLD billboard, sized from the top-down view's
+ * pixel width — which is the sizing this replaces, so it is a gap, not a default.
  */
 function buildProps(props) {
   const host = SOLID_HOST();
-  /** May a solid grow its depth this way, or is that way masonry? */
+  /** Does this prop's depth run into masonry, or into open floor? */
   const openBack = (fx, fy) => {
     const x = Math.floor(fx), y = Math.floor(fy);
     return !isWall(x, y) && !isLow(x, y);
@@ -1232,14 +1180,14 @@ function buildProps(props) {
     const a = ART[p.art];
     const vol = a ? propVolume(p.art) : null;
     if (!vol) return { p, vol: null };
-    // A slab is as wide as its own art says, given the height; a `lie` is drawn
-    // in plan, so its LENGTH is the authored number and the width follows that.
-    if (vol.form === 'slab') return { p, vol, fp: footprint(p, vol.h * (a.w / a.h), vol.d, openBack) };
+    // A standing thing is as wide as its own art says, given the height; a `lie`
+    // is drawn in plan, so its LENGTH is the authored number and width follows.
     if (vol.form === 'lie') return { p, vol, fp: footprint(p, vol.d * (a.w / a.h), vol.d, openBack) };
+    if (vol.d) return { p, vol, fp: footprint(p, vol.h * (a.w / a.h), vol.d, openBack) };
     return { p, vol };
   });
   const shelves = plan.filter((q) => q.fp);
-  /** How high the ground under this prop really is — 0, or a taller solid's lid. */
+  /** How high the ground under this prop really is — 0, or a taller prop's top. */
   const restOn = (q) => {
     let top = 0;
     for (const s of shelves) {
@@ -1261,33 +1209,34 @@ function buildProps(props) {
     const ground = -heightAt(Math.floor(p.x), Math.floor(p.y)) * STEP_PX;
     if (vol.form === 'wall') {
       // Nothing to bolt it to is a fault in the chart, not something to paper
-      // over: fall back to the billboard so it is still visible and still wrong.
+      // over: fall back to the sprite so it is still visible and still wrong.
       if (!wallSolid(host, p, vol, ground)) artBillboard(p.art, p.x, p.y, (p.w || 48) * (T / 48), p.label);
       continue;
     }
-    const base = ground - restOn(q) * T;   // up is negative
-    // `q.fp` is undefined for a pure cross and set for a slab, which is exactly
-    // the switch crossSolid reads — one emitter, two dressings.
-    if (vol.form === 'lie') lieSolid(host, p, vol, q.fp, base);
-    else crossSolid(host, p, vol, q.fp, base);
+    const rest = restOn(q);
+    if (vol.form === 'lie') { lieSolid(host, p, vol, q.fp, ground - rest * T); continue; }
+    // ONE SPRITE, turned to the walker every frame by place() — Hexen's answer,
+    // at the height this table finally knows.
+    artBillboardH(p.art, p.x, p.y, vol.h * T, p.label, rest * T);
   }
 }
 
 /** An art.js crop stood up. `worldW` is its width in world px; the height
  *  follows from the crop's own proportions, which is what keeps it a thing and
  *  not a stretched picture of one. */
-function artBillboard(name, x, y, worldW, title) {
+function artBillboard(name, x, y, worldW, title, rest) {
   const html = artSprite(name, '', 'width:100%;height:100%');
   if (!html) return;
   const a = ART[name];
   const el = addBillboard('fp-decor', html, worldW, worldW * (a.h / a.w));
   if (title) el.title = title;
-  standDecor(el, x, y);
+  standDecor(el, x, y, rest);
 }
-/** The same, given a HEIGHT — for things the ceiling has an opinion about. */
-function artBillboardH(name, x, y, worldH) {
+/** The same, given a HEIGHT — which is how everything with an authored volume
+ *  is sized (@see prop-volume.js), and the one thing that was ever wrong. */
+function artBillboardH(name, x, y, worldH, title, rest) {
   const a = ART[name];
-  if (a) artBillboard(name, x, y, worldH * (a.w / a.h));
+  if (a) artBillboard(name, x, y, worldH * (a.w / a.h), title, rest);
 }
 
 // ---------------------------------------------------------------------------
