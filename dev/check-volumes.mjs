@@ -15,7 +15,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', 'src', 'guild') + '/';
-const { PROP_VOL } = await import(new URL('../src/guild/prop-volume.js', import.meta.url));
+const { PROP_VOL, propCell } = await import(new URL('../src/guild/prop-volume.js', import.meta.url));
 
 /** Pull a balanced literal out of a source file, starting at `open`. */
 function literal(src, startRe, open, close) {
@@ -104,3 +104,23 @@ const many = [...seen.keys()].filter((n) => {
 });
 console.log('\nlayers: one quad per furnishing'
   + (many.length ? '  ** EXCEPT ' + many.join(', ') : ' — every form, no exceptions'));
+
+// WHERE THINGS STAND. The charts anchor a furnishing on its cell's SOUTH EDGE
+// (the top-down view's foot line, art rising north into the marked 'f'), so a
+// lens that takes it literally plants everything on a boundary. propCell reads
+// the line back into the cell. Counted rather than eyeballed, because "centred"
+// is exactly the kind of thing a screenshot argues about.
+const frac = (v) => ((v % 1) + 1) % 1;
+let onLine = 0, centred = 0, kept = 0, stillOff = [];
+for (const p of props) {
+  const c = propCell(p);
+  if (frac(p.y) < 1e-6) onLine++;
+  if (c.y === p.y) { kept++; continue; }
+  if (Math.abs(frac(c.y) - 0.5) < 1e-6) centred++;
+  else stillOff.push(p.art + '@' + c.y);
+}
+console.log('\nanchors:');
+console.log('  ' + String(onLine).padStart(3) + ' were on a tile boundary');
+console.log('  ' + String(centred).padStart(3) + ' now stand at a tile centre');
+console.log('  ' + String(kept).padStart(3) + ' left as authored (wall-hugging + tabletop nudges)');
+if (stillOff.length) console.log('  ** moved but not centred: ' + stillOff.join(', '));

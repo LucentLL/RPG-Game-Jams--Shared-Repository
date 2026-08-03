@@ -27,7 +27,7 @@ import { THEMES, LIGHTS, DECALS, ORE_KINDS, oreKindAt, mapForLocale, validateMap
 import { preyById } from './locales.js';
 import { loadImg, SHEET_URLS } from './delve.js';
 import { ART, artSprite, artCropCss, WORN, wornWeapon, wornShield, wornPick } from './art.js';
-import { propVolume, footprint, REST_SLOP } from './prop-volume.js';
+import { propVolume, propCell, footprint, REST_SLOP } from './prop-volume.js';
 import { icon } from './icons.js';
 import { createLook, readPad, padReset, touchPrimary, PAD } from '../platform/input.js';
 import { claimPad } from '../platform/ui-pad.js';
@@ -1170,6 +1170,13 @@ function buildDecor(sheets) {
  * is drawn in PLAN so it goes flat on the floor, and a hung portrait is a
  * texture on the one thing in the room that genuinely has volume — the wall.
  *
+ * AND THEY STAND IN THE MIDDLE OF A TILE, not on the line between two. The
+ * charts anchor a furnishing on its cell's SOUTH EDGE — `y: 4` for a bunk whose
+ * `'f'` is at row 3 — because that is the top-down view's foot line, with the
+ * art rising north from it into the marked cell. Taken literally here it plants
+ * every piece of furniture on a boundary; `propCell` reads the line back into
+ * the cell it means. @see prop-volume.js.
+ *
  * Footprints survive for ONE job: deciding what is standing on what. `gmLedgers`
  * is authored to OVERLAP `gmDesk`, because that reads as "ledgers on the desk"
  * in the top-down view; taken literally in three dimensions it is a stack of
@@ -1182,20 +1189,18 @@ function buildDecor(sheets) {
  */
 function buildProps(props) {
   const host = SOLID_HOST();
-  /** Does this prop's depth run into masonry, or into open floor? */
-  const openBack = (fx, fy) => {
-    const x = Math.floor(fx), y = Math.floor(fy);
-    return !isWall(x, y) && !isLow(x, y);
-  };
   const plan = props.map((p) => {
     const a = ART[p.art];
     const vol = a ? propVolume(p.art) : null;
-    if (!vol) return { p, vol: null };
+    if (!vol) return { p, vol: null, at: p };
+    // `wall` keeps its authored point: it is not standing in a cell, it is hung
+    // a hair proud of a wall face, and that hair is the whole placement.
+    const at = vol.form === 'wall' ? p : propCell(p);
     // A standing thing is as wide as its own art says, given the height; a `lie`
     // is drawn in plan, so its LENGTH is the authored number and width follows.
-    if (vol.form === 'lie') return { p, vol, fp: footprint(p, vol.d * (a.w / a.h), vol.d, openBack) };
-    if (vol.d) return { p, vol, fp: footprint(p, vol.h * (a.w / a.h), vol.d, openBack) };
-    return { p, vol };
+    if (vol.form === 'lie') return { p, vol, at, fp: footprint(at, vol.d * (a.w / a.h), vol.d) };
+    if (vol.d) return { p, vol, at, fp: footprint(at, vol.h * (a.w / a.h), vol.d) };
+    return { p, vol, at };
   });
   const shelves = plan.filter((q) => q.fp);
   /** How high the ground under this prop really is — 0, or a taller prop's top. */
@@ -1203,32 +1208,36 @@ function buildProps(props) {
     let top = 0;
     for (const s of shelves) {
       if (s === q || s.vol.h <= q.vol.h || s.vol.h <= top) continue;
-      if (q.p.x < s.fp.x0 - REST_SLOP || q.p.x > s.fp.x1 + REST_SLOP) continue;
-      if (q.p.y < s.fp.y0 - REST_SLOP || q.p.y > s.fp.y1 + REST_SLOP) continue;
+      if (q.at.x < s.fp.x0 - REST_SLOP || q.at.x > s.fp.x1 + REST_SLOP) continue;
+      if (q.at.y < s.fp.y0 - REST_SLOP || q.at.y > s.fp.y1 + REST_SLOP) continue;
       top = s.vol.h;
     }
     return top;
   };
   for (const q of plan) {
-    const { p, vol } = q;
+    const { p, vol, at } = q;
     if (!vol) {
       // `w` is the top-down view's pixels against its 48px tile, so w/48 is the
-      // thing's width in TILES and T/48 carries it straight across.
+      // thing's width in TILES and T/48 carries it straight across. Left on the
+      // authored anchor: a prop with no volume has not been looked at yet, and
+      // moving it would hide that.
       artBillboard(p.art, p.x, p.y, (p.w || 48) * (T / 48), p.label);
       continue;
     }
-    const ground = -heightAt(Math.floor(p.x), Math.floor(p.y)) * STEP_PX;
+    // The ground UNDER THE CELL IT STANDS IN, not under the line it was
+    // authored on — those are different cells on a ledge.
+    const ground = -heightAt(Math.floor(at.x), Math.floor(at.y)) * STEP_PX;
     if (vol.form === 'wall') {
       // Nothing to bolt it to is a fault in the chart, not something to paper
       // over: fall back to the sprite so it is still visible and still wrong.
-      if (!wallSolid(host, p, vol, ground)) artBillboard(p.art, p.x, p.y, (p.w || 48) * (T / 48), p.label);
+      if (!wallSolid(host, at, vol, ground)) artBillboard(p.art, at.x, at.y, (p.w || 48) * (T / 48), p.label);
       continue;
     }
     const rest = restOn(q);
     if (vol.form === 'lie') { lieSolid(host, p, vol, q.fp, ground - rest * T); continue; }
     // ONE SPRITE, turned to the walker every frame by place() — Hexen's answer,
-    // at the height this table finally knows.
-    artBillboardH(p.art, p.x, p.y, vol.h * T, p.label, rest * T);
+    // at the height this table finally knows, in the middle of its own tile.
+    artBillboardH(p.art, at.x, at.y, vol.h * T, p.label, rest * T);
   }
 }
 

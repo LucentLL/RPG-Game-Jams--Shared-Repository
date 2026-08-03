@@ -171,24 +171,44 @@ export function propVolume(art) {
 }
 
 /**
- * The footprint a solid covers, in tiles, given where it was authored.
+ * WHICH TILE A PROP IS ACTUALLY STANDING IN.
  *
- * `x, y` is the anchor the maps already carry, and it means what a top-down
- * standee has always meant: the MIDDLE OF THE FRONT EDGE, at floor level. The
- * solid therefore grows BACKWARD from it — except where backward is masonry,
- * which is what `openBack` is asked. Everything wall-hugging in the estate is
- * authored a hair south of its wall (`y: 2.02`), so without that test every
- * cabinet in the game would be buried half a tile inside the stonework.
+ * The charts anchor a furnishing on the SOUTH EDGE of its cell, not in the
+ * middle of it — `{ art: 'bed', x: 3.5, y: 4 }` in a chart whose `'f'` is at
+ * ROW 3. That is the top-down view's foot line: the standee's base sits on
+ * `y` and its art rises north from there, into the cell the chart marked. It
+ * is correct for that view and it is a LINE, so a first-person lens that takes
+ * it literally stands every piece of furniture in the estate on the boundary
+ * between two tiles — the playtest's "why are none of these objects centered in
+ * tiles? They all look to be centered on edge lines."
  *
- * Returns the CENTRE and the extents, so a caller only ever adds and halves.
- * @param {{x:number,y:number}} p the authored anchor
- * @param {number} w width in tiles @param {number} d depth in tiles
- * @param {(x:number,y:number)=>boolean} openBack can the solid grow that way?
+ * So an anchor that lands exactly ON a boundary is read as a foot line and
+ * moved to the middle of the cell above it. A FRACTIONAL anchor is not: `2.02`
+ * is a cabinet deliberately pressed against the wall at row 1, and `6.12` is a
+ * stack of ledgers deliberately laid over a desk. Those are placements, not
+ * lines, and snapping them would undo the author's aim.
+ *
+ * 44 of the 59 authored props are on a line; every one of them was half a tile
+ * out.
  */
-export function footprint(p, w, d, openBack) {
-  const back = openBack ? openBack(p.x, p.y - d) : true;
-  const cy = back ? p.y - d / 2 : p.y + d / 2;
-  return { cx: p.x, cy, w, d, x0: p.x - w / 2, x1: p.x + w / 2, y0: cy - d / 2, y1: cy + d / 2 };
+export const propCell = (p) => (Number.isInteger(p.y) ? { ...p, y: p.y - 0.5 } : p);
+
+/**
+ * The footprint a prop covers, in tiles, CENTRED on where it stands.
+ *
+ * Centred and not grown-backward-from-an-edge: `propCell` above has already
+ * turned the authored foot line into the middle of the occupied cell, so there
+ * is no front edge left to grow from and no masonry to test for.
+ *
+ * Returns the centre and the extents, so a caller only ever adds and halves.
+ * @param {{x:number,y:number}} p where the prop stands
+ * @param {number} w width in tiles @param {number} d depth in tiles
+ */
+export function footprint(p, w, d) {
+  return {
+    cx: p.x, cy: p.y, w, d,
+    x0: p.x - w / 2, x1: p.x + w / 2, y0: p.y - d / 2, y1: p.y + d / 2,
+  };
 }
 
 /**
