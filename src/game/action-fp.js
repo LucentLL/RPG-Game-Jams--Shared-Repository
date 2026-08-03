@@ -57,9 +57,25 @@ const STEP = 430 * K;          // one terrain level, world px
 const FIGHTER_H = 1200 * K;
 const FOOT_PCT = 31.25;        // a PERCENTAGE — never scaled
 const PERSP = 500, PERSP_AT = 720;   // the lens is untouched; that is the point
-// Tactical-fp's shoulder framing, kept in lockstep (head near centre, feet
-// near the bottom edge, ~half the screen of fighter — the reference shot).
-const OTS_BACK = 1.0, OTS_UP = 120 * K, OTS_PITCH = 10;   // tiles, world px, degrees
+/**
+ * The shoulder camera, kept in lockstep with tactical-fp.
+ *
+ * OTS_PITCH IS NEGATIVE, AND THE SIGN IS THE WHOLE POINT. CSS `rotateX(+θ)`
+ * puts a point straight ahead BELOW the screen centre, which means the camera
+ * is aimed above it — `+10` was looking UP ten degrees. That is why the third
+ * person shot was three-quarters sky with the fighter pressed into the bottom
+ * edge, and why nothing on the ground read: you could barely see the ground.
+ *
+ * −15 is a THREE-QUARTER view, the angle every isometric RPG uses, and it is
+ * what makes top-down-authored art work at all. The subject's centre already
+ * sits ~13° below the raised camera's horizontal, so looking down 15 lands it
+ * within 2° of the view axis — centred, with the floor open beneath it. It also
+ * buys the thing the sprites need: "up" on a sprite gains an AWAY component of
+ * sin(15°) ≈ 26%, so a swing drawn going up starts reading as going forward.
+ * That fraction is why the reference games sit steeper still — Diablo ~35°,
+ * Ultima VII ~45°. If the swing still reads as a chop, this is the number.
+ */
+const OTS_BACK = 1.0, OTS_UP = 120 * K, OTS_PITCH = -15;   // tiles, world px, degrees
 // Three tiles, matching the tactical board: the apron only has to out-reach the
 // shoulder camera's one-tile pull-back, and six bought a ring twice as wide as
 // anyone can see for twice the surface every device had to allocate.
@@ -362,6 +378,33 @@ function ensureActors() {
 /** Camera-relative rotation, tactical-fp's identical trick: the compositor
  *  picks its sheet row from `facing`, so subtract the camera's yaw on a
  *  shallow proxy and the fighter shows the camera the side it really shows. */
+/**
+ * A FALLEN FIGHTER LIES DOWN.
+ *
+ * The compositor's death pose is the sheet's SLEEP cell — a body drawn from
+ * above, lying on the ground, because that is what a top-down game needs. Stood
+ * up as a billboard it is a corpse standing at attention, which is what the
+ * playtest photographed with the opponent on 0 HP.
+ *
+ * The delve solved this a while ago and this is that solution, verbatim
+ * (delve-fp.js's place()): tip the standee about its FEET and squash it. The
+ * origin is already `50% 100%`, so the rotation is a fall rather than a spin,
+ * and the squash is the foreshortening of a thing that has gone from facing you
+ * to facing the sky. It is not a CSS animation on purpose — this transform is
+ * rewritten every frame by the placement below, and the two would fight.
+ *
+ * Returns 0..1 through the fall, or 0 for anyone still standing.
+ */
+const DEATH_MS = 520;
+function fallenBy(f) {
+  const a = f && f.anim;
+  if (!a || a.name !== 'death') return 0;
+  return Math.min(1, Math.max(0, (performance.now() - (a.timer || 0)) / DEATH_MS));
+}
+const fallTf = (t) => (t
+  ? ` rotateZ(${(t * -74).toFixed(1)}deg) scale(${(1 - t * 0.34).toFixed(3)},${(1 - t * 0.66).toFixed(3)})`
+  : '');
+
 function drawActor(f, a, yaw) {
   const gfx = window.__ranchGfx;
   if (!gfx || !gfx.renderActor) return;
@@ -496,8 +539,8 @@ function fitLens() {
  * whole term is gone from every per-frame transform string, which is a write
  * saved per standee per frame on the one lens that has a free look.
  */
-function aimLens() {
-  const oy = 50 + (PERSP / PERSP_AT) * Math.tan(V.pitch * Math.PI / 180) * 100;
+function aimLens(free) {
+  const oy = 50 + (PERSP / PERSP_AT) * Math.tan(free * Math.PI / 180) * 100;
   const po = `50% ${oy.toFixed(2)}%`;
   if (po !== V.po) V.stage.style.perspectiveOrigin = (V.po = po);
 }
@@ -527,9 +570,16 @@ export function actFpSteer(input, dt) {
   // transform string every frame and eventually costs real precision.
   if (V.yaw > Math.PI) V.yaw -= 2 * Math.PI;
   else if (V.yaw <= -Math.PI) V.yaw += 2 * Math.PI;
+  // THE SHOULDER CAMERA'S PITCH IS FIXED. Its whole job is to hold a
+  // three-quarter view — the angle that makes the ground readable and a
+  // top-down-drawn swing read as forward — and a pitch the player can move is a
+  // pitch that leaves it. Free look belongs to first person, where there is no
+  // framing to keep. The banked mouse travel is DRAINED either way (the `look`
+  // read above), so nothing accumulates while you are over the shoulder and
+  // nothing jumps when you cut back to first person.
   const dp = (look ? look.pitch * 180 / Math.PI : 0)
     + Math.max(-1, Math.min(1, input.pitch || 0)) * PAD_PITCH_RATE * dt;
-  if (dp) V.pitch = Math.max(-PITCH_MAX, Math.min(PITCH_MAX, V.pitch + dp));
+  if (dp && V.pov !== 'shoulder') V.pitch = Math.max(-PITCH_MAX, Math.min(PITCH_MAX, V.pitch + dp));
   const fwd = Math.max(-1, Math.min(1, input.fwd || 0));
   const strafe = Math.max(-1, Math.min(1, input.strafe || 0));
   const s = Math.sin(V.yaw), c = Math.cos(V.yaw);
@@ -578,10 +628,10 @@ export function actFpFrame() {
   const deg = V.yaw * 180 / Math.PI;
   // The free pitch is a SHEAR on the lens, not a term in here — see aimLens for
   // why, and for the measured size-swing that rotating it used to cause. The
-  // shoulder camera's own 10° stays a rotation: it is a fixed framing lean the
-  // portrait shot was tuned to, it never moves while you play, and a constant
-  // cannot produce a swing. Billboards therefore counter NOTHING now.
-  aimLens();
+  // shoulder camera's own lean stays a ROTATION and is the only pitch it has:
+  // a constant cannot produce a swing, and over the shoulder the free look is
+  // held at zero so the three-quarter framing is a fact and not a suggestion.
+  aimLens(V.pov === 'shoulder' ? 0 : V.pitch);
   // The scale is OUTERMOST and undoes K exactly: the picture is the one the
   // framing was measured at, only the rasters underneath it shrank.
   const sc = (1 / K).toFixed(4);
@@ -597,7 +647,8 @@ export function actFpFrame() {
     if (self !== a.selfHidden) { a.el.style.visibility = (a.selfHidden = self) ? 'hidden' : ''; }
     if (self) continue;
     const fl = liftAt(T0, f.ax, f.ay);
-    const tf = `translate3d(${(f.ax * T).toFixed(1)}px,${fl.toFixed(1)}px,${(f.ay * T).toFixed(1)}px) rotateY(${(-deg).toFixed(1)}deg)`;
+    const tf = `translate3d(${(f.ax * T).toFixed(1)}px,${fl.toFixed(1)}px,${(f.ay * T).toFixed(1)}px) rotateY(${(-deg).toFixed(1)}deg)`
+      + fallTf(fallenBy(f));
     if (tf !== a.tf) a.el.style.transform = (a.tf = tf);
     const hp = Math.max(0, Math.min(1, f.hp / (f.maxHp || f.hp || 1)));
     const w = (hp * 100).toFixed(0) + '%';

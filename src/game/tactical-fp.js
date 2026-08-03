@@ -63,7 +63,11 @@ const PERSP = 500, PERSP_AT = 720;   // the lens is untouched; that is the point
  * fall out of the projection: eye at EYE+120 ≈ 810, one tile back, pitched
  * 10° → head ≈ screen centre, feet ≈ 92% down, span ≈ 46% of the stage.
  */
-const OTS_BACK = 1.0, OTS_UP = 120 * K, OTS_PITCH = 10;   // tiles, world px, degrees
+const OTS_BACK = 1.0, OTS_UP = 120 * K, OTS_PITCH = -15;   // tiles, world px, degrees
+// NEGATIVE, and the sign is the point: CSS `rotateX(+θ)` aims the camera UP, so
+// `+10` was looking up ten degrees and the shot was mostly sky. −15 is the
+// three-quarter view every isometric RPG uses. @see action-fp.js's twin of this
+// constant for the arithmetic; the two must never drift.
 
 /** @type {?Object} the live view (null when first person is off) */
 let V = null;

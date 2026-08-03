@@ -2566,11 +2566,27 @@ function render() {
   // every standee (the top-down view learned this the hard way).
   // Guarded like every billboard write below: an idle frame must recomposite
   // nothing, and an unguarded write here recomposited the whole quad stack.
-  // The 9° pitch is CAMERA-space, so it sits left of the yaw (scale3d is a
-  // uniform similarity and commutes past it). Billboards only counter-yaw,
-  // so they lean 9° from true — the tactical shoulder ships 10-12° the same
-  // way and it reads as nothing.
-  const wtf = `scale3d(${F.lens},${F.lens},${F.lens})${pov3 ? ' rotateX(9deg)' : ''} rotateY(${F.yaw}deg) translate3d(${-ex}px,${-ey}px,${-ez}px)`;
+  /**
+   * The chase pitch is CAMERA-space, so it sits left of the yaw (scale3d is a
+   * uniform similarity and commutes past it).
+   *
+   * NEGATIVE, and the sign is the point. CSS `rotateX(+θ)` puts a point
+   * straight ahead BELOW the screen centre, which means the camera is aimed
+   * ABOVE it — the `9deg` this replaces was looking UP nine degrees, and so
+   * were both battle lenses. −15 is the three-quarter view every isometric RPG
+   * uses, and it is what lets art drawn for a top-down game read at all: "up"
+   * on a sprite gains an AWAY component of sin(15°) ≈ 26%, so a swing drawn
+   * going up starts reading as going forward, and the floor is visible enough
+   * to tell where anything is standing. The arithmetic: this camera rides 41
+   * world px above the eye and 1.1 tiles back, which puts the walker's centre
+   * 23.6° below its horizontal — looking up 9 left them 32.6° down the frame,
+   * looking down 15 lands them 8.6° below the axis. Kept in lockstep with
+   * action-fp.js / tactical-fp.js's OTS_PITCH; the three must never drift.
+   *
+   * Billboards only counter-yaw, so they now lean 15° from true rather than 9.
+   * That lean is not a cost here, it is the mechanism.
+   */
+  const wtf = `scale3d(${F.lens},${F.lens},${F.lens})${pov3 ? ' rotateX(-15deg)' : ''} rotateY(${F.yaw}deg) translate3d(${-ex}px,${-ey}px,${-ez}px)`;
   if (wtf !== F._wtf) F.world.style.transform = (F._wtf = wtf);
   // Billboards stand on the floor and counter-rotate to face the walker. Every
   // write is guarded by the value it would write: standing still, this loop
