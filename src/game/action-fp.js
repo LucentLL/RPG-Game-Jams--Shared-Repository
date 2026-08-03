@@ -707,8 +707,13 @@ function syncHands(me, now) {
     V.lastAnim = anim;
   }
   // The stride bob the delve's hands ride, keyed here to the move anim.
-  const bob = anim === 'move' ? (Math.sin(now / 150) * 14).toFixed(1) + 'px' : '0px';
-  if (bob !== V._bob) V.handsEl.style.setProperty('--fp-bob', (V._bob = bob));
+  // Written as a TRANSFORM, not an inherited custom property: a var set on the
+  // hands layer invalidates style for every hand, canvas and SVG beneath it,
+  // and while a swing animation is running that recalc lands on live animated
+  // elements every frame. @see the note on `.fp-hands` in delve.css.
+  const bob = anim === 'move' ? Math.round(Math.sin(now / 150) * 14 * 2) / 2 : 0;
+  const tf = `translate3d(0,${bob.toFixed(1)}px,0)`;
+  if (tf !== V._bob) V.handsEl.style.transform = (V._bob = tf);
 }
 
 // ---------------------------------------------------------------------------

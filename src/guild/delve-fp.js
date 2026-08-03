@@ -2853,11 +2853,18 @@ function render() {
     // Bob rides DISTANCE travelled, so walking into a wall does not bob; sway
     // is a low-passed yaw rate. Both hard-zero in steer(), so a standing frame
     // builds the same string and the guard below rejects the write.
+    // ONE transform write, not two inherited custom properties — @see the note
+    // on `.fp-hands` in delve.css for why that distinction is the difference
+    // between smooth and unplayable when a swing is running underneath.
+    //
+    // And quantised to a HALF PIXEL. At a tenth the bob changes on very nearly
+    // every frame of a walk, which is a write per frame for a difference no eye
+    // resolves; at a half it changes a few times a cycle and the guard below
+    // rejects the rest.
     const spd = Math.min(1, Math.hypot(F.vx, F.vy) / WALK_SPEED);
-    const bob = (Math.sin(F.bobPhase) * 26 * spd).toFixed(1) + 'px';
-    const sway = (clamp1(F.sway) * -30).toFixed(1) + 'px';
-    if (bob !== F._bob) F.hands.el.style.setProperty('--fp-bob', (F._bob = bob));
-    if (sway !== F._sway) F.hands.el.style.setProperty('--fp-sway', (F._sway = sway));
+    const q = (v) => (Math.round(v * 2) / 2).toFixed(1);
+    const tf = `translate3d(${q(clamp1(F.sway) * -30)}px,${q(Math.sin(F.bobPhase) * 26 * spd)}px,0)`;
+    if (tf !== F._handTf) F.hands.el.style.transform = (F._handTf = tf);
   }
   // The walker's own back, when the camera stands behind it.
   if (F.self) {

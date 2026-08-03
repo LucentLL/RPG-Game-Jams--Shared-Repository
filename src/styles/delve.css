@@ -620,7 +620,19 @@
    swing on top, which is why the bob is on the CONTAINER and not on the hand. */
 .fp-hands {
   position: absolute; inset: 0; z-index: 300; pointer-events: none;
-  transform: translate3d(var(--fp-sway, 0px), var(--fp-bob, 0px), 0);
+  /* THE BOB IS WRITTEN DIRECTLY, not through `--fp-bob`/`--fp-sway`.
+     A custom property set on this element is INHERITED, so changing it
+     invalidates style for the whole subtree — both hands, their canvases, the
+     slash SVG and its path. That is nearly free while the subtree is static,
+     which is why it survived the grid-locked crawler, where the bob only moved
+     during a 205ms stride. Continuous movement writes it every frame, and if a
+     swing is running at the same time every one of those invalidations lands on
+     elements with a live animation and a blur filter. That is the playtest's
+     "walking OR swinging is smooth, both at once and performance plummets", and
+     it is first-person only because `.fp-pov3 .fp-hands` is display:none.
+     A direct transform on ONE element invalidates nothing below it. */
+  transform: translate3d(0, 0, 0);
+  will-change: transform;
   /* THE LENS THE SWING IS SEEN THROUGH. The cut below travels a real circle in
      the ground plane around you, so something has to project it or the depth
      half of that circle is invisible and it degenerates back into a slide.
@@ -698,6 +710,14 @@
    put the pick away, you don't teleport it. */
 .fp-hand.fp-stowed { transform: translateY(112%); transition: transform 180ms ease-in; }
 
+/* NO BLUR ON A THING MID-SWING. `.fp-hand`'s drop-shadow is a private render
+   surface, and a surface has to be re-rastered whenever its own transform chain
+   changes — which during a swing is every frame, under a `perspective` whose
+   element is ALSO moving with the walk. It is the most expensive pixel in the
+   view at exactly the moment nobody can see it: a blurred shadow under a blade
+   travelling a metre in a third of a second. This is delve.css's own rule
+   (see the quads note) applied to the one element that had escaped it. */
+.fp-hand.fp-swinging { filter: none; }
 .fp-hand-weapon.fp-swinging, .fp-hand-pick.fp-swinging { animation: fp-swing 380ms cubic-bezier(.3,.7,.3,1); }
 .fp-hand-shield.fp-bracing  { animation: fp-brace 380ms ease-out; }
 /* Rotation only (plus a whisper of body-throw): the origin is the GRIP, so the
