@@ -9,7 +9,81 @@ the playtest link after every change below.
 
 ---
 
-## 1. THE OPEN PROBLEM — read this first
+## 0. WHAT HAPPENED ON 2026-08-03 — read this first
+
+A 5.1s phone capture of the crawler on the estate settled two things the rest
+of this document could only guess at, and a pass then shipped against them.
+
+**The failure is RASTER, not the 3D tree.** Three findings from the capture,
+frame by frame:
+
+1. **`.delve-hud` and `.fp-vitals` vanish too** — 22 frames of 326. They are
+   plain 2D siblings of `.fp-stage`, outside every `preserve-3d` subtree, and
+   nothing in JS or CSS ever hides them. So this is not confined to the quads,
+   and no amount of scene-graph work can be the whole answer.
+2. **One element paints HALF.** The `.fp-sky` div renders with a hard full-width
+   seam at device row 287: flat grey above, correct gradient and clouds below.
+   That is a partially-rastered layer. Nothing you can write draws it.
+3. **The scene tears down and half rebuilds in 18ms** (frames 193→194→195),
+   while `buildGeometry` only runs on a change of CELL.
+
+Frame pacing: median 8.5ms between captured frames — the compositor was
+presenting at ~118Hz throughout. **Frames kept arriving on time and arrived with
+content missing**, and the dropout bursts bracket the clip's two longest stalls
+(108ms, 101ms). The app is not CPU-bound; the raster queue is behind. Walking
+changes every quad's effective on-screen transform every frame, and that is what
+invalidates hundreds of rasters at once.
+
+**What shipped against it** (`delve-fp.js`, first person only):
+
+- **Merged ground and merged wall runs.** A block of cells alike in every way a
+  quad cares about is ONE quad with its tile repeated across it, and a straight
+  run of wall faces is one quad the same way. Merging is allowed only where the
+  fog is FLAT — inside `L.near` every cell reads 0 — so it is pixel-identical to
+  the quads it replaces, not an approximation. `CHUNK` is 4 (1200 CSS px).
+- **The rear half-space is not built.** ±117° against a ~115° horizontal FoV,
+  plus a 5-tile keep-everything radius, rebuilt every 30° of yaw.
+- **The radius is a MEASUREMENT now, not a formula.** `fitViewRadius` pins the
+  fog to close exactly at the build edge (`far = R`, `near = R − 0.3/(1−FOG_CULL)`)
+  and binary-searches the largest R whose want-set fits `LAYER_BUDGET`, sampled
+  at the entry and the middle of the chart over four bearings. So the meadow
+  gets its vista and the estate gets what forty-six rows of buildings can pay
+  for, instead of one number failing at both ends.
+- **The budget counts veils.** A fogged quad carries a `.fp-veil` child; live on
+  the estate that was 407 veils against 602 quads. Counting only quads makes the
+  budget wrong by two thirds — the same class of proxy error as §1 below.
+- Fixed on the way: the cell-change dead band was `&&` where it needed `||`
+  (inert except within 0.05 tiles of a corner, so every straight walk rebuilt on
+  the cell line); `.fp-corpse` carried a `filter` for the life of every body the
+  room keeps, and `place()` left a `drop-shadow` on each of them on desktop —
+  both are opacity now; `.fp-blood` is a stage-sized layer held at `opacity: 0`
+  and is `display: none` until it flashes.
+
+Measured, worst of eight bearings (`node --import ./dev/register-vite-env.mjs
+dev/check-drawdist.mjs`), layers = quads + veils:
+
+| chart | tier | was | now |
+|---|---|---|---|
+| estate | desktop | R13 / 876 | R18–30 / ~1000–1460 |
+| estate | phone | R8 / 387 | R9 / 247 |
+| Ferncreek | desktop | R13 / 371 | R24 (whole map) / 216 |
+| Ferncreek | phone | R8 / 191 | R20 / 196 |
+| arena | desktop | R13 / 380 | R19 (whole map) / 137 |
+| arena | phone | R8 / 359 | R19 / 135 |
+| Hollowvein | both | R7 / 232 | unchanged (lamp-bound) |
+
+Verified live in the pane: ground and wall coverage exact (zero double-cover,
+zero holes) at spawn, after walking, and across all 24 bearings of a full turn —
+4021 lens-cell checks with nothing missing. The audit caught one real bug on the
+way: east/west wall runs were sized `T` wide while repeating their texture n
+times, so a four-cell run drew squeezed into one tile.
+
+**Still true:** this is the DOM compositor's ceiling being managed, not removed.
+The estate still cannot show its whole self on a phone. §2 is unchanged.
+
+---
+
+## 1. THE OLDER WRITE-UP — still accurate about the mechanism
 
 **On a phone, large parts of the world do not draw, and flicker in and out as
 the camera moves.** Not geometry, not transparency: the compositor is being
@@ -267,9 +341,19 @@ player was on an old bundle.
 
 ## 7. IF YOU READ NOTHING ELSE
 
-1. The mobile rendering problem is **not fixed**. Do not claim it is.
-2. **Measure on the device with the Layers panel** before changing more code.
-   Layout-px is not GPU memory and this session proved it the hard way.
-3. The K-scale may be a no-op. Test before building on it.
-4. Trust the player's screenshots over any model of the renderer. Twice this
-   session a confident diagnosis was wrong and the screenshot was right.
+1. Read §0 first — the 2026-08-03 capture answered "which half of the pipeline"
+   and a pass shipped against it. The crawler's first person is much cheaper and
+   sees much further; the two battle lenses have had none of it.
+2. The mobile rendering problem is **managed, not fixed**. Do not claim it is.
+   The estate still cannot show its whole self on a phone.
+3. **Measure on the device with the Layers panel** before changing more code.
+   Layout-px is not GPU memory and a session proved it the hard way. The same
+   trap caught the layer budget: count veils, not just quads.
+4. The K-scale may be a no-op. Test before building on it.
+5. Trust the player's captures over any model of the renderer. Three times now a
+   confident diagnosis was wrong and the recording was right — and the frame
+   pacing in a screen recording is itself evidence (see §0).
+6. `dev/check-drawdist.mjs` censuses the real charts and `__fpDebug().view`
+   reports what the live fit settled on. Change the merge rule or the budget and
+   re-run both; neither can drift from the game because both read its own tables.
+   `dev/register-vite-env.mjs` is what lets a plain `node` run import them.

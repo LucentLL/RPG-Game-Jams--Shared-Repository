@@ -72,7 +72,21 @@ export const LIGHTS = {
   // FOG_CULL have always lived by).
   // `sky` means no ceiling is built at all: the background IS the sky, and the
   // haze runs up into it. A meadow with a roof on it is a cave with grass in it.
-  open: { rgb: [150, 168, 186], near: 7, far: 16, sprite: 0.95, sky: true, lite: { near: 4.5, far: 10 } },
+  // The vista opened right out on 2026-08-03, once merged ground blocks and
+  // merged wall runs made a radius affordable (@see CHUNK in delve-fp.js).
+  //
+  // THE SHAPE OF THE PAIR CHANGED, not just the size. 7/16 and 4.5/10 were a
+  // short view spent almost entirely INSIDE the haze; these are a wide CLEAR
+  // DISC with the weather arriving late. That is the N64 open-world shape — see
+  // a long way, then let the last of it go — and it is also what the renderer
+  // needs, because ground and walls may only merge where the fog is FLAT, so
+  // `near` is quite literally the radius inside which a vista is affordable.
+  //
+  // Both pairs still obey the standing rule: the haze must reach FOG_CULL just
+  // INSIDE the build radius, or the world ends at an edge instead of in weather.
+  // Desktop 22 + 0.96·8 = 29.7 against a cap of 30; phone 14 + 0.90·6 = 19.4
+  // against 20.
+  open: { rgb: [150, 168, 186], near: 22, far: 30, sprite: 0.95, sky: true, lite: { near: 14, far: 20 } },
   // Somebody else's lamps — dim at the edges, warmer than a cave.
   lit: { rgb: [16, 14, 20], near: 2.2, far: 6.6, sprite: 0.86 },
 };

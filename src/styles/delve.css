@@ -520,9 +520,11 @@
   60%  { transform: scale(1.1, 0.94) translateY(-3%); filter: brightness(1.35) saturate(1.3); }
   100% { transform: scale(0.94, 1.08) translateY(1%); filter: brightness(1.5) saturate(1.4); }
 }
-/* Dead. The fold-down itself is in the transform place() writes; this is only
-   what a body looks like once it is one. */
-.fp-corpse { filter: grayscale(0.55) brightness(0.62) !important; }
+/* Dead. The fold-down is in the transform place() writes and the dim is in the
+   OPACITY it writes — a body used to carry `filter: grayscale() brightness()`
+   for the rest of the delve, and a filtered element cannot be tiled by the
+   compositor at all (see the no-filter rule below; CORPSE_CAP is 14, so that
+   was fourteen render surfaces a phone had to find). Nothing left to say here. */
 /* Combat numbers live in SCREEN space, on their own layer. Parented to the
    creature they were sized in WORLD px — and every fight is fought at about a
    tile, where the billboard fills the view, so "−9" arrived the height of the
@@ -575,11 +577,15 @@
   font-size: 0.72em; font-weight: 700; color: #ffe9d0; text-shadow: 0 1px 2px rgba(0,0,0,0.9);
 }
 /* Being hit, from the inside. */
+/* A stage-sized gradient that is invisible 99% of a delve. `opacity: 0` still
+   buys it a compositor layer the size of the screen; `display: none` does not,
+   and the animation restarts from the class either way. */
 .fp-blood {
   position: absolute; inset: 0; pointer-events: none; z-index: 260; opacity: 0;
+  display: none;
   background: radial-gradient(ellipse at 50% 50%, transparent 42%, rgba(150,20,14,0.55) 100%);
 }
-.fp-blood.on { animation: fp-blood 300ms ease-out; }
+.fp-blood.on { display: block; animation: fp-blood 300ms ease-out; }
 @keyframes fp-blood { 0% { opacity: 0.95; } 100% { opacity: 0; } }
 /* Toasts sit ABOVE the pad, not on it. `.delve-toasts` is bottom:13% — fine
    over the top-down walk's cornered stick, but the first-person pad is centred,
@@ -885,6 +891,8 @@
 body.fp-lite .fp-hand { filter: none; }
 body.fp-lite .fp-shot { filter: none; }
 body.fp-lite .fp-slash path { filter: none; }
+/* At 0.3 over a sky this is a screen-sized layer nobody can see. */
+body.fp-lite .fp-open .fp-vignette { display: none; }
 body.fp-lite .fpm-exit   { text-shadow: 0 3px 0 rgba(0, 0, 0, 0.6); }
 body.fp-lite .fpm-portal { text-shadow: 0 3px 0 rgba(0, 0, 0, 0.6); }
 

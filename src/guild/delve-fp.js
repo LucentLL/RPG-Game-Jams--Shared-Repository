@@ -106,9 +106,10 @@ const PERSP = 500, PERSP_AT = 720;
  * The LIGHT TIER. A phone pays for this scene at devicePixelRatio² — the same
  * quad rasterises 7-9× the pixels at dpr 3 — and a tile GPU pays again for
  * every blur-radius filter. So coarse-pointer / high-dpr devices get a shorter
- * lamp and no decorative filters (body.fp-lite in delve.css). VIEW_CAP and
- * FOG_CULL move TOGETHER: both feed viewR(), and changing one without the
- * other puts unfogged rock at the build edge.
+ * lamp and no decorative filters (body.fp-lite in delve.css). The cap and
+ * FOG_CULL still move TOGETHER — fitViewRadius derives the fog FROM the radius
+ * it settles on precisely so the two cannot drift, because the moment they do
+ * you get unfogged rock hanging at the build edge.
  */
 const COARSE = typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches;
 /** Open-air maps see a VISTA, underground ones a lamp's reach — so the cap is
@@ -120,21 +121,43 @@ const COARSE = typeof matchMedia === 'function' && matchMedia('(pointer: coarse)
  *
  * Underground, most of a view radius is solid rock that emits nothing — a
  * corridor at R=9 is a few dozen quads. Out on the estate almost every cell in
- * range is open ground, and open ground emits a floor quad each: R=11 is a
- * 23×23 window, ~500 floor quads before a single wall, and at R=17 it measured
- * 629 live quads. Each one is a separate compositing layer the GPU has to hold,
- * sort and re-raster whenever the camera moves, and a phone falls over on the
- * COUNT long before the pixels — which is why the estate flickered a step at a
- * time while the 9×9 arena, at eighty quads, did not.
+ * range is open ground, and open ground used to emit a floor quad each: R=11 is
+ * a 23×23 window, ~500 floor quads before a single wall, and at R=17 it
+ * measured 629 live quads. Each one is a separate compositing layer the GPU has
+ * to hold, sort and re-raster whenever the camera moves, and a phone falls over
+ * on the COUNT long before the pixels — which is why the estate flickered a
+ * step at a time while the 9×9 arena, at eighty quads, did not.
  *
- * So the sky tiers are radius-capped by what the count can afford rather than
- * by what the light would reach. It costs distant scenery; it buys the estate
- * being drawable at all. The real fix is to stop spending one layer per floor
- * cell — merge far ground into blocks, or move the whole scene onto a canvas —
- * and until then this is the honest lever.
+ * That is attacked at the source now: clear ground merges into blocks and wall
+ * faces merge along their runs (@see CHUNK), and the half-space behind the
+ * camera is not built at all. `node --import ./dev/register-vite-env.mjs
+ * dev/check-drawdist.mjs` censuses the real charts, worst of eight bearings:
+ *
+ *   | chart      | tier    | was        | now         |
+ *   |------------|---------|------------|-------------|
+ *   | estate     | desktop | R13 /  876 | R30 /  1463 |
+ *   | estate     | phone   | R8  /  387 | R9  /   247 |
+ *   | Ferncreek  | desktop | R13 /  371 | R24 /   216 |
+ *   | Ferncreek  | phone   | R8  /  191 | R20 /   196 |
+ *   | arena      | desktop | R13 /  380 | R19 /   137 |
+ *   | arena      | phone   | R8  /  359 | R19 /   135 |
+ *   | Hollowvein | both    | R7  /  232 | unchanged   |
+ *
+ * On a phone the meadow sees two and a half times as far for the same layers
+ * and the arena more than twice as far for a THIRD of them, both whole-map now.
+ * The estate is the chart that cannot: it is forty-six rows of buildings, a
+ * wall run cannot merge past a corner, and its stamped rooms each carry their
+ * own surface set so the ground cannot merge across a threshold either. There
+ * the win is spent on being STABLE instead — much the same reach for 36% fewer
+ * layers — which is the bug that was actually reported.
+ *
+ * This cap is only a ceiling now; the number that binds is a layer budget.
+ * @see LAYER_BUDGET, fitViewRadius.
  */
-const viewCap = () => (L.sky ? (COARSE ? 8 : 13) : (COARSE ? 7 : 9));
-const viewR = () => Math.min(viewCap(), Math.ceil(L.near + FOG_CULL * (L.far - L.near)) + 1);
+const viewCap = () => (L.sky ? (COARSE ? 20 : 30) : (COARSE ? 12 : 16));
+/* The radius itself is no longer a formula but a MEASUREMENT, taken once per
+   chart against a layer budget — @see fitViewRadius, which is where the cap
+   above and FOG_CULL now meet. `F.viewR` is its answer for the live map. */
 const REACH = 0.75;      // how close a creature must be to engage
 
 /**
@@ -849,7 +872,98 @@ const openestYaw = (x, y) => openestDir(x, y) * Math.PI / 4;
  */
 const fogQ = (f) => Math.round(Math.min(1, Math.max(0, f)) * 40) / 40;
 
-function buildGeometry() {
+/**
+ * GROUND LOD — the lever that finally buys the draw distance.
+ *
+ * Open ground used to emit one quad per cell, so the cost of a vista was the
+ * radius SQUARED in compositor layers: R=8 is a 17×17 window and ~290 floor
+ * quads before a single wall, and a phone drops layers long before it runs out
+ * of pixels (a 2026-08-03 capture caught the HUD itself missing from 22 frames
+ * of 326 — see HANDOFF-RENDERER.md §1).
+ *
+ * But a floor is a PLANE, and every cell of it draws the same tile. So a block
+ * of cells that are alike in every way a quad cares about is ONE quad with its
+ * texture repeated n×n across it — pixel-identical, 1/n² the layers, and 1/n²
+ * the rasters when the camera moves. This is the N64's trick and Doom's before
+ * it: spend the detail where the eye is, and merge it where the eye cannot tell.
+ *
+ * WHERE IT MAY MERGE IS DECIDED BY THE FOG, NOT BY DISTANCE — and that is what
+ * makes this lossless rather than a trade. A veil is ONE opacity for the whole
+ * quad, so merging cells whose fog differs would replace the per-cell gradient
+ * with a staircase: at the phone's ramp a four-tile block steps a third of the
+ * whole haze at once, and the meadow would read as tiled lino. Inside `L.near`
+ * the fog is exactly 0 on every cell, so a block there is not an approximation
+ * of the sixteen quads it replaces — it is the same picture, pixel for pixel.
+ *
+ * Which is why the lights were re-cut around a wide CLEAR DISC and a short ramp
+ * (LIGHTS.open) instead of a short view and a long fade. That shape is the N64
+ * open-world shape too: see a long way, and let the last of it go to weather.
+ *
+ * Blocks are aligned to the WORLD grid, never to the camera, or every step
+ * would re-key and re-create the lot.
+ *
+ * CHUNK is 4 because 4·T = 1200 CSS px, which is 3120 device px at dpr 2.6 —
+ * inside the ~4096 GL_MAX_TEXTURE_SIZE floor that delve.css's no-filter rule
+ * exists to respect. Raising it needs that arithmetic redone, not taste.
+ */
+const CHUNK = 4;            // biggest ground block / wall run, in tiles
+/**
+ * THE HALF-SPACE BEHIND YOU IS NOT BUILT.
+ *
+ * buildGeometry emitted a full square window with no facing test at all, so on
+ * open ground a third of every scene was floor behind the camera holding layers
+ * it could never show. The cone is deliberately far wider than the lens (±117°
+ * against a horizontal FoV of ~115° on a phone in landscape, so ±58°): the cull
+ * edge has to sit where nothing can pop into view during the YAW_Q the scene is
+ * allowed to go stale for, and NEAR_KEEP holds everything close whatever the
+ * bearing so the third-person pull-back can never see round it.
+ */
+const NEAR_KEEP = 5, CULL_DOT = 0.45;
+/** How far the camera may turn before the cone is rebuilt. Small enough that
+ *  the cull edge stays outside the lens, large enough that a slow pan is not a
+ *  rebuild every frame. */
+const YAW_Q = Math.PI / 6;
+/**
+ * WHAT A SCENE MAY COST, IN LAYERS — and therefore how far you can see.
+ *
+ * Read off the failure rather than guessed. The 2026-08-03 phone capture was a
+ * device dropping whole layers — the HUD among them — on the estate, which the
+ * census puts at 387 layers for that build. The coarse tier is set a third
+ * under it; the desktop tier at 1.7× the 876 the same chart was already
+ * carrying on a laptop without complaint.
+ *
+ * This is a BUDGET, not a radius, because the two are not the same question on
+ * different charts: merged ground and merged wall runs let Ferncreek show its
+ * whole meadow for 124 layers, while the estate — forty-six rows of buildings,
+ * every one of them wall faces that cannot merge past a corner — spends that on
+ * a fraction of the distance. A single number for both would either black out
+ * the meadow or flicker the estate, which is exactly what one number has done
+ * twice. @see fitViewRadius.
+ */
+const LAYER_BUDGET = { coarse: 260, desktop: 1500 };
+/**
+ * What a want-set will actually cost the compositor.
+ *
+ * NOT `want.size`. A quad that has taken any fog carries a `.fp-veil` child, and
+ * the whole reason fog is built that way is that the veil is its own surface
+ * whose opacity can change without re-rastering the picture underneath. Live on
+ * the estate that was 407 veils against 602 quads — count only the quads and
+ * the budget is wrong by two thirds, which is precisely the kind of proxy that
+ * has already cost this renderer two rounds (HANDOFF-RENDERER.md §1).
+ */
+function layerCost(want) {
+  let n = want.size;
+  for (const w of want.values()) if (w.fog > 0) n++;
+  return n;
+}
+
+/**
+ * The want-set: every quad this scene should contain, keyed so the retained
+ * scene can diff against it. PURE — it reads the chart and the camera and
+ * touches no DOM — because fitViewRadius runs it a few dozen times at mount to
+ * find out how far this particular chart can afford to be seen.
+ */
+function wantSet(px, py, yaw, R, near, far) {
   const S = F.surf;
   // The surface set a cell draws from: its region's if it stands in one (the
   // campus's stamped rooms), the map's own otherwise.
@@ -857,71 +971,282 @@ function buildGeometry() {
     const t = F.regionThemeAt && F.regionThemeAt(x, y);
     return (t && F.surfByTheme[t]) || S;
   };
-  const cx = Math.floor(F.px), cy = Math.floor(F.py);
-  const R = viewR();
+  const cx = Math.floor(px), cy = Math.floor(py);
   const want = new Map();
-  const add = (key, tex, w, h, tx, ty, tz, rot, cls, fog) =>
-    want.set(key, { tex, w, h, tx, ty, tz, rot, cls, fog: fogQ(fog) });
-  for (let y = cy - R; y <= cy + R; y++) {
-    for (let x = cx - R; x <= cx + R; x++) {
-      const fog = fogAt(x + 0.5, y + 0.5);
-      if (fog >= FOG_CULL) continue;   // solid dark already — emitting it is pure overdraw
-      const ch = at(x, y);
-      const wx = (x + 0.5) * T, wz = (y + 0.5) * T;
-      const id = x + ',' + y;
-      const SC = surfAt(x, y);
-      if (WALL[ch] || LOW[ch]) {
-        const h = LOW[ch] ? LOW_H : WALL_H;
-        const tex = ch === 'o' ? ((S.ores && S.ores[oreKindAt(x, y)]) || SC.wall)
-          : (LOW[ch] ? SC.low : SC.wall);
-        const yc = -h / 2;
-        // A face is emitted only where it meets somewhere you could stand, so a
-        // solid block of rock costs nothing and no face is ever seen from behind.
-        // A face is fogged by ITS OWN distance, not the cell's — the two sides
-        // of a block a tile apart should not be equally dark.
-        const wf = (fx, fy) => fogAt(fx, fy);
-        if (!WALL[at(x, y + 1)] && !LOW[at(x, y + 1)]) add('s' + id, tex, T, h, wx, yc, (y + 1) * T, '', 'fp-wall', wf(x + 0.5, y + 1));
-        if (!WALL[at(x, y - 1)] && !LOW[at(x, y - 1)]) add('n' + id, tex, T, h, wx, yc, y * T, 'rotateY(180deg)', 'fp-wall', wf(x + 0.5, y));
-        if (!WALL[at(x + 1, y)] && !LOW[at(x + 1, y)]) add('e' + id, tex, T, h, (x + 1) * T, yc, wz, 'rotateY(90deg)', 'fp-wall', wf(x + 1, y + 0.5));
-        if (!WALL[at(x - 1, y)] && !LOW[at(x - 1, y)]) add('w' + id, tex, T, h, x * T, yc, wz, 'rotateY(-90deg)', 'fp-wall', wf(x, y + 0.5));
-        // A waist-high run needs a lid, or you look down into an open box.
-        // lid, not ceil: a lid is floor-lit (you look DOWN at it under the
-        // room's light), and the ceil bake is tuned for the dark overhead.
-        if (LOW[ch]) add('d' + id, SC.lid || SC.ceil, T, T, wx, -h, wz, 'rotateX(90deg)', 'fp-floor', fog);
-        continue;
+  const add = (key, tex, w, h, tx, ty, tz, rot, cls, fog, rep) =>
+    want.set(key, { tex, w, h, tx, ty, tz, rot, cls, fog: fogQ(fog), rep: rep || '' });
+  /** The repeat a merged quad needs: its own tile, nx by ny across the box. */
+  const tiled = (nx, ny) => (nx > 1 || ny > 1
+    ? `background-size:${100 / nx}% ${100 / ny}%;background-repeat:repeat;` : '');
+  /** Fog by raw distance, so a BLOCK can be judged by its NEAREST point rather
+   *  than its middle — the cull edge must never bite a corner you can still see.
+   *  Local, not the module's `fogAt`, because a fitting pass asks about a camera
+   *  and a light that are not the live ones. */
+  const fogD = (d) => Math.min(1, Math.max(0, (d - near) / (far - near)));
+  const fogAt = (x, y) => fogD(Math.hypot(x - px, y - py));
+  /** May everything out to this distance share ONE veil? Only where the fog has
+   *  not started: inside the clear disc every cell reads 0, so the merge is the
+   *  same picture rather than an average of one. */
+  const flat = (dFar) => dFar <= near;
+  const hx = Math.sin(yaw), hy = -Math.cos(yaw);
+  const inView = (mx, my, pad) => {
+    const dx = mx - px, dy = my - py, d = Math.hypot(dx, dy);
+    return d <= NEAR_KEEP + pad || dx * hx + dy * hy > -CULL_DOT * d - pad;
+  };
+
+  /**
+   * One cell of GROUND, in full — floor, ceiling, rail, risers, rungs, and the
+   * lid a waist-high block wears. The four vertical faces are not here: they
+   * merge along their own runs (@see wallRuns), which is where a chart made of
+   * buildings spends most of its layers.
+   */
+  const emitCell = (x, y) => {
+    const fog = fogAt(x + 0.5, y + 0.5);
+    if (fog >= FOG_CULL) return;   // solid dark already — emitting it is pure overdraw
+    const ch = at(x, y);
+    const wx = (x + 0.5) * T, wz = (y + 0.5) * T;
+    const id = x + ',' + y;
+    const SC = surfAt(x, y);
+    if (WALL[ch] || LOW[ch]) {
+      // A waist-high run needs a lid, or you look down into an open box.
+      // lid, not ceil: a lid is floor-lit (you look DOWN at it under the
+      // room's light), and the ceil bake is tuned for the dark overhead.
+      if (LOW[ch]) add('d' + id, SC.lid || SC.ceil, T, T, wx, -LOW_H, wz, 'rotateX(90deg)', 'fp-floor', fog);
+      return;
+    }
+    if (ch === '#') return;
+    const lift = -heightAt(x, y) * STEP_PX;
+    add('f' + id, SC.floor, T, T, wx, lift, wz, 'rotateX(90deg)', 'fp-floor', fog);
+    // A cell inside a stamped room is INDOORS whatever the weather outside —
+    // it gets that room's ceiling even on a map whose light is open sky.
+    const roomed = SC !== S;
+    if (!L.sky || roomed) add('c' + id, SC.ceil, T, T, wx, -WALL_H, wz, 'rotateX(-90deg)', 'fp-ceil', fog);
+    // Rails lie ON the floor, a hair above it so the two don't fight for depth.
+    if (ch === '=' && S.rail) add('r' + id, S.rail, T, T, wx, lift - 1, wz, 'rotateX(90deg)', 'fp-floor', fog);
+    // A ledge's risers — one per side that faces lower ground, or the shelf
+    // reads as a floor plane floating on nothing from every angle but the
+    // south (the playtest's "invisible sides"). A side that meets solid rock
+    // or the map edge is buried and costs nothing.
+    if (heightAt(x, y)) {
+      const ry = -STEP_PX / 2;
+      const lower = (nx, ny) => !heightAt(nx, ny) && !WALL[at(nx, ny)] && !LOW[at(nx, ny)];
+      if (lower(x, y + 1)) add('zs' + id, SC.low, T, STEP_PX, wx, ry, (y + 1) * T, '', 'fp-wall', fogAt(x + 0.5, y + 1));
+      if (lower(x, y - 1)) add('zn' + id, SC.low, T, STEP_PX, wx, ry, y * T, 'rotateY(180deg)', 'fp-wall', fogAt(x + 0.5, y));
+      if (lower(x + 1, y)) add('ze' + id, SC.low, T, STEP_PX, (x + 1) * T, ry, wz, 'rotateY(90deg)', 'fp-wall', fogAt(x + 1, y + 0.5));
+      if (lower(x - 1, y)) add('zw' + id, SC.low, T, STEP_PX, x * T, ry, wz, 'rotateY(-90deg)', 'fp-wall', fogAt(x, y + 0.5));
+    }
+    // The rungs. A climb cell is the ONLY place the level may change, so the
+    // ladder is drawn flat against whichever neighbouring face it serves —
+    // a thing you can see and aim at, not a square that silently lifts you.
+    if (S.ladder && onClimb(x, y)) {
+      if (heightAt(x, y + 1)) add('l0' + id, S.ladder, T * 0.42, STEP_PX, wx, -STEP_PX / 2, (y + 1) * T - 6 * K, 'rotateY(180deg)', 'fp-ladder', fog);
+      if (heightAt(x, y - 1)) add('l1' + id, S.ladder, T * 0.42, STEP_PX, wx, -STEP_PX / 2, y * T + 6 * K, '', 'fp-ladder', fog);
+      if (heightAt(x + 1, y)) add('l2' + id, S.ladder, T * 0.42, STEP_PX, (x + 1) * T - 6 * K, -STEP_PX / 2, wz, 'rotateY(-90deg)', 'fp-ladder', fog);
+      if (heightAt(x - 1, y)) add('l3' + id, S.ladder, T * 0.42, STEP_PX, x * T + 6 * K, -STEP_PX / 2, wz, 'rotateY(90deg)', 'fp-ladder', fog);
+    }
+  };
+
+  /**
+   * May this whole block be ONE quad?
+   *
+   * Only if every cell in it is plain open ground of the same surface set at
+   * the same level: anything that needs geometry of its own (a wall, a lid, a
+   * rail, a ledge riser, a rung) or a different texture makes the block
+   * non-uniform and it splits. Props and exits pass — the floor under a barrel
+   * is the same floor, and their sprites are billboards built elsewhere.
+   * Out-of-bounds reads as '#', so a block that overhangs the chart splits and
+   * the void cells then draw nothing, exactly as they did per-cell.
+   */
+  const evenGround = (bx, by, n) => {
+    const SC = surfAt(bx, by);
+    for (let y = by; y < by + n; y++) {
+      for (let x = bx; x < bx + n; x++) {
+        const ch = at(x, y);
+        if (WALL[ch] || LOW[ch] || ch === '#' || ch === '=') return false;
+        if (heightAt(x, y) || onClimb(x, y)) return false;
+        if (surfAt(x, y) !== SC) return false;
       }
-      if (ch === '#') continue;
-      const lift = -heightAt(x, y) * STEP_PX;
-      add('f' + id, SC.floor, T, T, wx, lift, wz, 'rotateX(90deg)', 'fp-floor', fog);
-      // A cell inside a stamped room is INDOORS whatever the weather outside —
-      // it gets that room's ceiling even on a map whose light is open sky.
-      const roomed = SC !== S;
-      if (!L.sky || roomed) add('c' + id, SC.ceil, T, T, wx, -WALL_H, wz, 'rotateX(-90deg)', 'fp-ceil', fog);
-      // Rails lie ON the floor, a hair above it so the two don't fight for depth.
-      if (ch === '=' && S.rail) add('r' + id, S.rail, T, T, wx, lift - 1, wz, 'rotateX(90deg)', 'fp-floor', fog);
-      // A ledge's risers — one per side that faces lower ground, or the shelf
-      // reads as a floor plane floating on nothing from every angle but the
-      // south (the playtest's "invisible sides"). A side that meets solid rock
-      // or the map edge is buried and costs nothing.
-      if (heightAt(x, y)) {
-        const ry = -STEP_PX / 2;
-        const lower = (nx, ny) => !heightAt(nx, ny) && !WALL[at(nx, ny)] && !LOW[at(nx, ny)];
-        if (lower(x, y + 1)) add('zs' + id, SC.low, T, STEP_PX, wx, ry, (y + 1) * T, '', 'fp-wall', fogAt(x + 0.5, y + 1));
-        if (lower(x, y - 1)) add('zn' + id, SC.low, T, STEP_PX, wx, ry, y * T, 'rotateY(180deg)', 'fp-wall', fogAt(x + 0.5, y));
-        if (lower(x + 1, y)) add('ze' + id, SC.low, T, STEP_PX, (x + 1) * T, ry, wz, 'rotateY(90deg)', 'fp-wall', fogAt(x + 1, y + 0.5));
-        if (lower(x - 1, y)) add('zw' + id, SC.low, T, STEP_PX, x * T, ry, wz, 'rotateY(-90deg)', 'fp-wall', fogAt(x, y + 0.5));
-      }
-      // The rungs. A climb cell is the ONLY place the level may change, so the
-      // ladder is drawn flat against whichever neighbouring face it serves —
-      // a thing you can see and aim at, not a square that silently lifts you.
-      if (S.ladder && onClimb(x, y)) {
-        if (heightAt(x, y + 1)) add('l0' + id, S.ladder, T * 0.42, STEP_PX, wx, -STEP_PX / 2, (y + 1) * T - 6 * K, 'rotateY(180deg)', 'fp-ladder', fog);
-        if (heightAt(x, y - 1)) add('l1' + id, S.ladder, T * 0.42, STEP_PX, wx, -STEP_PX / 2, y * T + 6 * K, '', 'fp-ladder', fog);
-        if (heightAt(x + 1, y)) add('l2' + id, S.ladder, T * 0.42, STEP_PX, (x + 1) * T - 6 * K, -STEP_PX / 2, wz, 'rotateY(-90deg)', 'fp-ladder', fog);
-        if (heightAt(x - 1, y)) add('l3' + id, S.ladder, T * 0.42, STEP_PX, x * T + 6 * K, -STEP_PX / 2, wz, 'rotateY(90deg)', 'fp-ladder', fog);
+    }
+    return true;
+  };
+
+  /** n×n cells of ground as one quad, its tile repeated across it. The picture
+   *  is identical to the n² quads it replaces — the floor texture was already
+   *  the same on every cell of a surface set — so this costs nothing but the
+   *  fog, which is now the block's rather than the cell's. Deep in the haze,
+   *  where the big blocks live, that is a distinction with no difference. */
+  const emitBlock = (bx, by, n) => {
+    const SC = surfAt(bx, by);
+    const w = n * T, mx = (bx + n / 2) * T, mz = (by + n / 2) * T;
+    add(`f${n}:${bx},${by}`, SC.floor, w, w, mx, 0, mz, 'rotateX(90deg)', 'fp-floor', 0, tiled(n, n));
+    if (!L.sky || SC !== S) add(`c${n}:${bx},${by}`, SC.ceil, w, w, mx, -WALL_H, mz, 'rotateX(-90deg)', 'fp-ceil', 0, tiled(n, n));
+  };
+
+  /** The farthest corner of a rect from the eye — what decides whether the fog
+   *  is still flat across the whole of it. */
+  const farCorner = (bx, by, w, h) => Math.hypot(
+    Math.max(Math.abs(px - bx), Math.abs(px - (bx + w))),
+    Math.max(Math.abs(py - by), Math.abs(py - (by + h))));
+
+  /**
+   * Quadtree descent. A block is dropped whole if it is out of the window,
+   * behind you, or past the fog; taken whole if the fog is flat across it and
+   * its ground is even; and quartered otherwise, all the way down to the cell.
+   */
+  const walk = (bx, by, n) => {
+    if (bx + n <= cx - R || bx > cx + R || by + n <= cy - R || by > cy + R) return;
+    const mx = bx + n / 2, my = by + n / 2, pad = n * 0.71;
+    if (!inView(mx, my, pad)) return;
+    // Nearest point of the block to the eye, clamped into its own rect.
+    const nx = Math.max(bx, Math.min(px, bx + n)), ny = Math.max(by, Math.min(py, by + n));
+    if (fogD(Math.hypot(px - nx, py - ny)) >= FOG_CULL) return;
+    if (n === 1) { emitCell(bx, by); return; }
+    if (flat(farCorner(bx, by, n, n)) && evenGround(bx, by, n)) { emitBlock(bx, by, n); return; }
+    const h = n / 2;
+    walk(bx, by, h); walk(bx + h, by, h); walk(bx, by + h, h); walk(bx + h, by + h, h);
+  };
+  const align = (v) => Math.floor(v / CHUNK) * CHUNK;
+  for (let by = align(cy - R); by <= cy + R; by += CHUNK) {
+    for (let bx = align(cx - R); bx <= cx + R; bx += CHUNK) walk(bx, by, CHUNK);
+  }
+
+  /**
+   * WALL FACES, MERGED ALONG THEIR RUNS.
+   *
+   * The estate is not a meadow — it is buildings, and a building is a long
+   * straight line of identical faces. Emitting one quad per cell of a twelve-
+   * tile wall is twelve layers of the same picture, and the census said the
+   * walls, not the grass, were what the estate spent most of its budget on once
+   * the ground had been merged.
+   *
+   * A face is emitted only where it meets somewhere you could stand, so a solid
+   * block of rock costs nothing and no face is ever seen from behind. A run
+   * extends while the neighbour is the same height, the same texture, and also
+   * exposed — and only while the fog is still flat across the whole of it, the
+   * same lossless rule the ground blocks take. A face is fogged by ITS OWN
+   * distance, not its cell's: the two sides of a block a tile apart should not
+   * be equally dark.
+   */
+  const wallTex = (x, y) => {
+    const ch = at(x, y), SC = surfAt(x, y);
+    return ch === 'o' ? ((S.ores && S.ores[oreKindAt(x, y)]) || SC.wall)
+      : (LOW[ch] ? SC.low : SC.wall);
+  };
+  const open = (x, y) => !WALL[at(x, y)] && !LOW[at(x, y)];
+  // key, the neighbour a face looks at, its rotation, and where the plane sits.
+  const SIDES = [
+    { k: 's', dx: 0, dy: 1, rot: '', horiz: true, off: 1 },
+    { k: 'n', dx: 0, dy: -1, rot: 'rotateY(180deg)', horiz: true, off: 0 },
+    { k: 'e', dx: 1, dy: 0, rot: 'rotateY(90deg)', horiz: false, off: 1 },
+    { k: 'w', dx: -1, dy: 0, rot: 'rotateY(-90deg)', horiz: false, off: 0 },
+  ];
+  for (const sd of SIDES) {
+    for (let fixed = (sd.horiz ? cy : cx) - R; fixed <= (sd.horiz ? cy : cx) + R; fixed++) {
+      const lo = (sd.horiz ? cx : cy) - R, hi = (sd.horiz ? cx : cy) + R;
+      const cell = (i) => (sd.horiz ? [i, fixed] : [fixed, i]);
+      let i = lo;
+      while (i <= hi) {
+        const [x, y] = cell(i);
+        const ch = at(x, y);
+        if (!(WALL[ch] || LOW[ch]) || !open(x + sd.dx, y + sd.dy)) { i++; continue; }
+        const h = LOW[ch] ? LOW_H : WALL_H, tex = wallTex(x, y);
+        // The face's own middle, half a tile off the cell centre toward the gap.
+        const fcx = x + 0.5 + sd.dx * 0.5, fcy = y + 0.5 + sd.dy * 0.5;
+        let n = 1;
+        while (n < CHUNK) {
+          const [ax, ay] = cell(i + n);
+          const c2 = at(ax, ay);
+          if (!(WALL[c2] || LOW[c2])) break;
+          if ((LOW[c2] ? LOW_H : WALL_H) !== h || wallTex(ax, ay) !== tex) break;
+          if (!open(ax + sd.dx, ay + sd.dy)) break;
+          // The run is a segment on the face plane; both ends must be inside
+          // the clear disc or its single veil would flatten a real gradient.
+          const w = sd.horiz ? n + 1 : 1, d = sd.horiz ? 1 : n + 1;
+          if (!flat(farCorner(sd.horiz ? x : fcx - 0.5, sd.horiz ? fcy - 0.5 : y, w, d))) break;
+          n++;
+        }
+        const mid = sd.horiz ? [x + n / 2, fcy] : [fcx, y + n / 2];
+        if (fogD(Math.hypot(mid[0] - F.px, mid[1] - F.py)) < FOG_CULL
+          && inView(mid[0], mid[1], n * 0.5)) {
+          // WIDTH IS ALWAYS THE RUN. A quad's own X axis is what `rotateY(±90)`
+          // swings onto the world's Z, so an east or west face `T` wide spans
+          // one tile ALONG Z — and a four-cell run of them is `4T` wide in the
+          // element and 4T deep in the world. Sizing those at `T` drew the run
+          // squeezed into one tile with its texture repeated four times inside.
+          add(`${sd.k}${n}:${x},${y}`, tex, n * T, h,
+            (sd.horiz ? x + n / 2 : x + sd.off) * T, -h / 2, (sd.horiz ? y + sd.off : y + n / 2) * T,
+            sd.rot, 'fp-wall', fogAt(mid[0], mid[1]), tiled(n, 1));
+        }
+        i += n;
       }
     }
   }
+  return want;
+}
+
+/**
+ * HOW FAR THIS CHART CAN AFFORD TO BE SEEN — measured at mount, then held.
+ *
+ * The fog and the build radius are one decision, so pin them together and sweep
+ * the single variable that is left. `far = R` puts the haze at exactly full
+ * strength at the build edge, and `near = R − 0.3/(1 − FOG_CULL)` puts it at
+ * FOG_CULL just inside — which fixes the ramp at 3.0 tiles on a phone and 7.5
+ * on a desktop and makes everything nearer than that a CLEAR DISC the ground
+ * and the walls may merge across losslessly.
+ *
+ * Then take the largest R whose want-set fits LAYER_BUDGET. Sampled at the
+ * entry and the middle of the chart, four bearings each, worst case wins —
+ * because a number tuned at a spawn is a number that fails in the courtyard.
+ *
+ * Underground this does not run: a lamp's reach is the light's statement about
+ * the world, not a budget, and rock emits nothing so it was never the problem.
+ */
+function fitViewRadius() {
+  if (!L.sky) {
+    F.viewR = Math.min(viewCap(), Math.ceil(L.near + FOG_CULL * (L.far - L.near)) + 1);
+    return;
+  }
+  const budget = COARSE ? LAYER_BUDGET.coarse : LAYER_BUDGET.desktop;
+  const ramp = 0.3 / (1 - FOG_CULL);
+  // Past the chart's own span nothing more can appear, so there is no sense
+  // paying to look for it.
+  const hi0 = Math.min(viewCap(), Math.max(F.cols, F.rows));
+  const spots = [[F.px, F.py], [F.cols / 2, F.rows / 2]];
+  const fits = (R) => {
+    for (const [sx, sy] of spots) {
+      for (let d = 0; d < 4; d++) {
+        if (layerCost(wantSet(sx, sy, d * Math.PI / 2, R, R - ramp, R)) > budget) return false;
+      }
+    }
+    return true;
+  };
+  let lo = 6, hi = hi0, best = 6;
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1;
+    if (fits(mid)) { best = mid; lo = mid + 1; } else hi = mid - 1;
+  }
+  F.viewR = best;
+  L = { ...L, near: best - ramp, far: best };
+}
+
+function buildGeometry() {
+  const want = wantSet(F.px, F.py, F.yaw, F.viewR, L.near, L.far);
+  /**
+   * A chart is sampled at two spots, and a courtyard can still be denser than
+   * either. So the budget has a runtime floor as well: blow well past it and
+   * the view closes by a tile, ONE WAY — it never re-opens, because a radius
+   * that breathes as you walk is a fog bank sliding in and out of the scene.
+   */
+  const budget = COARSE ? LAYER_BUDGET.coarse : LAYER_BUDGET.desktop;
+  if (layerCost(want) > budget * 1.35 && F.viewR > 6) {
+    const ramp = 0.3 / (1 - FOG_CULL);
+    F.viewR -= 1;
+    if (L.sky) L = { ...L, near: F.viewR - ramp, far: F.viewR };
+  }
+  applyWants(want);
+}
+
+function applyWants(want) {
   // The diff. A quad that left the light is dropped, one that entered it is
   // built, and one that merely got darker changes a single compositor-only
   // number. This — not the traversal above — is why a step costs no raster.
@@ -953,6 +1278,9 @@ function buildGeometry() {
     const el = document.createElement('div');
     el.className = 'fp-q ' + w.cls;
     el.style.cssText = `width:${w.w}px;height:${w.h}px;margin-left:${-w.w / 2}px;margin-top:${-w.h / 2}px;`
+      // A merged quad repeats its tile instead of stretching it. `.fp-q` says
+      // `100% 100% / no-repeat` for the single-cell case, so both live here.
+      + w.rep
       + `background-image:url(${w.tex});transform:translate3d(${w.tx}px,${w.ty}px,${w.tz}px) ${w.rot}`;
     host.appendChild(el);
     const rec = { el, veil: null, fog: w.fog };
@@ -1027,18 +1355,28 @@ function place(b, x, y, lift) {
    * here — .fp-bb's children are a flat canvas and a flat bar — but it is the
    * exact trap that squashed every standee in the top-down view, so: never put
    * this on a wrapper whose CHILD carries a 3D counter-rotation.)
+   *
+   * A BODY is dimmer than a thing that is alive, and that dim rides here too.
+   * It used to be `.fp-corpse { filter: grayscale() brightness() }` in CSS —
+   * a filter, on a billboard, for the rest of the delve, fourteen of them at
+   * CORPSE_CAP, each forcing its own render surface on a phone that is already
+   * out of them. Fading a body toward the light's own colour is the same answer
+   * distance already gets, and it costs nothing.
    */
-  const lit = Math.round((1 - fog) * 20) / 20;
+  const lit = Math.round((1 - fog) * (b.death != null ? 0.62 : 1) * 20) / 20;
   if (lit !== b._lit) { b._lit = lit; b.el.style.opacity = lit; }
   // A struck creature flashes white — the one piece of feedback that has to
   // arrive before the number does.
   const hurt = b.hurtUntil > performance.now();
-  if (hurt !== b._hurt) {
-    b._hurt = hurt;
+  const dead = b.death != null;
+  if (hurt !== b._hurt || dead !== b._dead) {
+    b._hurt = hurt; b._dead = dead;
     // The drop-shadow is a per-sprite blur buffer — decorative on desktop,
-    // unaffordable on a dpr-3 phone. The hurt flash stays on both: it is
-    // feedback, brief, and on one creature at a time.
-    b.el.style.filter = (COARSE ? '' : 'drop-shadow(0 4px 5px rgba(0,0,0,0.6))')
+    // unaffordable on a dpr-3 phone, and NEVER left on a body: every creature
+    // that dies has been hurt, so this line used to hand each of the fourteen
+    // corpses a permanent render surface on the way out. The hurt flash stays
+    // on both: it is feedback, brief, and on one creature at a time.
+    b.el.style.filter = (COARSE || dead ? '' : 'drop-shadow(0 4px 5px rgba(0,0,0,0.6))')
       + (hurt ? ' brightness(2.6) saturate(0.2)' : '');
   }
   // The bar only exists while the thing is hurt, so an untouched room is clean.
@@ -1116,9 +1454,20 @@ function solidQuad(host, css, w, h, tx, ty, tz, rot, anchor, cls) {
  * rather than merely making it invisible.
  */
 function fogSolids() {
+  /**
+   * Furniture has its OWN horizon, shorter than the ground's.
+   *
+   * Fog alone used to decide this, which was fine at a 16-tile vista and is not
+   * at 30: the campus chart carries every stamped room's furnishings at once, so
+   * opening the distance would have put a hundred desks and barrels on the
+   * compositor to be drawn a few pixels tall each. Scenery you cannot read is
+   * scenery you should not be paying a layer for — the ground, the buildings and
+   * the tree line are what a vista is made of.
+   */
+  const solidR = COARSE ? 14 : 20;
   for (const s of F.solids) {
     const f = fogAt(s.x, s.y);
-    const off = f >= FOG_CULL;
+    const off = f >= FOG_CULL || Math.hypot(s.x - F.px, s.y - F.py) > solidR;
     if (off !== s.off) { s.el.style.display = (s.off = off) ? 'none' : ''; }
     if (off) continue;
     const q = fogQ(f);
@@ -1731,6 +2080,7 @@ function mount(prep, entry) {
   F.vx = 0; F.vy = 0; F.sway = 0; F.bobPhase = 0; F.prevYaw = F.yaw;
   F.lev = heightAt(Math.floor(F.px), Math.floor(F.py));   // snapped, never lerped
   F.cellKey = Math.floor(F.px) + ',' + Math.floor(F.py);  // so frame one re-fires nothing
+  F.yawQ = Math.round(F.yaw / YAW_Q);                     // and neither does the cone
   F.seen.add(F.map.id + ':' + F.cellKey);                 // you have seen where you stand
   F.creatures = []; F.decor = []; F.solids = []; F.doors = []; F.shots = []; F.armed = false;
   F.settleUntil = performance.now() + 350;   // delve.js's, not the old STEP_MS's
@@ -1747,6 +2097,9 @@ function mount(prep, entry) {
   // skip the write, and leave this world untransformed. Same-task reset.
   F._wtf = '';
   fitLens();
+  // How far THIS chart can be seen, before anything is built from it — the fog
+  // it settles on is the fog every quad below is then cut to.
+  fitViewRadius();
   buildGeometry();
   buildDecor(props || {});
   for (const sp of spawns) spawnCreature(sp.prey, sp.img, sp.s.x + 0.5, sp.s.y + 0.5);
@@ -1824,7 +2177,7 @@ export async function openDelveFp(localeId, member, hooks, carry) {
       // The continuous walker's state. Every one of these is hard-reset in
       // mount(), because a portal must not carry the last room's easing in.
       vx: 0, vy: 0, lev: 0, bobPhase: 0, sway: 0, prevYaw: 0,
-      cellKey: '', selfFace: null,
+      cellKey: '', yawQ: 0, viewR: 8, selfFace: null,
       last: 0, raf: 0, ended: false, transiting: false,
       creatures: [], decor: [], solids: [], doors: [], shots: [], armed: false,
       seen: new Set(), mined: new Set(), settleUntil: 0,
@@ -2218,15 +2571,35 @@ function steer(dt) {
  */
 function onCellChange() {
   const key = Math.floor(F.px) + ',' + Math.floor(F.py);
-  if (key === F.cellKey) return;
-  // A walker jittering on a cell line would otherwise re-run a diff over ~600
-  // entries every frame. Require a real committal into the new cell.
+  /**
+   * A walker jittering on a cell line would otherwise re-run a diff over the
+   * whole want-set every frame. Require a real committal into the new cell —
+   * BOTH axes inside the band.
+   *
+   * This was `&&`, which made the guard very nearly inert: crossing a boundary
+   * you are 0.49 off-centre on the axis you are travelling and ~0 on the other,
+   * so the test only held within 0.05 tiles of a CORNER and every straight walk
+   * rebuilt exactly ON the line — the one place a slide can re-cross it.
+   */
   const cx = Math.floor(F.px) + 0.5, cy = Math.floor(F.py) + 0.5;
-  if (Math.abs(F.px - cx) > 0.45 && Math.abs(F.py - cy) > 0.45) return;
-  F.cellKey = key;
-  F.seen.add(F.map.id + ':' + Math.floor(F.px) + ',' + Math.floor(F.py));
+  const moved = key !== F.cellKey
+    && Math.abs(F.px - cx) <= 0.45 && Math.abs(F.py - cy) <= 0.45;
+  /**
+   * A TURN changes the scene too, now that the half-space behind you is not
+   * built. Quantised to YAW_Q so a slow pan rebuilds every 30° rather than
+   * every frame, and the cone is cut wide enough that the stale wedge in
+   * between is always outside the lens.
+   */
+  const yq = Math.round(F.yaw / YAW_Q);
+  const turned = yq !== F.yawQ;
+  if (!moved && !turned) return;
+  if (moved) {
+    F.cellKey = key;
+    F.seen.add(F.map.id + ':' + Math.floor(F.px) + ',' + Math.floor(F.py));
+  }
+  F.yawQ = yq;
   buildGeometry();
-  drawMap();
+  if (moved) drawMap();
 }
 
 /**
@@ -2544,7 +2917,15 @@ function foeHit(prey, guarding) {
   }
   floater('−' + dmg, 'fp-hurt');
   const blood = F.host.querySelector('.fp-blood');
-  if (blood) { blood.classList.remove('on'); void blood.getBoundingClientRect(); blood.classList.add('on'); }
+  // `.on` is what shows it at all now (delve.css) — a stage-sized gradient held
+  // at `opacity: 0` still costs a stage-sized layer, and it is invisible for
+  // almost the whole of a delve. So the class has to come back OFF at the end
+  // of the flash, or the first blow you take buys that layer for good.
+  if (blood) {
+    blood.classList.remove('on'); void blood.getBoundingClientRect(); blood.classList.add('on');
+    clearTimeout(F._bloodT);
+    F._bloodT = setTimeout(() => blood.classList.remove('on'), 340);
+  }
   updateVitals();
   if (F.hp <= 0) {
     F.hp = 0;
@@ -3133,6 +3514,7 @@ function endDelve(reason, beaten = false) {
 
 function close() {
   if (!F) return;
+  clearTimeout(F._bloodT);
   const hooks = F.hooks, summary = F.haul;
   for (const s of [F.surf, ...Object.values(F.surfByTheme || {})]) {
     if (s && s._urls) s._urls.forEach((u) => URL.revokeObjectURL(u));
@@ -3153,6 +3535,12 @@ if (typeof window !== 'undefined') {
     speed: +Math.hypot(F.vx, F.vy).toFixed(3),
     moving: Math.hypot(F.vx, F.vy) > 0.05, hp: Math.ceil(F.hp), hpCeil: F.hpCeil, armed: F.armed,
     quads: F.world.querySelectorAll('.fp-q').length, creatures: F.creatures.length,
+    // How far this chart was fitted to be seen, and the weather that closes it.
+    // `merged` is the whole point of the 2026-08-03 pass: how many of those
+    // quads are ground blocks or wall runs standing in for several cells each.
+    view: { R: F.viewR, clear: +L.near.toFixed(1), gone: +L.far.toFixed(1), budget: COARSE ? LAYER_BUDGET.coarse : LAYER_BUDGET.desktop },
+    merged: [...F.geo.keys()].filter((k) => /^[fcsnew][248]:/.test(k)).length,
+    veils: F.world.querySelectorAll('.fp-veil').length,
     // Split out because the two are bounded by different things and the phone
     // falls over on the total: geometry is the view radius squared, solids are
     // whatever the chart furnished the map with. `drawn` excludes the ones fog
