@@ -28,6 +28,7 @@ import { preyById } from './locales.js';
 import { loadImg, SHEET_URLS } from './delve.js';
 import { ART, artSprite, artCropCss, WORN, wornWeapon, wornShield, wornPick } from './art.js';
 import { propVolume, footprint, REST_SLOP } from './prop-volume.js';
+import { makeBlade, placeBlade, swingT, SWING_COL, SWING_ROW } from '../game/fp-swing.js';
 import { icon } from './icons.js';
 import { createLook, readPad, padReset, touchPrimary, PAD } from '../platform/input.js';
 import { claimPad } from '../platform/ui-pad.js';
@@ -1684,8 +1685,14 @@ function mount(prep, entry) {
   F.world = stage.querySelector('.fp-world');
   // A fresh .fp-geo means the retained-quad registry starts empty with it.
   F.geo = new Map();
-  // The third-person self rides across portals — a fresh stage orphaned it.
-  if (F.self) { F.world.querySelector('.fp-bbs').appendChild(F.self.el); F.self._tf = ''; }
+  // The third-person self rides across portals — a fresh stage orphans it, and
+  // its swing blade with it.
+  if (F.self) {
+    const bbs = F.world.querySelector('.fp-bbs');
+    bbs.appendChild(F.self.el);
+    if (F.self.blade) { bbs.appendChild(F.self.blade.el); F.self.blade.tf = ''; }
+    F.self._tf = '';
+  }
   // The world element is NEW but render()'s write-guard cache is not: a portal
   // landing on the same coords/yaw would build the identical transform string,
   // skip the write, and leave this world untransformed. Same-task reset.
@@ -2693,7 +2700,26 @@ function render() {
       // stepper (walk cycle, slash follow-through), exactly as the top-down
       // walker's do. Without the tick every anim froze on its first frame.
       F.self.gfx.tickActor(F.self.actor, now);
+      // THE BLOW GOES ROUND YOU, NOT OVER YOUR HEAD. These sheets were drawn
+      // for a top-down game, where a forward swing is motion across the GROUND
+      // — and this billboard has stood that plane up. So for the length of a
+      // blow the blade comes off the standee and travels round the walker in
+      // the plane it was drawn in. @see fp-swing.js. The blade is cut FIRST and
+      // the standee's own hidden only if that worked, so a member whose weapon
+      // has no sheet keeps the one the compositor draws.
+      const t = swingT(F.self.actor);
+      if (t == null) F.self.blade.drawn = false;
+      if (t != null && !F.self.blade.drawn && F.self.gfx.weaponCell) {
+        F.self.blade.drawn = F.self.gfx.weaponCell(F.self.blade.cv, F.self.actor, SWING_COL, SWING_ROW);
+      }
+      F.self.actor._hideWeapon = !!(t != null && F.self.blade.drawn);
       F.self.gfx.renderActor(F.self.cv, F.self.actor);
+      // The walker's WORLD facing here, not the camera-relative one above — the
+      // orbit is a fact about the ground, and `yr` is only how the picture of it
+      // is turned.
+      placeBlade(F.self.blade, t, F.px, F.py, lift, F.dir * 45 * Math.PI / 180, -F.yaw, T);
+    } else if (F.self.blade) {
+      placeBlade(F.self.blade, null);
     }
   }
   // The compass element survives portal re-mounts (mount() rebuilds only the
@@ -2862,7 +2888,11 @@ function mountSelf() {
   const cv = document.createElement('canvas');
   cv.width = 96; cv.height = 96;
   el.appendChild(cv);
-  F.self = { el, cv, gfx, actor: gfx.makeActor(F.member), busyUntil: 0, _on: false, _tf: '' };
+  F.self = {
+    el, cv, gfx, actor: gfx.makeActor(F.member), busyUntil: 0, _on: false, _tf: '',
+    // The blade that leaves the standee for the length of a blow, @see fp-swing.js.
+    blade: makeBlade(F.world.querySelector('.fp-bbs'), T),
+  };
   el.style.display = 'none';
 }
 

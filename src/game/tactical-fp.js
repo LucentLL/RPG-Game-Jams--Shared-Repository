@@ -24,6 +24,7 @@
 import { S } from './state.js';
 import { GS } from './data/config.js';
 import { createFpHands, fighterHandsSpec } from './fp-hands.js';
+import { makeBlade, placeBlade, swingT, SWING_COL, SWING_ROW } from './fp-swing.js';
 
 /**
  * World scale — and the reason a phone can draw this at all.
@@ -416,10 +417,10 @@ function ensureActors() {
     el.appendChild(cv);
     const bar = document.createElement('i');
     el.appendChild(bar);
-    V.actors.set(f, { el, cv, bar, drawn: -1 });
+    V.actors.set(f, { el, cv, bar, drawn: -1, blade: makeBlade(V.world.querySelector('.tfp-bbs'), T) });
   }
   for (const [f, a] of V.actors) {
-    if (live.indexOf(f) < 0) { a.el.remove(); V.actors.delete(f); }
+    if (live.indexOf(f) < 0) { a.el.remove(); a.blade.el.remove(); V.actors.delete(f); }
   }
 }
 
@@ -432,11 +433,20 @@ function ensureActors() {
  * Shadowing `facing` on the proxy also means nothing is ever written back onto
  * the fighter the rules own.
  */
-function drawActor(f, a, yaw) {
+function drawActor(f, a, yaw, swinging) {
   const gfx = window.__ranchGfx;
   if (!gfx || !gfx.renderActor) return;
   const view = Object.create(f);
+  // Cut the orbiting blade FIRST, and hide the standee's own only if that
+  // worked — a weapon with no sheet must keep the one the compositor draws, or
+  // the blow lands with empty hands. @see action-fp.js's twin of this.
+  if (swinging && !a.blade.drawn && gfx.weaponCell) {
+    a.blade.drawn = gfx.weaponCell(a.blade.cv, f, SWING_COL, SWING_ROW);
+  }
   view.facing = (typeof f.facing === 'number' ? f.facing : Math.PI) - yaw;
+  // Same prototype-view trick as `facing`: nothing is ever written back onto
+  // the fighter the rules own.
+  view._hideWeapon = !!(swinging && a.blade.drawn);
   try { gfx.renderActor(a.cv, view); } catch (e) { /* a half-loaded sheet is not worth a crash */ }
 }
 
@@ -669,13 +679,21 @@ function placeActors() {
     // yourself from inside your own head — but it IS from over the shoulder.
     const self = f === V.subject && V.pov !== 'shoulder';
     if (self !== a.selfHidden) { a.el.style.visibility = (a.selfHidden = self) ? 'hidden' : ''; }
-    if (self) continue;
+    // In first person your own blade is the VIEWMODEL, not an orbit round a
+    // body you cannot see — park it, or it freezes mid-arc.
+    if (self) { placeBlade(a.blade, null); continue; }
     const tf = `translate3d(${((f.x + 0.5) * T).toFixed(1)}px,${liftAt(f.x, f.y)}px,${((f.y + 0.5) * T).toFixed(1)}px) rotateY(${(-yaw * 180 / Math.PI).toFixed(1)}deg)`;
     if (tf !== a.tf) a.el.style.transform = (a.tf = tf);
     const hp = Math.max(0, Math.min(1, f.hp / (f.maxHp || f.hp || 1)));
     const w = (hp * 100).toFixed(0) + '%';
     if (w !== a.hpw) { a.bar.style.width = (a.hpw = w); }
-    drawActor(f, a, yaw);
+    // The blow travels round the wielder in the GROUND plane — the plane the
+    // sheet's attack frames were drawn in before a billboard stood them up.
+    const t = swingT(f);
+    if (t == null) a.blade.drawn = false;
+    drawActor(f, a, yaw, t != null);        // cuts the blade; must precede placing it
+    placeBlade(a.blade, t, f.x + 0.5, f.y + 0.5, liftAt(f.x, f.y),
+      typeof f.facing === 'number' ? f.facing : Math.PI, -yaw * 180 / Math.PI, T);
   }
 }
 

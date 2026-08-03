@@ -1401,6 +1401,14 @@ function gearToSheathDesc(g){
 function fighterWeaponLayers(fighter, sheathed) {
   var out = { lhand: null, rhand: null, back: null };
   if (!fighter || !fighter.gear) return out;
+  // A 3D lens takes the weapon OFF the standee for the length of a swing and
+  // orbits it round the wielder itself (@see fp-swing.js). It has to: the
+  // sheet's attack frames are motion across the sprite's own plane, which is
+  // the GROUND in the top-down game they were drawn for, and a billboard has
+  // stood that plane up — so played on a standee they carry the blade over the
+  // head instead of round the body. Set on a per-lens `Object.create(fighter)`
+  // view, never on the fighter the sim owns.
+  if (fighter._hideWeapon) return out;
   var g = fighter.gear;
   if (sheathed && g.sheath){
     out.back = { file: g.sheath.file, c: g.sheath.c || 0, mirror: false };
@@ -1410,6 +1418,32 @@ function fighterWeaponLayers(fighter, sheathed) {
   out.rhand = gearToWeaponDesc(g.RHand, 'RHand');
   if (g.Back) out.back = gearToSheathDesc(g.Back); // explicit back-worn cosmetic
   return out;
+}
+
+/**
+ * The wielder's main weapon ALONE — one sheet cell, drawn to fill a canvas.
+ *
+ * For the 3D lenses' orbiting swing (@see fp-swing.js): they hide the weapon on
+ * the standee for the length of a blow and draw it here instead, on a quad that
+ * travels round the wielder. Lives in this file because the sheet cache and the
+ * gear→sheet translation both do, and a second copy of either would drift.
+ * Returns false when the sheet has not loaded yet — the caller simply does not
+ * draw this frame, and the next one will.
+ */
+function drawFighterWeaponCell(cv, fighter, col, row){
+  if (!cv) return false;
+  var ctx = cv.getContext('2d');
+  ctx.clearRect(0, 0, cv.width, cv.height);
+  ctx.imageSmoothingEnabled = false;
+  var g = fighter && fighter.gear;
+  if (!g) return false;
+  var d = gearToWeaponDesc(g.RHand, 'RHand') || gearToWeaponDesc(g.LHand, 'LHand');
+  if (!d) return false;
+  var img = getElementsWeapon(d.file, d.c);
+  if (!img) return false;
+  ctx.drawImage(img, (col|0) * ELEMENTS_CELL, (row|0) * ELEMENTS_CELL,
+    ELEMENTS_CELL, ELEMENTS_CELL, 0, 0, cv.width, cv.height);
+  return true;
 }
 
 // Weapon parts use named filenames (sword1, daggerL, hammer, etc.). Loader
@@ -4277,6 +4311,7 @@ window.__ranchGfx = {
   renderActor: renderActionFighter,     // (canvas, actor) → composite anim+frame+facing
   tickActor:   _stepFighterAnim,        // (actor, now) → step its anim frame
   setAnim:     setFighterAnim,          // (actor, 'move'|'idle'|'slash'|'parry'|'cast'|'jump'|…) → set actor.anim
+  weaponCell:  drawFighterWeaponCell,   // (canvas, fighter, col, row) → the wielder's blade alone
   bakeGrass:   renderRanchTilesToDataURI,
   bakeCampus:  bakeCampusToDataURI,     // (cols, rows, typeAt) → data-URI ground for the big campus
   GS:          ACTION_GS,               // arena field grid size (tiles) — the RANCH has its own, larger grid
