@@ -42,6 +42,7 @@
 /** One quad's worth of vertices: 6 verts × (x, y, z, u, v). */
 const FLOATS_PER_VERT = 5;
 const VERTS_PER_QUAD = 6;
+const UV_FULL = [0, 0, 1, 1];
 
 const VERT_SRC = `#version 300 es
 in vec3 aPos;
@@ -210,11 +211,15 @@ function writeSprite(buf, at, s, rx, rz) {
   const wx = rx * hw, wz = rz * hw;
   const cx = s.x, cy = -s.y, cz = s.z;
   const top = cy + s.h;             // sprites stand ON their anchor point
+  // `uv` is a sub-rectangle of a SHEET (@see artTexRect) — most of this game's
+  // scenery is one crop out of a shared atlas, which the DOM says with a
+  // background-position and this says with four numbers.
+  const u = s.uv || UV_FULL;
   const P = [
-    [cx - wx, top, cz - wz, 0, 0],
-    [cx + wx, top, cz + wz, 1, 0],
-    [cx + wx, cy, cz + wz, 1, 1],
-    [cx - wx, cy, cz - wz, 0, 1],
+    [cx - wx, top, cz - wz, u[0], u[1]],
+    [cx + wx, top, cz + wz, u[2], u[1]],
+    [cx + wx, cy, cz + wz, u[2], u[3]],
+    [cx - wx, cy, cz - wz, u[0], u[3]],
   ];
   for (const i of [0, 1, 2, 0, 2, 3]) {
     const p = P[i];
@@ -318,7 +323,7 @@ export function createGlWorld(canvas) {
     if (!src) return null;
     let e = tex.get(src);
     if (!e) {
-      e = { t: gl.createTexture(), ready: false, mip: !!wantMip, rev: -1 };
+      e = { t: gl.createTexture(), ready: false, mip: !!wantMip, rev: -1, warm: 0 };
       tex.set(src, e);
       paramsFor(e.t, false);
       if (typeof src === 'string') {
@@ -331,12 +336,16 @@ export function createGlWorld(canvas) {
         upload(e, src);
       }
     }
-    // A live canvas (a walking creature, a burning torch) says when it changed.
-    if (e.ready && typeof src !== 'string' && src._glRev !== undefined && src._glRev !== e.rev) {
-      e.rev = src._glRev;
-      upload(e, src);
-    } else if (!e.ready && typeof src !== 'string') {
-      upload(e, src);
+    if (typeof src !== 'string') {
+      /**
+       * A canvas is re-read for its first few draws whatever it says, because
+       * this game's sprite canvases are filled LATE: the compositor's redraw
+       * registry paints them on a real frame, so a tree uploaded the instant it
+       * was created is a tree that stays blank for the rest of the delve. After
+       * that a live one (a walking creature) opts in by bumping `_glRev`.
+       */
+      if (!e.ready || e.warm < 8) { e.warm = (e.warm || 0) + 1; upload(e, src); }
+      else if (src._glRev !== undefined && src._glRev !== e.rev) { e.rev = src._glRev; upload(e, src); }
     }
     return e.ready ? e.t : null;
   }
@@ -538,20 +547,24 @@ export function createGlWorld(canvas) {
      * which between them catch a flipped axis, a bad winding, a broken
      * projection and a dead texture without anybody looking at a screen.
      */
-    probe(cols = 8, rows = 6) {
+    probe(cols = 8, rows = 6, rect) {
       this.draw();
       const px = new Uint8Array(W * H * 4);
       gl.readPixels(0, 0, W, H, gl.RGBA, gl.UNSIGNED_BYTE, px);
+      // An optional window, in CSS px from the top-left — for looking at ONE
+      // thing (is that sprite actually on screen?) rather than the whole frame.
+      const RX = rect ? rect[0] * dprNow : 0, RW = rect ? rect[2] * dprNow : W;
+      const RY = rect ? rect[1] * dprNow : 0, RH = rect ? rect[3] * dprNow : H;
       const out = [];
       for (let r = 0; r < rows; r++) {
         const line = [];
         for (let c = 0; c < cols; c++) {
-          // readPixels is bottom-up; flip so row 0 is the top of the screen.
-          const y0 = Math.floor(H * (rows - 1 - r) / rows), y1 = Math.floor(H * (rows - r) / rows);
-          const x0 = Math.floor(W * c / cols), x1 = Math.floor(W * (c + 1) / cols);
+          // readPixels is bottom-up; flip so row 0 is the top of the window.
+          const y0 = Math.floor(H - RY - RH * (r + 1) / rows), y1 = Math.floor(H - RY - RH * r / rows);
+          const x0 = Math.floor(RX + RW * c / cols), x1 = Math.floor(RX + RW * (c + 1) / cols);
           let R = 0, G = 0, B = 0, A = 0, n = 0;
-          for (let y = y0; y < y1; y += 2) {
-            for (let x = x0; x < x1; x += 2) {
+          for (let y = Math.max(0, y0); y < Math.min(H, y1); y++) {
+            for (let x = Math.max(0, x0); x < Math.min(W, x1); x++) {
               const i = (y * W + x) * 4;
               R += px[i]; G += px[i + 1]; B += px[i + 2]; A += px[i + 3]; n++;
             }

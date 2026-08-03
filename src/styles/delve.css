@@ -437,10 +437,20 @@
 }
 .fp-gl-on .fp-gl { display: block; }
 /* With the canvas drawing the world, the composited copy of it must go — and
-   go by DISPLAY, so it holds no layers at all. `.fp-bbs` stays: creatures,
-   props and markers are still billboards for now, and they are drawn OVER the
-   canvas rather than depth-tested against it. That is the next piece. */
+   go by DISPLAY, so it holds no layers at all. */
 .fp-gl-on .fp-geo { display: none; }
+/* And so must the SCENERY, which is most of the count on an open chart: a
+   meadow is two hundred trees, and once the fog reaches the far side of it
+   they are all live at once. The rasteriser draws these from their records
+   (@see render), so the composited copy would only be a second one.
+
+   Creatures and markers stay: a creature wears a health bar and a hurt flash
+   and a marker is a glyph with a label, which are LABELS — they belong on top
+   of the picture, and there are never more than a handful. `place()` writes
+   `display:''` when a billboard is in range, which leaves the property absent
+   and lets this rule win; when it writes `none` the two agree anyway. */
+.fp-gl-on .fp-bb.fp-decor,
+.fp-gl-on .fp-bb.fp-shot { display: none; }
 .fp-world {
   position: absolute; left: 50%; top: 50%;
   transform-style: preserve-3d;

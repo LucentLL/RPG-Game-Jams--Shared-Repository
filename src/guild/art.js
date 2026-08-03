@@ -360,6 +360,32 @@ export function artCropCss(name, sub) {
 }
 
 /**
+ * The same crop, as a TEXTURE and a UV rectangle.
+ *
+ * `artCropCss` says the crop in the only vocabulary the DOM has — a background
+ * image with a percentage size and position, which is a fiddly way of writing
+ * "this rectangle of that sheet". A rasteriser wants it plainly: the sheet's
+ * URL, and the corners in 0..1. Both come out of the same table, so a sprite
+ * cannot be cropped one way in one renderer and another way in the other.
+ *
+ * @param {keyof typeof ART} name @param {{x:number,y:number,w:number,h:number}} [sub]
+ * @returns {?{url:string, uv:[number,number,number,number], aspect:number}}
+ */
+export function artTexRect(name, sub) {
+  const s = ART[name];
+  if (!s) return null;
+  const sh = SHEETS[s.sheet];
+  if (!sh) return null;
+  const x = s.x + (sub ? sub.x : 0), y = s.y + (sub ? sub.y : 0);
+  const w = sub ? sub.w : s.w, h = sub ? sub.h : s.h;
+  return {
+    url: `${ART_BASE}${s.sheet}.png`,
+    uv: [x / sh.w, y / sh.h, (x + w) / sh.w, (y + h) / sh.h],
+    aspect: w / h,
+  };
+}
+
+/**
  * A cropped sheet sprite as an HTML string. Size it from CSS/inline style
  * (width + the intrinsic aspect-ratio keeps it true); it scales pixel-crisp.
  * @param {keyof typeof ART} name @param {string} [cls] extra classes

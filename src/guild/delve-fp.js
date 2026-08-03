@@ -26,7 +26,7 @@ import { ART_BASE } from '../config/assets.js';
 import { THEMES, LIGHTS, DECALS, ORE_KINDS, oreKindAt, mapForLocale, validateMap } from './delve-maps.js';
 import { preyById } from './locales.js';
 import { loadImg, SHEET_URLS } from './delve.js';
-import { ART, artSprite, artCropCss, WORN, wornWeapon, wornShield, wornPick } from './art.js';
+import { ART, artSprite, artCropCss, artTexRect, WORN, wornWeapon, wornShield, wornPick } from './art.js';
 import { propVolume, propCell, footprint, REST_SLOP } from './prop-volume.js';
 import { icon } from './icons.js';
 import { createLook, readPad, padReset, touchPrimary, PAD } from '../platform/input.js';
@@ -1370,7 +1370,32 @@ function buildGeometry() {
   if (glOn()) {
     // No diff, no veils, no budget: the whole chart every time, which on the
     // estate is one buffer upload of ~1400 quads and about a dozen draw calls.
-    F.gl.setGeometry([...want.values()].map(toGlQuad));
+    const quads = [...want.values()].map(toGlQuad);
+    /**
+     * THE SKIRT — one quad so the world does not visibly END.
+     *
+     * The composited path never had to think about this: its fog closed inside
+     * the build radius, and the build radius was always well inside the chart.
+     * Draw the whole chart instead and you can stand at the edge of the meadow
+     * and see the ground stop at a hard line with the void behind it, which is
+     * exactly what the first rasterised build did.
+     *
+     * So the ground plane keeps going. One tiled quad, centred on the chart and
+     * reaching `L.far · 2` tiles past every edge of it, a hair BELOW the real
+     * floor so the two never fight for depth. It costs one quad and one draw
+     * call, and it is the oldest trick there is: the world ends in weather, and
+     * nobody can walk far enough to catch it out.
+     */
+    if (L.sky && F.surf && F.surf.floor) {
+      const reach = Math.max(F.cols, F.rows) + L.far * 2;
+      const n = Math.ceil(reach * 2);
+      quads.push({
+        src: F.surf.floor, w: n * T, h: n * T,
+        x: (F.cols / 2) * T, y: 2, z: (F.rows / 2) * T,
+        rot: 'rotateX(90deg)', repX: n, repY: n,
+      });
+    }
+    F.gl.setGeometry(quads);
     return;
   }
   /**
@@ -1818,6 +1843,9 @@ function artBillboard(name, x, y, worldW, title, rest) {
   if (!html) return;
   const a = ART[name];
   const el = addBillboard('fp-decor', html, worldW, worldW * (a.h / a.w));
+  // The DOM draws this crop as a background-position; the rasteriser needs the
+  // same rectangle as a texture and four UVs. One table, two spellings.
+  el._glTex = artTexRect(name);
   if (title) el.title = title;
   standDecor(el, x, y, rest);
 }
@@ -3385,6 +3413,53 @@ function render() {
       back: st && st.clientHeight ? perspectiveFor(st.clientHeight) / F.lens : 0,
     });
     F.gl.setFog(L.rgb, L.near * T, L.far * T);
+    /**
+     * THE SCENERY GOES IN THE BUFFER TOO — and this is the fix for the first
+     * rasterised build coming back with the flicker, the dropped HUD and the
+     * low frame rate all intact.
+     *
+     * Putting the WORLD on a canvas took ~1180 compositor layers down to 11,
+     * and then opening the draw distance to the whole chart handed most of them
+     * straight back: `place()` shows a billboard until the fog has taken it, so
+     * a fog that now reaches the far side of the meadow means every tree in the
+     * meadow is a live DOM layer at once. The renderer was fine; the scenery
+     * around it was still being composited, in numbers the old short fog had
+     * been quietly hiding.
+     *
+     * So decor and shots are drawn here, from the records rather than the DOM
+     * (`.fp-gl-on` hides those elements), each one a camera-facing quad taking
+     * its texture from the canvas the billboard already holds.
+     *
+     * CREATURES AND MARKERS STAY DOM on purpose. A creature carries an overhead
+     * health bar and a hurt flash, and a marker is a glyph and a label — those
+     * are LABELS, they belong on top, and there are never more than a handful.
+     * Trees are what there are two hundred of.
+     */
+    const sprites = [];
+    const add = (rec) => {
+      const el = rec.el;
+      if (!el || el.style.display === 'none') return;
+      const w = parseFloat(el.style.width), h = parseFloat(el.style.height);
+      if (!(w > 0) || !(h > 0)) return;
+      /**
+       * A billboard's art is one of two things in this codebase and the
+       * rasteriser takes both: a real CANVAS child (decals and creatures, drawn
+       * by hand at build time) or a CROP OF A SHEET (everything through
+       * `artSprite`, which the DOM spells as a background-position and
+       * `artTexRect` spells as a URL plus four UVs). Cached on the element,
+       * because this runs for every sprite every frame.
+       */
+      let g = el._glSrc;
+      if (g === undefined) {
+        const cv = el.querySelector('canvas, img');
+        g = el._glSrc = cv ? { src: cv, uv: null } : (el._glTex ? { src: el._glTex.url, uv: el._glTex.uv } : null);
+      }
+      if (!g) return;
+      sprites.push({ src: g.src, uv: g.uv, w, h, x: rec.x * T, y: rec.lift || 0, z: rec.y * T, alpha: 1 });
+    };
+    for (const d of F.decor) if (!d.el.classList.contains('fp-marker')) add(d);
+    for (const s of F.shots) add(s);
+    F.gl.setSprites(sprites);
     F.gl.draw();
   }
   // Billboards stand on the floor and counter-rotate to face the walker. Every
@@ -3753,8 +3828,8 @@ if (typeof window !== 'undefined') {
     }).sort((a, b) => a.d - b.d).slice(0, 3),
   });
   /** The rendered frame, read back — @see gl-world.js `probe`. */
-  window.__fpGl = () => (F && F.gl
-    ? { ...F.gl.stats(), ...F.gl.probe(), R: F.viewR, fog: [+L.near.toFixed(1), +L.far.toFixed(1)] }
+  window.__fpGl = (c, r, rect) => (F && F.gl
+    ? { ...F.gl.stats(), ...F.gl.probe(c, r, rect), R: F.viewR, fog: [+L.near.toFixed(1), +L.far.toFixed(1)] }
     : null);
   /** Where a world point lands on the stage. The proof that the rasteriser's
    *  camera IS the CSS camera is projecting the same point both ways. */
