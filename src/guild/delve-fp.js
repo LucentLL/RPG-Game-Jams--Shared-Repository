@@ -1047,17 +1047,15 @@ function fogSolids() {
 }
 
 /**
- * The dressing for a solid's sides.
+ * THE OBJECT'S OWN COLOUR — the crop's CENTRE BAND, a patch guaranteed to be
+ * inside the thing's own mass.
  *
- * The ends take the SAME art as the front, squeezed to the depth. That is what
- * every Doom-descendant did with a box, and it is deliberately not cleverer
- * than that: an earlier cut sliced the crop's outermost column instead, which
- * on a tight alpha-box crop is mostly transparent, and gave every cabinet
- * see-through sides.
- *
- * The lid takes the crop's CENTRE BAND — a patch guaranteed to be inside the
- * object's own mass, so the top of a thing is painted in the thing's own colour
- * whatever the sheet is repainted to, and never in an invented tint.
+ * It dresses the two surfaces that must not be a picture: a slab's side and its
+ * lid. Sampling the crop's outer edge instead was the obvious idea and the wrong
+ * one — a tight alpha-box crop is mostly transparent along its rim, so cabinets
+ * came out with see-through sides. The centre is always paint, so the top and
+ * ends of a thing are painted in that thing's own colour, and stay right if the
+ * sheet is ever recut.
  */
 const lidCss = (name) => {
   const a = ART[name];
@@ -1067,18 +1065,9 @@ const lidCss = (name) => {
   });
 };
 
-/** A solid whose ART IS ITS FRONT — a desk, a cabinet, a furnace. */
-function boxSolid(host, p, vol, fp, base) {
-  const w = fp.w * T, d = fp.d * T, h = vol.h * T;
-  const cx = fp.cx * T, cz = fp.cy * T, yc = base - h / 2;
-  const face = artCropCss(p.art);
-  const el = solidQuad(host, face, w, h, cx, yc, cz + d / 2, '', p);
-  if (p.label) el.title = p.label;
-  solidQuad(host, face, w, h, cx, yc, cz - d / 2, 'rotateY(180deg)', p);
-  solidQuad(host, face, d, h, cx + w / 2, yc, cz, 'rotateY(90deg)', p);
-  solidQuad(host, face, d, h, cx - w / 2, yc, cz, 'rotateY(-90deg)', p);
-  solidQuad(host, lidCss(p.art), w, d, cx, base - h, cz, 'rotateX(90deg)', p);
-}
+/** Eye height in TILES — what decides whether a lid is a surface you can see or
+ *  a compositor layer spent on the top of a wardrobe. */
+const EYE_T = EYE / T;
 
 /**
  * A solid whose ART IS ITS TOP — the beds. The sheet draws a bunk in PLAN, and
@@ -1089,30 +1078,52 @@ function boxSolid(host, p, vol, fp, base) {
 function lieSolid(host, p, vol, fp, base) {
   const w = fp.w * T, d = fp.d * T, h = vol.h * T;
   const cx = fp.cx * T, cz = fp.cy * T, yc = base - h / 2;
-  const side = lidCss(p.art);   // the blanket's own colour, for the frame below it
-  solidQuad(host, side, w, h, cx, yc, cz + d / 2, '', p);
-  solidQuad(host, side, w, h, cx, yc, cz - d / 2, 'rotateY(180deg)', p);
-  solidQuad(host, side, d, h, cx + w / 2, yc, cz, 'rotateY(90deg)', p);
-  solidQuad(host, side, d, h, cx - w / 2, yc, cz, 'rotateY(-90deg)', p);
+  // The same crossed frame every other solid stands on, in the blanket's own
+  // colour, with the plan-view art where it was drawn to go: on top.
+  const side = lidCss(p.art);
+  solidQuad(host, side, w, h, cx, yc, cz, '', p, 'fp-cross');
+  solidQuad(host, side, d, h, cx, yc, cz, 'rotateY(90deg)', p, 'fp-cross');
   const el = solidQuad(host, artCropCss(p.art), w, d, cx, base - h, cz, 'rotateX(90deg)', p);
   if (p.label) el.title = p.label;
 }
 
 /**
- * Round or irregular: two quads at right angles through the centre. Ground
- * contact on both axes, depth from every bearing, no per-frame rotation.
+ * TWO QUADS AT RIGHT ANGLES THROUGH THE CENTRE — the only volume you can build
+ * honestly out of one picture, and now the only one this file builds.
+ *
+ * The first cut also emitted a real six-sided BOX for anything with a front,
+ * and since every crop in the game is a single elevation, all four walls of that
+ * box got the same picture. The playtest verdict was immediate: "the furnace is
+ * placed 4 times around the sides of an invisible cube — this is not
+ * acceptable." Correct, and not tunable: a box needs four pictures and we own
+ * one. A cross carries the same information and never shows you the lie,
+ * because its second quad goes edge-on exactly when it would have started
+ * facing you. @see prop-volume.js.
+ *
+ * `fp` (a footprint) is what separates the two dressings:
+ *   • WITHOUT one — a barrel, a statue, a lamp post — the thing looks the same
+ *     from every bearing, so both quads are the art at full width.
+ *   • WITH one — a desk, a cabinet, a furnace — the front quad is the art and
+ *     the side quad narrows to the real depth and takes the object's own colour,
+ *     because a desk seen end-on is not a picture of a desk front. It also gets
+ *     a lid, but only when it is shorter than the eye: you cannot look down on
+ *     a wardrobe, and an invisible quad is a layer spent on nothing.
  *
  * `.fp-cross` restores backface-visibility, which `.fp-q` turns off — a wall
  * face is never seen from behind and a barrel always is, and without this the
  * cross vanished a quarter-turn at a time as you walked around it.
  */
-function crossSolid(host, p, vol, base) {
-  const h = vol.h * T, w = h * (ART[p.art].w / ART[p.art].h);
-  const cx = p.x * T, cz = p.y * T, yc = base - h / 2;
-  const css = artCropCss(p.art);
-  const el = solidQuad(host, css, w, h, cx, yc, cz, '', p, 'fp-cross');
+function crossSolid(host, p, vol, fp, base) {
+  const a = ART[p.art];
+  const h = vol.h * T;
+  const w = (fp ? fp.w : vol.h * (a.w / a.h)) * T;
+  const d = fp ? fp.d * T : w;
+  const cx = (fp ? fp.cx : p.x) * T, cz = (fp ? fp.cy : p.y) * T, yc = base - h / 2;
+  const face = artCropCss(p.art);
+  const el = solidQuad(host, face, w, h, cx, yc, cz, '', p, 'fp-cross');
   if (p.label) el.title = p.label;
-  solidQuad(host, css, w, h, cx, yc, cz, 'rotateY(90deg)', p, 'fp-cross');
+  solidQuad(host, fp ? lidCss(p.art) : face, d, h, cx, yc, cz, 'rotateY(90deg)', p, 'fp-cross');
+  if (fp && vol.h < EYE_T) solidQuad(host, lidCss(p.art), w, d, cx, base - h, cz, 'rotateX(90deg)', p);
 }
 
 /**
@@ -1221,9 +1232,9 @@ function buildProps(props) {
     const a = ART[p.art];
     const vol = a ? propVolume(p.art) : null;
     if (!vol) return { p, vol: null };
-    // A box is as wide as its own art says, given the height; a `lie` is drawn
+    // A slab is as wide as its own art says, given the height; a `lie` is drawn
     // in plan, so its LENGTH is the authored number and the width follows that.
-    if (vol.form === 'box') return { p, vol, fp: footprint(p, vol.h * (a.w / a.h), vol.d, openBack) };
+    if (vol.form === 'slab') return { p, vol, fp: footprint(p, vol.h * (a.w / a.h), vol.d, openBack) };
     if (vol.form === 'lie') return { p, vol, fp: footprint(p, vol.d * (a.w / a.h), vol.d, openBack) };
     return { p, vol };
   });
@@ -1255,9 +1266,10 @@ function buildProps(props) {
       continue;
     }
     const base = ground - restOn(q) * T;   // up is negative
-    if (vol.form === 'cross') crossSolid(host, p, vol, base);
-    else if (vol.form === 'lie') lieSolid(host, p, vol, q.fp, base);
-    else boxSolid(host, p, vol, q.fp, base);
+    // `q.fp` is undefined for a pure cross and set for a slab, which is exactly
+    // the switch crossSolid reads — one emitter, two dressings.
+    if (vol.form === 'lie') lieSolid(host, p, vol, q.fp, base);
+    else crossSolid(host, p, vol, q.fp, base);
   }
 }
 

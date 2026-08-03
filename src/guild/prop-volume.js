@@ -40,52 +40,71 @@
 /**
  * How a thing occupies its cell.
  *
- * `box`   — a solid standing on the floor whose ART IS ITS FRONT. Four sides and
- *           a lid. The ends and the back get a slice of the art's own edge
- *           rather than an invented tint, so a repainted sheet stays in step.
+ * `cross` — two quads at right angles through the centre, for things that look
+ *           the SAME FROM EVERY BEARING: barrels, statues, cauldrons, lamp
+ *           posts. Ground contact on both axes, depth from any angle, no
+ *           per-frame rotation, two quads. The trick every Doom descendant used.
+ * `slab`  — the same cross, for a thing that has a FRONT. The front quad is the
+ *           art at full width; the side quad is narrowed to `d` and dressed in
+ *           the object's own colour, because a desk seen end-on is not a picture
+ *           of a desk front. A lid appears only if the thing is shorter than eye
+ *           height — you cannot see the top of a wardrobe, and a quad you cannot
+ *           see is a compositor layer spent on nothing.
  * `lie`   — a solid whose ART IS ITS TOP. Beds: the sheet draws them in plan,
  *           and standing a plan view up on its edge is precisely the bug above.
  *           The lid takes the art; `d` is the long axis and width follows it.
- * `cross` — two quads at right angles through the centre, for round or
- *           irregular uprights (barrels, statues, trees, cauldrons). Ground
- *           contact on both axes, depth from every bearing, no per-frame
- *           rotation, one extra quad. The trick every Doom descendant used.
  * `wall`  — one quad bolted flat to the wall it hangs on, taking THAT wall's
  *           rotation from the map and never turning to follow the camera.
  *           `mid` is the centre height above the floor: a portrait hangs, it
  *           does not stand on the skirting.
  *
+ * THERE IS NO BOX, AND THERE CANNOT BE ONE. The first cut emitted `slab` things
+ * as a real six-sided box — and since every crop in this game is a single
+ * elevation, all four walls of that box got the SAME picture. The playtest
+ * verdict was immediate and correct: "the furnace is placed 4 times around the
+ * sides of an invisible cube — this is not acceptable." It was never fixable by
+ * tuning. A box needs four pictures and we own one, so any box built from that
+ * one picture is a cube with the front of a furnace painted on each face.
+ *
+ * A cross has the same information and none of that failure, because its second
+ * quad is edge-on exactly when it would have been showing you a lie. The same
+ * playtest picked the lamp post as the best-looking of the three forms and
+ * described it as "rotating as the player walks around" — it does not rotate;
+ * it is a cross, and the silhouette change as the two quads trade prominence is
+ * what reads as a solid turning. That is the whole endorsement, and it is why
+ * everything with a volume is a cross of one dressing or another now.
+ *
  * A name absent from this table keeps the old camera-facing billboard. That is
  * the right default for anything genuinely flat or too small to have sides, and
  * it means adding an entry is always a considered act.
  *
- * @typedef {{form:'box'|'lie'|'cross'|'wall', h:number, d?:number, mid?:number}} Volume
- * `h` height in tiles · `d` depth in tiles (box/lie) · `mid` centre height (wall)
+ * @typedef {{form:'slab'|'lie'|'cross'|'wall', h:number, d?:number, mid?:number}} Volume
+ * `h` height in tiles · `d` depth in tiles (slab/lie) · `mid` centre height (wall)
  */
 export const PROP_VOL = /** @type {Record<string, Volume>} */ ({
   // ── Desks, benches, counters ──────────────────────────────────────────────
-  teacherDesk:  { form: 'box', h: 0.40, d: 0.30 },
-  gmDesk:       { form: 'box', h: 0.55, d: 0.38 },   // a raised bench-desk, not a table
-  classDesk:    { form: 'box', h: 0.40, d: 0.30 },
-  lectern:      { form: 'box', h: 0.55, d: 0.35 },
-  potionCounter:{ form: 'box', h: 0.44, d: 0.30 },
-  abacus:       { form: 'box', h: 0.30, d: 0.14 },
-  gmLedgers:    { form: 'box', h: 0.12, d: 0.16 },
-  breadPile:    { form: 'box', h: 0.14, d: 0.22 },
+  teacherDesk:  { form: 'slab', h: 0.40, d: 0.30 },
+  gmDesk:       { form: 'slab', h: 0.55, d: 0.38 },   // a raised bench-desk, not a table
+  classDesk:    { form: 'slab', h: 0.40, d: 0.30 },
+  lectern:      { form: 'slab', h: 0.55, d: 0.35 },
+  potionCounter:{ form: 'slab', h: 0.44, d: 0.30 },
+  abacus:       { form: 'slab', h: 0.30, d: 0.14 },
+  gmLedgers:    { form: 'slab', h: 0.12, d: 0.16 },
+  breadPile:    { form: 'slab', h: 0.14, d: 0.22 },
 
   // ── Cabinets and cases: tall solids against a wall ────────────────────────
-  gmBookshelf:  { form: 'box', h: 0.90, d: 0.28 },
-  jarCabinet:   { form: 'box', h: 0.95, d: 0.30 },
-  gearCubbies:  { form: 'box', h: 0.85, d: 0.28 },
-  wardrobe:     { form: 'box', h: 0.95, d: 0.30 },
-  footlocker:   { form: 'box', h: 0.24, d: 0.24 },
-  gmThrone:     { form: 'box', h: 0.60, d: 0.30 },
+  gmBookshelf:  { form: 'slab', h: 0.90, d: 0.28 },
+  jarCabinet:   { form: 'slab', h: 0.95, d: 0.30 },
+  gearCubbies:  { form: 'slab', h: 0.85, d: 0.28 },
+  wardrobe:     { form: 'slab', h: 0.95, d: 0.30 },
+  footlocker:   { form: 'slab', h: 0.24, d: 0.24 },
+  gmThrone:     { form: 'slab', h: 0.60, d: 0.30 },
 
   // ── Fire and iron ─────────────────────────────────────────────────────────
-  forgeFurnace: { form: 'box', h: 1.05, d: 0.55 },
-  stoneOven:    { form: 'box', h: 0.85, d: 0.42 },
-  kitchenStove: { form: 'box', h: 0.85, d: 0.40 },
-  anvilBare:    { form: 'box', h: 0.35, d: 0.28 },
+  forgeFurnace: { form: 'slab', h: 1.05, d: 0.55 },
+  stoneOven:    { form: 'slab', h: 0.85, d: 0.42 },
+  kitchenStove: { form: 'slab', h: 0.85, d: 0.40 },
+  anvilBare:    { form: 'slab', h: 0.35, d: 0.28 },
 
   // ── Beds: drawn in plan, so they lie down ─────────────────────────────────
   bed:          { form: 'lie', h: 0.26, d: 0.95 },

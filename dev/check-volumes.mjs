@@ -91,8 +91,18 @@ console.log(`ceiling ${CEIL.toFixed(2)} tiles · ${rows.length} distinct props �
   + `${rows.filter((r) => r.form && r.form !== 'billboard').length} given a volume · `
   + `${fixed} no longer pierce the ceiling · ${over} still do`);
 
-// Quad cost, per form, so the layer budget is a number and not a hope.
-const COST = { box: 5, lie: 5, cross: 2, wall: 1, billboard: 1 };
+// Quad cost, per form, so the layer budget is a number and not a hope. Every
+// solid is a CROSS now (there is no box — see prop-volume.js); a slab adds a lid
+// only when it is shorter than the eye, because you cannot see the top of a
+// wardrobe and an invisible quad is a compositor layer spent on nothing.
+const EYE_T = 690 / 900;   // eye height in tiles, K cancels
+const cost = (v) => {
+  if (!v) return 1;                                   // billboard
+  if (v.form === 'wall') return 1;
+  if (v.form === 'lie') return 3;                     // crossed frame + art lid
+  if (v.form === 'slab') return v.h < EYE_T ? 3 : 2;
+  return 2;                                           // cross
+};
 const byMap = {};
 for (let k = 0; ;) {
   const at = mapSrc.indexOf('props: [', k);
@@ -101,7 +111,7 @@ for (let k = 0; ;) {
   const lit = literal(mapSrc.slice(at), /props: /, '[', ']');
   const list = eval('(' + lit + ')');
   const name = (id.match(/id: '(\w+)'/) || [, '?'])[1];
-  byMap[name] = list.reduce((s, q) => s + (COST[(PROP_VOL[q.art] || {}).form || 'billboard'] || 1), 0);
+  byMap[name] = list.reduce((s, q) => s + cost(PROP_VOL[q.art]), 0);
   k = at + 8;
 }
 console.log('\nquads spent on furnishings, per chart (was 1 each):');
