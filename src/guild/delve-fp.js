@@ -63,9 +63,11 @@ const WALL_H = 1260 * K; // full wall height — 1.4 tiles reads best
 const LOW_H = 560 * K;   // 'b' — waist-high, seen over
 const EYE = 690 * K;     // eye height above the floor
 const STEP_PX = 430 * K; // one level of ledge, in world px
-/** Snappier than the first cut (250/185): the playtest read the walk as
- *  stiff. A diagonal stride pays √2-ish in time so speed stays honest. */
-const STEP_MS = 205, TURN_MS = 130, DIAG_MS = 1.35;
+/** How fast a held turn key swings the view, rad/s — the arena's number, and
+ *  the crawler's now too. The eighth-turn it replaces was 45° in 130ms, about
+ *  6.0 rad/s: a snap rather than a turn, fine as one discrete action per stride
+ *  and far too quick to steer with. */
+const TURN_RATE = 3.1;
 
 /**
  * THE LENS, AND WHY IT HAS TO MOVE WITH THE WINDOW.
@@ -667,16 +669,82 @@ const isLow = (x, y) => !!LOW[at(x, y)];
 const blocked = (x, y) => isWall(x, y) || isLow(x, y) || !!PROP[at(x, y)];
 const heightAt = (x, y) => (at(x, y) === '^' ? 1 : 0);
 const onClimb = (x, y) => { const c = at(x, y); return c === 'L' || c === 'v'; };
-/** A step is legal if the destination is open AND any climb UP happens across
- *  a ladder. Stepping DOWN is always allowed — a ledge is a thing you must
- *  climb to reach, not a pen you must climb to leave: you can simply walk off
- *  the edge and drop. A DIAGONAL stride additionally needs both shoulders
- *  clear: cutting a corner through a wall's edge put the camera in the rock. */
-function canStep(fx, fy, tx, ty) {
-  if (blocked(tx, ty)) return false;
-  const dx = tx - fx, dy = ty - fy;
-  if (dx && dy && (blocked(fx + dx, fy) || blocked(fx, fy + dy))) return false;
-  return heightAt(fx, fy) >= heightAt(tx, ty) || onClimb(fx, fy) || onClimb(tx, ty);
+
+/**
+ * How wide the walker is, in tiles — and the number the whole continuous
+ * movement model is bounded by.
+ *
+ * A grid-locked crawler could be a POINT, because it only ever existed at cell
+ * centres and a single test vetted the whole hop before it began. A walker at
+ * arbitrary coordinates cannot: it has to be a box, or it slips into the inner
+ * angle of a corner that no single axis test refuses. THE BOX IS WHAT PRESERVES
+ * THE NO-CORNER-CUTTING RULE — axis separation alone does not, and believing
+ * otherwise is how you end up inside the rock.
+ *
+ * 0.28 is delve.js's `BODY_R`, deliberately, so the two lenses fit through the
+ * same doorways. A one-tile gap leaves 0.44 tiles of clearance, which every
+ * campus map's only way forward depends on.
+ *
+ * INVARIANT: `WALK_SPEED * DT_CLAMP < BODY`. Break it and a fast frame steps
+ * clean over a wall between two legal positions. 3.4 × 0.08 = 0.272 < 0.28.
+ */
+const BODY = 0.28;
+
+/**
+ * Is this a place the walker's whole body can be, coming FROM (fx, fy)?
+ *
+ * Four corners through `blocked()` — which keeps the crawler's own solidity
+ * vocabulary (walls, low blocks AND props), where handing collision to the
+ * arena's `T.pass` would silently make every barrel walk-through — plus
+ * THE CLIMB RULE, verbatim from the grid-locked `canStep` this replaces: a
+ * ledge still needs a ladder to go UP and none to drop off, because a ledge is
+ * a thing you climb to reach, not a pen you must climb to leave.
+ */
+function canStandAt(x, y, fx, fy) {
+  for (const cx of [x - BODY, x + BODY]) {
+    for (const cy of [y - BODY, y + BODY]) {
+      if (blocked(Math.floor(cx), Math.floor(cy))) return false;
+    }
+  }
+  const f = [Math.floor(fx), Math.floor(fy)], t = [Math.floor(x), Math.floor(y)];
+  return heightAt(f[0], f[1]) >= heightAt(t[0], t[1]) || onClimb(f[0], f[1]) || onClimb(t[0], t[1]);
+}
+
+/**
+ * Move, sliding along whatever refuses you, and SAY what refused.
+ *
+ * Two things here are deliberately not what the arena does:
+ *
+ * Both existing slides in this repo (arena-terrain's and delve.js's) test the
+ * second axis from the ALREADY-MOVED position, which lets a diagonal into a
+ * corner sneak through on the second test. The origin is captured once here.
+ *
+ * And it returns the cell each axis was refused BY, not a bare boolean. That is
+ * what keeps walk-into-ore mining alive: the grid-locked crawler knew which
+ * cell it had failed to enter because it had asked before moving, and a slide
+ * that only reports "blocked" throws that away.
+ *
+ * The escape clause matters more than it looks. A view swap from the top-down
+ * walk lands you at ITS coordinates under ITS solidity model — props block a
+ * shallow slice there and the whole cell here — so you can arrive already
+ * illegal. Without the fallback you would be wedged with no way out.
+ */
+function slide(e, dx, dy) {
+  const ox = e.x, oy = e.y;
+  const stuck = !canStandAt(ox, oy, ox, oy);
+  const ok = stuck
+    ? (x, y) => !blocked(Math.floor(x), Math.floor(y))    // already illegal: walk out on a point
+    : (x, y) => canStandAt(x, y, ox, oy);
+  let hit = null;
+  if (dx) {
+    if (ok(ox + dx, oy)) e.x = ox + dx;
+    else hit = { x: Math.floor(ox + dx + Math.sign(dx) * BODY), y: Math.floor(oy) };
+  }
+  if (dy) {
+    if (ok(e.x, oy + dy)) e.y = oy + dy;
+    else if (!hit) hit = { x: Math.floor(e.x), y: Math.floor(oy + dy + Math.sign(dy) * BODY) };
+  }
+  return hit;
 }
 
 /** Re-fit the lens to the window. Called on mount and on every resize, because
@@ -729,7 +797,9 @@ function fogAt(x, y) {
  *  yaw = dir·45°. `DIRS` holds the GRID step (diagonals land on the corner
  *  cell); `DIRV` the unit vector, for every aim, cone and pose dot-product. */
 const DIRS = [[0, -1], [1, -1], [1, 0], [1, 1], [0, 1], [-1, 1], [-1, 0], [-1, -1]];
-const DIRV = DIRS.map(([dx, dy]) => { const m = Math.hypot(dx, dy); return [dx / m, dy / m]; });
+/* DIRV is GONE. Every consumer wanted a BEARING, and now takes the live one:
+   [Math.sin(F.yaw), -Math.cos(F.yaw)]. A lookup off a rounded eighth-turn would
+   put the aim up to 22.5° from the crosshair you are actually looking down. */
 const COMPASS = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];
 
 /**
@@ -749,6 +819,10 @@ function openestDir(x, y) {
   }
   return best;
 }
+/** The same answer as a continuous heading, in radians. The ray stays an
+ *  integer cardinal scan — arriving at 45° reads as a stumble whether or not
+ *  the yaw that follows is free. `DIRS` survives for this and nothing else. */
+const openestYaw = (x, y) => openestDir(x, y) * Math.PI / 4;
 
 // ---------------------------------------------------------------------------
 // Geometry — rebuilt on a change of cell, never per frame
@@ -938,7 +1012,8 @@ function place(b, x, y, lift) {
   const hidden = fog >= 0.995;
   if (hidden !== b._hidden) { b.el.style.display = (b._hidden = hidden) ? 'none' : ''; }
   if (hidden) return;
-  const tf = `translate3d(${(x * T).toFixed(1)}px,${lift}px,${(y * T).toFixed(1)}px) rotateY(${-F.yaw}deg)`
+  const tf = `translate3d(${(x * T).toFixed(1)}px,${(+lift).toFixed(1)}px,${(y * T).toFixed(1)}px)`
+    + ` rotateY(${(-F.yaw * 180 / Math.PI).toFixed(1)}deg)`
     + (b.death ? ` rotateZ(${(b.death * -74).toFixed(1)}deg) scale(${(1 - b.death * 0.34).toFixed(3)},${(1 - b.death * 0.66).toFixed(3)})` : '');
   if (tf !== b._tf) b.el.style.transform = (b._tf = tf);
   /**
@@ -1137,7 +1212,10 @@ function buildDecor(sheets) {
         if (ch === 'w') artBillboard('wagon', x + 0.5, y + 0.5, 82 * (T / 48), 'The wagon home');
         if (sign) markerBillboard(sign[0], sign[1], 'fpm-exit', x + 0.5, y + 0.5);
         else markerBillboard('◈', 'Onward', 'fpm-portal', x + 0.5, y + 0.5);
-        F.doors.push({ x: x + 0.5, y: y + 0.5 });
+        // The grid char rides along: checkDoors has to know whether reaching
+        // this one pops the stack ('d') or ends the delve ('s'/'w'), which the
+        // old arrival path re-read from the cell it had just landed on.
+        F.doors.push({ x: x + 0.5, y: y + 0.5, ch, dead: false });
       }
     }
   }
@@ -1642,11 +1720,20 @@ function mount(prep, entry) {
   // way through it, in the middle of the passage you opened.
   F.grid = map.grid.map((row, y) => row.replace(/o/g, (m, x) => (F.mined.has(map.id + ':' + x + ',' + y) ? '.' : m)));
   const at0 = entry || map.entry;
-  F.px = Math.floor(at0[0]) + 0.5; F.py = Math.floor(at0[1]) + 0.5;
-  F.dir = openestDir(Math.floor(F.px), Math.floor(F.py));
-  F.yaw = F.dir * 45; F.turning = null; F.stepping = null;
+  // NOT floored to a centre. Every campus chart authors its entry 0.2 tiles
+  // clear of its own doorway ([4.5, 7.3]), and snapping moved you back TOWARD
+  // the door you had just come out of — which a proximity trigger notices.
+  F.px = at0[0]; F.py = at0[1];
+  // HARD-RESET every smoothed value in the same task, for the same reason
+  // F._wtf is reset below: a portal would otherwise carry the previous room's
+  // easing into the new one and the eye would rise out of the floor on arrival.
+  F.yaw = openestYaw(Math.floor(F.px), Math.floor(F.py));
+  F.vx = 0; F.vy = 0; F.sway = 0; F.bobPhase = 0; F.prevYaw = F.yaw;
+  F.lev = heightAt(Math.floor(F.px), Math.floor(F.py));   // snapped, never lerped
+  F.cellKey = Math.floor(F.px) + ',' + Math.floor(F.py);  // so frame one re-fires nothing
+  F.seen.add(F.map.id + ':' + F.cellKey);                 // you have seen where you stand
   F.creatures = []; F.decor = []; F.solids = []; F.doors = []; F.shots = []; F.armed = false;
-  F.settleUntil = performance.now() + 250;
+  F.settleUntil = performance.now() + 350;   // delve.js's, not the old STEP_MS's
 
   const stage = F.host.querySelector('.fp-stage');
   stage.innerHTML = '<div class="fp-world"><div class="fp-geo"></div><div class="fp-bbs"></div></div>';
@@ -1733,7 +1820,11 @@ export async function openDelveFp(localeId, member, hooks, carry) {
       map: null, theme: null, surf: null, hooks, member, host, world: null,
       grid: null, cols: 0, rows: 0,
       px: 0, py: 0, dir: 2, yaw: 180, turning: null, stepping: null,
-      keys: {}, latched: {}, padKeys: {}, look: null, lookAcc: 0,
+      keys: {}, latched: {}, padKeys: {}, padAxes: null, look: null,
+      // The continuous walker's state. Every one of these is hard-reset in
+      // mount(), because a portal must not carry the last room's easing in.
+      vx: 0, vy: 0, lev: 0, bobPhase: 0, sway: 0, prevYaw: 0,
+      cellKey: '', selfFace: null,
       last: 0, raf: 0, ended: false, transiting: false,
       creatures: [], decor: [], solids: [], doors: [], shots: [], armed: false,
       seen: new Set(), mined: new Set(), settleUntil: 0,
@@ -1786,7 +1877,7 @@ export async function openDelveFp(localeId, member, hooks, carry) {
 }
 
 // ---------------------------------------------------------------------------
-// Input — grid steps and quarter turns
+// Input — held rates, drained once a tick
 // ---------------------------------------------------------------------------
 
 /** One table, read by both handlers — two copies drifted apart waiting to happen. */
@@ -1799,18 +1890,22 @@ const KEYMAP = {
 };
 
 /**
- * How far the mouse must travel to be worth a turn, in radians of would-be
- * look. A crawler HAS no continuous yaw — `F.dir` is an eighth-turn index that
- * seven other things read (the swing's aim, the creature sprite rows, the
- * compass, the minimap arrow, the third-person self facing) and `tryStep` walks
- * `DIRS[F.dir]` to a whole cell. So the mouse does not steer the camera here;
+ * THE MOUSE STEERS THE CAMERA, as it does in the arena.
+ *
+ * It used to bank travel until it was worth a whole eighth-turn, because the
+ * crawler had no continuous yaw to give it — `F.dir` was an integer index that
+ * seven other things read. All seven take the live yaw now, so the bank is gone
+ * and mouse travel is added to `F.yaw` directly: the distance your hand moved
+ * IS the distance the view turns. What follows is the old note, kept because
  * it fills a bucket, and each bucketful spends itself as ONE eighth-turn on the
  * same latch the ◀ ▶ buttons use. A flick turns you, a drift does not.
  */
-const LOOK_SNAP = 0.62;
+/* LOOK_SNAP is gone with the eighth-turn it fed. Mouse travel goes straight
+   into the yaw as an angle now — the distance your hand moved IS the distance
+   the view turned, which is the whole reason a mouse aims better than a key. */
 /** Past this a stick is a direction, not a resting hand. The crawler's inputs
  *  are all discrete, so an analog axis has to be squared off somewhere. */
-const PAD_ON = 0.5;
+/* PAD_ON is gone: the sticks are read as analog axes (see readDevices). */
 
 function wireInput() {
   // Both guard on F: a throw during open leaves the listener attached with no
@@ -1832,6 +1927,17 @@ function wireInput() {
     const k = e.key.toLowerCase();
     if (KEYMAP[k]) F.keys[KEYMAP[k]] = false;
   };
+  // NOTHING FIRES A KEYUP when the window goes away — not alt-tab, not a
+  // minimise, not Esc out of a pointer lock. Grid-lock hid this (a held key
+  // only ever bought one more stride); a rate model turns it into walking into
+  // a wall forever, and a stuck Shift into every attack silently refused
+  // behind "Shield up — no room to swing."
+  F.onDrop = () => {
+    if (!F) return;
+    F.keys = {}; F.latched = {}; F.padKeys = {}; F.padAxes = null;
+  };
+  window.addEventListener('blur', F.onDrop);
+  document.addEventListener('visibilitychange', F.onDrop);
   window.addEventListener('keydown', F.onKeyDown);
   window.addEventListener('keyup', F.onKeyUp);
   F.host.querySelectorAll('.fp-pad button').forEach((b) => {
@@ -1860,13 +1966,16 @@ function wireInput() {
     ignore: '.delve-hud,.fp-pad,.fp-map,.fp-vitals',
     onChange: (on) => { if (F) F.host.classList.toggle('fp-looking', on); },
   });
-  F.lookAcc = 0;
   F.onResize = () => { fitLens(); fitHands(); mountSky(); };
   window.addEventListener('resize', F.onResize);
 }
 function unwireInput() {
   window.removeEventListener('keydown', F.onKeyDown);
   window.removeEventListener('keyup', F.onKeyUp);
+  if (F.onDrop) {
+    window.removeEventListener('blur', F.onDrop);
+    document.removeEventListener('visibilitychange', F.onDrop);
+  }
   const stage = F.host.querySelector('.fp-stage');
   if (stage && F.onStagePointer) stage.removeEventListener('pointerdown', F.onStagePointer);
   if (F.look) { F.look.dispose(); F.look = null; }   // and hands the cursor back
@@ -1893,36 +2002,28 @@ function readDevices() {
   if (!F) return;
   const was = F.padKeys || {};
   const now = {};
+  const ax = { fwd: 0, strafe: 0, turn: 0 };
   const p = readPad();
   if (p) {
-    now.fwd = p.my < -PAD_ON;
-    now.back = p.my > PAD_ON;
-    now.strafeL = p.mx < -PAD_ON || p.down(PAD.LB);
-    now.strafeR = p.mx > PAD_ON || p.down(PAD.RB);
-    now.turnL = p.rx < -PAD_ON;
-    now.turnR = p.rx > PAD_ON;
+    // ANALOG STRAIGHT THROUGH. input.js's own `ax()` has already deadzoned and
+    // rescaled these, so squaring them off into booleans (which is what the
+    // grid-locked crawler did, at PAD_ON 0.5) throws away the one thing a
+    // continuous walker exists to use: how far you pushed.
+    ax.fwd = -p.my;
+    ax.turn = p.rx;
+    ax.strafe = p.mx + (p.down(PAD.RB) ? 1 : 0) - (p.down(PAD.LB) ? 1 : 0);
     now.attack = p.down(PAD.A) || p.down(PAD.RT);
     now.drink = p.down(PAD.X);
     now.block = p.down(PAD.LT) || p.down(PAD.Y);
-    // A press too short to survive to the next frame still counts, exactly as
-    // it does for the on-screen pad.
-    for (const k in now) if (now[k] && !was[k]) F.latched[k] = true;
+    // ONLY the three presses manufacture an edge. Movement used to as well, and
+    // under a rate model that is a bug with a delay on it: an edge armed on
+    // `fwd` sits in the latch and spends itself as a step AFTER the stick has
+    // been released. A press too short to survive a frame still counts.
+    for (const k of ['attack', 'drink', 'block']) if (now[k] && !was[k]) F.latched[k] = true;
     if (p.hit(PAD.SELECT)) togglePov();
   }
   F.padKeys = now;
-  // Mouse travel, banked until it is worth an eighth-turn. The remainder stays
-  // in the bucket, so a slow drag never loses the fraction it was owed and a
-  // steady sweep keeps turning you as fast as the 130ms tween allows. What it
-  // will NOT do is queue: a single frame carrying three turns' worth arms one
-  // latch, because a mouse that flew off the desk should not spin you round.
-  if (F.look && F.look.locked()) {
-    F.lookAcc += F.look.read().yaw;
-    while (F.lookAcc >= LOOK_SNAP) { F.lookAcc -= LOOK_SNAP; F.latched.turnR = true; }
-    while (F.lookAcc <= -LOOK_SNAP) { F.lookAcc += LOOK_SNAP; F.latched.turnL = true; }
-  } else if (F.look) {
-    F.look.read();          // drain, so an unlocked drift never banks
-    F.lookAcc = 0;
-  }
+  F.padAxes = ax;
 }
 
 /** Is the shield up, by any hand? Read raw all over the fight — never through
@@ -1944,31 +2045,6 @@ function helpUntil(ms) {
 // Simulation
 // ---------------------------------------------------------------------------
 
-/** Begin a stride into the next cell, if anything is there to stride into.
- *  `strafe` is in eighth-turns; a sidestep is ±2 (a true 90° sidestep). */
-function tryStep(sign, strafe) {
-  const d = (F.dir + (strafe || 0) + 8) % 8;
-  const [dx, dy] = DIRS[d];
-  const fx = Math.floor(F.px), fy = Math.floor(F.py);
-  const tx = fx + dx * sign, ty = fy + dy * sign;
-  if (!canStep(fx, fy, tx, ty)) {
-    // An ore face is a wall you can take away by walking into it.
-    if (at(tx, ty) === 'o') mineOre(tx, ty);
-    return;
-  }
-  F.stepping = {
-    fx: fx + 0.5, fy: fy + 0.5, tx: tx + 0.5, ty: ty + 0.5, t: 0,
-    ms: STEP_MS * (dx && dy ? DIAG_MS : 1),
-    // The levels at both ends, so the camera can ride the drop instead of
-    // snapping the moment the cell boundary passes under the feet.
-    lf: heightAt(fx, fy), lt: heightAt(tx, ty),
-  };
-}
-
-function tryTurn(sign) {
-  F.turning = { from: F.yaw, to: F.yaw + sign * 45, t: 0 };
-  F.dir = (F.dir + sign + 8) % 8;
-}
 
 /**
  * Strike at what is in front of you.
@@ -1990,9 +2066,15 @@ function trySwing() {
   // right move, which is the same as having no guard at all.
   if (guarding()) { toast('Shield up — no room to swing.'); return; }
   F.swingUntil = now + SWING_MS;
-  const [gx, gy] = DIRS[F.dir];                          // the CELL ahead (grid step)
-  const [dx, dy] = DIRV[F.dir];                          // the true aim (unit)
-  const ax = Math.floor(F.px) + gx, ay = Math.floor(F.py) + gy;
+  const dx = Math.sin(F.yaw), dy = -Math.cos(F.yaw);     // the true aim, live
+  // The cell ahead is a RAY now. Standing anywhere in a cell facing anywhere at
+  // all, the seam you can see is the one the ray meets; a grid step off a
+  // rounded eighth-turn takes the diagonal neighbour instead.
+  let ax = Math.floor(F.px + dx * 0.7), ay = Math.floor(F.py + dy * 0.7);
+  for (let r = 0.55; r <= 1.15; r += 0.15) {
+    const rx = Math.floor(F.px + dx * r), ry = Math.floor(F.py + dy * r);
+    if (at(rx, ry) === 'o') { ax = rx; ay = ry; break; }
+  }
   const seam = at(ax, ay) === 'o';
   playSwing(seam);
   const w = F.hooks.gear && F.hooks.gear.weapon;
@@ -2031,55 +2113,148 @@ function took(k) {
   return on;
 }
 
-function readInput() {
+/**
+ * WALK, TURN, SLIDE — one engine, the arena's, every frame.
+ *
+ * This replaces `readInput()` + `advanceMotion()`, and with them the whole
+ * grid-lock: `F.stepping`, `F.turning`, `ease`, `tryStep`, `tryTurn`, STEP_MS,
+ * TURN_MS and DIAG_MS. The playtest verdict was "walking feels choppy, like the
+ * player is always stepping with the same foot… there should not be a separate
+ * mode", and both halves of that were true. The choppiness was 205ms hops
+ * between cell centres; the same foot was the walk cycle restarting, because a
+ * walker is `'move'` only while `F.stepping` exists and every gap between
+ * strides reset the anim to frame 0.
+ *
+ * Divergences from the arena's tick, each of which is deliberate:
+ *
+ * The vector is CLAMPED, not normalised. `dx /= L` forces unit length, so a
+ * stick at 0.3 walks at full speed — and a crawler edging toward a ledge or an
+ * ore face is exactly who wants that magnitude back. It also caps a diagonal at
+ * 1 rather than the √2 the arena's own steer lets through.
+ *
+ * The settle ZEROES the vector rather than bailing. The old guard returned
+ * outright, which swallowed turning too; here everything else keeps ticking.
+ *
+ * WALK_SPEED is delve.js's, not the arena's, for two reasons: a view swap
+ * between the two lenses is seamless, so walking at different paces is a
+ * visible seam — and the invariant below.
+ *
+ * INVARIANT: `WALK_SPEED * DT_CLAMP < BODY`. 3.4 × 0.08 = 0.272 < 0.28. Break
+ * it and one slow frame steps clean over a wall, between two legal positions.
+ */
+const WALK_SPEED = 3.4, CLIMB_RATE = 0.42;
+/** How far you travel per bob cycle, tiles. Keyed to distance and not to time,
+ *  so walking into a wall does not bob. */
+const STRIDE_LEN = 1.25;
+const clamp1 = (v) => (v < -1 ? -1 : v > 1 ? 1 : v);
+
+function steer(dt) {
   if (F.transiting) return;
-  // Striking is allowed mid-stride: a stride is 200ms, and a crawler that
-  // swallows your attack because you are still walking feels broken.
+  // Striking stays above the settle, and stays on `took` — a blow is a press.
   if (took('attack')) trySwing();
   if (took('drink')) drink();
-  if (F.turning || F.stepping) return;
-  if (performance.now() < F.settleUntil) return;
-  if (took('turnL')) { tryTurn(-1); return; }
-  if (took('turnR')) { tryTurn(1); return; }
-  if (took('fwd')) { tryStep(1, 0); return; }
-  if (took('back')) { tryStep(-1, 0); return; }
-  if (took('strafeL')) { tryStep(1, -2); return; }
-  if (took('strafeR')) { tryStep(1, 2); return; }
+  // Drained FIRST and ALWAYS. A read that only happens on some frames banks the
+  // travel between them and spends it in a lump.
+  const look = F.look ? F.look.read() : null;
+  const held = (a, b) => ((F.keys[a] ? 1 : 0) - (F.keys[b] ? 1 : 0));
+  const A = F.padAxes || { fwd: 0, strafe: 0, turn: 0 };
+  const turn = clamp1(held('turnR', 'turnL') + A.turn);
+  let fwd = clamp1(held('fwd', 'back') + A.fwd);
+  let strafe = clamp1(held('strafeR', 'strafeL') + A.strafe);
+
+  // Held input is a RATE (×dt); mouse travel is a DISPLACEMENT already — the
+  // distance your hand moved IS the angle. They must never be mixed.
+  const locked = !!(F.look && F.look.locked());
+  F.yaw += turn * TURN_RATE * dt + (locked && look ? look.yaw : 0);
+  if (F.yaw > Math.PI) F.yaw -= 2 * Math.PI;
+  else if (F.yaw <= -Math.PI) F.yaw += 2 * Math.PI;
+
+  if (performance.now() < F.settleUntil) { fwd = 0; strafe = 0; }
+  const s = Math.sin(F.yaw), c = Math.cos(F.yaw);
+  let dx = s * fwd + c * strafe, dy = -c * fwd + s * strafe;
+  const L = Math.hypot(dx, dy);
+  if (L > 1) { dx /= L; dy /= L; }
+  const cx = Math.floor(F.px), cy = Math.floor(F.py);
+  const sp = WALK_SPEED * (onClimb(cx, cy) ? CLIMB_RATE : 1);
+  const ox = F.px, oy = F.py;
+  const e = { x: F.px, y: F.py };
+  const hit = slide(e, dx * sp * dt, dy * sp * dt);
+  F.px = e.x; F.py = e.y;
+  // ACHIEVED velocity, not intended — the idiom moveCreatures already uses.
+  // Walking into a wall must read as standing still, or the standee marches on
+  // the spot and the bob never stops.
+  const adx = F.px - ox, ady = F.py - oy;
+  F.vx = adx / dt; F.vy = ady / dt;
+
+  // WALK-INTO-ORE SURVIVES. The grid-locked crawler knew which cell it had
+  // failed to enter because it asked before moving; `slide` reports the cell
+  // that refused each axis, which is the same knowledge after the fact.
+  if (hit && at(hit.x, hit.y) === 'o') mineOre(hit.x, hit.y);
+
+  // The four smoothed values, each with a hard-zero threshold so an idle frame
+  // still compares equal and writes nothing — that guard IS the mobile budget.
+  const want = heightAt(Math.floor(F.px), Math.floor(F.py));
+  const k = 1 - Math.exp(-dt / 0.09);            // ~the old 205ms ease
+  F.lev += (want - F.lev) * k;
+  if (Math.abs(want - F.lev) < 0.01) F.lev = want;
+  const dist = Math.hypot(adx, ady);
+  if (dist > 1e-4) F.bobPhase = (F.bobPhase + dist / STRIDE_LEN * Math.PI * 2) % (Math.PI * 2);
+  // Sway is a low-passed yaw RATE. The old one read the remaining tween angle —
+  // a scripted lean that led the camera — which has nothing to read any more.
+  let dyaw = F.yaw - F.prevYaw;
+  if (dyaw > Math.PI) dyaw -= 2 * Math.PI; else if (dyaw <= -Math.PI) dyaw += 2 * Math.PI;
+  F.sway += (dyaw / Math.max(dt, 1e-3) / TURN_RATE - F.sway) * Math.min(1, dt / 0.07);
+  if (Math.abs(F.sway) < 0.004) F.sway = 0;
+  F.prevYaw = F.yaw;
 }
 
-function advanceMotion(dt) {
-  if (F.turning) {
-    F.turning.t += dt * 1000 / TURN_MS;
-    if (F.turning.t >= 1) { F.yaw = F.turning.to; F.turning = null; drawMap(); }
-    else F.yaw = F.turning.from + (F.turning.to - F.turning.from) * ease(F.turning.t);
-  }
-  if (F.stepping) {
-    const s = F.stepping;
-    s.t += dt * 1000 / (s.ms || STEP_MS);
-    const k = Math.min(1, ease(s.t));
-    F.px = s.fx + (s.tx - s.fx) * k;
-    F.py = s.fy + (s.ty - s.fy) * k;
-    if (s.t >= 1) { F.px = s.tx; F.py = s.ty; F.stepping = null; onArrive(); }
-  }
-}
-const ease = (t) => (t <= 0 ? 0 : t >= 1 ? 1 : t * t * (3 - 2 * t));
-
-/** Everything that happens because a stride finished on a new cell. */
-function onArrive() {
-  const x = Math.floor(F.px), y = Math.floor(F.py);
-  F.seen.add(F.map.id + ':' + x + ',' + y);
+/**
+ * Everything that used to hang off "a stride finished", split in two.
+ *
+ * There is no arrival any more, so the work divides by what it actually needed:
+ * the map bookkeeping needs a CHANGE OF CELL, and the ways out need PROXIMITY.
+ * Folding them together is what made a portal fire the instant you stepped on
+ * its cell — fine at 205ms a step, wrong when you can stand astride the line.
+ */
+function onCellChange() {
+  const key = Math.floor(F.px) + ',' + Math.floor(F.py);
+  if (key === F.cellKey) return;
+  // A walker jittering on a cell line would otherwise re-run a diff over ~600
+  // entries every frame. Require a real committal into the new cell.
+  const cx = Math.floor(F.px) + 0.5, cy = Math.floor(F.py) + 0.5;
+  if (Math.abs(F.px - cx) > 0.45 && Math.abs(F.py - cy) > 0.45) return;
+  F.cellKey = key;
+  F.seen.add(F.map.id + ':' + Math.floor(F.px) + ',' + Math.floor(F.py));
   buildGeometry();
   drawMap();
-  const ch = at(x, y);
-  // The entry sits ON or BESIDE the way out (hollowvein spawns one cell from
-  // its 's'), so a door is ARMED only once you have stepped clear of it — the
-  // same rule the top-down walk has always had (delve.js checkExit). Without
-  // it the first press of ▲ can end the delve before it has begun.
-  if (!F.armed) return;
-  if (ch === '+') { const p = (F.map.portals || []).find((q) => Math.floor(q.x) === x && Math.floor(q.y) === y); if (p) { usePortal(p); return; } }
-  if (EXIT[ch]) {
-    if (F.stack.length) { usePortal({ ...F.stack.pop(), popped: true }); return; }
-    endDelve('climbed back into the daylight');
+}
+
+/**
+ * The ways out, by proximity — the top-down walk's rule (checkPortals), 0.8
+ * tiles, measured against the AUTHORED fractional coordinates rather than the
+ * grid character. The char route was also a latent bug: validateMap only warns
+ * when a portal sits on a plain '.', so such a portal worked in the top-down
+ * walk and was silently dead here.
+ *
+ * Four things stop this double-firing, and all four are load-bearing: `F.armed`
+ * (you must step clear of every door before any of them works), `F.transiting`
+ * (set synchronously before usePortal's first await, so `busy()` blocks every
+ * later frame), the settle zeroing your movement on arrival, and a door that
+ * threw being retired so it cannot be offered again.
+ */
+function checkDoors() {
+  if (!F.armed || F.transiting || F.ended) return;
+  const near = (q) => Math.hypot(q.x - F.px, q.y - F.py) < 0.8;
+  for (const q of (F.map.portals || [])) {
+    if (q.dead || !near(q)) continue;
+    usePortal(q); return;
+  }
+  for (const d of F.doors) {
+    if (d.dead || !near(d)) continue;
+    if (EXIT[d.ch]) {
+      if (F.stack.length) { usePortal({ ...F.stack[F.stack.length - 1], popped: true }); return; }
+      endDelve('climbed back into the daylight'); return;
+    }
   }
 }
 
@@ -2098,10 +2273,20 @@ async function usePortal(portal) {
     const p = await prep(portal.to);
     if (F !== S || S.ended) return;
     if (portal.enter) S.stack.push({ to: S.map.id, at: [S.px, S.py] });
+    // The stack is POPPED here, not by the caller. It used to be spliced before
+    // this function's own guard and before the try — so a door that threw
+    // discarded the return address, and the next `d` ended the delve instead of
+    // taking you down a floor. Unreachable at one trigger per stride; routine
+    // once the trigger is per-frame.
+    if (portal.popped) S.stack.pop();
     mount(p, portal.at);
     toast(p.map.name || 'Onward');
   } catch (e) {
     console.warn('delve-fp: door failed', e);
+    // RETIRE A BROKEN DOOR. One toast used to be one toast because you had to
+    // step off and back on; standing inside a 0.8-tile radius would now retry
+    // it every frame — an unbounded run of async map bakes, one toast each.
+    if (portal) portal.dead = true;
     if (F === S && !S.ended) toast('That way is blocked.');
   } finally {
     if (F === S) S.transiting = false;
@@ -2204,7 +2389,7 @@ function moveCreatures(dt) {
  */
 function poseCreature(c, walking) {
   if (walking && (c.vx || c.vy)) {
-    const [cdx, cdy] = DIRV[F.dir];
+    const cdx = Math.sin(F.yaw), cdy = -Math.cos(F.yaw);
     const rx = -cdy, ry = cdx;                    // the camera's right, on the floor
     const away = c.vx * cdx + c.vy * cdy;         // + = walking off into the scene
     const across = c.vx * rx + c.vy * ry;         // + = walking to screen right
@@ -2552,7 +2737,7 @@ function render() {
   // it, so a pull-back along DIRV jumped 45° ahead of the camera's own
   // rotation for the length of every turn — the one window in which the
   // chase camera was NOT behind the walker.
-  const yr = F.yaw * Math.PI / 180;
+  const yr = F.yaw;                    // radians, natively, since the swap
   /**
    * Third person frames like the reference action-RPG shot: about a tile
    * back, eye barely over the member's head, lens tipped 9° down — head near
@@ -2595,10 +2780,8 @@ function render() {
   const ex = F.px * T - Math.sin(yr) * horiz, ez = F.py * T + Math.cos(yr) * horiz;
   // The level under the eye, interpolated across a stride so a walk-off-the-
   // ledge drop is a hop down rather than a mid-step teleport.
-  const s = F.stepping;
-  const lev = s && s.lf != null
-    ? s.lf + (s.lt - s.lf) * Math.min(1, ease(s.t))
-    : heightAt(Math.floor(F.px), Math.floor(F.py));
+  // Smoothed every frame in steer() now, instead of eased across a stride.
+  const lev = F.lev;
   const ey = -EYE - lev * STEP_PX - back * Math.sin(orb);
   // rotateY(+yaw), not −yaw. Forward is −Z, and CSS rotateY maps (x,y,z) to
   // (x·cosθ + z·sinθ, y, −x·sinθ + z·cosθ) — so facing east (yaw 90) has to send
@@ -2632,7 +2815,10 @@ function render() {
    * Billboards only counter-yaw, so they lean by the whole of it from true.
    * That lean is not a cost here, it is the mechanism.
    */
-  const wtf = `scale3d(${F.lens},${F.lens},${F.lens})${pov3 ? ` rotateX(${camLean()}deg)` : ''} rotateY(${F.yaw}deg) translate3d(${-ex}px,${-ey}px,${-ez}px)`;
+  const wtf = `scale3d(${F.lens.toFixed(4)},${F.lens.toFixed(4)},${F.lens.toFixed(4)})`
+    + `${pov3 ? ` rotateX(${camLean()}deg)` : ''}`
+    + ` rotateY(${(F.yaw * 180 / Math.PI).toFixed(2)}deg)`
+    + ` translate3d(${(-ex).toFixed(1)}px,${(-ey).toFixed(1)}px,${(-ez).toFixed(1)}px)`;
   if (wtf !== F._wtf) F.world.style.transform = (F._wtf = wtf);
   // Billboards stand on the floor and counter-rotate to face the walker. Every
   // write is guarded by the value it would write: standing still, this loop
@@ -2664,8 +2850,12 @@ function render() {
   // The hands ride the stride and lag the turn — the whole reason to draw them
   // is that they are the only thing on screen that moves WITH you.
   if (F.hands) {
-    const bob = (F.stepping ? Math.sin(Math.min(1, F.stepping.t) * Math.PI) * 26 : 0).toFixed(1) + 'px';
-    const sway = (F.turning ? (F.turning.to - F.yaw) / 90 * -30 : 0).toFixed(1) + 'px';
+    // Bob rides DISTANCE travelled, so walking into a wall does not bob; sway
+    // is a low-passed yaw rate. Both hard-zero in steer(), so a standing frame
+    // builds the same string and the guard below rejects the write.
+    const spd = Math.min(1, Math.hypot(F.vx, F.vy) / WALK_SPEED);
+    const bob = (Math.sin(F.bobPhase) * 26 * spd).toFixed(1) + 'px';
+    const sway = (clamp1(F.sway) * -30).toFixed(1) + 'px';
     if (bob !== F._bob) F.hands.el.style.setProperty('--fp-bob', (F._bob = bob));
     if (sway !== F._sway) F.hands.el.style.setProperty('--fp-sway', (F._sway = sway));
   }
@@ -2674,7 +2864,8 @@ function render() {
     if (pov3 !== F.self._on) { F.self._on = pov3; F.self.el.style.display = pov3 ? '' : 'none'; }
     if (pov3) {
       const lift = -lev * STEP_PX;   // the same interpolated level the eye rides
-      const tf = `translate3d(${(F.px * T).toFixed(1)}px,${lift.toFixed(1)}px,${(F.py * T).toFixed(1)}px) rotateY(${-F.yaw}deg)`;
+      const tf = `translate3d(${(F.px * T).toFixed(1)}px,${lift.toFixed(1)}px,${(F.py * T).toFixed(1)}px)`
+        + ` rotateY(${(-F.yaw * 180 / Math.PI).toFixed(1)}deg)`;
       if (tf !== F.self._tf) F.self.el.style.transform = (F.self._tf = tf);
       /**
        * The pose is CAMERA-relative, like every rotation in this view
@@ -2689,15 +2880,19 @@ function render() {
        * so the sprite leans into the turn for a beat, which is the one moment
        * a profile is the true answer.
        */
-      F.self.actor.facing = F.dir * 45 * Math.PI / 180 - yr;
+      // Facing follows the MOVEMENT while moving and holds when still, so a
+      // strafe shows a profile. The old lean-into-the-turn came from F.dir
+      // leading the lerping yaw, and goes with the tween that produced it.
+      if (Math.hypot(F.vx, F.vy) > 0.05) F.selfFace = Math.atan2(F.vx, -F.vy);
+      F.self.actor.facing = (F.selfFace == null ? F.yaw : F.selfFace) - yr;
       const now = performance.now();
       // One-shots (a swing, a bow draw, a hit taken) own the sprite while
       // they play; the stance logic reasserts itself the moment they lapse.
       if (now >= (F.self.busyUntil || 0)) {
-        const climbing = F.stepping && F.stepping.lf !== F.stepping.lt;
+        const climbing = onClimb(Math.floor(F.px), Math.floor(F.py));
         const desired = guarding() ? 'hold'
           : climbing ? 'climb'
-            : (F.stepping || F.turning) ? 'move' : 'idle';
+            : Math.hypot(F.vx, F.vy) > 0.05 ? 'move' : 'idle';
         if (F.self.actor.anim.name !== desired) F.self.gfx.setAnim(F.self.actor, desired);
       }
       // Tick, THEN draw: the anim frames advance on the compositor's own
@@ -2711,7 +2906,10 @@ function render() {
   // stage, the HUD is per-session), so it is looked up once — a querySelector
   // plus a textContent write per frame kept layout dirty on every idle frame.
   if (!F._comp) F._comp = F.host.querySelector('.fp-compass');
-  if (F._comp && F._compDir !== F.dir) { F._compDir = F.dir; F._comp.textContent = '✦ ' + COMPASS[F.dir]; }
+  // The double modulo is not optional: a negative yaw gives a negative index
+  // and the HUD reads "✦ undefined".
+  const cd = ((Math.round(F.yaw / (Math.PI / 4)) % 8) + 8) % 8;
+  if (F._comp && F._compDir !== cd) { F._compDir = cd; F._comp.textContent = '✦ ' + COMPASS[cd]; }
 }
 
 /** The scrap of chart you have drawn so far — only cells you have stood on and
@@ -2739,7 +2937,7 @@ function drawMap() {
   }
   g.fillStyle = '#e8e0d0';
   g.beginPath();
-  const mx = (R + 0.5) * cell, my = (R + 0.5) * cell, a = (F.dir * 45 - 90) * Math.PI / 180;
+  const mx = (R + 0.5) * cell, my = (R + 0.5) * cell, a = F.yaw - Math.PI / 2;
   g.moveTo(mx + Math.cos(a) * cell, my + Math.sin(a) * cell);
   g.lineTo(mx + Math.cos(a + 2.5) * cell, my + Math.sin(a + 2.5) * cell);
   g.lineTo(mx + Math.cos(a - 2.5) * cell, my + Math.sin(a - 2.5) * cell);
@@ -2759,8 +2957,9 @@ function stepSim(now) {
   // Mouse and controller first: they speak into the same key table readInput
   // reads, so they have to have spoken before it looks.
   if (!busy()) readDevices();
-  if (!busy()) readInput();
-  if (!busy()) advanceMotion(dt);
+  if (!busy()) steer(dt);
+  if (!busy()) onCellChange();
+  if (!busy()) checkDoors();
   if (!busy()) moveCreatures(dt);
   if (!busy()) checkArmed();
   if (!busy()) fightTick(dt);
@@ -2935,8 +3134,11 @@ window.__delveFp = { leave, close, help: () => helpUntil(9000), pov: togglePov }
 // Dev probe — the headless pane runs no rAF, so the sim is stepped by hand.
 if (typeof window !== 'undefined') {
   window.__fpDebug = () => F && ({
-    map: F.map && F.map.id, x: +F.px.toFixed(2), y: +F.py.toFixed(2), dir: COMPASS[F.dir], yaw: F.yaw,
-    moving: !!(F.stepping || F.turning), hp: Math.ceil(F.hp), hpCeil: F.hpCeil, armed: F.armed,
+    map: F.map && F.map.id, x: +F.px.toFixed(2), y: +F.py.toFixed(2),
+    dir: COMPASS[((Math.round(F.yaw / (Math.PI / 4)) % 8) + 8) % 8],
+    yawDeg: +(F.yaw * 180 / Math.PI).toFixed(1),
+    speed: +Math.hypot(F.vx, F.vy).toFixed(3),
+    moving: Math.hypot(F.vx, F.vy) > 0.05, hp: Math.ceil(F.hp), hpCeil: F.hpCeil, armed: F.armed,
     quads: F.world.querySelectorAll('.fp-q').length, creatures: F.creatures.length,
     // Split out because the two are bounded by different things and the phone
     // falls over on the total: geometry is the view radius squared, solids are
@@ -2950,7 +3152,7 @@ if (typeof window !== 'undefined') {
     // creature is, and how far in front of you it is.
     near: F.creatures.map((c) => {
       const vx = c.x - F.px, vy = c.y - F.py, d = Math.hypot(vx, vy) || 1e-6;
-      const [dx, dy] = DIRV[F.dir];
+      const dx = Math.sin(F.yaw), dy = -Math.cos(F.yaw);
       return {
         id: c.prey.id, d: +d.toFixed(2), dot: +((vx * dx + vy * dy) / d).toFixed(2),
         row: ['front', 'left', 'right', 'back'][c.row], mode: c.mode,
@@ -2979,6 +3181,6 @@ if (typeof window !== 'undefined') {
     F.look = { locked: () => true, read: () => (spent ? { yaw: 0, pitch: 0 } : (spent = true, { yaw: rad || 0, pitch: 0 })) };
     for (let i = 0; i < steps; i++) stepSim((F.last || performance.now()) + 16);
     F.look = real;
-    return { ...window.__fpDebug(), lookAcc: +F.lookAcc.toFixed(3) };
+    return window.__fpDebug();
   };
 }
