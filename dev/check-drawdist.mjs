@@ -165,8 +165,8 @@ for (const id of ['ferncreek', 'hollowvein', 'arena']) {
  * The budgets are read off the failure, not guessed: the capture was a phone
  * dropping whole layers at a censused ~227 quads.
  */
-const BUDGET = { phone: Number(process.env.PH || 260), desktop: Number(process.env.DESK || 1500) };
-const CAP = { phone: 20, desktop: 30 };
+const BUDGET = { phone: Number(process.env.PH || 440), desktop: Number(process.env.DESK || 1900) };
+const CAP = { phone: 32, desktop: 48 };
 const WAS = {
   desktop: { near: 7, far: 16, cap: 13 },
   phone: { near: 4.5, far: 10, cap: 8 },

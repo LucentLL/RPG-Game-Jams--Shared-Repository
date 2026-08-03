@@ -31,7 +31,7 @@ import { propVolume, propCell, footprint, REST_SLOP } from './prop-volume.js';
 import { icon } from './icons.js';
 import { createLook, readPad, padReset, touchPrimary, PAD } from '../platform/input.js';
 import { claimPad } from '../platform/ui-pad.js';
-import { perspectiveFor, camLean, onView } from '../platform/view-prefs.js';
+import { perspectiveFor, camLean, onView, view } from '../platform/view-prefs.js';
 
 /**
  * World scale. These look arbitrary and are not: what a surface MEASURES on
@@ -151,10 +151,15 @@ const COARSE = typeof matchMedia === 'function' && matchMedia('(pointer: coarse)
  * the win is spent on being STABLE instead — much the same reach for 36% fewer
  * layers — which is the bug that was actually reported.
  *
- * This cap is only a ceiling now; the number that binds is a layer budget.
+ * This cap is only a RUNAWAY STOP now; the number that binds is a layer budget.
+ * It was 20/30 for one build and that was still a wall — Ferncreek and the
+ * arena hit it with a third of their budget unspent, so the cap was quietly
+ * deciding the draw distance again. Set it past anything a chart can use (the
+ * estate is 46 rows, and R is separately clamped to the chart's own span) and
+ * let the measurement do the deciding.
  * @see LAYER_BUDGET, fitViewRadius.
  */
-const viewCap = () => (L.sky ? (COARSE ? 20 : 30) : (COARSE ? 12 : 16));
+const viewCap = () => (L.sky ? (COARSE ? 32 : 48) : (COARSE ? 12 : 16));
 /* The radius itself is no longer a formula but a MEASUREMENT, taken once per
    chart against a layer budget — @see fitViewRadius, which is where the cap
    above and FOG_CULL now meet. `F.viewR` is its answer for the live map. */
@@ -796,9 +801,36 @@ function fitLens() {
   stage.style.perspective = perspectiveFor(h).toFixed(1) + 'px';
 }
 
-// Either slider moves the picture now. `F._wtf` is the world transform's
-// write-guard — clearing it is what lets the next frame actually write.
-onView(() => { if (!F) return; fitLens(); F._wtf = ''; });
+/**
+ * Every slider moves the picture live. `F._wtf` is the world transform's
+ * write-guard — clearing it is what lets the next frame actually write.
+ *
+ * Draw distance goes further than the lens: it re-measures how far THIS chart
+ * can afford to be seen, which moves the fog with it (fitViewRadius derives one
+ * from the other), and the scene has to be rebuilt to that new weather. Guarded
+ * on the value actually changing, because the panel fires on every `input` and
+ * a refit is a few dozen traversals of the chart.
+ */
+let _dialWas = view.dist, _dialT = 0;
+onView(() => {
+  if (!F) return;
+  fitLens();
+  if (view.dist !== _dialWas) {
+    _dialWas = view.dist;
+    // DEBOUNCED, unlike the lens. A refit is a few dozen traversals of the
+    // chart — 126ms on the estate at the top of the range — and the panel fires
+    // on every `input`, so dragging the slider would be a second of hitching
+    // per sweep. The lens above still moves with the thumb; the world lands
+    // when you let go.
+    clearTimeout(_dialT);
+    _dialT = setTimeout(() => {
+      if (!F) return;
+      fitViewRadius(); buildGeometry(); drawMap();
+      F._wtf = '';
+    }, 140);
+  }
+  F._wtf = '';
+});
 
 /** Nothing solid on the floor between two points. Sampled rather than swept —
  *  over a tile and a quarter of reach, eight samples is finer than the grid. */
@@ -940,7 +972,12 @@ const YAW_Q = Math.PI / 6;
  * the meadow or flicker the estate, which is exactly what one number has done
  * twice. @see fitViewRadius.
  */
-const LAYER_BUDGET = { coarse: 260, desktop: 1500 };
+const LAYER_BUDGET = { coarse: 440, desktop: 1900 };
+/** The budget this device is working to, with the player's own dial on it.
+ *  The dial exists because nobody can compute a particular phone's compositor
+ *  ceiling from here, and the failure is legible from the sofa: push it until
+ *  the world drops surfaces as you walk, come back a step. @see view-prefs. */
+const budgetNow = () => (COARSE ? LAYER_BUDGET.coarse : LAYER_BUDGET.desktop) * (view.dist / 100);
 /**
  * What a want-set will actually cost the compositor.
  *
@@ -1206,7 +1243,7 @@ function fitViewRadius() {
     F.viewR = Math.min(viewCap(), Math.ceil(L.near + FOG_CULL * (L.far - L.near)) + 1);
     return;
   }
-  const budget = COARSE ? LAYER_BUDGET.coarse : LAYER_BUDGET.desktop;
+  const budget = budgetNow();
   const ramp = 0.3 / (1 - FOG_CULL);
   // Past the chart's own span nothing more can appear, so there is no sense
   // paying to look for it.
@@ -1237,7 +1274,7 @@ function buildGeometry() {
    * the view closes by a tile, ONE WAY — it never re-opens, because a radius
    * that breathes as you walk is a fog bank sliding in and out of the scene.
    */
-  const budget = COARSE ? LAYER_BUDGET.coarse : LAYER_BUDGET.desktop;
+  const budget = budgetNow();
   if (layerCost(want) > budget * 1.35 && F.viewR > 6) {
     const ramp = 0.3 / (1 - FOG_CULL);
     F.viewR -= 1;
@@ -3538,7 +3575,7 @@ if (typeof window !== 'undefined') {
     // How far this chart was fitted to be seen, and the weather that closes it.
     // `merged` is the whole point of the 2026-08-03 pass: how many of those
     // quads are ground blocks or wall runs standing in for several cells each.
-    view: { R: F.viewR, clear: +L.near.toFixed(1), gone: +L.far.toFixed(1), budget: COARSE ? LAYER_BUDGET.coarse : LAYER_BUDGET.desktop },
+    view: { R: F.viewR, clear: +L.near.toFixed(1), gone: +L.far.toFixed(1), budget: Math.round(budgetNow()), dial: view.dist },
     merged: [...F.geo.keys()].filter((k) => /^[fcsnew][248]:/.test(k)).length,
     veils: F.world.querySelectorAll('.fp-veil').length,
     // Split out because the two are bounded by different things and the phone

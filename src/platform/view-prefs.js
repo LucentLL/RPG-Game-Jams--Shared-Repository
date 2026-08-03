@@ -26,14 +26,28 @@
  *   (`PERSP 500 / PERSP_AT 720` → 2·atan(720/1000) = 71.5°), so the default is
  *   a no-op and anything you see is a deliberate change.
  *
+ * `dist` — DRAW DISTANCE, as a percentage of what the crawler's fitter thinks
+ *   the device can afford. Not a radius in tiles, because the affordable radius
+ *   is not one number: it depends on the chart (the meadow merges into a
+ *   handful of quads, the estate is forty-six rows of buildings that cannot
+ *   merge past a corner) and the fitter measures it per map. This scales the
+ *   layer budget it measures against. @see LAYER_BUDGET in delve-fp.js.
+ *
+ *   It is a slider for the same reason the other two are, only more so: the
+ *   ceiling is a particular phone's compositor, nobody can compute it from
+ *   here, and the failure is legible — push it until the world starts dropping
+ *   surfaces as you walk, then come back a step. The default is deliberately
+ *   short of the edge.
+ *
  * FIRST PERSON HAS NO ANGLE SETTING on purpose: it has free look, and a fixed
  * pitch on top of a pitch you steer is two cameras arguing. The angle belongs
  * to the shoulder camera, which holds a framing rather than following a hand.
  */
 
 const KEY = 'crucible.view';
-const DEF = { angle: 25, fov: 72 };
-const LIM = { angle: [0, 45], fov: [50, 110] };
+const DEF = { angle: 25, fov: 72, dist: 100 };
+const LIM = { angle: [0, 45], fov: [50, 110], dist: [40, 300] };
+const UNIT = { angle: '°', fov: '°', dist: '%' };
 
 /** The live values. Read directly — it is one object and it never changes identity. */
 export const view = { ...DEF };
@@ -86,11 +100,11 @@ export function camLean() { return -view.angle; }
 
 let panel = null;
 
-function row(label, key, unit, hint) {
+function row(label, key, step, hint) {
   return `<label class="vp-row">
       <span class="vp-name">${label}<i>${hint}</i></span>
-      <input type="range" min="${LIM[key][0]}" max="${LIM[key][1]}" step="1" value="${view[key]}" data-k="${key}">
-      <output>${view[key]}${unit}</output>
+      <input type="range" min="${LIM[key][0]}" max="${LIM[key][1]}" step="${step}" value="${view[key]}" data-k="${key}">
+      <output>${view[key]}${UNIT[key]}</output>
     </label>`;
 }
 
@@ -99,8 +113,9 @@ function build() {
   panel.className = 'vp-panel';
   panel.innerHTML = `<div class="vp-card">
       <h3>Camera</h3>
-      ${row('Shoulder angle', 'angle', '&deg;', 'how far third person looks down')}
-      ${row('Field of view', 'fov', '&deg;', 'vertical, first person and all')}
+      ${row('Shoulder angle', 'angle', 1, 'how far third person looks down')}
+      ${row('Field of view', 'fov', 1, 'vertical, first person and all')}
+      ${row('Draw distance', 'dist', 10, 'raise it until the world flickers, then step back')}
       <div class="vp-foot">
         <button class="vp-reset" type="button">Reset</button>
         <button class="vp-close" type="button">Done</button>
@@ -129,7 +144,7 @@ function sync() {
     const k = el.dataset.k;
     el.value = view[k];
     const out = el.parentElement.querySelector('output');
-    if (out) out.textContent = view[k] + '°';
+    if (out) out.textContent = view[k] + UNIT[k];
   }
 }
 
