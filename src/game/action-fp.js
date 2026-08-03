@@ -43,7 +43,6 @@
  */
 import { facePanel, apronPanel, standsPanel, cloudsPanel, WALL_DIM, SEG_T } from './tactical-fp.js';
 import { createFpHands, fighterHandsSpec } from './fp-hands.js';
-import { makeBlade, placeBlade, swingT, SWING_COL, SWING_ROW } from './fp-swing.js';
 import { createLook, touchPrimary } from '../platform/input.js';
 
 /** World scale — the delve's, via tactical-fp, so a person is the same size
@@ -353,32 +352,21 @@ function ensureActors() {
     const bar = document.createElement('i');
     el.appendChild(bar);
     V.world.querySelector('.tfp-bbs').appendChild(el);
-    V.actors.set(f, { el, cv, bar, tf: '', hpw: '', blade: makeBlade(V.world.querySelector('.tfp-bbs'), T) });
+    V.actors.set(f, { el, cv, bar, tf: '', hpw: '' });
   }
   for (const [f, a] of V.actors) {
-    if (live.indexOf(f) < 0) { a.el.remove(); a.blade.el.remove(); V.actors.delete(f); }
+    if (live.indexOf(f) < 0) { a.el.remove(); V.actors.delete(f); }
   }
 }
 
 /** Camera-relative rotation, tactical-fp's identical trick: the compositor
  *  picks its sheet row from `facing`, so subtract the camera's yaw on a
  *  shallow proxy and the fighter shows the camera the side it really shows. */
-function drawActor(f, a, yaw, swinging) {
+function drawActor(f, a, yaw) {
   const gfx = window.__ranchGfx;
   if (!gfx || !gfx.renderActor) return;
-  // CUT THE ORBITING BLADE FIRST, then hide the standee's own only if that
-  // worked. A fighter whose weapon has no sheet — or whose sheet has not loaded
-  // yet — must keep the blade the compositor draws, or the blow lands with
-  // empty hands. Cut once per swing: the cell is fixed (the sheet's own frames
-  // ARE the in-plane swing this replaces), so re-cutting it per frame would be
-  // the same pixels at the same size, thirty times a second.
-  if (swinging && !a.blade.drawn && gfx.weaponCell) {
-    a.blade.drawn = gfx.weaponCell(a.blade.cv, f, SWING_COL, SWING_ROW);
-  }
   const view = Object.create(f);
   view.facing = (typeof f.facing === 'number' ? f.facing : Math.PI) - yaw;
-  // On a prototype view, so the fighter the sim owns never learns a camera exists.
-  view._hideWeapon = !!(swinging && a.blade.drawn);
   try { gfx.renderActor(a.cv, view); } catch (e) { /* a half-loaded sheet is not worth a crash */ }
 }
 
@@ -607,22 +595,14 @@ export function actFpFrame() {
     // Your own body is not drawn in first person; it IS from the shoulder.
     const self = f === me && V.pov !== 'shoulder';
     if (self !== a.selfHidden) { a.el.style.visibility = (a.selfHidden = self) ? 'hidden' : ''; }
-    // In first person your own blade is the VIEWMODEL, not an orbit around a
-    // body you cannot see — park it, or it freezes mid-arc waiting for a frame
-    // that never comes.
-    if (self) { placeBlade(a.blade, null); continue; }
+    if (self) continue;
     const fl = liftAt(T0, f.ax, f.ay);
     const tf = `translate3d(${(f.ax * T).toFixed(1)}px,${fl.toFixed(1)}px,${(f.ay * T).toFixed(1)}px) rotateY(${(-deg).toFixed(1)}deg)`;
     if (tf !== a.tf) a.el.style.transform = (a.tf = tf);
     const hp = Math.max(0, Math.min(1, f.hp / (f.maxHp || f.hp || 1)));
     const w = (hp * 100).toFixed(0) + '%';
     if (w !== a.hpw) { a.bar.style.width = (a.hpw = w); }
-    // The blow travels round the wielder in the GROUND plane — the plane the
-    // sheet's own attack frames were drawn in before a billboard stood them up.
-    const t = swingT(f);
-    if (t == null) a.blade.drawn = false;   // re-cut on the next blow
-    drawActor(f, a, V.yaw, t != null);      // cuts the blade; must precede placing it
-    placeBlade(a.blade, t, f.ax, f.ay, fl, typeof f.facing === 'number' ? f.facing : Math.PI, -deg, T);
+    drawActor(f, a, V.yaw);
   }
   // The dressing does NOT move. It is placed once, in world space, standing on
   // its own ground — see buildDressing. Rotating it to the camera every frame is

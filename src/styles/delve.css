@@ -621,12 +621,17 @@
 .fp-hands {
   position: absolute; inset: 0; z-index: 300; pointer-events: none;
   transform: translate3d(var(--fp-sway, 0px), var(--fp-bob, 0px), 0);
-  /* The swing below is a rotation about a VERTICAL axis, which is only a swing
-     and not a squash if something projects it. This is that something: the
-     blade leans away as it travels, which is what sells a cut going past you
-     rather than a sprite being scaled. */
-  perspective: 900px;
-  perspective-origin: 50% 72%;
+  /* THE LENS THE SWING IS SEEN THROUGH. The cut below travels a real circle in
+     the ground plane around you, so something has to project it or the depth
+     half of that circle is invisible and it degenerates back into a slide.
+     Both numbers are tied to `--fp-arc` on purpose: the arc is how far the
+     blade reaches, and fixing the perspective at a MULTIPLE of it means the
+     foreshortening is identical on a phone and a monitor. A fixed px
+     perspective would make the same swing violent on a 390px screen and flat
+     on a 2560px one. */
+  --fp-arc: min(30vw, 46vh);
+  perspective: calc(var(--fp-arc) * 2.4);
+  perspective-origin: 50% 78%;
 }
 /* Sized to be HELD, not to be noted: about 45% of the screen height of blade,
    a viewmodel you read without looking for it. The `vw` term is not decoration
@@ -695,55 +700,60 @@
 
 .fp-hand-weapon.fp-swinging, .fp-hand-pick.fp-swinging { animation: fp-swing 380ms cubic-bezier(.3,.7,.3,1); }
 .fp-hand-shield.fp-bracing  { animation: fp-brace 380ms ease-out; }
-/* THE CUT GOES ROUND YOU, NOT OVER YOUR HEAD.
-   This was `rotate()` — a rotation in the SCREEN plane about the grip — and
-   about a grip at the bottom of the frame that sends the blade tip up and to
-   the left: an overhead chop. It is the viewmodel's half of the same fault the
-   standees had (@see fp-swing.js): these sheets were drawn for a TOP-DOWN game,
-   where a forward swing is motion across the GROUND, and every first-person
-   view stands that plane up.
-   So the pivot is the VERTICAL axis instead — `rotateY` about the same grip,
-   under the container's perspective — and the blade travels horizontally across
-   the view, leaning away as it goes, exactly as a real cut would. The small
-   residual `rotate()` is wrist, not arc; without it the sweep reads mechanical.
-   Angles stay under ~70°: a flat sprite at 90° is edge-on and gone.
-   NO %-translates. They were tuned for a ≤560px box, and after fitHands sizes
-   the element to the swing union they resolve to ±350px and carry the weapon
-   around the viewport. The sweep is the rotation. */
+/* Rotation only (plus a whisper of body-throw): the origin is the GRIP, so the
+   rotation IS the arc. The old %-translates were tuned for a ≤560px box; after
+   fitHands sized the element to the swing union they resolved to ±350px and
+   carried the weapon around the viewport. */
+/**
+ * THE CUT TRAVELS A CIRCLE ON THE GROUND AROUND YOU.
+ *
+ * This was `rotate()` — a rotation in the SCREEN plane about the grip — and
+ * about a grip at the bottom of the frame that throws the tip up and to the
+ * left: an overhead chop. These sheets were drawn for a TOP-DOWN game, where a
+ * forward swing is motion across the GROUND, and a first-person camera stands
+ * that plane up. So the swing has to be put back in the plane it was authored
+ * in: a horizontal circle of radius `--fp-arc`, centred on YOU, rotating about
+ * the vertical axis.
+ *
+ * It is expressed as TRANSLATION along that circle, not as `rotateY`, and that
+ * is the whole trick. Rotating the quad would carry the sprite edge-on exactly
+ * as it passed in front of you — the one moment the blade must be readable —
+ * and a flat sprite at 90° is a line. Translating it keeps the picture facing
+ * you while the MOTION happens in the ground plane, which is the complaint and
+ * nothing else. Same reasoning as the crossed solids and the orbiting standee.
+ *
+ * The offsets are the circle, exactly: for a blade at angle θ round from the
+ * rest position, offset = (r·cosθ − r, −r·sinθ) in x and z. So:
+ *   −16°  drawn back past your hip, and a little NEARER (z positive) — the
+ *         anticipation, and the only part of the move that grows
+ *   +92°  the full extension: dead ahead of you and a whole radius away, which
+ *         the lens above renders at ~70% — reaching, not shrinking
+ *   +45°  the recovery, coming back round
+ * The residual `rotate()` is wrist. Keep it small: past about 10° it stops
+ * being a wrist and becomes the chop this replaces.
+ */
 @keyframes fp-swing {
-  0%   { transform: rotateY(0deg)   rotate(0deg); }
-  18%  { transform: rotateY(36deg)  rotate(7deg); }    /* drawn back across the body */
-  48%  { transform: rotateY(-62deg) rotate(-9deg); }   /* through, and past the far shoulder */
-  70%  { transform: rotateY(-24deg) rotate(-4deg); }
-  100% { transform: rotateY(0deg)   rotate(0deg); }
+  0%   { transform: translate3d(0, 0, 0) rotate(0deg); }
+  16%  { transform: translate3d(calc(var(--fp-arc) * -0.039), 0, calc(var(--fp-arc) *  0.276)) rotate(8deg); }
+  50%  { transform: translate3d(calc(var(--fp-arc) * -1.035), 0, calc(var(--fp-arc) * -0.999)) rotate(-6deg); }
+  72%  { transform: translate3d(calc(var(--fp-arc) * -0.293), 0, calc(var(--fp-arc) * -0.707)) rotate(-3deg); }
+  100% { transform: translate3d(0, 0, 0) rotate(0deg); }
 }
 @keyframes fp-brace {
   0%, 100% { transform: rotate(7deg) translate(0, 0) scale(1); }
   38%      { transform: rotate(2deg) translate(9%, -7%) scale(1.07); }
 }
-/* The blade a STANDEE swings — a quad that travels round the wielder in the
-   ground plane while facing the camera like every other billboard. @see
-   fp-swing.js for why the motion is an orbit and the sprite is not laid flat.
-   Centre-anchored (margins, written inline) because it is placed by where the
-   edge IS, not by where something stands. */
-.fp-blade {
-  position: absolute; left: 0; top: 0;
-  image-rendering: pixelated; pointer-events: none;
-  backface-visibility: hidden;
-}
-.fp-blade canvas { width: 100%; height: 100%; display: block; image-rendering: pixelated; }
-
 /* The arc the edge leaves. Drawn, not cropped: no sheet in the kit carries a
-   slash big enough to hold up to the screen.
-   FLATTENED, because the swing above is horizontal now: a cut travelling round
-   you is seen almost along its own plane, so its trail is a shallow ellipse and
-   not the upright arc a chop leaves. Applied as a CSS transform on the ELEMENT,
-   which scales the rendered raster — the path's own dash is measured in viewBox
-   units and is untouched, so the `meet` uniform-scaling rule below still holds
+   slash big enough to hold up to the screen. */
+/* FLATTENED, to match the cut it trails. A blade travelling a circle on the
+   ground is seen almost along its own plane, so its trail is a shallow ellipse
+   and not the upright arc a chop leaves. Applied as a CSS transform on the
+   ELEMENT, which scales the rendered raster — the path's dash is measured in
+   viewBox units and is untouched, so the uniform-scaling rule below still holds
    and the stroke stays one unbroken piece. */
 .fp-slash {
   position: absolute; right: -3%; bottom: 2%; width: 66%; height: 66%; opacity: 0;
-  transform: scaleY(0.52) rotate(-6deg);
+  transform: scaleY(0.5) rotate(-4deg);
 }
 /* Widths and dashes are both in the viewBox's 100 units, which is only
    consistent because the SVG scales uniformly (see the `meet` above). The path
