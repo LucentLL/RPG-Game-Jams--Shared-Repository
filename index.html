@@ -168,6 +168,9 @@
     <button class="cam-btn cam-fit" onclick="actZoomReset()" title="Reset zoom">⊡</button>
     <!-- The same fight, from inside it. View only — every rule stays in the loop. -->
     <button class="cam-btn cam-view" id="actCamFp" onclick="actViewCycle()" title="Stand in the fighter">1st Person</button>
+    <!-- Shoulder angle and field of view, on sliders that apply live — the two
+         numbers that can only be judged by looking at them. Also on the O key. -->
+    <button class="cam-btn cam-view" onclick="__viewPanel()" title="Camera angle and field of view">Camera</button>
   </div>
   <div class="action-attacks" id="actionAttackBar"></div>
   <div class="action-log" id="actionLog"></div>

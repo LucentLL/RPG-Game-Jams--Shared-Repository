@@ -24,6 +24,7 @@
 import { S } from './state.js';
 import { GS } from './data/config.js';
 import { createFpHands, fighterHandsSpec } from './fp-hands.js';
+import { perspectiveFor, camLean, onView } from '../platform/view-prefs.js';
 
 /**
  * World scale — and the reason a phone can draw this at all.
@@ -63,11 +64,12 @@ const PERSP = 500, PERSP_AT = 720;   // the lens is untouched; that is the point
  * fall out of the projection: eye at EYE+120 ≈ 810, one tile back, pitched
  * 10° → head ≈ screen centre, feet ≈ 92% down, span ≈ 46% of the stage.
  */
-const OTS_BACK = 1.0, OTS_UP = 120 * K, OTS_PITCH = -15;   // tiles, world px, degrees
-// NEGATIVE, and the sign is the point: CSS `rotateX(+θ)` aims the camera UP, so
-// `+10` was looking up ten degrees and the shot was mostly sky. −15 is the
-// three-quarter view every isometric RPG uses. @see action-fp.js's twin of this
-// constant for the arithmetic; the two must never drift.
+const OTS_BACK = 1.0, OTS_UP = 120 * K;   // tiles, world px
+// The lean is `camLean()` — a slider, shared with action-fp and the crawler, so
+// the three third-person cameras cannot drift. NEGATIVE is looking down, and
+// that sign is the point: CSS `rotateX(+θ)` aims the camera UP, so the `+10`
+// this file shipped for months was looking up ten degrees and the shot was
+// mostly sky. @see view-prefs.js.
 
 /** @type {?Object} the live view (null when first person is off) */
 let V = null;
@@ -491,8 +493,12 @@ function fitLens() {
   const st = V.host.querySelector('.tfp-stage');
   const h = st && st.clientHeight;
   if (!h) return;                                    // measured before it is shown
-  st.style.perspective = (PERSP * (h / PERSP_AT)).toFixed(1) + 'px';
+  st.style.perspective = perspectiveFor(h).toFixed(1) + 'px';
 }
+
+// Either slider moves the picture now. `V.wtf` is the camera's write-guard;
+// clearing it is what lets the next placement actually write.
+onView(() => { if (!V) return; fitLens(); V.wtf = ''; aimCamera(); });
 
 /** How far back the shoulder camera may pull before an impassable block
  *  stands between it and the fighter. A block is only BLOCK_H tall and the
@@ -527,7 +533,7 @@ function aimCamera() {
     ex -= Math.sin(yaw) * back * T;
     ez += Math.cos(yaw) * back * T;
     ey -= OTS_UP;
-    pitch = OTS_PITCH;
+    pitch = camLean();
   }
   V.yaw = yaw;
   // GUARDED, and rounded. This ran unconditionally every frame with raw

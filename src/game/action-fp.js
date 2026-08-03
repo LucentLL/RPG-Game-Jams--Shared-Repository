@@ -32,9 +32,10 @@
  * the view turned, which is the whole reason a mouse aims better than a key.
  * Mouse Y tips a small free pitch on top, and that pitch SHEARS the lens rather
  * than rotating the world (@see aimLens — it is Hexen's trick, and it is the fix
- * for "enemies look massive when I look up"). The shoulder camera's built-in 10°
- * stays a rotation, because that lean is the portrait framing this view was
- * tuned to and not something a mouse should quietly restyle.
+ * for "enemies look massive when I look up"). Over the shoulder there is no free
+ * pitch at all: that camera holds a three-quarter framing, and a pitch the
+ * player can move is a pitch that leaves it. Its lean and the field of view are
+ * both sliders now — @see view-prefs.js.
  *
  * Nothing here can put the eye outside the world: the board's own fence,
  * apron and stands (tall past any pull-back) come with the dressing — and the
@@ -44,6 +45,7 @@
 import { facePanel, apronPanel, standsPanel, cloudsPanel, WALL_DIM, SEG_T } from './tactical-fp.js';
 import { createFpHands, fighterHandsSpec } from './fp-hands.js';
 import { createLook, touchPrimary } from '../platform/input.js';
+import { perspectiveFor, perspRatio, camLean, onView } from '../platform/view-prefs.js';
 
 /** World scale — the delve's, via tactical-fp, so a person is the same size
  *  standing in any of the three grounds, and shrunk by the same K for the same
@@ -56,26 +58,26 @@ const EYE = 690 * K;
 const STEP = 430 * K;          // one terrain level, world px
 const FIGHTER_H = 1200 * K;
 const FOOT_PCT = 31.25;        // a PERCENTAGE — never scaled
-const PERSP = 500, PERSP_AT = 720;   // the lens is untouched; that is the point
+// The lens the framing was originally measured through. Kept as documentation
+// rather than used: the FoV slider's 72° default reproduces
+// `PERSP * (h / PERSP_AT)` to the pixel, so every number below still holds at
+// the default and anything you see is a deliberate change. @see view-prefs.js.
+const PERSP = 500, PERSP_AT = 720;
 /**
  * The shoulder camera, kept in lockstep with tactical-fp.
  *
- * OTS_PITCH IS NEGATIVE, AND THE SIGN IS THE WHOLE POINT. CSS `rotateX(+θ)`
- * puts a point straight ahead BELOW the screen centre, which means the camera
- * is aimed above it — `+10` was looking UP ten degrees. That is why the third
- * person shot was three-quarters sky with the fighter pressed into the bottom
- * edge, and why nothing on the ground read: you could barely see the ground.
+ * THE LEAN IS NO LONGER A CONSTANT — it is `camLean()`, a slider (@see
+ * view-prefs.js), because it had been tuned four times by screenshot and the
+ * loop was the wrong shape. What stays fixed here is the pull-back and the lift.
  *
- * −15 is a THREE-QUARTER view, the angle every isometric RPG uses, and it is
- * what makes top-down-authored art work at all. The subject's centre already
- * sits ~13° below the raised camera's horizontal, so looking down 15 lands it
- * within 2° of the view axis — centred, with the floor open beneath it. It also
- * buys the thing the sprites need: "up" on a sprite gains an AWAY component of
- * sin(15°) ≈ 26%, so a swing drawn going up starts reading as going forward.
- * That fraction is why the reference games sit steeper still — Diablo ~35°,
- * Ultima VII ~45°. If the swing still reads as a chop, this is the number.
+ * The lean is NEGATIVE, and the sign is the whole point: CSS `rotateX(+θ)` puts
+ * a point straight ahead BELOW the screen centre, which means the camera is
+ * aimed above it — the `+10` this replaced was looking UP ten degrees, which is
+ * why the shot was three-quarters sky with the fighter pressed into the bottom
+ * edge and nothing on the ground readable. `camLean()` returns the negation of
+ * a positive "degrees down", so the sign can only be got wrong in one place.
  */
-const OTS_BACK = 1.0, OTS_UP = 120 * K, OTS_PITCH = -15;   // tiles, world px, degrees
+const OTS_BACK = 1.0, OTS_UP = 120 * K;   // tiles, world px
 // Three tiles, matching the tactical board: the apron only has to out-reach the
 // shoulder camera's one-tile pull-back, and six bought a ring twice as wide as
 // anyone can see for twice the surface every device had to allocate.
@@ -501,8 +503,16 @@ function placeShots(yaw) {
 function fitLens() {
   const h = V.stage && V.stage.clientHeight;
   if (!h) return;
-  V.stage.style.perspective = (PERSP * (h / PERSP_AT)).toFixed(1) + 'px';
+  // The FoV slider is the only thing that decides this now. Its default of 72°
+  // reproduces the old `PERSP * (h / PERSP_AT)` exactly, so the framing every
+  // number in this file was measured against is still the default framing.
+  V.stage.style.perspective = perspectiveFor(h).toFixed(1) + 'px';
 }
+
+// Either slider moves the picture NOW: re-fit the lens and clear the transform
+// write-guards, or the frame loop compares the new string against the old one,
+// finds them equal for the parts it did not change, and skips the write.
+onView(() => { if (!V) return; fitLens(); V.wtf = ''; V.po = ''; actFpFrame(); });
 
 /**
  * PITCH IS A SHEAR, NOT A ROTATION — Hexen's answer, and the reason its
@@ -540,7 +550,7 @@ function fitLens() {
  * saved per standee per frame on the one lens that has a free look.
  */
 function aimLens(free) {
-  const oy = 50 + (PERSP / PERSP_AT) * Math.tan(free * Math.PI / 180) * 100;
+  const oy = 50 + perspRatio() * Math.tan(free * Math.PI / 180) * 100;
   const po = `50% ${oy.toFixed(2)}%`;
   if (po !== V.po) V.stage.style.perspectiveOrigin = (V.po = po);
 }
@@ -623,7 +633,7 @@ export function actFpFrame() {
     ex -= Math.sin(V.yaw) * back * T;
     ez += Math.cos(V.yaw) * back * T;
     ey -= OTS_UP;
-    lean = OTS_PITCH;
+    lean = camLean();
   }
   const deg = V.yaw * 180 / Math.PI;
   // The free pitch is a SHEAR on the lens, not a term in here — see aimLens for

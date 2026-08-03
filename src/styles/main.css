@@ -17,6 +17,7 @@
 @import './globe.css';
 @import './ranch.css';
 @import './delve.css';
+@import './view-prefs.css';
 /* Last, so the menu cursor's ring wins the cascade over every screen's own
    hover and selected states. */
 @import './pad-ui.css';

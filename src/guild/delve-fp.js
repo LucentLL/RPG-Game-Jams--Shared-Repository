@@ -31,6 +31,7 @@ import { propVolume, footprint, REST_SLOP } from './prop-volume.js';
 import { icon } from './icons.js';
 import { createLook, readPad, padReset, touchPrimary, PAD } from '../platform/input.js';
 import { claimPad } from '../platform/ui-pad.js';
+import { perspectiveFor, camLean, onView } from '../platform/view-prefs.js';
 
 /**
  * World scale. These look arbitrary and are not: what a surface MEASURES on
@@ -693,10 +694,20 @@ function fitLens() {
   // Perspective is UNCHANGED by the world-unit shrink; the world scale carries
   // the whole factor instead (÷K), so the projection is the same similarity it
   // was at T=900 and every measured framing number still holds.
+  //
+  // The WORLD SCALE keeps its own ratio (PERSP_AT) and the PERSPECTIVE comes
+  // from the FoV slider — and the split is deliberate. Field of view IS the
+  // ratio between those two: changing the lens while the world stays put is
+  // what widens or narrows the view, and changing both together would be a
+  // similarity that does nothing at all. @see view-prefs.js.
   const fit = h / PERSP_AT;
   F.lens = fit / K;
-  stage.style.perspective = (PERSP * fit).toFixed(1) + 'px';
+  stage.style.perspective = perspectiveFor(h).toFixed(1) + 'px';
 }
+
+// Either slider moves the picture now. `F._wtf` is the world transform's
+// write-guard — clearing it is what lets the next frame actually write.
+onView(() => { if (!F) return; fitLens(); F._wtf = ''; });
 
 /** Nothing solid on the floor between two points. Sampled rather than swept —
  *  over a tile and a quarter of reach, eight samples is finer than the grid. */
@@ -1681,6 +1692,7 @@ export async function openDelveFp(localeId, member, hooks, carry) {
         <span class="fp-compass"></span>
         <span class="dv-haul fp-haul"></span>
         <button class="fp-help fp-povbtn" title="Change view" onclick="__delveFp.pov()">3rd person</button>
+        <button class="fp-help" title="Camera settings" onclick="__viewPanel()">${icon('eye')}</button>
         <button class="fp-help" title="Controls" onclick="__delveFp.help()">?</button>
       </div>
       <canvas class="fp-map" width="150" height="150"></canvas>
@@ -2573,20 +2585,23 @@ function render() {
    * NEGATIVE, and the sign is the point. CSS `rotateX(+θ)` puts a point
    * straight ahead BELOW the screen centre, which means the camera is aimed
    * ABOVE it — the `9deg` this replaces was looking UP nine degrees, and so
-   * were both battle lenses. −15 is the three-quarter view every isometric RPG
-   * uses, and it is what lets art drawn for a top-down game read at all: "up"
-   * on a sprite gains an AWAY component of sin(15°) ≈ 26%, so a swing drawn
-   * going up starts reading as going forward, and the floor is visible enough
-   * to tell where anything is standing. The arithmetic: this camera rides 41
-   * world px above the eye and 1.1 tiles back, which puts the walker's centre
-   * 23.6° below its horizontal — looking up 9 left them 32.6° down the frame,
-   * looking down 15 lands them 8.6° below the axis. Kept in lockstep with
-   * action-fp.js / tactical-fp.js's OTS_PITCH; the three must never drift.
+   * were both battle lenses. Looking DOWN is the three-quarter view every
+   * isometric RPG uses, and it is what lets art drawn for a top-down game read
+   * at all: "up" on a sprite gains an AWAY component of sin(lean) — a quarter
+   * of it at 25° — so a swing drawn going up starts reading as going forward,
+   * and the floor is visible enough to tell where anything is standing. The
+   * arithmetic: this camera rides 41 world px above the eye and 1.1 tiles back,
+   * which puts the walker's centre 23.6° below its horizontal, so looking up 9
+   * left them 32.6° down the frame.
    *
-   * Billboards only counter-yaw, so they now lean 15° from true rather than 9.
+   * It is `camLean()` — ONE slider shared with action-fp.js and tactical-fp.js,
+   * so the three third-person cameras cannot drift and the sign can only be got
+   * wrong in one place. @see view-prefs.js.
+   *
+   * Billboards only counter-yaw, so they lean by the whole of it from true.
    * That lean is not a cost here, it is the mechanism.
    */
-  const wtf = `scale3d(${F.lens},${F.lens},${F.lens})${pov3 ? ' rotateX(-15deg)' : ''} rotateY(${F.yaw}deg) translate3d(${-ex}px,${-ey}px,${-ez}px)`;
+  const wtf = `scale3d(${F.lens},${F.lens},${F.lens})${pov3 ? ` rotateX(${camLean()}deg)` : ''} rotateY(${F.yaw}deg) translate3d(${-ex}px,${-ey}px,${-ez}px)`;
   if (wtf !== F._wtf) F.world.style.transform = (F._wtf = wtf);
   // Billboards stand on the floor and counter-rotate to face the walker. Every
   // write is guarded by the value it would write: standing still, this loop
