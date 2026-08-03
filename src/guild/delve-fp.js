@@ -32,6 +32,7 @@ import { icon } from './icons.js';
 import { createLook, readPad, padReset, touchPrimary, PAD } from '../platform/input.js';
 import { claimPad } from '../platform/ui-pad.js';
 import { perspectiveFor, camLean, onView, view } from '../platform/view-prefs.js';
+import { createGlWorld } from '../platform/gl-world.js';
 
 /**
  * World scale. These look arbitrary and are not: what a surface MEASURES on
@@ -799,6 +800,54 @@ function fitLens() {
   const fit = h / PERSP_AT;
   F.lens = fit / K;
   stage.style.perspective = perspectiveFor(h).toFixed(1) + 'px';
+  // The rasteriser gets the same box, at device resolution. Capped at 2 because
+  // past that a phone is spending four times the fill rate on a difference
+  // nobody can see through a pixel-art texture.
+  if (F.gl) F.gl.resize(stage.clientWidth, h, Math.min(2, window.devicePixelRatio || 1));
+}
+
+/**
+ * Bring the rasteriser up, or take it down, to match the setting.
+ *
+ * Failure to get a context is NOT an error: the DOM path is still there and
+ * still works, so a device without WebGL2 quietly keeps the game it had. That
+ * is the whole reason this arrived as a switch rather than a rewrite.
+ */
+function setGlBackend(on) {
+  if (!F) return;
+  let canvas = F.host.querySelector('.fp-gl');
+  if (on && !F.gl && canvas) {
+    /**
+     * A FRESH CANVAS EVERY TIME, and it is not fussiness: `dispose()` ends with
+     * `WEBGL_lose_context`, and a canvas whose context has been lost can never
+     * be given another one. Reusing the element made the switch one-way —
+     * off worked, on afterwards silently returned null and the player was left
+     * on the composited path wondering why nothing changed.
+     */
+    const fresh = document.createElement('canvas');
+    fresh.className = canvas.className;
+    canvas.replaceWith(fresh);
+    canvas = fresh;
+    F.gl = createGlWorld(canvas);
+    if (!F.gl) console.warn('delve-fp: no WebGL2 here — keeping the composited path');
+  } else if (!on && F.gl) {
+    F.gl.dispose();
+    F.gl = null;
+  }
+  F.host.classList.toggle('fp-gl-on', !!F.gl);
+  fitLens();
+  // The two backends want different geometry — the whole chart against a fitted
+  // radius — so the switch has to re-measure and rebuild, not just re-point.
+  fitViewRadius();
+  // EITHER WAY the composited copy is thrown away: turning GL on leaves a
+  // thousand hidden elements holding the map that was, and turning it off must
+  // start from an empty registry or the diff keeps quads the new radius never
+  // asked for.
+  F.geo = new Map();
+  const geoHost = F.world && F.world.querySelector('.fp-geo');
+  if (geoHost) geoHost.innerHTML = '';
+  buildGeometry();
+  F._wtf = '';
 }
 
 /**
@@ -811,10 +860,11 @@ function fitLens() {
  * on the value actually changing, because the panel fires on every `input` and
  * a refit is a few dozen traversals of the chart.
  */
-let _dialWas = view.dist, _dialT = 0;
+let _dialWas = view.dist, _glWas = view.gl, _dialT = 0;
 onView(() => {
   if (!F) return;
   fitLens();
+  if (view.gl !== _glWas) { _glWas = view.gl; setGlBackend(view.gl); return; }
   if (view.dist !== _dialWas) {
     _dialWas = view.dist;
     // DEBOUNCED, unlike the lens. A refit is a few dozen traversals of the
@@ -1010,9 +1060,14 @@ function wantSet(px, py, yaw, R, near, far) {
   };
   const cx = Math.floor(px), cy = Math.floor(py);
   const want = new Map();
-  const add = (key, tex, w, h, tx, ty, tz, rot, cls, fog, rep) =>
-    want.set(key, { tex, w, h, tx, ty, tz, rot, cls, fog: fogQ(fog), rep: rep || '' });
-  /** The repeat a merged quad needs: its own tile, nx by ny across the box. */
+  /** How many times a merged quad repeats its own tile, across and down. The
+   *  DOM path spells that as a `background-size` percentage; the rasteriser
+   *  spells it as a UV that runs past 1. Both come from the same two numbers. */
+  const add = (key, tex, w, h, tx, ty, tz, rot, cls, fog, nx, ny) =>
+    want.set(key, {
+      tex, w, h, tx, ty, tz, rot, cls, fog: fogQ(fog),
+      nx: nx || 1, ny: ny || 1, rep: tiled(nx || 1, ny || 1),
+    });
   const tiled = (nx, ny) => (nx > 1 || ny > 1
     ? `background-size:${100 / nx}% ${100 / ny}%;background-repeat:repeat;` : '');
   /** Fog by raw distance, so a BLOCK can be judged by its NEAREST point rather
@@ -1021,12 +1076,24 @@ function wantSet(px, py, yaw, R, near, far) {
    *  and a light that are not the live ones. */
   const fogD = (d) => Math.min(1, Math.max(0, (d - near) / (far - near)));
   const fogAt = (x, y) => fogD(Math.hypot(x - px, y - py));
-  /** May everything out to this distance share ONE veil? Only where the fog has
-   *  not started: inside the clear disc every cell reads 0, so the merge is the
-   *  same picture rather than an average of one. */
-  const flat = (dFar) => dFar <= near;
+  /**
+   * May everything out to this distance share ONE veil? Only where the fog has
+   * not started: inside the clear disc every cell reads 0, so the merge is the
+   * same picture rather than an average of one.
+   *
+   * ON THE RASTERISER THIS IS ALWAYS TRUE, and that is the single biggest thing
+   * the rewrite buys. A veil is one opacity for a whole surface, which is why
+   * the DOM path may only merge where the fog is flat and why its draw distance
+   * is bounded by the AREA of the ring where it is not. A shader fogs the pixel,
+   * so there is nothing to be flat about: merge everything, always, and the
+   * cone and the fog cull go with it — the whole chart is cheaper to draw than
+   * the old eight-tile bubble was.
+   */
+  const gl = glOn();
+  const flat = (dFar) => gl || dFar <= near;
   const hx = Math.sin(yaw), hy = -Math.cos(yaw);
   const inView = (mx, my, pad) => {
+    if (gl) return true;
     const dx = mx - px, dy = my - py, d = Math.hypot(dx, dy);
     return d <= NEAR_KEEP + pad || dx * hx + dy * hy > -CULL_DOT * d - pad;
   };
@@ -1039,7 +1106,7 @@ function wantSet(px, py, yaw, R, near, far) {
    */
   const emitCell = (x, y) => {
     const fog = fogAt(x + 0.5, y + 0.5);
-    if (fog >= FOG_CULL) return;   // solid dark already — emitting it is pure overdraw
+    if (!gl && fog >= FOG_CULL) return;   // solid dark already — emitting it is pure overdraw
     const ch = at(x, y);
     const wx = (x + 0.5) * T, wz = (y + 0.5) * T;
     const id = x + ',' + y;
@@ -1115,8 +1182,8 @@ function wantSet(px, py, yaw, R, near, far) {
   const emitBlock = (bx, by, n) => {
     const SC = surfAt(bx, by);
     const w = n * T, mx = (bx + n / 2) * T, mz = (by + n / 2) * T;
-    add(`f${n}:${bx},${by}`, SC.floor, w, w, mx, 0, mz, 'rotateX(90deg)', 'fp-floor', 0, tiled(n, n));
-    if (!L.sky || SC !== S) add(`c${n}:${bx},${by}`, SC.ceil, w, w, mx, -WALL_H, mz, 'rotateX(-90deg)', 'fp-ceil', 0, tiled(n, n));
+    add(`f${n}:${bx},${by}`, SC.floor, w, w, mx, 0, mz, 'rotateX(90deg)', 'fp-floor', 0, n, n);
+    if (!L.sky || SC !== S) add(`c${n}:${bx},${by}`, SC.ceil, w, w, mx, -WALL_H, mz, 'rotateX(-90deg)', 'fp-ceil', 0, n, n);
   };
 
   /** The farthest corner of a rect from the eye — what decides whether the fog
@@ -1136,7 +1203,7 @@ function wantSet(px, py, yaw, R, near, far) {
     if (!inView(mx, my, pad)) return;
     // Nearest point of the block to the eye, clamped into its own rect.
     const nx = Math.max(bx, Math.min(px, bx + n)), ny = Math.max(by, Math.min(py, by + n));
-    if (fogD(Math.hypot(px - nx, py - ny)) >= FOG_CULL) return;
+    if (!gl && fogD(Math.hypot(px - nx, py - ny)) >= FOG_CULL) return;
     if (n === 1) { emitCell(bx, by); return; }
     if (flat(farCorner(bx, by, n, n)) && evenGround(bx, by, n)) { emitBlock(bx, by, n); return; }
     const h = n / 2;
@@ -1203,7 +1270,7 @@ function wantSet(px, py, yaw, R, near, far) {
           n++;
         }
         const mid = sd.horiz ? [x + n / 2, fcy] : [fcx, y + n / 2];
-        if (fogD(Math.hypot(mid[0] - F.px, mid[1] - F.py)) < FOG_CULL
+        if ((gl || fogD(Math.hypot(mid[0] - px, mid[1] - py)) < FOG_CULL)
           && inView(mid[0], mid[1], n * 0.5)) {
           // WIDTH IS ALWAYS THE RUN. A quad's own X axis is what `rotateY(±90)`
           // swings onto the world's Z, so an east or west face `T` wide spans
@@ -1212,7 +1279,7 @@ function wantSet(px, py, yaw, R, near, far) {
           // squeezed into one tile with its texture repeated four times inside.
           add(`${sd.k}${n}:${x},${y}`, tex, n * T, h,
             (sd.horiz ? x + n / 2 : x + sd.off) * T, -h / 2, (sd.horiz ? y + sd.off : y + n / 2) * T,
-            sd.rot, 'fp-wall', fogAt(mid[0], mid[1]), tiled(n, 1));
+            sd.rot, 'fp-wall', fogAt(mid[0], mid[1]), n, 1);
         }
         i += n;
       }
@@ -1239,6 +1306,19 @@ function wantSet(px, py, yaw, R, near, far) {
  * the world, not a budget, and rock emits nothing so it was never the problem.
  */
 function fitViewRadius() {
+  /**
+   * ON THE RASTERISER THERE IS NOTHING TO FIT. The whole chart is drawn, and
+   * the fog goes back to being weather: hung off the chart's own SPAN so a big
+   * estate hazes toward its far end and a one-room interior does not haze at
+   * all, rather than off a layer budget. Underground keeps its authored lamp —
+   * a lamp's reach is a statement about the world and always was.
+   */
+  if (glOn()) {
+    const span = Math.max(F.cols, F.rows);
+    F.viewR = span + 2;
+    if (L.sky) L = { ...L, near: span * 0.45, far: span * 1.15 };
+    return;
+  }
   if (!L.sky) {
     F.viewR = Math.min(viewCap(), Math.ceil(L.near + FOG_CULL * (L.far - L.near)) + 1);
     return;
@@ -1266,8 +1346,33 @@ function fitViewRadius() {
   L = { ...L, near: best - ramp, far: best };
 }
 
+/**
+ * IS THE WORLD BEING DRAWN, OR COMPOSITED?
+ *
+ * `gl` is a per-session switch rather than a rewrite: both backends read the
+ * same want-set, so they cannot drift about what the world contains, and a
+ * device with no WebGL2 simply keeps the old path. @see gl-world.js.
+ */
+const glOn = () => !!(F && F.gl);
+
+/**
+ * A want-set entry, in the vocabulary the rasteriser takes. Same numbers, and
+ * the fog is dropped on the floor: a veil is the DOM's way of saying "this
+ * surface is far away" and the shader knows that from the pixel's own position.
+ */
+const toGlQuad = (w) => ({
+  src: w.tex, w: w.w, h: w.h, x: w.tx, y: w.ty, z: w.tz, rot: w.rot,
+  repX: w.nx, repY: w.ny,
+});
+
 function buildGeometry() {
   const want = wantSet(F.px, F.py, F.yaw, F.viewR, L.near, L.far);
+  if (glOn()) {
+    // No diff, no veils, no budget: the whole chart every time, which on the
+    // estate is one buffer upload of ~1400 quads and about a dozen draw calls.
+    F.gl.setGeometry([...want.values()].map(toGlQuad));
+    return;
+  }
   /**
    * A chart is sampled at two spots, and a courtyard can still be denser than
    * either. So the budget has a runtime floor as well: blow well past it and
@@ -2133,6 +2238,12 @@ function mount(prep, entry) {
   // landing on the same coords/yaw would build the identical transform string,
   // skip the write, and leave this world untransformed. Same-task reset.
   F._wtf = '';
+  // The rasteriser survives a portal — the CONTEXT is expensive to make and the
+  // canvas is outside `.fp-stage`, which mountScene just rewrote. Only its
+  // textures go, because they belonged to the map that just ended.
+  if (view.gl && !F.gl) F.gl = createGlWorld(F.host.querySelector('.fp-gl'));
+  if (F.gl) F.gl.dropTextures();
+  F.host.classList.toggle('fp-gl-on', !!F.gl);
   fitLens();
   // How far THIS chart can be seen, before anything is built from it — the fog
   // it settles on is the fog every quad below is then cut to.
@@ -2168,6 +2279,7 @@ export async function openDelveFp(localeId, member, hooks, carry) {
     if (COARSE) document.body.classList.add('fp-lite');
     host.innerHTML = `
       <div class="fp-sky"></div>
+      <canvas class="fp-gl"></canvas>
       <div class="fp-stage"></div>
       <div class="fp-hands"></div>
       <div class="fp-vignette"></div>
@@ -2214,7 +2326,7 @@ export async function openDelveFp(localeId, member, hooks, carry) {
       // The continuous walker's state. Every one of these is hard-reset in
       // mount(), because a portal must not carry the last room's easing in.
       vx: 0, vy: 0, lev: 0, bobPhase: 0, sway: 0, prevYaw: 0,
-      cellKey: '', yawQ: 0, viewR: 8, selfFace: null,
+      cellKey: '', yawQ: 0, viewR: 8, gl: null, selfFace: null,
       last: 0, raf: 0, ended: false, transiting: false,
       creatures: [], decor: [], solids: [], doors: [], shots: [], armed: false,
       seen: new Set(), mined: new Set(), settleUntil: 0,
@@ -3238,6 +3350,43 @@ function render() {
     + ` rotateY(${(F.yaw * 180 / Math.PI).toFixed(2)}deg)`
     + ` translate3d(${(-ex).toFixed(1)}px,${(-ey).toFixed(1)}px,${(-ez).toFixed(1)}px)`;
   if (wtf !== F._wtf) F.world.style.transform = (F._wtf = wtf);
+  /**
+   * THE SAME CAMERA, TOLD TO A RASTERISER.
+   *
+   * The eye, the bearing and the lean are already computed above for the CSS
+   * transform — this hands them to the shader instead of building a string, so
+   * the two backends cannot disagree about where you are standing.
+   *
+   * The world SCALE is deliberately not passed. In the CSS form a fixed
+   * `perspective` P and a scaled world express a field of view together, and
+   * the scale cancels: a world length L at world depth D lands at `L·P/D` on
+   * screen whatever the scale, so the vertical FoV is exactly `2·atan(h/2P)` —
+   * which is `view.fov`, by construction of `perspectiveFor`. Handing the
+   * projection the FoV directly is therefore the same picture, not a new one.
+   *
+   * Fog is in TILES in this file and world px in the shader, so it multiplies
+   * by the tile on the way out. It is the only conversion between them.
+   */
+  if (glOn()) {
+    // Sized from the live stage every frame, not only from fitLens. fitLens
+    // bails when the stage measures nothing — which is exactly what it does
+    // during mount(), before showScreen — and a canvas that missed its one
+    // chance to be sized stays 1×1 and draws a frame nobody can see. `resize`
+    // early-outs on no change, so the cost of never having that bug is nil.
+    const st = F.host.querySelector('.fp-stage');
+    if (st && st.clientHeight) {
+      F.gl.resize(st.clientWidth, st.clientHeight, Math.min(2, window.devicePixelRatio || 1));
+    }
+    F.gl.setCamera({
+      x: ex, y: ey, z: ez, yaw: yr,
+      pitch: pov3 ? camLean() * Math.PI / 180 : 0,
+      fovY: view.fov * Math.PI / 180,
+      // @see viewFromEye: this is what makes it the SAME picture, not a new one.
+      back: st && st.clientHeight ? perspectiveFor(st.clientHeight) / F.lens : 0,
+    });
+    F.gl.setFog(L.rgb, L.near * T, L.far * T);
+    F.gl.draw();
+  }
   // Billboards stand on the floor and counter-rotate to face the walker. Every
   // write is guarded by the value it would write: standing still, this loop
   // touches no style at all, which is the difference between a scene that
@@ -3552,6 +3701,10 @@ function endDelve(reason, beaten = false) {
 function close() {
   if (!F) return;
   clearTimeout(F._bloodT);
+  // The GL context and every texture in it go with the session — `host.innerHTML
+  // = ''` below drops the canvas, and a context left behind is one of the very
+  // few things a browser will not reclaim on its own.
+  if (F.gl) { F.gl.dispose(); F.gl = null; }
   const hooks = F.hooks, summary = F.haul;
   for (const s of [F.surf, ...Object.values(F.surfByTheme || {})]) {
     if (s && s._urls) s._urls.forEach((u) => URL.revokeObjectURL(u));
@@ -3599,6 +3752,13 @@ if (typeof window !== 'undefined') {
       };
     }).sort((a, b) => a.d - b.d).slice(0, 3),
   });
+  /** The rendered frame, read back — @see gl-world.js `probe`. */
+  window.__fpGl = () => (F && F.gl
+    ? { ...F.gl.stats(), ...F.gl.probe(), R: F.viewR, fog: [+L.near.toFixed(1), +L.far.toFixed(1)] }
+    : null);
+  /** Where a world point lands on the stage. The proof that the rasteriser's
+   *  camera IS the CSS camera is projecting the same point both ways. */
+  window.__fpProject = (x, y, z) => (F && F.gl ? F.gl.project(x, y, z) : null);
   window.__fpStep = (steps = 1, keys = '', ms = 16) => {
     if (!F || F.ended) return null;
     const map = { w: 'fwd', s: 'back', a: 'strafeL', d: 'strafeR', l: 'turnL', r: 'turnR', x: 'attack' };

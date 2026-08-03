@@ -45,9 +45,13 @@
  */
 
 const KEY = 'crucible.view';
-const DEF = { angle: 25, fov: 72, dist: 100 };
+const DEF = { angle: 25, fov: 72, dist: 100, gl: false };
 const LIM = { angle: [0, 45], fov: [50, 110], dist: [40, 300] };
 const UNIT = { angle: '°', fov: '°', dist: '%' };
+/** Settings that are a switch rather than a number, and what they say. */
+const FLAGS = {
+  gl: ['Draw on a canvas', 'the new renderer — one surface instead of a thousand'],
+};
 
 /** The live values. Read directly — it is one object and it never changes identity. */
 export const view = { ...DEF };
@@ -59,6 +63,7 @@ function clamp() {
     const n = +view[k];
     view[k] = isFinite(n) ? Math.max(LIM[k][0], Math.min(LIM[k][1], n)) : DEF[k];
   }
+  for (const k of Object.keys(FLAGS)) view[k] = !!view[k];
 }
 try { Object.assign(view, JSON.parse(localStorage.getItem(KEY) || '{}')); } catch (e) { /* first run */ }
 clamp();
@@ -108,6 +113,14 @@ function row(label, key, step, hint) {
     </label>`;
 }
 
+function flag(key) {
+  const [label, hint] = FLAGS[key];
+  return `<label class="vp-row vp-flag">
+      <span class="vp-name">${label}<i>${hint}</i></span>
+      <input type="checkbox" data-k="${key}"${view[key] ? ' checked' : ''}>
+    </label>`;
+}
+
 function build() {
   panel = document.createElement('div');
   panel.className = 'vp-panel';
@@ -116,6 +129,7 @@ function build() {
       ${row('Shoulder angle', 'angle', 1, 'how far third person looks down')}
       ${row('Field of view', 'fov', 1, 'vertical, first person and all')}
       ${row('Draw distance', 'dist', 10, 'raise it until the world flickers, then step back')}
+      ${flag('gl')}
       <div class="vp-foot">
         <button class="vp-reset" type="button">Reset</button>
         <button class="vp-close" type="button">Done</button>
@@ -126,7 +140,7 @@ function build() {
   panel.addEventListener('input', (e) => {
     const k = e.target && e.target.dataset && e.target.dataset.k;
     if (!k) return;
-    setView({ [k]: +e.target.value });
+    setView({ [k]: FLAGS[k] ? e.target.checked : +e.target.value });
     sync();
   });
   panel.querySelector('.vp-reset').onclick = () => { setView({ ...DEF }); sync(); };
@@ -142,6 +156,7 @@ function sync() {
   if (!panel) return;
   for (const el of panel.querySelectorAll('input[data-k]')) {
     const k = el.dataset.k;
+    if (FLAGS[k]) { el.checked = !!view[k]; continue; }
     el.value = view[k];
     const out = el.parentElement.querySelector('output');
     if (out) out.textContent = view[k] + UNIT[k];

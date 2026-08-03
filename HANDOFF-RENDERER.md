@@ -9,7 +9,67 @@ the playtest link after every change below.
 
 ---
 
-## 0. WHAT HAPPENED ON 2026-08-03 — read this first
+## −1. THERE IS A RASTERISER NOW (2026-08-03) — start here
+
+`src/platform/gl-world.js`. One canvas, one depth buffer, fog in a fragment
+shader. Switched on per session by **Camera panel → "Draw on a canvas"**
+(`view.gl`, default OFF), and it is a BACKEND rather than a rewrite: both paths
+read the same want-set out of `buildGeometry`, so they cannot drift about what
+the world contains, and a device with no WebGL2 keeps the composited path.
+
+Measured on the estate, first person, same spot:
+
+| | draw distance | compositor layers |
+|---|---|---|
+| composited | R=34 (a fitted budget) | **1182** |
+| rasterised | **R=48 — the whole estate** | **11** |
+
+1103 quads, 39 draw calls, one canvas. The 11 are the furniture solids, which
+are still DOM (see the gap below).
+
+**The camera is provably the same camera.** Project a world point through the
+live CSS chain (a zero-size probe in `.fp-bbs`, `getBoundingClientRect`) and
+through `gl.project()`, and they agree to **0.01px** across 1.5–20 tiles, off
+axis, at four heights, while walking, while turning, and in third person. That
+test is `__fpProbeCam` in the session transcript and it is worth rebuilding if
+this is ever touched: it caught the one thing that was genuinely surprising —
+
+> **CSS `perspective` puts its viewer BEHIND the eye.** The world transform
+> `scale3d(lens)·rotate·translate(−eye)` lands a point at stage-z = lens·Z, and
+> the viewer sits at +P, so the distance is `P + lens·d` and a height projects
+> to `Y·P/(P/lens + d)`. A GL camera at the eye gives `Y·P/d`. They agree only
+> with the GL camera pulled back **P/lens world px** — 165px, about half a tile
+> at the shipped lens, but 27% of the apparent size of anything two tiles away.
+> The world scale does NOT simply cancel, which is exactly what it looks like it
+> does. `viewFromEye`'s `back` parameter is that, and only that.
+
+**What the rasteriser deletes.** Everything §0 below is about. There is no
+merge rule, no facing cone, no layer budget and no draw-distance slider in GL
+mode, because fog is per-PIXEL: the whole "merge only where the fog is flat"
+constraint exists solely because a `.fp-veil` is one opacity for a whole
+surface. `wantSet` still runs (it is the geometry builder for both paths) with
+its cone and merge tests short-circuited.
+
+**The gap, and it is the next piece.** Billboards — creatures, trees, props,
+markers, the third-person self — are still DOM, composited OVER the canvas, so
+they are **not depth-tested against the world**: a tree behind a building draws
+in front of it. That is why the default is off. Sprites are camera-facing quads
+with an alpha cutout in the same buffer; the texture for each is the canvas or
+`<img>` the billboard already contains, and `gl.project()` is already there for
+the things that should stay DOM (health bars, damage numbers, door labels).
+Furniture solids need their sheet crop turned into UVs rather than a
+`background-position`.
+
+Verification changed shape, and this matters more than it sounds: **a rasteriser
+can be read back and a compositor cannot.** `gl.probe()` draws and `readPixels`
+into a coarse grid of mean colours, so the headless pane — which composites
+nothing and runs no rAF — can now check that the sky is empty at the top, the
+ground green at the bottom, and the fog closing with distance. Every CSS-3D
+change for a year was checked by measuring DOM rectangles and hoping.
+
+---
+
+## 0. WHAT HAPPENED ON 2026-08-03 — the pass before that
 
 A 5.1s phone capture of the crawler on the estate settled two things the rest
 of this document could only guess at, and a pass then shipped against them.
