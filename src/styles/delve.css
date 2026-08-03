@@ -754,9 +754,9 @@
  */
 @keyframes fp-swing {
   0%   { transform: translate3d(0, 0, 0) rotate(0deg); }
-  16%  { transform: translate3d(calc(var(--fp-arc) * -0.039), 0, calc(var(--fp-arc) *  0.276)) rotate(8deg); }
-  50%  { transform: translate3d(calc(var(--fp-arc) * -1.035), 0, calc(var(--fp-arc) * -0.999)) rotate(-6deg); }
-  72%  { transform: translate3d(calc(var(--fp-arc) * -0.293), 0, calc(var(--fp-arc) * -0.707)) rotate(-3deg); }
+  16%  { transform: translate3d(calc(min(30vw, 46vh) * -0.039), 0, calc(min(30vw, 46vh) * 0.276)) rotate(8deg); }
+  50%  { transform: translate3d(calc(min(30vw, 46vh) * -1.035), 0, calc(min(30vw, 46vh) * -0.999)) rotate(-6deg); }
+  72%  { transform: translate3d(calc(min(30vw, 46vh) * -0.293), 0, calc(min(30vw, 46vh) * -0.707)) rotate(-3deg); }
   100% { transform: translate3d(0, 0, 0) rotate(0deg); }
 }
 @keyframes fp-brace {
@@ -781,7 +781,8 @@
 .fp-slash path {
   fill: none; stroke: rgba(255,246,220,0.92); stroke-width: 3.4; stroke-linecap: round;
   stroke-dasharray: 170; stroke-dashoffset: 170;
-  filter: drop-shadow(0 0 12px rgba(255,214,140,0.9));
+  /* NO drop-shadow. @see the .fp-hand note: a blur is a private surface, and
+     this one is ~1 megapixel with a dash animating through it every frame. */
 }
 .fp-slash.fp-swinging { animation: fp-slash-show 380ms ease-out; }
 .fp-slash.fp-swinging path { animation: fp-slash-draw 380ms ease-out; }

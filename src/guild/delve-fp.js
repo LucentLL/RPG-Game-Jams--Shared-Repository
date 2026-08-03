@@ -2861,9 +2861,15 @@ function render() {
     // every frame of a walk, which is a write per frame for a difference no eye
     // resolves; at a half it changes a few times a cycle and the guard below
     // rejects the rest.
-    const spd = Math.min(1, Math.hypot(F.vx, F.vy) / WALK_SPEED);
+    // FROZEN DURING A SWING. This layer carries the perspective the swing is
+    // projected through, so a transform here invalidates the projection of a
+    // ~2.7 Mpx animating child on every frame — which is precisely why walking
+    // alone and swinging alone are both smooth and doing both is 5fps.
+    const swinging = performance.now() < F.swingUntil;
+    const spd = swinging ? 0 : Math.min(1, Math.hypot(F.vx, F.vy) / WALK_SPEED);
     const q = (v) => (Math.round(v * 2) / 2).toFixed(1);
-    const tf = `translate3d(${q(clamp1(F.sway) * -30)}px,${q(Math.sin(F.bobPhase) * 26 * spd)}px,0)`;
+    const tf = swinging ? F._handTf || 'translate3d(0px,0px,0)'
+      : `translate3d(${q(clamp1(F.sway) * -30)}px,${q(Math.sin(F.bobPhase) * 26 * spd)}px,0)`;
     if (tf !== F._handTf) F.hands.el.style.transform = (F._handTf = tf);
   }
   // The walker's own back, when the camera stands behind it.
