@@ -3183,11 +3183,10 @@ function roomStub(room) {
 }
 
 // --- Grounds (the outdoors / compound view) ---------------------------------
-// A capacity dashboard fronted by an illustrated compound. The scene is pure
-// CSS/DOM (no canvas, no RAF) so it costs no battery; buildings are tappable and
-// the Bunkhouse visibly grows as Living Quarters are expanded. Below the scene:
-// capacity roll-ups (bars/counts that read the same at 6 members or 120 trainees)
-// and the facility upgrade grid. See DESIGN.md Phase 5 (the minor league).
+// A capacity dashboard: roll-ups (bars/counts that read the same at 6 members
+// or 120 trainees) and the facility upgrade grid. The illustrated CSS compound
+// that used to front it is GONE by playtest verdict (2026-08-04) — the walkable
+// campus is the compound now. See DESIGN.md Phase 5 (the minor league).
 
 /** Human-readable effect of a facility AT a given tier (for the "now → next" line). */
 function facilityEffect(key, t) {
@@ -3229,32 +3228,6 @@ function facilityCard(key) {
       <div class="fac-desc">${def.desc}</div>
       <div class="fac-now">Now <b>${facilityEffect(key, t)}</b>${maxed ? '' : ` <span class="dim">→ ${facilityEffect(key, t + 1)}</span>`}</div>
       <div class="fac-action">${action}</div>
-    </div>`;
-}
-
-/** The buildings in the compound scene, left→right. Each opens its room; the
- *  Bunkhouse (grow:'quarters') gains storeys as Living Quarters expand. */
-const COMPOUND_BUILDINGS = [
-  { room: 'quarters', glyph: icon('mug'), name: 'Bunkhouse', cls: 'bld-quarters', h: 50, grow: 'quarters' },
-  { room: 'library', glyph: icon('book'), name: 'Library', cls: 'bld-library', h: 60 },
-  { room: 'roster', glyph: icon('town'), name: 'Great Hall', cls: 'bld-hall', h: 86, wide: true },
-  { room: 'forge', glyph: icon('hammer'), name: 'Forge', cls: 'bld-forge', h: 52 },
-  { room: 'armory', glyph: icon('sword'), name: 'Armory', cls: 'bld-armory', h: 56 },
-  { room: 'kitchen', glyph: icon('pot'), name: 'Kitchen', cls: 'bld-kitchen', h: 46 },
-];
-function compoundScene() {
-  const buildings = COMPOUND_BUILDINGS.map((b) => {
-    const floors = b.grow ? facilityTier(guild, b.grow) : 0; // extra storeys as the facility tiers up
-    const height = Math.min(100, b.h + floors * 8);
-    const wins = Array.from({ length: 1 + floors }, () => '<span class="bld-win"></span>').join('');
-    return `<button class="building ${b.cls} ${b.wide ? 'wide' : ''}" style="height:${height}%" onclick="__guild.openRoom('${b.room}')" aria-label="Enter ${b.name}" title="Enter ${b.name}">
-        <span class="bld-roof"></span>
-        <span class="bld-wall"><span class="bld-glyph">${b.glyph}</span><span class="bld-wins">${wins}</span></span>
-        <span class="bld-label">${b.name}</span>
-      </button>`;
-  }).join('');
-  return `<div class="compound" role="group" aria-label="The guild grounds — tap a building to enter">
-      <div class="compound-row">${buildings}</div>
     </div>`;
 }
 
@@ -3521,8 +3494,7 @@ function groundsRoom() {
   const strip = roster.slice(0, 8).map((h) => `<button class="hs-chip" title="${h.name}" onclick="__guild.selectHero('${h.id}')">${personSprite(h, 48)}</button>`).join('')
     + (roster.length > 8 ? `<span class="hs-more">+${roster.length - 8}</span>` : '');
   const m = ensureMaster(guild);
-  return `${compoundScene()}
-    <div class="plan-card">
+  return `<div class="plan-card">
       <div class="plan-title">☙ The Guildmaster</div>
       <div class="gm-row">
         <span class="gm-face">${personSprite(m, 72)}</span>

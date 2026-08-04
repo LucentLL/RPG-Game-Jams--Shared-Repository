@@ -653,58 +653,8 @@
 .stakes-worldcup { color: #e8908a; }
 
 /* ═══ THE GROUNDS (outdoors / compound view) ═══ */
-/* The illustrated compound: a sky+ground banner with stylized buildings sitting on
-   the ground line. 100% CSS/DOM — no canvas, no RAF, so it costs nothing on battery.
-   Each building is a button that enters its room; the Bunkhouse grows with tier. */
-.compound {
-  position: relative; width: 100%; height: clamp(150px, 30vh, 230px);
-  margin-bottom: 14px; border: 1px solid var(--border); border-radius: 12px; overflow: hidden;
-  background: linear-gradient(180deg, #0e1524 0%, #172033 42%, #3a3320 43%, #241d12 100%);
-}
-.compound::before { /* a faint moon/sun */
-  content: ''; position: absolute; top: 14px; right: 18px; width: 26px; height: 26px; border-radius: 50%;
-  background: radial-gradient(circle, rgba(230, 216, 170, 0.9), rgba(230, 216, 170, 0)); pointer-events: none;
-}
-.compound::after { /* the ground band */
-  content: ''; position: absolute; left: 0; right: 0; bottom: 0; height: 20%;
-  background: linear-gradient(180deg, #2b2416, #171009); border-top: 1px solid rgba(0, 0, 0, 0.5);
-}
-.compound-row {
-  position: absolute; left: 0; right: 0; bottom: 18%; height: 78%; z-index: 1; /* above the ::after ground band so labels show */
-  display: flex; align-items: flex-end; justify-content: center; gap: 3%; padding: 0 4%;
-}
-.building {
-  position: relative; flex: 1 1 0; min-width: 0; max-width: 15%;
-  display: flex; flex-direction: column; align-items: center; justify-content: flex-end;
-  background: transparent; border: none; padding: 0; cursor: pointer;
-  transition: transform 0.15s, filter 0.15s;
-}
-.building.wide { flex-grow: 1.7; max-width: 24%; }
-.building:hover, .building:focus-visible { transform: translateY(-3px); filter: brightness(1.18); outline: none; }
-.bld-roof {
-  width: 82%; height: 12px; flex: 0 0 auto; background: var(--roof, #6b4a2a);
-  clip-path: polygon(12% 100%, 0 100%, 50% 0, 100% 100%, 88% 100%); margin-bottom: -1px;
-}
-.bld-wall {
-  width: 100%; flex: 1 1 auto; min-height: 8px;
-  background: linear-gradient(180deg, var(--wall, #3a2e1f), var(--wall2, #241b12));
-  border: 1px solid rgba(0, 0, 0, 0.55); border-bottom: none; border-radius: 2px 2px 0 0;
-  display: flex; flex-direction: column; align-items: center; gap: 3px; padding: 5px 2px 0;
-  overflow: hidden; image-rendering: pixelated;
-}
-.bld-glyph { font-size: clamp(0.85em, 2.3vw, 1.35em); line-height: 1; filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.6)); }
-.bld-wins { display: flex; flex-wrap: wrap; gap: 3px; justify-content: center; }
-.bld-win { width: 5px; height: 6px; border-radius: 1px; background: rgba(240, 200, 90, 0.75); box-shadow: 0 0 4px rgba(240, 200, 90, 0.45); }
-.bld-label {
-  position: absolute; bottom: -15px; left: 50%; transform: translateX(-50%); white-space: nowrap;
-  font-size: 0.58em; color: var(--muted); font-family: 'Cinzel', serif; letter-spacing: 0.02em;
-}
-.bld-quarters { --roof: #7a5230; --wall: #4a3826; --wall2: #2c2013; }
-.bld-library  { --roof: #3f5170; --wall: #2c3346; --wall2: #1a1f2c; }
-.bld-hall     { --roof: #9a7326; --wall: #4a3a1c; --wall2: #2a2010; }
-.bld-forge    { --roof: #8a3a24; --wall: #4a2a1e; --wall2: #2a1712; }
-.bld-armory   { --roof: #4a4a5c; --wall: #2e2e3a; --wall2: #1c1c24; }
-.bld-kitchen  { --roof: #5a6a34; --wall: #333a22; --wall2: #1e2214; }
+/* The illustrated CSS compound that led this section is GONE by playtest
+   verdict (2026-08-04) — the walkable campus is the compound now. */
 
 /* capacity dashboard */
 .fac-note { font-size: 0.74em; color: var(--dim); margin: -4px 0 12px; font-style: italic; }
@@ -730,9 +680,6 @@
 .fac-action .rc-hire { width: 100%; text-align: center; }
 .fac-max { display: block; text-align: center; font-size: 0.76em; color: var(--gold);
   padding: 7px; border: 1px dashed var(--border); border-radius: 8px; }
-
-/* short viewport (phone landscape): shrink the scene so the dashboard stays reachable */
-@media (max-height: 430px) { .compound { height: clamp(120px, 26vh, 170px); } .bld-label { font-size: 0.52em; } }
 
 /* ═══ CALENDAR / TOURNAMENTS (the season) ═══ */
 .hub-tourney {
