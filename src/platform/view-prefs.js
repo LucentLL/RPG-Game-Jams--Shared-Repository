@@ -54,10 +54,14 @@
  */
 
 const KEY = 'crucible.view';
+/** Bumped when a stored value's MEANING changes, not when a value is added.
+ *  v2: `gl` stopped meaning "try the experiment" and started meaning "the
+ *  renderer" — a v1 save carries the old default as if it were a choice. */
+const VER = 2;
 /** A coarse pointer is the cheapest honest signal for "this is a phone", and
  *  the only place it is consulted is a DEFAULT — the dial is still the dial. */
 const COARSE = typeof matchMedia !== 'undefined' && matchMedia('(pointer: coarse)').matches;
-const DEF = { angle: 25, fov: 72, dist: 100, res: COARSE ? 50 : 100, gl: true };
+const DEF = { angle: 25, fov: 72, dist: 100, res: COARSE ? 50 : 100, gl: true, v: VER };
 const LIM = { angle: [0, 45], fov: [50, 110], dist: [40, 300], res: [25, 100] };
 const UNIT = { angle: '°', fov: '°', dist: '%', res: '%' };
 /** Settings that are a switch rather than a number, and what they say. */
@@ -70,6 +74,12 @@ export const view = { ...DEF };
 
 const subs = new Set();
 
+/** One-line truths for the panel — a lens registers what is REALLY running
+ *  ("live: canvas 486×1053 @ 50%"), because the checkbox is a wish, and the
+ *  playtest screenshots proved nobody can tell a wish from a fact on a phone. */
+const status = [];
+export function vpStatus(fn) { status.push(fn); }
+
 function clamp() {
   for (const k of Object.keys(LIM)) {
     const n = +view[k];
@@ -77,8 +87,18 @@ function clamp() {
   }
   for (const k of Object.keys(FLAGS)) view[k] = !!view[k];
 }
-try { Object.assign(view, JSON.parse(localStorage.getItem(KEY) || '{}')); } catch (e) { /* first run */ }
+let _saved = null;
+try { _saved = JSON.parse(localStorage.getItem(KEY) || 'null'); } catch (e) { /* first run */ }
+if (_saved) Object.assign(view, _saved);
 clamp();
+/** MIGRATION, once per device: a v1 save predates both the renderer flip and
+ *  the Resolution dial, so its `gl`/`res` are yesterday's defaults wearing a
+ *  choice's clothes. Reset those two to the new defaults, stamp the version,
+ *  and everything the player sets from here on sticks. */
+if (_saved && (+_saved.v || 1) < VER) {
+  view.gl = DEF.gl; view.res = DEF.res; view.v = VER;
+  try { localStorage.setItem(KEY, JSON.stringify(view)); } catch (e) { /* private mode */ }
+}
 
 /** Change one or both, persist, and tell every live lens to re-fit. */
 export function setView(patch) {
@@ -143,6 +163,7 @@ function build() {
       ${row('Draw distance', 'dist', 10, 'raise it until the world flickers, then step back')}
       ${row('Resolution', 'res', 5, 'lower is faster and chunkier — half the res is a quarter the work')}
       ${flag('gl')}
+      <div class="vp-live"></div>
       <div class="vp-foot">
         <button class="vp-reset" type="button">Reset</button>
         <button class="vp-close" type="button">Done</button>
@@ -173,6 +194,17 @@ function sync() {
     el.value = view[k];
     const out = el.parentElement.querySelector('output');
     if (out) out.textContent = view[k] + UNIT[k];
+  }
+  // The line of FACT under the wishes: live backend + buffer, and which build
+  // this even is — the two questions a playtest screenshot has to answer.
+  const live = panel.querySelector('.vp-live');
+  if (live) {
+    const lines = [];
+    for (const fn of status) { try { const t = fn(); if (t) lines.push(t); } catch (e) { /* lens mid-teardown */ } }
+    const src = (document.querySelector('script[type="module"][src*="index-"]') || {}).src || '';
+    const h = src.match(/index-([\w-]+)\.js/);
+    lines.push(h ? 'build ' + h[1] : 'dev build');
+    live.textContent = lines.join('  ·  ');
   }
 }
 

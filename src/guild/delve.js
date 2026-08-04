@@ -805,6 +805,7 @@ export async function openDelve(localeId, member, hooks, carry) {
       <span class="dv-title"></span>
       <span class="dv-haul"></span>
       <button class="dv-leave dv-view" title="See it through their eyes" onclick="__delve.view()">1st person</button>
+      <button class="dv-leave" title="Camera settings" onclick="__viewPanel()">Camera</button>
     </div>
     <div class="delve-toasts"></div>
     <button class="dv-use" hidden onclick="__delve.use()"></button>`;

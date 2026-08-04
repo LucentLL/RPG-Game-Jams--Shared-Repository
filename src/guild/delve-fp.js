@@ -31,7 +31,7 @@ import { propVolume, propCell, footprint, REST_SLOP } from './prop-volume.js';
 import { icon } from './icons.js';
 import { createLook, readPad, padReset, touchPrimary, PAD } from '../platform/input.js';
 import { claimPad } from '../platform/ui-pad.js';
-import { perspectiveFor, camLean, onView, view } from '../platform/view-prefs.js';
+import { perspectiveFor, camLean, onView, view, vpStatus } from '../platform/view-prefs.js';
 import { createGlWorld } from '../platform/gl-world.js';
 
 /**
@@ -818,6 +818,18 @@ function glDpr() {
   return Math.min(2, window.devicePixelRatio || 1) * (view.res / 100);
 }
 
+/** The camera panel's line of truth for this lens: the checkbox says what was
+ *  ASKED, this says what is RUNNING — canvas and buffer, or the composited
+ *  fallback and why. @see vpStatus in view-prefs.js. */
+vpStatus(() => {
+  if (!F) return '';
+  if (F.gl) {
+    const c = F.host.querySelector('canvas.fp-gl');
+    return `live: canvas ${c ? c.width + '×' + c.height : '?'} @ ${view.res}%`;
+  }
+  return view.gl ? 'live: composited — WebGL2 unavailable here' : 'live: composited (canvas off)';
+});
+
 /**
  * Bring the rasteriser up, or take it down, to match the setting.
  *
@@ -845,7 +857,12 @@ function setGlBackend(on) {
     canvas.replaceWith(fresh);
     canvas = fresh;
     F.gl = createGlWorld(canvas);
-    if (!F.gl) console.warn('delve-fp: no WebGL2 here — keeping the composited path');
+    if (!F.gl) {
+      console.warn('delve-fp: no WebGL2 here — keeping the composited path');
+      // Say it where the player is looking. The silent fallback is how a phone
+      // spent a day on the wrong renderer with nobody the wiser.
+      try { toast('Canvas renderer unavailable — using the old path.'); } catch (e) { /* pre-toast mount */ }
+    }
   } else if (!on && F.gl) {
     F.gl.dispose();
     F.gl = null;
