@@ -361,6 +361,10 @@
 
 /* --- touch stick (lower-left quadrant; base appears under the thumb) --- */
 .delve-joy { position: absolute; left: 0; bottom: 0; width: 50%; height: 55%; z-index: 550; touch-action: none; }
+/* The crawler's stick — same base/knob dressing as the top-down's, but the
+   zone stops short of the pad's corner: move on the left thumb, act on the
+   right. Serves first person and over-the-shoulder alike (same walker). */
+.fp-joy { position: absolute; left: 0; bottom: 0; width: 45%; height: 60%; z-index: 550; touch-action: none; }
 .dj-base {
   position: fixed; width: 96px; height: 96px;
   margin: -48px 0 0 -48px; border-radius: 50%;
@@ -451,6 +455,13 @@
    and lets this rule win; when it writes `none` the two agree anyway. */
 .fp-gl-on .fp-bb.fp-decor,
 .fp-gl-on .fp-bb.fp-shot { display: none; }
+/* And what SURVIVES in the DOM — creatures, markers, the third-person self —
+   must also survive the CANVAS: .fp-gl carries z-index 1, and an unranked
+   .fp-world left every world-space billboard painting UNDER the picture of
+   the world (the HUD, hands and floats never noticed; they all rank 200+).
+   This was "the player character is not visible in 3rd person". Depth against
+   geometry is the known trade — labels belong on top anyway. */
+.fp-gl-on .fp-world { z-index: 2; }
 .fp-world {
   position: absolute; left: 50%; top: 50%;
   transform-style: preserve-3d;

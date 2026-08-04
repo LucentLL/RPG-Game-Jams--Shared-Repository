@@ -840,6 +840,8 @@ export async function openDelve(localeId, member, hooks, carry) {
     // of the page. Tear it down and let the caller report the failure.
     try {
       mountScene(prep, carry ? carry.at : null);
+      // Arriving FROM first person: stand looking where the crawler looked.
+      if (carry && carry.dir != null && D && D.player) D.player.actor.facing = carry.dir * Math.PI / 4;
       wireInput();
       updateHaul();
       showScreen('delveScreen');
@@ -1945,6 +1947,9 @@ function swapToFp() {
   D.transiting = true;   // freeze the sim while the other view bakes
   const carry = {
     swap: true, mapId: D.map.id, at: [D.player.x, D.player.y],
+    // The FACING crosses too — the lenses are 1:1 by decree, so the crawler
+    // must open looking where the walker was looking, not down the openest run.
+    dir: Math.round((((D.player.actor.facing * 180 / Math.PI) % 360) + 360) % 360 / 45) % 8,
     stack: D.stack.slice(), mined: [...D.mined], haul: D.haul,
   };
   hooks.swapView('fp', carry).then((ok) => { if (!ok && D) D.transiting = false; });

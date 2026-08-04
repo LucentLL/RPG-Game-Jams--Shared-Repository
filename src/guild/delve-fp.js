@@ -29,7 +29,7 @@ import { loadImg, SHEET_URLS } from './delve.js';
 import { ART, artSprite, artCropCss, artTexRect, WORN, wornWeapon, wornShield, wornPick } from './art.js';
 import { propVolume, propCell, footprint, REST_SLOP } from './prop-volume.js';
 import { icon } from './icons.js';
-import { createLook, readPad, padReset, touchPrimary, PAD } from '../platform/input.js';
+import { createLook, readPad, padReset, touchPrimary, onTouchPrimary, PAD } from '../platform/input.js';
 import { claimPad } from '../platform/ui-pad.js';
 import { perspectiveFor, camLean, onView, view, vpStatus } from '../platform/view-prefs.js';
 import { createGlWorld } from '../platform/gl-world.js';
@@ -2410,7 +2410,16 @@ export async function openDelveFp(localeId, member, hooks, carry) {
     }
     try {
       mount(p, carry ? carry.at : null);
+      // The FACING crosses the swap too — the lenses are 1:1 by decree.
+      // openestDir only chooses for a fresh march in through the gate.
+      if (carry && carry.dir != null) {
+        F.yaw = carry.dir * Math.PI / 4;
+        F.prevYaw = F.yaw; F.yawQ = Math.round(F.yaw / YAW_Q);
+      }
       wireInput();
+      // The stick arrives with the first touch, exactly like the top-down's.
+      F.joyTouchOff = onTouchPrimary(() => { if (F && !F.joyEl) buildFpStick(); });
+      if (touchPrimary()) buildFpStick();
       updateHaul();
       showScreen('delveFpScreen');
       fitLens();               // now that the stage has a height to measure
@@ -2536,6 +2545,53 @@ function wireInput() {
   F.onResize = () => { fitLens(); fitHands(); mountSky(); };
   window.addEventListener('resize', F.onResize);
 }
+/**
+ * The crawler's thumb-stick — the top-down walk's stick re-aimed at a KEY
+ * TABLE instead of a velocity, because the crawler's grammar IS keys: Y is
+ * W/S and X is the turn pair (quarter turns at their own cadence while held).
+ * The thresholds cut a dead cross in the middle — .35 forward so a walk is
+ * easy to hold, .55 for a turn so a thumb rolling forward does not also spin
+ * you. Appears only when touch is the primary driver, like the top-down's,
+ * and serves first person and over-the-shoulder alike (same walker).
+ */
+function buildFpStick() {
+  if (!F || !F.host || F.joyEl) return;
+  const joy = document.createElement('div');
+  joy.className = 'fp-joy';
+  joy.innerHTML = '<div class="dj-base"><div class="dj-knob"></div></div>';
+  F.host.appendChild(joy);
+  F.joyEl = joy;
+  const base = joy.querySelector('.dj-base'), knob = joy.querySelector('.dj-knob');
+  const clear = () => { if (F) F.keys.fwd = F.keys.back = F.keys.turnL = F.keys.turnR = false; };
+  let pid = null, cx = 0, cy = 0;
+  joy.addEventListener('pointerdown', (e) => {
+    pid = e.pointerId; cx = e.clientX; cy = e.clientY;
+    base.style.left = cx + 'px'; base.style.top = cy + 'px';
+    base.classList.add('on');
+    joy.setPointerCapture(pid);
+  });
+  joy.addEventListener('pointermove', (e) => {
+    if (e.pointerId !== pid) return;
+    let dx = e.clientX - cx, dy = e.clientY - cy;
+    const m = Math.hypot(dx, dy);
+    if (m > 42) { dx = dx / m * 42; dy = dy / m * 42; }
+    knob.style.transform = `translate(${dx}px,${dy}px)`;
+    if (!F) return;
+    const nx = m > 8 ? dx / 42 : 0, ny = m > 8 ? dy / 42 : 0;
+    F.keys.fwd = ny < -0.35; F.keys.back = ny > 0.35;
+    F.keys.turnL = nx < -0.55; F.keys.turnR = nx > 0.55;
+  });
+  const end = (e) => {
+    if (e.pointerId !== pid) return;
+    pid = null;
+    base.classList.remove('on');
+    knob.style.transform = '';
+    clear();
+  };
+  joy.addEventListener('pointerup', end);
+  joy.addEventListener('pointercancel', end);
+}
+
 function unwireInput() {
   window.removeEventListener('keydown', F.onKeyDown);
   window.removeEventListener('keyup', F.onKeyUp);
@@ -3752,6 +3808,8 @@ function swapToTop() {
   F.transiting = true;
   const carry = {
     swap: true, mapId: F.map.id, at: [F.px, F.py],
+    // The facing crosses too — the walker turns to look where you were looking.
+    dir: Math.round((((F.yaw * 180 / Math.PI) % 360) + 360) % 360 / 45) % 8,
     stack: F.stack.slice(), mined: [...F.mined], haul: F.haul,
   };
   hooks.swapView('top', carry).then((ok) => { if (!ok && F) F.transiting = false; });
@@ -3763,6 +3821,7 @@ export function closeDelveFpSilent() {
   if (F.raf) cancelAnimationFrame(F.raf);
   clearTimeout(F.helpTimer);
   unwireInput();
+  if (F.joyTouchOff) F.joyTouchOff();
   for (const s of [F.surf, ...Object.values(F.surfByTheme || {})]) {
     if (s && s._urls) s._urls.forEach((u) => URL.revokeObjectURL(u));
   }
@@ -3814,6 +3873,7 @@ function endDelve(reason, beaten = false) {
   if (F.raf) cancelAnimationFrame(F.raf);
   clearTimeout(F.helpTimer);
   unwireInput();
+  if (F.joyTouchOff) F.joyTouchOff();
   const h = F.haul;
   const killLines = Object.keys(h.kills).map((pid) => {
     const p = preyById(pid);
