@@ -455,13 +455,16 @@
    and lets this rule win; when it writes `none` the two agree anyway. */
 .fp-gl-on .fp-bb.fp-decor,
 .fp-gl-on .fp-bb.fp-shot { display: none; }
-/* And what SURVIVES in the DOM — creatures, markers, the third-person self —
-   must also survive the CANVAS: .fp-gl carries z-index 1, and an unranked
-   .fp-world left every world-space billboard painting UNDER the picture of
-   the world (the HUD, hands and floats never noticed; they all rank 200+).
-   This was "the player character is not visible in 3rd person". Depth against
-   geometry is the known trade — labels belong on top anyway. */
-.fp-gl-on .fp-world { z-index: 2; }
+/* And what SURVIVES in the DOM — creatures, markers, furniture solids, the
+   third-person self — must also survive the CANVAS. The canvas is the STAGE'S
+   SIBLING (host > sky · canvas z1 · stage), so the contest is settled between
+   canvas and stage at HOST level: an unranked stage sat under z-index 1 and
+   the whole DOM cast painted beneath the picture of the world — "the player
+   character is not visible in 3rd person" was this. A z-index INSIDE the
+   stage cannot fix it (it never escapes the stage's own stacking level — a
+   first cut ranked .fp-world and changed nothing on a real compositor).
+   Depth against geometry is the known trade — labels belong on top anyway. */
+.fp-gl-on .fp-stage { z-index: 2; }
 .fp-world {
   position: absolute; left: 50%; top: 50%;
   transform-style: preserve-3d;
