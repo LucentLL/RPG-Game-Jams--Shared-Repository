@@ -39,15 +39,27 @@
  *   surfaces as you walk, then come back a step. The default is deliberately
  *   short of the edge.
  *
+ * `res` — RENDER SCALE, as a percentage of the buffer the device would get by
+ *   default (its own pixel ratio, capped at 2). The rasteriser's cost is per
+ *   PIXEL and pixels fall with the square: half resolution is a quarter of the
+ *   fill rate, which on a phone is routinely the whole difference. The upscale
+ *   is NEAREST, so a low setting reads as the game leaning into its pixel art
+ *   rather than going soft — phones START at 50 for exactly that reason, and
+ *   it is a dial because "chunky and smooth" versus "sharp and struggling" is
+ *   a taste call nobody can make from here.
+ *
  * FIRST PERSON HAS NO ANGLE SETTING on purpose: it has free look, and a fixed
  * pitch on top of a pitch you steer is two cameras arguing. The angle belongs
  * to the shoulder camera, which holds a framing rather than following a hand.
  */
 
 const KEY = 'crucible.view';
-const DEF = { angle: 25, fov: 72, dist: 100, gl: false };
-const LIM = { angle: [0, 45], fov: [50, 110], dist: [40, 300] };
-const UNIT = { angle: '°', fov: '°', dist: '%' };
+/** A coarse pointer is the cheapest honest signal for "this is a phone", and
+ *  the only place it is consulted is a DEFAULT — the dial is still the dial. */
+const COARSE = typeof matchMedia !== 'undefined' && matchMedia('(pointer: coarse)').matches;
+const DEF = { angle: 25, fov: 72, dist: 100, res: COARSE ? 50 : 100, gl: true };
+const LIM = { angle: [0, 45], fov: [50, 110], dist: [40, 300], res: [25, 100] };
+const UNIT = { angle: '°', fov: '°', dist: '%', res: '%' };
 /** Settings that are a switch rather than a number, and what they say. */
 const FLAGS = {
   gl: ['Draw on a canvas', 'the new renderer — one surface instead of a thousand'],
@@ -129,6 +141,7 @@ function build() {
       ${row('Shoulder angle', 'angle', 1, 'how far third person looks down')}
       ${row('Field of view', 'fov', 1, 'vertical, first person and all')}
       ${row('Draw distance', 'dist', 10, 'raise it until the world flickers, then step back')}
+      ${row('Resolution', 'res', 5, 'lower is faster and chunkier — half the res is a quarter the work')}
       ${flag('gl')}
       <div class="vp-foot">
         <button class="vp-reset" type="button">Reset</button>

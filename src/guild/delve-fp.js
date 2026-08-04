@@ -800,10 +800,22 @@ function fitLens() {
   const fit = h / PERSP_AT;
   F.lens = fit / K;
   stage.style.perspective = perspectiveFor(h).toFixed(1) + 'px';
-  // The rasteriser gets the same box, at device resolution. Capped at 2 because
-  // past that a phone is spending four times the fill rate on a difference
-  // nobody can see through a pixel-art texture.
-  if (F.gl) F.gl.resize(stage.clientWidth, h, Math.min(2, window.devicePixelRatio || 1));
+  // The rasteriser gets the same box, at buffer resolution — @see glDpr.
+  if (F.gl) F.gl.resize(stage.clientWidth, h, glDpr());
+}
+
+/**
+ * Buffer pixels per CSS px for the rasteriser. The hardware ratio first,
+ * capped at 2 because past that a phone is spending four times the fill rate
+ * on a difference nobody can see through a pixel-art texture — then the
+ * Resolution dial's share on top of it, because a frame's cost falls with the
+ * SQUARE of this number and a phone that cannot hold a native frame can
+ * usually hold a quarter of one. The canvas upscales NEAREST
+ * (@see setGlBackend), so turning the dial down reads as leaning into the
+ * pixel art, not blurring it.
+ */
+function glDpr() {
+  return Math.min(2, window.devicePixelRatio || 1) * (view.res / 100);
 }
 
 /**
@@ -826,6 +838,10 @@ function setGlBackend(on) {
      */
     const fresh = document.createElement('canvas');
     fresh.className = canvas.className;
+    // NEAREST upscale to the screen: below 100% Resolution the buffer is
+    // smaller than the element, and bilinear would smear exactly the pixels
+    // the low setting is there to celebrate.
+    fresh.style.imageRendering = 'pixelated';
     canvas.replaceWith(fresh);
     canvas = fresh;
     F.gl = createGlWorld(canvas);
@@ -1948,6 +1964,10 @@ function spawnCreature(prey, img, x, y) {
     // Fixed per creature so a circling thing keeps going the same way round
     // instead of shivering between the two.
     spin: Math.random() < 0.5 ? -1 : 1,
+    // Where it is FACING, in the world — the rotation rows are cut from this.
+    // Random at spawn so a chamber of idle things looks inhabited rather than
+    // paraded, and so some of them start with their backs to the door.
+    head: Math.random() * Math.PI * 2,
     aggro: false, staggerUntil: 0, windUntil: 0,
   };
   drawCreature(c);
@@ -2907,7 +2927,14 @@ function moveCreatures(dt) {
       continue;
     }
     const dx = c.tx - c.x, dy = c.ty - c.y, d = Math.hypot(dx, dy);
-    if (d < 0.15) { c.mode = 'idle'; c.t = 1 + Math.random() * 2; c.vx = c.vy = 0; poseCreature(c, false); continue; }
+    if (d < 0.15) {
+      c.mode = 'idle'; c.t = 1 + Math.random() * 2; c.vx = c.vy = 0;
+      // A woken thing that has arrived somewhere turns to you; a wanderer that
+      // has arrived keeps looking the way it walked, which is what lets you
+      // come round behind it.
+      if (c.aggro) c.head = Math.atan2(dy0, dx0);
+      poseCreature(c, false); continue;
+    }
     const step = Math.min(d, speed * dt);
     const nx = c.x + dx / d * step, ny = c.y + dy / d * step;
     if (!blocked(Math.floor(nx), Math.floor(c.y))) c.x = nx;
@@ -2915,6 +2942,12 @@ function moveCreatures(dt) {
     // Actual velocity, not intent — a creature grinding along a wall it cannot
     // get past should show the direction it is really going, which is nowhere.
     c.vx = (c.x - px) / (dt || 1e-6); c.vy = (c.y - py) / (dt || 1e-6);
+    // FACING follows real movement — but a woken thing in reach squares up to
+    // you even while its feet carry it sideways round the orbit: a circling
+    // wolf strafes, it does not politely show you its flank. (Doom's monsters
+    // do the same — the face tracks the target whatever the feet say.)
+    if (Math.hypot(c.vx, c.vy) > 0.05) c.head = Math.atan2(c.vy, c.vx);
+    if (c.aggro && c.mode === 'chase' && dist <= MELEE * 1.4) c.head = Math.atan2(dy0, dx0);
     c.phase += dt * speed * 3.4;
     poseCreature(c, Math.hypot(c.vx, c.vy) > 0.05);
   }
@@ -2927,24 +2960,34 @@ function moveCreatures(dt) {
  *
  * A 3×4 charset is four poses of one character drawn from one viewpoint: front,
  * two profiles, back. Used as rotations they are exactly the four Hexen would
- * pick from eight — so the row is chosen by where the creature is HEADING
- * relative to the camera, not by where it is heading in the world:
+ * pick from eight — and the row is Doom's own rule: the creature's world-space
+ * FACING (`head`) against the line of sight from you to it. Not its velocity
+ * against the camera, which is what this used to be — a camera-relative row is
+ * a photograph, it cannot be re-projected when YOU move, so a standing thing
+ * showed you the same face however far round it you walked:
  *
- *   coming at you        → row 0, its face
- *   going away           → row 3, its back
- *   crossing your view   → row 1 or 2, whichever profile faces the way it moves
+ *   facing you           → row 0, its face
+ *   facing away          → row 3, its back
+ *   facing across        → row 1 or 2, whichever profile leads
  *
- * A creature standing still keeps the last rotation it had, so a thing that has
- * noticed you and stopped stays looking at you rather than snapping to front.
+ * Re-judged every frame, so the rotation turns when IT turns and when YOU walk
+ * round it — circle a thing that has not noticed you and you are reading its
+ * back. The 1.15 is HYSTERESIS at the 45° boundaries: without a preference for
+ * the axis it is already on, a rotation sitting exactly on a diagonal flips
+ * row every frame as the two magnitudes trade places by a hair — the same
+ * shiver `spin` exists to prevent, cured the same way.
  */
 function poseCreature(c, walking) {
-  if (walking && (c.vx || c.vy)) {
-    const cdx = Math.sin(F.yaw), cdy = -Math.cos(F.yaw);
-    const rx = -cdy, ry = cdx;                    // the camera's right, on the floor
-    const away = c.vx * cdx + c.vy * cdy;         // + = walking off into the scene
-    const across = c.vx * rx + c.vy * ry;         // + = walking to screen right
-    c.row = Math.abs(away) >= Math.abs(across) ? (away > 0 ? 3 : 0) : (across > 0 ? 2 : 1);
-  }
+  const bx0 = c.x - F.px, by0 = c.y - F.py;
+  const bd = Math.hypot(bx0, by0) || 1e-6;
+  const bx = bx0 / bd, by = by0 / bd;             // the line of sight, out of you
+  const ux = Math.cos(c.head), uy = Math.sin(c.head);
+  const away = ux * bx + uy * by;                 // + = facing off along it (back)
+  const across = ux * -by + uy * bx;              // + = facing your screen-right
+  const onAway = c.row === 0 || c.row === 3;
+  const useAway = onAway ? Math.abs(away) * 1.15 >= Math.abs(across)
+                         : Math.abs(away) >= Math.abs(across) * 1.15;
+  c.row = useAway ? (away > 0 ? 3 : 0) : (across > 0 ? 2 : 1);
   const col = walking ? WALK_COLS[Math.floor(c.phase) % 4] : 1;
   if (c.drawn === c.row * 4 + col) return;
   c.col = col;
@@ -3403,7 +3446,7 @@ function render() {
     // early-outs on no change, so the cost of never having that bug is nil.
     const st = F.host.querySelector('.fp-stage');
     if (st && st.clientHeight) {
-      F.gl.resize(st.clientWidth, st.clientHeight, Math.min(2, window.devicePixelRatio || 1));
+      F.gl.resize(st.clientWidth, st.clientHeight, glDpr());
     }
     F.gl.setCamera({
       x: ex, y: ey, z: ez, yaw: yr,
