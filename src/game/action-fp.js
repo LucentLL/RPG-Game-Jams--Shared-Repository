@@ -482,8 +482,11 @@ function placeShots(yaw) {
       m = { el, cv, tf: '' };
       V.shots.set(p, m);
     }
-    const t = Math.min(1, (now - p.start) / p.dur);
-    const x = p.x0 + (p.x1 - p.x0) * t, y = p.y0 + (p.y1 - p.y0) * t;
+    // A LIVE shot carries its own position (the sim ticks it); only the old
+    // cosmetic streaks still lerp between endpoints on a clock.
+    const t = p.live ? 1 : Math.min(1, (now - p.start) / p.dur);
+    const x = p.live ? p.x : p.x0 + (p.x1 - p.x0) * t;
+    const y = p.live ? p.y : p.y0 + (p.y1 - p.y0) * t;
     const im = V.bridge.projImg && V.bridge.projImg(p.kind, p.c);
     if (im) {
       const g = m.cv.getContext('2d');
