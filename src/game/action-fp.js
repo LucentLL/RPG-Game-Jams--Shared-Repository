@@ -318,12 +318,19 @@ function buildDressing(T0) {
     const base = liftAt(T0, p.x + 0.5, p.y + 0.5);   // the ground THIS prop stands on
     const h = (p.h || 1) * (p.kind === 'boulder' ? T : STEP);
     if (p.flat) {
-      // Against its shelf, facing out of it. One quad, one rotation, forever.
+      // AGAINST its shelf — pressed to the riser face it serves, not standing
+      // in the middle of its own cell (the playtest's "ladders aren't
+      // attached to tiles"). 0.44 of a tile puts the quad a hair off the
+      // face's plane so the two never z-fight, and the rotation stays the
+      // map's fact, never the camera's.
+      const OFF = { n: [0, -1], s: [0, 1], w: [-1, 0], e: [1, 0] };
+      const o = OFF[p.face] || OFF.n;
+      const lx = (p.x + 0.5 + o[0] * 0.44) * T, lz = (p.y + 0.5 + o[1] * 0.44) * T;
       const w = T * 0.42;
       const el = document.createElement('div');
       el.className = 'tfp-q afp-prop afp-flat';
       el.style.cssText = `width:${w}px;height:${h}px;margin-left:${-w / 2}px;margin-top:${-h / 2}px;`
-        + `transform:translate3d(${cx}px,${base - h / 2}px,${cz}px) rotateY(${FACE_YAW[p.face] || 0}deg)`;
+        + `transform:translate3d(${lx}px,${base - h / 2}px,${lz}px) rotateY(${FACE_YAW[p.face] || 0}deg)`;
       if (p.kind === 'vine') {
         el.style.backgroundImage = `url(${vineTex()})`;
       } else {

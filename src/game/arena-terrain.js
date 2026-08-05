@@ -341,13 +341,24 @@ export function stepToward(T, fromX, fromY, goalX, goalY) {
   return null;
 }
 
-/** Pick a battlefield at random — or the one pinned by __arenaPin (dev probe). */
+/** Pick a battlefield — or the one pinned by __arenaPin (dev probe).
+ *
+ *  A SHUFFLE BAG, not a die: uniform random over seven fields repeats
+ *  back-to-back one battle in seven, and the playtest verdict on that maths
+ *  was "I keep getting the same map." Every field now comes out once before
+ *  any comes out twice, and the refill refuses to lead with the one you just
+ *  fought on. */
+let _fieldBag = [], _lastField = null;
 export function pickField() {
   if (typeof window !== 'undefined' && window.__arenaPin != null) {
     const p = ARENA_FIELDS.find((f) => f.name === window.__arenaPin) || ARENA_FIELDS[window.__arenaPin];
     if (p) return p;
   }
-  return ARENA_FIELDS[Math.floor(Math.random() * ARENA_FIELDS.length)];
+  if (!_fieldBag.length) _fieldBag = ARENA_FIELDS.slice();
+  let i = Math.floor(Math.random() * _fieldBag.length);
+  if (_fieldBag[i] === _lastField && _fieldBag.length > 1) i = (i + 1) % _fieldBag.length;
+  _lastField = _fieldBag.splice(i, 1)[0];
+  return _lastField;
 }
 
 // ─── Mounting the real geometry ──────────────────────────────────────────────
@@ -438,11 +449,16 @@ export async function mountArenaTerrain(arena, T, tilesBase) {
   try { rocks = await loadRocks(tilesBase); } catch (e) { /* boulders just go undressed */ }
   if (!arena.isConnected) return baked;
   const TILE = 48;
+  // A flat prop leans ON its shelf, so its drawn base shifts toward the face
+  // it serves — a ladder standing in the middle of its own cell reads as
+  // dropped, not bolted (the playtest's "ladders aren't attached to tiles").
+  const LEAN = { n: [0, -0.4], s: [0, 0.4], w: [-0.4, 0], e: [0.4, 0] };
   for (const p of T.props) {
+    const lean = (p.flat && LEAN[p.face]) || [0, 0];
     const el = document.createElement('div');
     el.className = 'at-prop ' + (DRESS[p.kind].css || 'at-rock');
-    el.style.left = ((p.x + 0.5) / T.cols * 100) + '%';
-    el.style.top = ((p.y + 1) / T.rows * 100) + '%';
+    el.style.left = ((p.x + 0.5 + lean[0]) / T.cols * 100) + '%';
+    el.style.top = ((p.y + 1 + lean[1]) / T.rows * 100) + '%';
     el.style.zIndex = String(10 + (p.y + 1) * TILE + 2);
     if (p.kind === 'boulder' && rocks) {
       const d = DRESS.boulder;
