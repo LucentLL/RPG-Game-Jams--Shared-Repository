@@ -3274,6 +3274,7 @@ function startActionLoop(){
   _koAt = 0;
   padReset();
   ensureActionJoystick();
+  ensureActionWheel();
   // NOTHING FIRES A KEYUP when the window goes away — not Esc leaving a pointer
   // lock, not alt-tab, not forfeitAction's own confirm(). A held W would stay
   // true in _actionKeys and the fighter would keep walking into the fence while
@@ -3494,6 +3495,144 @@ function showCrossHotbar(on){
   }
   el.innerHTML = html;
   el.classList.add('on');
+}
+
+/**
+ * The ATTACK WHEEL — the cross hotbar's answer for a thumb. The attack bar is
+ * a desktop shape: six full-width buttons stack four rows deep on a phone and
+ * bury the movement stick under the one thing a phone cannot spare (playtest:
+ * "unable to move due to movement buttons layered under attacks").
+ *
+ * One round button where the right thumb rests, and it IS the basic attack —
+ * press starts its charge, release looses it, exactly the bar's own
+ * hold-to-charge. DRAG and the rest of the kit fans out on an arc, and the
+ * CHARGE FOLLOWS THE THUMB: leave a petal and its charge is cancelled, land
+ * on one and its charge begins, so hold-to-charge works mid-gesture on any
+ * skill. Specials and potions fire on RELEASE only — startCharge fires a
+ * special the instant it is called, so a thumb merely PASSING the teleport
+ * must never trigger it.
+ *
+ * Touch-primary only, the stick's own latch; while the wheel serves, the
+ * attack bar hides (#actionScreen.act-touch) — which is what un-buries the
+ * stick. Desktop keeps the bar and the 1–6 keys untouched.
+ */
+var _wheelTouchOff = null;
+function syncActionWheelVis(){
+  var el = document.getElementById('actWheel'); if (!el) return;
+  var on = touchPrimary() && actionLoopRunning;
+  el.classList.toggle('active', on);
+  var scr = document.getElementById('actionScreen');
+  if (scr) scr.classList.toggle('act-touch', on);
+}
+function ensureActionWheel(){
+  var host = document.querySelector('#actionScreen .action-stage') || document.getElementById('actionScreen');
+  if (!host) return;
+  var el = document.getElementById('actWheel');
+  if (!el){
+    el = document.createElement('div');
+    el.id = 'actWheel';
+    el.className = 'act-wheel';
+    host.appendChild(el);
+    wireActionWheel(el);
+  }
+  buildActionWheel(el);
+  if (!_wheelTouchOff) _wheelTouchOff = onTouchPrimary(syncActionWheelVis);
+  syncActionWheelVis();
+}
+/** Petals from the live kit, hotkey digits and all — rebuilt each battle, so
+ *  the wheel always says what releasing will actually do. Skills fan on an
+ *  arc from straight up round to just past left; radii ALTERNATE, because
+ *  seven pills on one hundred degrees of arc shingle each other. */
+function buildActionWheel(el){
+  var opts = [];
+  ((p1 && p1.attacks) || []).slice(1, 6).forEach(function(name, i){
+    if (ATTACKS[name]) opts.push({ kind: 'atk', name: name, label: name, key: i + 2 });
+  });
+  (_guildItems || []).slice(0, 2).forEach(function(item, i){
+    opts.push({ kind: 'item', slot: i, label: item.name, glyph: item.glyph });
+  });
+  var a0 = (p1 && p1.attacks && p1.attacks[0]) || '';
+  var html = '<button class="aw-core" type="button"><b>1</b><span>' + a0 + '</span></button>';
+  var span = [82, 198], n = opts.length;
+  for (var k = 0; k < n; k++){
+    var deg = n === 1 ? 140 : span[0] + k * ((span[1] - span[0]) / (n - 1));
+    var th = deg * Math.PI / 180;
+    var r = (k % 2 ? 176 : 116);
+    var x = Math.cos(th) * r, y = -Math.sin(th) * r;
+    opts[k].deg = deg;
+    html += '<div class="aw-petal' + (opts[k].kind === 'item' ? ' aw-item' : '') + '" data-k="' + k + '"'
+      + ' style="transform:translate(calc(-50% + ' + x.toFixed(0) + 'px), calc(-50% + ' + y.toFixed(0) + 'px))">'
+      + (opts[k].kind === 'atk' ? '<b>' + opts[k].key + '</b>' : opts[k].glyph)
+      + '<span>' + opts[k].label + '</span></div>';
+  }
+  el.innerHTML = html;
+  el._opts = opts;
+}
+/** Listeners live on the CONTAINER, once — buildActionWheel rewrites the
+ *  children every battle and per-child wiring would go with them. */
+function wireActionWheel(el){
+  var pid = null, sel = -2, held = '';   // sel: -1 the core, 0.. a petal, -2 idle
+  function paint(){
+    var core = el.querySelector('.aw-core');
+    if (core) core.classList.toggle('on', sel === -1);
+    var ps = el.querySelectorAll('.aw-petal');
+    for (var i = 0; i < ps.length; i++) ps[i].classList.toggle('on', i === sel);
+  }
+  function setSel(next){
+    if (next === sel) return;
+    if (held){ cancelChargeFor(held); held = ''; }   // the charge follows the thumb
+    sel = next;
+    var a = null;
+    if (sel === -1) a = (p1 && p1.attacks && p1.attacks[0]) || null;
+    else if (sel >= 0 && el._opts[sel] && el._opts[sel].kind === 'atk') a = el._opts[sel].name;
+    if (a && ATTACKS[a] && !ATTACKS[a].special){ startCharge(a); held = a; }
+    paint();
+  }
+  el.addEventListener('pointerdown', function(e){
+    pid = e.pointerId;
+    try { el.setPointerCapture(pid); } catch (_e){}
+    el.classList.add('open');
+    setSel(-1);
+    e.preventDefault();
+  });
+  el.addEventListener('pointermove', function(e){
+    if (e.pointerId !== pid) return;
+    var r = el.getBoundingClientRect();
+    var dx = e.clientX - (r.left + r.width / 2), dy = e.clientY - (r.top + r.height / 2);
+    if (Math.hypot(dx, dy) < 46){ setSel(-1); e.preventDefault(); return; }
+    var deg = Math.atan2(-dy, dx) * 180 / Math.PI;
+    if (deg < 0) deg += 360;
+    var best = -1, err = 26;   // land within 26° of a petal, else it is still the core
+    for (var k = 0; k < el._opts.length; k++){
+      var d = Math.abs(deg - el._opts[k].deg);
+      if (d > 180) d = 360 - d;
+      if (d < err){ err = d; best = k; }
+    }
+    setSel(best === -1 ? -1 : best);
+    e.preventDefault();
+  });
+  function done(e, fire){
+    if (e.pointerId !== pid) return;
+    pid = null;
+    el.classList.remove('open');
+    var s = sel, h = held;
+    sel = -2; held = '';
+    paint();
+    if (!fire){ if (h) cancelChargeFor(h); return; }
+    if (s === -1){
+      var a0 = (p1 && p1.attacks && p1.attacks[0]) || null;
+      if (!a0) return;
+      if (h) releaseCharge(h);
+      else if (ATTACKS[a0] && ATTACKS[a0].special) startCharge(a0);   // fires now
+    } else if (s >= 0 && el._opts[s]){
+      var o = el._opts[s];
+      if (o.kind === 'item') tryUseItem(o.slot);
+      else if (h) releaseCharge(h);
+      else if (ATTACKS[o.name] && ATTACKS[o.name].special) startCharge(o.name);   // fires now
+    }
+  }
+  el.addEventListener('pointerup', function(e){ done(e, true); e.preventDefault(); });
+  el.addEventListener('pointercancel', function(e){ done(e, false); });
 }
 
 function actionTick(dt){

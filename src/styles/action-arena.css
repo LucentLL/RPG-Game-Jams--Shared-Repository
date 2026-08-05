@@ -202,6 +202,24 @@
 
 /* Virtual movement stick (touch). Lives on the SCREEN-SPACE stage (never on the
    rotated plane — its pointer math is 2D); shown only while a battle loop runs. */
+/* THE ATTACK WHEEL (touch) — the bar is a desktop shape; six stacked buttons
+   buried the stick on phones. One thumb button IS the basic attack; drag and
+   the kit fans out, the charge following the thumb. While the wheel serves,
+   the bar hides — that is what un-buries the stick. */
+#actionScreen.act-touch .action-attacks{display:none}
+.act-wheel{position:absolute;right:16px;bottom:16px;width:96px;height:96px;z-index:30;display:none;touch-action:none}
+.act-wheel.active{display:block}
+#actionScreen .act-wheel{bottom:calc(104px + env(safe-area-inset-bottom,0))}
+.aw-core{position:absolute;inset:0;border-radius:50%;border:2px solid rgba(212,168,67,0.6);background:radial-gradient(circle at 40% 35%,rgba(58,44,20,0.92),rgba(20,16,10,0.88));color:var(--gold,#d4a843);font-family:'Cinzel',serif;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;padding:6px;cursor:pointer}
+.aw-core b{font-size:0.9em}
+.aw-core span{font-size:0.52em;letter-spacing:0.04em;text-align:center;line-height:1.1}
+.aw-core.on{background:radial-gradient(circle at 40% 35%,rgba(212,168,67,0.5),rgba(58,44,20,0.9));color:#fff}
+.aw-petal{position:absolute;left:50%;top:50%;min-width:64px;max-width:100px;padding:7px 9px;border-radius:12px;border:1px solid rgba(212,168,67,0.5);background:rgba(15,15,22,0.92);color:#e8e2d4;font-family:'Cinzel',serif;text-align:center;opacity:0;pointer-events:none;transition:opacity 0.12s}
+.act-wheel.open .aw-petal{opacity:1}
+.aw-petal b{color:var(--gold,#d4a843);margin-right:4px;font-size:0.7em}
+.aw-petal span{font-size:0.56em;letter-spacing:0.03em}
+.aw-petal.on{background:rgba(212,168,67,0.32);border-color:var(--gold,#d4a843);color:#fff}
+.aw-petal.aw-item{border-style:dashed}
 .action-joystick{position:absolute;left:14px;bottom:14px;width:112px;height:112px;border-radius:50%;background:radial-gradient(circle,rgba(15,15,22,0.55),rgba(15,15,22,0.3));border:2px solid rgba(212,168,67,0.45);touch-action:none;z-index:30;display:none;align-items:center;justify-content:center}
 .action-joystick.active{display:flex}
 .action-joystick .aj-thumb{width:50px;height:50px;border-radius:50%;background:radial-gradient(circle at 40% 35%,#e0b455,#6b4a1a);border:1px solid rgba(0,0,0,0.45);box-shadow:0 2px 6px rgba(0,0,0,0.45);pointer-events:none}
