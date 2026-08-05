@@ -3641,7 +3641,7 @@ function actionTick(dt){
     // loop keeps rendering (fighters held, arrow flying) until the projectile lands,
     // THEN we stop and cue the result beat. Without this the decisive arrow would be
     // cleared by stopActionLoop the very frame it spawned (never visibly flies).
-    if (_actionProjectiles.length) return; // still airborne — keep looping
+    if (_actionProjectiles.length){ tickLiveProjectiles(dt); if (_actionProjectiles.length) return; } // still airborne — keep looping
     // THE KILLING BLOW GETS TO LAND. The loop used to stop on the very frame a
     // fighter hit zero, which froze the death animation on its first cell and
     // then swapped the screen out from under it. Here the loop keeps turning —
@@ -3654,6 +3654,8 @@ function actionTick(dt){
     _koTimer = setTimeout(endActionBattle, 120);
     return;
   }
+  // Shots in the air move on the same clock as everyone else.
+  tickLiveProjectiles(dt);
   // ─── Player movement (held keys, the stick, the mouse, the pad) ──
   // ONE poll per tick, stashed: readPad's `hit` is an edge against the previous
   // read, so a second call this frame would swallow the press it belongs to.
@@ -3777,13 +3779,14 @@ function actionTick(dt){
 
 function tryActionAttack(attacker, defender, atkName, opts){
   if (!atkName) return;
-  if ((attacker._atkCD||0) > 0) return;
+  if ((attacker._atkCD||0) > 0 && !(opts && opts._boltHit)) return; // a landed bolt paid its cooldown at cast
   if (attacker.hp <= 0 || defender.hp <= 0) return;
   var atk = ATTACKS[atkName]; if (!atk) return;
   var matB = getMateriaBonus(attacker, atk);
   // Charge tier from how long the attack was held (player only, damaging attacks only).
   var chargeTier = 0;
-  if (opts && opts.held != null && attacker === p1 && !atk.special){
+  if (opts && opts._boltHit) chargeTier = opts.chargeTier || 0; // the tier flew with the bolt
+  else if (opts && opts.held != null && attacker === p1 && !atk.special){
     if (opts.held >= 1.1 && chargeTier2Allowed(attacker, atk)) chargeTier = 2;
     else if (opts.held >= 0.45) chargeTier = 1;
   }
@@ -3820,8 +3823,9 @@ function tryActionAttack(attacker, defender, atkName, opts){
     actionLog('☽ '+(attacker===p1?'You':'Opp')+' '+atk.name+' heal '+healed, 'hit');
     return;
   }
-  // You cannot fight from a ladder — both hands are on the rungs.
-  if (attacker._climbing){
+  // You cannot fight from a ladder — both hands are on the rungs. (A bolt
+  // LANDING while you climb still lands — it was loosed from solid ground.)
+  if (attacker._climbing && !(opts && opts._boltHit)){
     if (attacker === p1) actionLog('⚔ '+atk.name+' — both hands on the climb', 'miss');
     return;
   }
@@ -3846,16 +3850,25 @@ function tryActionAttack(attacker, defender, atkName, opts){
     if (attacker === p1) actionLog('⚔ '+atk.name+' — no line of sight', 'miss');
     return;
   }
-  // Face the target as we swing.
-  attacker.facing = Math.atan2(ddx, -ddy);
-  // A bow/crossbow shot draws-and-looses (nockBow); everything else swings (slash).
-  var _wtype = equippedWeaponType(attacker);
-  var _drawsBow = atk.range >= 2 && (_wtype === 'Bow' || _wtype === 'Crossbow');
-  setFighterAnim(attacker, _drawsBow ? 'nockBow' : 'slash');
-  attacker._atkCD = (atk.range > 1 ? 0.95 : 0.7) + (chargeTier ? 0.25 : 0); // a charged swing recovers a touch slower
-  // Ranged attack → loose a projectile that flies to the target (arrow / bolt /
-  // thrown blade, tinted by the attack's element). Melee (range 1) stays hand-to-hand.
-  if (atk.range >= 2) spawnActionProjectile(attacker, defender, atk);
+  if (!(opts && opts._boltHit)){
+    // Face the target as we swing.
+    attacker.facing = Math.atan2(ddx, -ddy);
+    // A bow/crossbow shot draws-and-looses (nockBow); everything else swings (slash).
+    var _wtype = equippedWeaponType(attacker);
+    var _drawsBow = atk.range >= 2 && (_wtype === 'Bow' || _wtype === 'Crossbow');
+    setFighterAnim(attacker, _drawsBow ? 'nockBow' : 'slash');
+    attacker._atkCD = (atk.range > 1 ? 0.95 : 0.7) + (chargeTier ? 0.25 : 0); // a charged swing recovers a touch slower
+    /**
+     * A ranged attack is a THING IN FLIGHT now, not a paid-up result with a
+     * cosmetic streak. The shot leaves the hand here and the ROLL waits at
+     * the far end — the flight calls this same function back with `_boltHit`
+     * when (if!) it arrives. Rock can eat it mid-air and feet can walk out
+     * from under it: the fields' cover and footwork govern the shot itself
+     * now, not just the moment of aiming. Bows, thrown blades and spells all
+     * ride the one rule; only specials stay instant.
+     */
+    if (atk.range >= 2){ spawnLiveProjectile(attacker, defender, atk, atkName, chargeTier); return; }
+  }
   // Roll-to-hit reuses the same stat → modifier → +prof + materia chain.
   // A charged release lands more reliably (+2 to-hit — SS2's "charges connect").
   var sMod = Math.floor((attacker.stats[atk.stat] - 10) / 2);
@@ -3929,6 +3942,71 @@ function spawnActionProjectile(attacker, defender, atk){
   var angDeg = Math.atan2(y1 - y0, x1 - x0) * 180 / Math.PI + PROJ_BASE_ANGLE;
   _actionProjectiles.push({ x0:x0, y0:y0, x1:x1, y1:y1, start: performance.now(), dur:dur, kind:kind, c:c, angDeg:angDeg, el:null });
 }
+
+/** Magic reads by STAT, not by the hand: an INT or WIS attack at range is a
+ *  bolt of its element, whatever weapon is held. */
+function isSpellAttack(atk){ return atk.range >= 2 && (atk.stat === 'INT' || atk.stat === 'WIS'); }
+/** A spell bolt's face: a glowing orb in the element's colour. Procedural on
+ *  purpose — the kits carry arrows and blades but no magic missile, and an
+ *  orb is LIGHT, not linework. (The throwables sheet in RPG Assets is the
+ *  upgrade path once its cells are confirmed by eye.) Cached per element. */
+var _spellOrbs = {};
+function spellOrb(c){
+  if (_spellOrbs[c]) return _spellOrbs[c];
+  var tone = { 4: '#ffb347', 2: '#9fd8ff', 6: '#c99bff' }[c] || '#fff2b0';
+  var cv = document.createElement('canvas'); cv.width = 16; cv.height = 16;
+  var g = cv.getContext('2d');
+  var grad = g.createRadialGradient(8, 8, 1, 8, 8, 7.5);
+  grad.addColorStop(0, '#ffffff');
+  grad.addColorStop(0.35, tone);
+  grad.addColorStop(1, 'rgba(0,0,0,0)');
+  g.fillStyle = grad;
+  g.fillRect(0, 0, 16, 16);
+  return (_spellOrbs[c] = cv);
+}
+/**
+ * A LIVE projectile — a position, a heading and an UNRESOLVED roll, where the
+ * cosmetic streak was two endpoints and a clock. It flies straight along the
+ * line to where the target stood at loose; whether anyone is standing there
+ * when it arrives is the target's business now.
+ */
+function spawnLiveProjectile(attacker, defender, atk, atkName, chargeTier){
+  var dx = defender.ax - attacker.ax, dy = defender.ay - attacker.ay;
+  var d = Math.sqrt(dx*dx + dy*dy) || 1;
+  var spell = isSpellAttack(atk);
+  _actionProjectiles.push({
+    live: true, name: atkName, from: attacker, at: defender,
+    x: attacker.ax, y: attacker.ay, dx: dx / d, dy: dy / d,
+    speed: spell ? 6.5 : 9,                        // tiles/s — a spell reads, an arrow zips
+    flown: 0, maxD: (atk.range || 3) + 2.2,
+    chargeTier: chargeTier || 0,
+    kind: spell ? 'spell' : projectileKindFor(attacker),
+    c: PROJ_ELEMENT_COLOR[atk.type] != null ? PROJ_ELEMENT_COLOR[atk.type] : 0,
+    angDeg: Math.atan2(dy, dx) * 180 / Math.PI + PROJ_BASE_ANGLE,
+    el: null,
+  });
+}
+/** Advance every live shot and settle what it meets: the defender inside half
+ *  a tile resolves the attack THERE (`_boltHit` re-enters tryActionAttack),
+ *  sight-blocking rock eats it, and past its range it is spent sky. */
+function tickLiveProjectiles(dt){
+  for (var i = _actionProjectiles.length - 1; i >= 0; i--){
+    var p = _actionProjectiles[i];
+    if (!p.live) continue;
+    var step = p.speed * dt;
+    p.x += p.dx * step; p.y += p.dy * step; p.flown += step;
+    var tx = Math.floor(p.x), ty = Math.floor(p.y);
+    var rock = _arenaT && _arenaT.blocksSight && _arenaT.blocksSight[ty] && _arenaT.blocksSight[ty][tx];
+    var reach = p.at && p.at.hp > 0 && Math.sqrt((p.at.ax - p.x) * (p.at.ax - p.x) + (p.at.ay - p.y) * (p.at.ay - p.y)) < 0.45;
+    var out = p.x < 0 || p.y < 0 || p.x > ACTION_GS || p.y > ACTION_GS || p.flown > p.maxD;
+    if (reach) tryActionAttack(p.from, p.at, p.name, { _boltHit: true, chargeTier: p.chargeTier });
+    else if (rock){ if (p.from === p1) actionLog('⚔ ' + p.name + ' — the rock takes it', 'miss'); }
+    else if (out){ if (p.from === p1) actionLog('⚔ ' + p.name + ' — streaks wide', 'miss'); }
+    else continue;
+    if (p.el && p.el.parentNode) p.el.parentNode.removeChild(p.el);
+    _actionProjectiles.splice(i, 1);
+  }
+}
 function clearActionProjectiles(){
   for (var i=0;i<_actionProjectiles.length;i++){ var p=_actionProjectiles[i]; if(p.el&&p.el.parentNode) p.el.parentNode.removeChild(p.el); }
   _actionProjectiles.length = 0;
@@ -3939,8 +4017,14 @@ function renderActionProjectiles(now){
   if (!arena) { clearActionProjectiles(); return; }
   for (var i = _actionProjectiles.length - 1; i >= 0; i--){
     var p = _actionProjectiles[i];
-    var t = (now - p.start) / p.dur;
-    if (t >= 1){ if(p.el&&p.el.parentNode) p.el.parentNode.removeChild(p.el); _actionProjectiles.splice(i,1); continue; }
+    var x, y;
+    if (p.live){ x = p.x; y = p.y; }   // the tick owns a live shot's whole life
+    else {
+      var t = (now - p.start) / p.dur;
+      if (t >= 1){ if(p.el&&p.el.parentNode) p.el.parentNode.removeChild(p.el); _actionProjectiles.splice(i,1); continue; }
+      x = p.x0 + (p.x1 - p.x0) * t;
+      y = p.y0 + (p.y1 - p.y0) * t;
+    }
     if (!p.el){
       p.el = document.createElement('div');
       p.el.className = 'action-proj';
@@ -3950,10 +4034,8 @@ function renderActionProjectiles(now){
       arena.appendChild(p.el);
     }
     // Draw the sprite each frame (fills in once the async image loads).
-    var im = getProjectileImg(p.kind, p.c);
+    var im = p.kind === 'spell' ? spellOrb(p.c) : getProjectileImg(p.kind, p.c);
     if (im){ var g = p.el.firstChild.getContext('2d'); g.clearRect(0,0,16,16); g.imageSmoothingEnabled=false; g.drawImage(im,0,0); }
-    var x = p.x0 + (p.x1 - p.x0) * t;
-    var y = p.y0 + (p.y1 - p.y0) * t;
     p.el.style.left = (x / ACTION_GS * 100) + '%';
     p.el.style.top  = (y / ACTION_GS * 100) + '%';
     p.el.style.zIndex = String(4 + Math.round(y * 10)); // above the fighters on its row
@@ -3973,6 +4055,14 @@ if (typeof window !== 'undefined'){
     return { spawned: _actionProjectiles.length };
   };
   window.__projStep = function(now){ renderActionProjectiles(now == null ? performance.now() : now); return _actionProjectiles.length; };
+  // Cast any ATTACKS entry from p1 as if pressed — the live-bolt path included.
+  window.__castTest = function(name, dt){
+    if (!p1 || !p2) return 'no fighters';
+    if (dt != null){ tickLiveProjectiles(dt); }
+    else { p1._atkCD = 0; tryActionAttack(p1, p2, name || 'Lightning Bolt', {}); }
+    return _actionProjectiles.filter(function(p){ return p.live; })
+      .map(function(p){ return { kind: p.kind, x: +p.x.toFixed(2), y: +p.y.toFixed(2), flown: +p.flown.toFixed(2) }; });
+  };
   // Reflect a fighter's live combat state for headless checks (weapon detection,
   // current animation, basic-attack routing) — the same reason __projStep exists.
   window.__fighterState = function(which){
@@ -7414,7 +7504,7 @@ var _actFpBridge={
   terrain:function(){return _arenaT;},
   projectiles:function(){return _actionProjectiles;},
   arenaEl:function(){return document.getElementById('actionArena');},
-  projImg:function(kind,c){return getProjectileImg(kind,c);},
+  projImg:function(kind,c){return kind === 'spell' ? spellOrb(c) : getProjectileImg(kind,c);},
   charge:_actFpCharge,
   tilesBase:TILES_BASE,
 };
