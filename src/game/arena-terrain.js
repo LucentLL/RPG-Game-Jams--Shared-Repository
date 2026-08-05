@@ -105,6 +105,56 @@ export const ARENA_FIELDS = [
       '.........',
     ],
   },
+  {
+    name: 'The Ring',
+    // The dueling chamber (user's posted reference, 2026-08-05): a broken
+    // circle of standing stones, gaps at the cardinals, and one prize perch
+    // dead centre — king of the ring. The whole perimeter stays walkable.
+    grid: [
+      '.........',
+      '..rr.rr..',
+      '.r.....r.',
+      '.r..^..r.',
+      '....L....',
+      '.r.....r.',
+      '.r.....r.',
+      '..rr.rr..',
+      '.........',
+    ],
+  },
+  {
+    name: 'The Gallery',
+    // Facing terraces, and a discovery worth keeping: a ledge NO climb cell
+    // serves is a PILLAR — unclimbable, cover-by-height, pure architecture,
+    // and it costs no new art (the shelf kit already draws its faces).
+    grid: [
+      '^^^......',
+      'L^^......',
+      '.........',
+      '...r.r...',
+      '....^....',
+      '...r.r...',
+      '.........',
+      '......^^L',
+      '......^^^',
+    ],
+  },
+  {
+    name: 'Crossfire Court',
+    // A raised spine down the middle with ladders on BOTH faces, and corner
+    // perches — whoever holds the spine owns the court, until they don't.
+    grid: [
+      '.........',
+      '.^^...r..',
+      '..L......',
+      '.r..^..r.',
+      '...L^L...',
+      '.r..^..r.',
+      '......L..',
+      '..r...^^.',
+      '.........',
+    ],
+  },
 ];
 
 const LEDGE = '^', LADDER = 'L', VINE = 'v', BOULDER = 'r';
@@ -323,6 +373,52 @@ function loadRocks(base) {
   return _rocksImg;
 }
 
+let _ladderArt = null;
+/**
+ * The REAL ladder — the 2019 kit's caveladders sheet, whose left edge carries
+ * a standalone cutout ladder (the rest of the sheet is the same ladder set
+ * into cave-wall tiles). Alpha-trimmed at runtime, the delve's trimBox lesson,
+ * so nobody has to keep pixel coordinates true by hand. One canvas, cached,
+ * shared by every lens: the flat arena stamps it once, first person tiles it
+ * up the shelf. Replaces two procedural paints — the playtest rule is the
+ * owned tilesets, not drawings.
+ */
+export function ladderArt(base) {
+  if (_ladderArt) return _ladderArt;
+  _ladderArt = new Promise((res, rej) => {
+    const im = new Image();
+    im.onload = () => {
+      try {
+        const scan = document.createElement('canvas');
+        scan.width = im.width; scan.height = im.height;
+        const g = scan.getContext('2d', { willReadFrequently: true });
+        g.drawImage(im, 0, 0);
+        // The standalone ladder is everything left of the first backed tile.
+        const W = Math.min(130, im.width), H = im.height;
+        const d = g.getImageData(0, 0, W, H).data;
+        let x0 = W, y0 = H, x1 = -1, y1 = -1;
+        for (let y = 0; y < H; y++) {
+          for (let x = 0; x < W; x++) {
+            if (d[(y * W + x) * 4 + 3] < 12) continue;
+            if (x < x0) x0 = x;
+            if (y < y0) y0 = y;
+            if (x > x1) x1 = x;
+            if (y > y1) y1 = y;
+          }
+        }
+        if (x1 < 0) throw new Error('arena: caveladders scan found nothing');
+        const out = document.createElement('canvas');
+        out.width = x1 - x0 + 1; out.height = y1 - y0 + 1;
+        out.getContext('2d').drawImage(scan, x0, y0, out.width, out.height, 0, 0, out.width, out.height);
+        res(out);
+      } catch (e) { _ladderArt = null; rej(e); }
+    };
+    im.onerror = () => { _ladderArt = null; rej(new Error('arena: caveladders.png failed')); };
+    im.src = base + 'caveladders.png';
+  });
+  return _ladderArt;
+}
+
 /**
  * Bake `field` and hang its geometry + dressing on the arena element.
  * Async (the cliff kit loads over the network); the caller keeps its instant
@@ -356,6 +452,18 @@ export async function mountArenaTerrain(arena, T, tilesBase) {
       g.imageSmoothingEnabled = false;
       g.drawImage(rocks, d.x, d.y, d.w, d.h, 0, 0, d.w, d.h);
       el.appendChild(cv);
+    } else if (p.kind === 'ladder') {
+      // The kit's own wood over the CSS rungs (which stay as the fallback).
+      ladderArt(tilesBase).then((art) => {
+        if (!el.isConnected) return;
+        const cv = document.createElement('canvas');
+        cv.width = art.width; cv.height = art.height;
+        cv.getContext('2d').drawImage(art, 0, 0);
+        cv.style.width = '30px'; cv.style.height = 'auto';
+        el.style.width = '30px'; el.style.height = 'auto';
+        el.style.background = 'none';
+        el.appendChild(cv);
+      }).catch(() => { /* the painted rungs stay */ });
     }
     arena.appendChild(el);
   }

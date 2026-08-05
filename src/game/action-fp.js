@@ -45,6 +45,7 @@
 import { facePanel, apronPanel, standsPanel, cloudsPanel, WALL_DIM, SEG_T } from './tactical-fp.js';
 import { createFpHands, fighterHandsSpec } from './fp-hands.js';
 import { createLook, touchPrimary } from '../platform/input.js';
+import { ladderArt } from './arena-terrain.js';
 import { perspectiveFor, perspRatio, camLean, onView } from '../platform/view-prefs.js';
 
 /** World scale — the delve's, via tactical-fp, so a person is the same size
@@ -322,8 +323,25 @@ function buildDressing(T0) {
       const el = document.createElement('div');
       el.className = 'tfp-q afp-prop afp-flat';
       el.style.cssText = `width:${w}px;height:${h}px;margin-left:${-w / 2}px;margin-top:${-h / 2}px;`
-        + `background-image:url(${p.kind === 'vine' ? vineTex() : ladderTex()});`
         + `transform:translate3d(${cx}px,${base - h / 2}px,${cz}px) rotateY(${FACE_YAW[p.face] || 0}deg)`;
+      if (p.kind === 'vine') {
+        el.style.backgroundImage = `url(${vineTex()})`;
+      } else {
+        // The kit's own wood, tiled up the height of the shelf — caveladders'
+        // cutout in place of four painted rectangles. The paint survives only
+        // as the fallback for a sheet that never arrives.
+        const cv = document.createElement('canvas');
+        const cw = 48, chh = Math.max(1, Math.round(cw * h / w));
+        cv.width = cw; cv.height = chh;
+        cv.style.width = '100%'; cv.style.height = '100%';
+        el.appendChild(cv);
+        ladderArt(V.bridge.tilesBase).then((art) => {
+          const g = cv.getContext('2d');
+          g.imageSmoothingEnabled = false;
+          const th = Math.max(1, Math.round(art.height * cw / art.width));
+          for (let y = 0; y < chh; y += th) g.drawImage(art, 0, y, cw, th);
+        }).catch(() => { el.style.backgroundImage = `url(${ladderTex()})`; });
+      }
       bbs.appendChild(el);
       V.dressing.push({ el });
       continue;
