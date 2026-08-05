@@ -383,31 +383,19 @@ function ensureActors() {
  *  picks its sheet row from `facing`, so subtract the camera's yaw on a
  *  shallow proxy and the fighter shows the camera the side it really shows. */
 /**
- * A FALLEN FIGHTER LIES DOWN.
+ * A FALLEN FIGHTER SHOWS THE SHEET'S OWN DEATH CELL, PLAIN — no fall, no
+ * squash, no roll (playtest verdict 2026-08-05: "they should just use the
+ * designated death position from the character, armor, etc tilesets").
  *
- * The compositor's death pose is the sheet's SLEEP cell — a body drawn from
- * above, lying on the ground, because that is what a top-down game needs. Stood
- * up as a billboard it is a corpse standing at attention, which is what the
- * playtest photographed with the opponent on 0 HP.
- *
- * The delve solved this a while ago and this is that solution, verbatim
- * (delve-fp.js's place()): tip the standee about its FEET and squash it. The
- * origin is already `50% 100%`, so the rotation is a fall rather than a spin,
- * and the squash is the foreshortening of a thing that has gone from facing you
- * to facing the sky. It is not a CSS animation on purpose — this transform is
- * rewritten every frame by the placement below, and the two would fight.
- *
- * Returns 0..1 through the fall, or 0 for anyone still standing.
+ * The previous cut tipped the standee 74° about its feet and foreshortened it
+ * — the delve's creature fold, borrowed verbatim — and the photograph came
+ * back a crumpled sticker on the sand. Same lesson as the crossed solids and
+ * the detached swing, third time now: a synthetic transform faking what the
+ * art should say is always near enough to see and always wrong. The
+ * compositor's death anim IS the designated cell, drawn across every layer of
+ * the outfit; the billboard's whole job is to show it at full size and hold
+ * still.
  */
-const DEATH_MS = 520;
-function fallenBy(f) {
-  const a = f && f.anim;
-  if (!a || a.name !== 'death') return 0;
-  return Math.min(1, Math.max(0, (performance.now() - (a.timer || 0)) / DEATH_MS));
-}
-const fallTf = (t) => (t
-  ? ` rotateZ(${(t * -74).toFixed(1)}deg) scale(${(1 - t * 0.34).toFixed(3)},${(1 - t * 0.66).toFixed(3)})`
-  : '');
 
 function drawActor(f, a, yaw) {
   const gfx = window.__ranchGfx;
@@ -667,8 +655,7 @@ export function actFpFrame() {
     if (self !== a.selfHidden) { a.el.style.visibility = (a.selfHidden = self) ? 'hidden' : ''; }
     if (self) continue;
     const fl = liftAt(T0, f.ax, f.ay);
-    const tf = `translate3d(${(f.ax * T).toFixed(1)}px,${fl.toFixed(1)}px,${(f.ay * T).toFixed(1)}px) rotateY(${(-deg).toFixed(1)}deg)`
-      + fallTf(fallenBy(f));
+    const tf = `translate3d(${(f.ax * T).toFixed(1)}px,${fl.toFixed(1)}px,${(f.ay * T).toFixed(1)}px) rotateY(${(-deg).toFixed(1)}deg)`;
     if (tf !== a.tf) a.el.style.transform = (a.tf = tf);
     const hp = Math.max(0, Math.min(1, f.hp / (f.maxHp || f.hp || 1)));
     const w = (hp * 100).toFixed(0) + '%';
