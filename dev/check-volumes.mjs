@@ -1,6 +1,15 @@
 /**
- * Every authored delve prop, before and after — in tiles and in metres, with a
- * ceiling check, and what the whole lot costs in compositor layers per chart.
+ * THE SIZE LAW, ENFORCED. Every authored prop, in tiles and in player-heights,
+ * with the two facts that must agree checked against each other:
+ *
+ *   1. THE LADDER (user decree 2026-08-06): a prop's height in prop-volume.js
+ *      is a legal multiple of PLAYER_H — 0.125, 0.25, 0.5, 0.75, 1, 1.25,
+ *      1.5, 2, 3 — because "object heights should be related to player
+ *      character sizes", and a human-usable thing is sized for a human.
+ *   2. THE CHART WIDTH (the ONE SIZE FACT every lens draws from) is COMPUTED
+ *      from that height: w = h × (art.w/art.h) × 48. Authoring w by eye is how
+ *      the anvil came to stand eye-high — this script fails on any drift, so
+ *      the drift can never again be silent.
  *
  *     node dev/check-volumes.mjs
  *
@@ -15,7 +24,8 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', 'src', 'guild') + '/';
-const { PROP_VOL, propCell } = await import(new URL('../src/guild/prop-volume.js', import.meta.url));
+const { PROP_VOL, propCell, PLAYER_H, LADDER } =
+  await import(new URL('../src/guild/prop-volume.js', import.meta.url));
 
 /** Pull a balanced literal out of a source file, starting at `open`. */
 function literal(src, startRe, open, close) {
@@ -49,56 +59,82 @@ for (const m of campusSrc.matchAll(/art: '(\w+)',\s+w: (\d+)/g)) props.push({ ar
 const T = 300, K = T / 900, WALL_H = 1260 * K, CEIL = WALL_H / T;   // ceiling, in tiles
 const M = 2.1;   // metres per tile (eye 0.77 tiles ≈ 1.65 m)
 
-const seen = new Map();
-for (const p of props) if (!seen.has(p.art)) seen.set(p.art, p);
+// Sizing must agree within rounding: w is an integer px against the 48px tile,
+// so ±1 px against the exact derivation is the honest tolerance — for EVERY
+// form. (Comparing heights through the aspect instead let a wide crop hide
+// ±4 px of drift and would flag a tall narrow crop at its own correct round.)
+const W_TOL = 1.0;     // px — authored w against the volume-derived spec
 
-const rows = [];
-for (const [name, p] of seen) {
-  const a = ART[name];
-  if (!a) { rows.push({ name, note: 'NO ART' }); continue; }
-  const oldW = (p.w || 48) / 48, oldH = oldW * (a.h / a.w);
-  const v = PROP_VOL[name];
-  let newW = oldW, newH = oldH, newD = 0, form = 'billboard';
-  if (v) {
-    form = v.form;
-    newH = v.h;
-    newW = v.form === 'lie' ? v.d * (a.w / a.h) : v.h * (a.w / a.h);
-    newD = v.d || 0;
-    if (v.form === 'lie') { newD = v.d; }
-  }
-  rows.push({ name, form, oldH, newH, newW, newD, mid: v && v.mid });
+// The props allowed to keep the old billboard sizing: no volume entry, width
+// still the top-down's authored fact. Anything ELSE without a volume is the
+// silent drift this script exists to stop — the law is not opt-in per prop.
+const BILLBOARD_OK = new Set(['treeTall', 'gateArch', 'wagon']);
+
+// EVERY authored width per art, so one object drawn two sizes is caught too.
+const widths = new Map();
+for (const p of props) {
+  if (!widths.has(p.art)) widths.set(p.art, new Set());
+  if (p.w) widths.get(p.art).add(p.w);
 }
 
-const f = (n) => (n == null ? '   -  ' : n.toFixed(2).padStart(6));
-console.log('prop              form        old h   new h   new w   new d    height   over');
-console.log('                              (tiles) (tiles) (tiles) (tiles)  (m)      ceiling?');
-console.log('-'.repeat(84));
-let over = 0, fixed = 0;
-for (const r of rows.sort((x, y) => (x.form || '').localeCompare(y.form || '') || x.name.localeCompare(y.name))) {
-  if (r.note) { console.log(r.name.padEnd(18) + r.note); continue; }
-  const top = (r.mid != null ? r.mid + r.newH / 2 : r.newH);
-  const bad = top > CEIL;
-  if (bad) over++;
-  if (r.oldH > CEIL && !bad) fixed++;
+const bad = [];
+const rows = [];
+for (const [name, ws] of widths) {
+  const a = ART[name];
+  if (!a) { bad.push(`${name}: NO ART`); continue; }
+  const v = PROP_VOL[name];
+  if (ws.size > 1) bad.push(`${name}: authored at ${ws.size} different widths (${[...ws].join(', ')}) — one object, one size`);
+  const w = [...ws][0];
+  if (!v) {
+    if (!BILLBOARD_OK.has(name)) bad.push(`${name}: no PROP_VOL entry and not on the billboard allowlist — author its ladder height`);
+    rows.push({ name, form: 'billboard', w, hChart: (w / 48) * (a.h / a.w) });
+    continue;
+  }
+
+  // The ladder: the authored height is a legal multiple of the player.
+  const rung = v.h / PLAYER_H;
+  const snapped = LADDER.reduce((b, r) => (Math.abs(r - rung) < Math.abs(b - rung) ? r : b));
+  if (Math.abs(snapped - rung) > 0.01) {
+    bad.push(`${name}: h ${v.h.toFixed(3)} tiles is ${rung.toFixed(3)}× the player — off the ladder (nearest ${snapped}×)`);
+  }
+
+  // The chart width agrees with the size it was computed from — the exact
+  // derivation, all three forms, so no aspect can widen the tolerance.
+  const spec = (v.form === 'lie' ? v.d : v.h) * (a.w / a.h) * 48;
+  const hChart = v.form === 'stand' ? (w / 48) * (a.h / a.w) : null;
+  if (Math.abs(w - spec) > W_TOL) {
+    bad.push(`${name}: chart w ${w} but the ${v.form} volume derives ${spec.toFixed(1)}px — re-author w = ${Math.round(spec)}`);
+  }
+
+  // Nothing indoor pierces the roof (outdoor placeables all sit under it too).
+  const top = v.mid != null ? v.mid + v.h / 2 : v.h;
+  if (top > CEIL) bad.push(`${name}: top at ${top.toFixed(2)} tiles is through the ${CEIL.toFixed(2)} ceiling`);
+
+  rows.push({ name, form: v.form, w, rung: snapped, h: v.h, d: v.d, mid: v.mid, hChart });
+}
+
+const f = (n, p = 2) => (n == null ? '    - ' : n.toFixed(p).padStart(6));
+console.log('prop              form        ×player  h(tiles)  h(m)   chart w  w-derived h');
+console.log('-'.repeat(80));
+for (const r of rows.sort((x, y) => (x.rung || 99) - (y.rung || 99) || x.name.localeCompare(y.name))) {
   console.log(
     r.name.padEnd(18) + r.form.padEnd(11)
-    + f(r.oldH) + '  ' + f(r.newH) + '  ' + f(r.newW) + '  ' + f(r.newD)
-    + '   ' + (r.newH * M).toFixed(2).padStart(5) + 'm'
-    + (bad ? '   ** THROUGH THE CEILING' : (r.oldH > CEIL ? '   (was through it)' : '')));
+    + (r.rung != null ? String(r.rung).padStart(6) : '     -') + '  '
+    + f(r.h) + '  ' + (r.h != null ? (r.h * M).toFixed(2).padStart(5) : '    -')
+    + String(r.w ?? '-').padStart(9)
+    + (r.hChart != null ? f(r.hChart) : '      '));
 }
-console.log('-'.repeat(84));
-console.log(`ceiling ${CEIL.toFixed(2)} tiles · ${rows.length} distinct props · `
-  + `${rows.filter((r) => r.form && r.form !== 'billboard').length} given a volume · `
-  + `${fixed} no longer pierce the ceiling · ${over} still do`);
+console.log('-'.repeat(80));
+console.log(`player ${PLAYER_H.toFixed(3)} tiles · ceiling ${CEIL.toFixed(2)} tiles · ${rows.length} distinct props · `
+  + `${rows.filter((r) => r.form !== 'billboard').length} on the ladder · `
+  + `${rows.filter((r) => r.form === 'billboard').length} still billboard-sized (a gap, not a default)`);
 
 // Layer cost is no longer worth tabulating: EVERY furnishing is exactly one
 // quad now — a sprite that turns to face you, a bed flat on the floor, or a
 // portrait flat on a wall. That is Hexen's rule and it is also, by some way,
-// the cheapest of the three things this project tried. The interim box (5
-// quads) and cross (2–3) cost the dormitory 37 and 22 quads of furniture
-// respectively; it is 8 now, one per prop. Assert it rather than print it, so
-// a future form that quietly costs two is a failure and not a footnote.
-const many = [...seen.keys()].filter((n) => {
+// the cheapest of the three things this project tried. Assert it rather than
+// print it, so a future form that quietly costs two is a failure, not a footnote.
+const many = [...widths.keys()].filter((n) => {
   const v = PROP_VOL[n];
   return v && !['stand', 'lie', 'wall'].includes(v.form);
 });
@@ -124,3 +160,11 @@ console.log('  ' + String(onLine).padStart(3) + ' were on a tile boundary');
 console.log('  ' + String(centred).padStart(3) + ' now stand at a tile centre');
 console.log('  ' + String(kept).padStart(3) + ' left as authored (wall-hugging + tabletop nudges)');
 if (stillOff.length) console.log('  ** moved but not centred: ' + stillOff.join(', '));
+
+if (bad.length) {
+  console.log('\n** THE SIZE LAW IS BROKEN:');
+  for (const b of bad) console.log('   ' + b);
+  process.exitCode = 1;
+} else {
+  console.log('\nsize law holds: every height on the ladder, every chart width derived from it.');
+}

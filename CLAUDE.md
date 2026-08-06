@@ -14,6 +14,15 @@ a preview of another. Therefore:
   (`p.w`, px against the 48px tile — what the top-down has always drawn) is
   that fact; every lens DERIVES from it and none may re-author it. A size that
   looks wrong is fixed at the source, never patched per-lens.
+- **THE HEIGHT LADDER (user decree, 2026-08-06).** Object heights are authored
+  relative to THE PLAYER (`PLAYER_H` = 760/900 tiles, prop-volume.js), on the
+  ladder 0.125x · 0.25x · 0.5x · 0.75x · 1x · 1.25x · 1.5x · 2x · 3x — and a
+  thing meant for human use is sized for a human to use (desks at the waist,
+  shelves at the shoulder, a pell as tall as the fighter). The chart width is
+  COMPUTED from the ladder height (`w = h × art aspect × 48`), never eyeballed
+  — that is how an anvil came to stand eye-high. `node dev/check-volumes.mjs`
+  fails on any width that drifts off its rung; run it after touching any prop
+  size.
 - **ONE COLLISION FACT.** A thing blocks the space its art occupies — in every
   lens, no more, no less. "Bigger than the art" collision is a bug by
   definition; so is walking through something you can see.

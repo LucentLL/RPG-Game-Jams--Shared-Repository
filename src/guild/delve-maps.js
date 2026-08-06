@@ -35,6 +35,11 @@ import { buildCampusMap } from './campus.js';
  * Interiors may also carry:
  *   name    the room's title, shown in the HUD (and on arrival)
  *   props   [{art, x, y, w}] upright art.js standees (x centre, y base, px wide)
+ *           `w` is the ONE SIZE FACT every lens draws from — and it is NOT
+ *           free-authored: w = h × (art.w/art.h) × 48, where h is the prop's
+ *           ladder height in prop-volume.js (a multiple of PLAYER_H). A width
+ *           picked for "readability" is how an anvil came to stand eye-high
+ *           (playtest 2026-08-06); dev/check-volumes.mjs fails on any drift.
  *   portals [{x, y, to, at}] walk within 0.8 tiles of (x,y) → map `to` at `at`
  *
  * Creature spawns are explicit `{prey, x, y}` (tile coords; delve.js centers
@@ -372,8 +377,8 @@ export const DELVE_MAPS = {
     ],
     entry: [4.5, 7.3],
     props: [
-      { art: 'teacherDesk', x: 3.5, y: 4, w: 84 }, { art: 'globe', x: 5.5, y: 4, w: 36 },
-      { art: 'gmPortrait', x: 4.5, y: 2.02, w: 64 },
+      { art: 'teacherDesk', x: 3.5, y: 4, w: 35 }, { art: 'globe', x: 5.5, y: 4, w: 21 },
+      { art: 'gmPortrait', x: 4.5, y: 2.02, w: 22 },
     ],
   },
 
@@ -407,9 +412,9 @@ export const DELVE_MAPS = {
     ],
     entry: [9.5, 10.3],
     props: [
-      { art: 'trainDummy', x: 4.5, y: 4, w: 50 }, { art: 'trainDummy', x: 14.5, y: 4, w: 50 },
-      { art: 'trainDummy', x: 4.5, y: 10, w: 50 }, { art: 'trainDummy', x: 14.5, y: 10, w: 50 },
-      { art: 'statue', x: 9.5, y: 7, w: 84 },
+      { art: 'trainDummy', x: 4.5, y: 4, w: 32 }, { art: 'trainDummy', x: 14.5, y: 4, w: 32 },
+      { art: 'trainDummy', x: 4.5, y: 10, w: 32 }, { art: 'trainDummy', x: 14.5, y: 10, w: 32 },
+      { art: 'statue', x: 9.5, y: 7, w: 30 },
     ],
   },
 
@@ -434,9 +439,9 @@ export const DELVE_MAPS = {
     ],
     entry: [5.5, 7.3],
     props: [
-      { art: 'stoneOven', x: 3.5, y: 4, w: 48 }, { art: 'kitchenStove', x: 7.5, y: 4, w: 48 },
-      { art: 'hangingHerbs', x: 5.5, y: 2.02, w: 90 },
-      { art: 'provisionBarrel', x: 2.6, y: 7, w: 40 }, { art: 'breadPile', x: 8.4, y: 7, w: 42 },
+      { art: 'stoneOven', x: 3.5, y: 4, w: 23 }, { art: 'kitchenStove', x: 7.5, y: 4, w: 22 },
+      { art: 'hangingHerbs', x: 5.5, y: 2.02, w: 27 },
+      { art: 'provisionBarrel', x: 2.6, y: 7, w: 20 }, { art: 'breadPile', x: 8.4, y: 7, w: 17 },
     ],
   },
   // ── A SCALE PROBE (2026-07-27) ───────────────────────────────────────────
@@ -466,9 +471,9 @@ export const DELVE_MAPS = {
     props: [
       // The anvil is bare-faced so the piece being refined can be laid on it,
       // and flagged `use` — walk into reach and it offers to be struck.
-      { art: 'anvilBare', x: 5.5, y: 6, w: 84, use: 'anvil', label: 'Work the anvil' },
-      { art: 'forgeFurnace', x: 3.5, y: 4, w: 90 }, { art: 'quenchBarrel', x: 7.5, y: 4, w: 36 },
-      { art: 'tools', x: 5.5, y: 2.02, w: 44 },
+      { art: 'anvilBare', x: 5.5, y: 6, w: 35, use: 'anvil', label: 'Work the anvil' },
+      { art: 'forgeFurnace', x: 3.5, y: 4, w: 32 }, { art: 'quenchBarrel', x: 7.5, y: 4, w: 14 },
+      { art: 'tools', x: 5.5, y: 2.02, w: 18 },
     ],
   },
   //             012345678
@@ -480,7 +485,7 @@ export const DELVE_MAPS = {
       '#B.....B#', //  2
       '#B.f.f.B#', //  3  ← the jar cabinet · the cauldron
       '#B.....B#', //  4
-      '#B.fff.B#', //  5  ← the sales counter
+      '#B..f..B#', //  5  ← the sales counter (one cell — the ladder cut its art to ~1.4 tiles)
       '#B.....B#', //  6
       '#B.....B#', //  7
       '#BBBdBBB#', //  8
@@ -488,14 +493,14 @@ export const DELVE_MAPS = {
     ],
     entry: [4.5, 7.3],
     props: [
-      { art: 'jarCabinet', x: 3.5, y: 4, w: 72 },
+      { art: 'jarCabinet', x: 3.5, y: 4, w: 20 },
       // The cauldron is the WORKABLE station: walk up and brew the week's
       // potion at it, the way the Forge's anvil takes a refine.
-      { art: 'cauldronBoil', x: 5.5, y: 4, w: 60, cls: 'apoth-boil', use: 'cauldron', label: 'Work the cauldron' },
-      { art: 'potionCounter', x: 4.5, y: 6, w: 126 },
+      { art: 'cauldronBoil', x: 5.5, y: 4, w: 32, cls: 'apoth-boil', use: 'cauldron', label: 'Work the cauldron' },
+      { art: 'potionCounter', x: 4.5, y: 6, w: 67 },
       // Wall and floor dressing — no grid cell, so nothing here blocks a walk.
-      { art: 'recipeBanner', x: 4.5, y: 2.04, w: 96 },
-      { art: 'herbBasket', x: 2.6, y: 7, w: 36 }, { art: 'potionGreen', x: 6.4, y: 6.95, w: 20 },
+      { art: 'recipeBanner', x: 4.5, y: 2.04, w: 46 },
+      { art: 'herbBasket', x: 2.6, y: 7, w: 11 }, { art: 'potionGreen', x: 6.4, y: 6.95, w: 8 },
     ],
   },
   //             01234567890
@@ -515,9 +520,9 @@ export const DELVE_MAPS = {
     ],
     entry: [4.5, 7.3],
     props: [
-      { art: 'armorKnight', x: 3.5, y: 4, w: 42 }, { art: 'armorSteel', x: 7.5, y: 4, w: 42 },
-      { art: 'gearCubbies', x: 5.5, y: 2.02, w: 120 },
-      { art: 'storeBarrel', x: 2.6, y: 7, w: 34 }, { art: 'footlocker', x: 8.4, y: 7, w: 50 },
+      { art: 'armorKnight', x: 3.5, y: 4, w: 20 }, { art: 'armorSteel', x: 7.5, y: 4, w: 22 },
+      { art: 'gearCubbies', x: 5.5, y: 2.02, w: 56 },
+      { art: 'storeBarrel', x: 2.6, y: 7, w: 14 }, { art: 'footlocker', x: 8.4, y: 7, w: 11 },
     ],
   },
   //             01234567890
@@ -537,9 +542,9 @@ export const DELVE_MAPS = {
     ],
     entry: [5.5, 7.3],
     props: [
-      { art: 'bed', x: 3.5, y: 4, w: 42 }, { art: 'bunkIron', x: 5.5, y: 4, w: 42 }, { art: 'bed', x: 7.5, y: 4, w: 42 },
-      { art: 'bunkPosted', x: 3.5, y: 6, w: 44 }, { art: 'bed', x: 5.5, y: 6, w: 42 }, { art: 'bunkIron', x: 7.5, y: 6, w: 42 },
-      { art: 'wardrobe', x: 5.5, y: 2.02, w: 80 }, { art: 'bedCandle', x: 8.4, y: 7, w: 18 },
+      { art: 'bed', x: 3.5, y: 4, w: 32 }, { art: 'bunkIron', x: 5.5, y: 4, w: 32 }, { art: 'bed', x: 7.5, y: 4, w: 32 },
+      { art: 'bunkPosted', x: 3.5, y: 6, w: 33 }, { art: 'bed', x: 5.5, y: 6, w: 32 }, { art: 'bunkIron', x: 7.5, y: 6, w: 32 },
+      { art: 'wardrobe', x: 5.5, y: 2.02, w: 30 }, { art: 'bedCandle', x: 8.4, y: 7, w: 9 },
     ],
   },
   // THE ACADEMY IS A TOWER, so it is three rooms stacked, not one wide one —
@@ -564,9 +569,9 @@ export const DELVE_MAPS = {
     ],
     entry: [4.5, 7.3],
     props: [
-      { art: 'lectern', x: 3.5, y: 4, w: 78 },
-      { art: 'classDesk', x: 3.5, y: 6, w: 42 }, { art: 'classDesk', x: 5.5, y: 6, w: 42 },
-      { art: 'lessonBoard', x: 2.6, y: 2.02, w: 66 },
+      { art: 'lectern', x: 3.5, y: 4, w: 47 },
+      { art: 'classDesk', x: 3.5, y: 6, w: 18 }, { art: 'classDesk', x: 5.5, y: 6, w: 18 },
+      { art: 'lessonBoard', x: 2.6, y: 2.02, w: 29 },
     ],
     portals: [{ x: 4.5, y: 1.5, to: 'classroom2', at: [4.5, 7.3], stairs: true }],
   },
@@ -587,9 +592,9 @@ export const DELVE_MAPS = {
     ],
     entry: [4.5, 7.3],
     props: [
-      { art: 'lectern', x: 3.5, y: 4, w: 78 },
-      { art: 'classDesk', x: 3.5, y: 6, w: 42 }, { art: 'classDesk', x: 5.5, y: 6, w: 42 },
-      { art: 'globe', x: 6.4, y: 2.02, w: 36 },
+      { art: 'lectern', x: 3.5, y: 4, w: 47 },
+      { art: 'classDesk', x: 3.5, y: 6, w: 18 }, { art: 'classDesk', x: 5.5, y: 6, w: 18 },
+      { art: 'globe', x: 6.4, y: 2.02, w: 21 },
     ],
     // `enter` so the Third Form remembers THIS floor to come back down to.
     portals: [{ x: 4.5, y: 1.5, to: 'classroom3', at: [4.5, 7.3], enter: true, stairs: true }],
@@ -611,9 +616,9 @@ export const DELVE_MAPS = {
     ],
     entry: [4.5, 7.3],
     props: [
-      { art: 'teacherDesk', x: 3.5, y: 4, w: 90 },
-      { art: 'classDesk', x: 3.5, y: 6, w: 42 }, { art: 'classDesk', x: 5.5, y: 6, w: 42 },
-      { art: 'abacus', x: 6.4, y: 7, w: 38 },
+      { art: 'teacherDesk', x: 3.5, y: 4, w: 35 },
+      { art: 'classDesk', x: 3.5, y: 6, w: 18 }, { art: 'classDesk', x: 5.5, y: 6, w: 18 },
+      { art: 'abacus', x: 6.4, y: 7, w: 12 },
     ],
   },
   //             012345678
@@ -633,13 +638,17 @@ export const DELVE_MAPS = {
     ],
     entry: [4.5, 7.3],
     props: [
-      { art: 'gmBookshelf', x: 3.5, y: 4, w: 84 }, { art: 'gmBanner', x: 5.5, y: 4, w: 40 },
+      { art: 'gmBookshelf', x: 3.5, y: 4, w: 37 }, { art: 'gmBanner', x: 5.5, y: 4, w: 13 },
       // The plans table. Reading what is spread on it opens the Build tab — the
       // estate's only door, and the one place the drawing and the ground you
       // walk are the same object (hall.js readEstatePlan → campus.js).
-      { art: 'gmDesk', x: 4.5, y: 6, w: 110, use: 'estatePlan', label: 'Read the estate plans' },
-      { art: 'gmLedgers', x: 4.0, y: 6.12, w: 34 },
-      { art: 'gmPortrait', x: 2.6, y: 2.02, w: 60 }, { art: 'gmBust', x: 6.4, y: 2.02, w: 30 },
+      { art: 'gmDesk', x: 4.5, y: 6, w: 47, use: 'estatePlan', label: 'Read the estate plans' },
+      // On the desk: inside its footprint in BOTH lenses (restOn stands them on
+      // its top in FP; the top-down draws them over its face). The old anchor
+      // (4.0, 6.12) was laid against the 110px desk and landed on the floor
+      // once the ladder cut the desk to 47.
+      { art: 'gmLedgers', x: 4.35, y: 5.8, w: 9 },
+      { art: 'gmPortrait', x: 2.6, y: 2.02, w: 22 }, { art: 'gmBust', x: 6.4, y: 2.02, w: 23 },
     ],
     portals: [{ x: 4.5, y: 1.5, to: 'guildmaster', at: [4.5, 7.3], stairs: true }],
   },
@@ -650,7 +659,7 @@ export const DELVE_MAPS = {
       '#########', //  0
       '#BBBBBBB#', //  1
       '#B.....B#', //  2
-      '#B.fff.B#', //  3  ← the great desk
+      '#B..f..B#', //  3  ← the great desk (one cell — the ladder cut its art to ~1 tile)
       '#B.....B#', //  4
       '#B.f...B#', //  5  ← the chair
       '#B.....B#', //  6
@@ -662,10 +671,11 @@ export const DELVE_MAPS = {
     props: [
       // The great desk keeps its own copy of the plans — the study is his room,
       // and the hall's table should not be the only place he can think.
-      { art: 'gmDesk', x: 4.5, y: 4, w: 120, use: 'estatePlan', label: 'Read the estate plans' },
-      { art: 'gmLedgers', x: 3.7, y: 4.12, w: 34 },
-      { art: 'gmThrone', x: 3.5, y: 6, w: 32 },
-      { art: 'gmPortrait', x: 2.6, y: 2.02, w: 60 }, { art: 'gmBust', x: 6.4, y: 2.02, w: 30 },
+      { art: 'gmDesk', x: 4.5, y: 4, w: 47, use: 'estatePlan', label: 'Read the estate plans' },
+      { art: 'gmLedgers', x: 4.25, y: 3.8, w: 9 },   // on the desk — same story as the hall's
+
+      { art: 'gmThrone', x: 3.5, y: 6, w: 15 },
+      { art: 'gmPortrait', x: 2.6, y: 2.02, w: 22 }, { art: 'gmBust', x: 6.4, y: 2.02, w: 23 },
     ],
   },
 };

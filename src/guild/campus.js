@@ -49,13 +49,17 @@ export const BUILDING_KINDS = {
   watchtower: { name: 'Watchtower', art: 'bldgLibrary',    px: 238, frac: 0.50, to: null, glyph: '', cost: 1500 },
 };
 
-/** Free-standing dressing you can place and clear. `w` is render px. */
+/** Free-standing dressing you can place and clear. `w` is render px — NOT
+ *  free-authored: w = ladder height (prop-volume.js) × art aspect × 48, same
+ *  law as the chart props, enforced by dev/check-volumes.mjs. The tree is the
+ *  one exception: no volume entry (it stays a billboard by that file's own
+ *  ruling), so its width is still the top-down's authored fact. */
 export const PROP_KINDS = {
-  lampPost:   { name: 'Lamp Post',      art: 'lampPost',   w: 58,  glyph: '', cost: 60 },
-  statue:     { name: 'Statue',         art: 'statue',     w: 90,  glyph: '', cost: 400 },
-  trainDummy: { name: 'Training Dummy', art: 'trainDummy', w: 50,  glyph: '◎', cost: 120 },
-  well:       { name: 'Well',           art: 'well',       w: 96,  glyph: '', cost: 250 },
-  stall:      { name: 'Market Stall',   art: 'stall',      w: 84,  glyph: '', cost: 180 },
+  lampPost:   { name: 'Lamp Post',      art: 'lampPost',   w: 50,  glyph: '', cost: 60 },
+  statue:     { name: 'Statue',         art: 'statue',     w: 30,  glyph: '', cost: 400 },
+  trainDummy: { name: 'Training Dummy', art: 'trainDummy', w: 32,  glyph: '◎', cost: 120 },
+  well:       { name: 'Well',           art: 'well',       w: 38,  glyph: '', cost: 250 },
+  stall:      { name: 'Market Stall',   art: 'stall',      w: 45,  glyph: '', cost: 180 },
   treeTall:   { name: 'Tree',           art: 'treeTall',   w: 96,  glyph: '', cost: 40 },
 };
 

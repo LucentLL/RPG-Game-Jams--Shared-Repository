@@ -27,6 +27,7 @@ import { TILES_BASE, ART_BASE } from '../config/assets.js';
 import { preyById } from './locales.js';
 import { THEMES, DECALS, ORE_KINDS, oreKindAt, mapForLocale, validateMap } from './delve-maps.js';
 import { artSprite } from './art.js';
+import { propVolume } from './prop-volume.js';
 import { readPad, padReset, touchPrimary, onTouchPrimary, PAD } from '../platform/input.js';
 import { claimPad } from '../platform/ui-pad.js';
 
@@ -433,6 +434,23 @@ async function bakeMap(map, theme) {
   // Passability comes in three grains now. `pass`/`tall` are the full-height
   // cells; `solids` the shallow rectangles an upright prop rests on; `height`
   // and `climb` say which LEVEL a cell's floor is and where you may change it.
+  //
+  // ONE COLLISION FACT (CLAUDE.md): a furnishing blocks the space its ART
+  // occupies. The 'f' slab used to span its whole tile, which matched the art
+  // only while chart widths were authored generously; with widths derived from
+  // the ladder heights a barrel is a third of a tile wide, and a full-tile slab
+  // would be two-thirds invisible wall. So an 'f' slab takes its own prop's
+  // drawn width, centred where the art stands. 'r'/'t'/'m' decals keep the full
+  // tile their near-tile-wide art actually covers.
+  const fw = new Map();
+  for (const p of (map.props || [])) {
+    const cx = Math.floor(p.x), cy = Number.isInteger(p.y) ? p.y - 1 : Math.floor(p.y);
+    // Only a prop that OWNS an 'f' cell may narrow it — wall-hung art and
+    // floor dressing land on plain floor and must not leave stray entries a
+    // later chart could collide with a real furnishing's.
+    if (at(cx, cy) !== 'f') continue;
+    fw.set(cx + ',' + cy, { x: p.x, half: Math.max(0.12, Math.min(0.5, (p.w || 48) / 96)) });
+  }
   const pass = [], tall = [], solids = [], height = [], climb = [];
   for (let y = 0; y < rows; y++) {
     pass.push([]); tall.push([]); height.push([]); climb.push([]);
@@ -445,7 +463,11 @@ async function bakeMap(map, theme) {
       tall[y].push(ch === '#' || ch === 'B' || ch === 'b' || ch === 'F');
       height[y].push(ch === LEDGE ? 1 : 0);
       climb[y].push(!!CLIMB[ch]);
-      if (FOOTED[ch]) solids.push({ x0: x, x1: x + 1, y0: y + 1 - SOLID_DEPTH, y1: y + 1 });
+      if (FOOTED[ch]) {
+        const f = ch === 'f' ? fw.get(x + ',' + y) : null;
+        const cx = f ? f.x : x + 0.5, half = f ? f.half : 0.5;
+        solids.push({ x0: cx - half, x1: cx + half, y0: y + 1 - SOLID_DEPTH, y1: y + 1 });
+      }
     }
   }
   // One texture set per theme on the plane. attachTerrain picks by the name each
@@ -714,6 +736,17 @@ function mountScene(prep, entry) {
     // `cls` lets a furnishing carry its own behaviour — the apothecary's
     // cauldron uses it to step through the sheet's four boiling frames.
     const el = addProp(artSprite(p.art, 'dv-furn ' + (p.cls || '')), p.x, p.y, p.w || 48);
+    // A hung thing HANGS. The volume table's `mid` is its centre height on the
+    // wall — the fact the FP lens has always drawn — and the lift is the same
+    // translateZ a ledge rides. Without it the art bottom-anchors on the floor
+    // line, which passed unnoticed only while widths were authored generously:
+    // the ladder-cut portrait drew twenty pixels tall on the skirting.
+    const vol = propVolume(p.art);
+    if (vol && vol.form === 'wall') {
+      el.style.setProperty('--dvlift', (liftAt(p.x, p.y) + (vol.mid - vol.h / 2) * TILE) + 'px');
+      const sh = el.querySelector('.dv-shadow');
+      if (sh) sh.style.display = 'none';   // nothing hung casts a contact shadow
+    }
     if (p.use) D.uses.push({ id: p.use, label: p.label || 'Use', x: p.x, y: p.y, art: p.art, el });
   }
   // Facades on the grounds. A facade is a STANDEE over the room it contains —

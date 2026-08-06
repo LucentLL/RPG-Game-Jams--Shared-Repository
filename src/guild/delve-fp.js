@@ -27,7 +27,7 @@ import { THEMES, LIGHTS, DECALS, ORE_KINDS, oreKindAt, mapForLocale, validateMap
 import { preyById } from './locales.js';
 import { loadImg, SHEET_URLS } from './delve.js';
 import { ART, artSprite, artCropCss, artTexRect, WORN, wornWeapon, wornShield, wornPick } from './art.js';
-import { propVolume, propCell, footprint, REST_SLOP } from './prop-volume.js';
+import { propVolume, propCell, footprint, REST_SLOP, PLAYER_H } from './prop-volume.js';
 import { icon } from './icons.js';
 import { createLook, readPad, padReset, touchPrimary, onTouchPrimary, PAD } from '../platform/input.js';
 import { claimPad } from '../platform/ui-pad.js';
@@ -203,7 +203,9 @@ let L = LIGHTS.dark;
  * height (eye 690, so the top of your head is near there); a Slime Sovereign
  * at 1080 fills the corridor to the ceiling, which is what a sovereign is for.
  */
-const CREATURE_H = { 1: 320 * K, 2: 470 * K, 3: 760 * K, 4: 900 * K, 5: 1080 * K };
+// Rank 3 IS the player's height — the same fact prop-volume.js's ladder hangs
+// every furnishing on, spelled once (760/900 tiles) and multiplied out here.
+const CREATURE_H = { 1: 320 * K, 2: 470 * K, 3: PLAYER_H * T, 4: 900 * K, 5: 1080 * K };
 /**
  * Standing scenery, in world px tall. Sized to the fact that in FIRST PERSON a
  * prop blocks its WHOLE cell (blocked() consults PROP), where the top-down walk
@@ -2009,7 +2011,10 @@ function buildProps(props) {
      * Things resting ON other things block nothing.
      */
     if (!(rest > 0)) {
-      F.propBlockers.push({ x: at.x, y: at.y, r: Math.max(0.12, Math.min(0.42, wTiles * 0.42)) });
+      // The 0.12 floor exists so a small thing still stops a foot — but never
+      // wider than the art's own half-width (a potion bottle is 8px; a blocker
+      // past its glass is "bigger than the art", the law's own definition).
+      F.propBlockers.push({ x: at.x, y: at.y, r: Math.min(wTiles / 2, Math.max(0.12, wTiles * 0.42)) || 0.06 });
     }
     // Under GL a standing thing gets its VOLUME BACK — extruded from its own
     // pixels (@see voxel-sprite.js) — unless the table says `flat` (animated
