@@ -1404,7 +1404,22 @@ function buildGeometry() {
   if (glOn()) {
     // No diff, no veils, no budget: the whole chart every time, which on the
     // estate is one buffer upload of ~1400 quads and about a dozen draw calls.
-    const quads = [...want.values()].map(toGlQuad);
+    let entries = [...want.values()];
+    /**
+     * THIRD PERSON SEES PAST THE ROOF — its camera lives above one the moment
+     * you step indoors, and the playtest photographed the resulting acre of
+     * shingle. The DOM path earned this with a tri-state x-ray; the
+     * rasteriser's answer is blunter: over the shoulder, ceiling surfaces
+     * stay out of the buffer entirely. First person keeps them — a corridor
+     * without its dark is no corridor.
+     */
+    if (F.pov === 3) {
+      const ceils = new Set();
+      if (F.surf && F.surf.ceil) ceils.add(F.surf.ceil);
+      for (const s of Object.values(F.surfByTheme || {})) if (s && s.ceil) ceils.add(s.ceil);
+      if (ceils.size) entries = entries.filter((w) => !ceils.has(w.tex));
+    }
+    const quads = entries.map(toGlQuad);
     /**
      * THE SKIRT — one quad so the world does not visibly END.
      *
@@ -1698,6 +1713,19 @@ function fogSolids() {
  */
 function lieSolid(host, p, vol, fp, base) {
   const w = fp.w * T, d = fp.d * T;
+  // Under GL the bed joins the BUFFER — a DOM solid composites over the
+  // canvas with no depth test, which is how every bed on the estate showed
+  // through every wall on the estate (playtest). Same numbers, real depth.
+  if (glOn()) {
+    const y = base - Math.max(2, vol.h * T * 0.5);
+    const mapId = F.map.id;
+    voxCrop(p.art).then((cv) => {
+      if (!F || !F.gl || F.map.id !== mapId) return;
+      F.propQuads.push({ src: cv, w, h: d, x: fp.cx * T, y, z: fp.cy * T, rot: 'rotateX(90deg)', uv: [0, 0, 1, 1] });
+      buildGeometry();
+    }).catch(() => {});
+    return;
+  }
   const el = solidQuad(host, artCropCss(p.art), w, d,
     fp.cx * T, base - Math.max(2, vol.h * T * 0.5), fp.cy * T, 'rotateX(90deg)', p);
   if (p.label) el.title = p.label;
@@ -1724,6 +1752,17 @@ function wallSolid(host, p, vol, base) {
   const face = WALL_FACE.find(([dx, dy]) => isWall(tx + dx, ty + dy) || isLow(tx + dx, ty + dy));
   if (!face) return false;
   const h = vol.h * T, w = h * (ART[p.art].w / ART[p.art].h);
+  // Same story as lieSolid: hung things join the buffer under GL, so a
+  // portrait is depth-tested against the wall it hangs on.
+  if (glOn()) {
+    const mapId = F.map.id;
+    voxCrop(p.art).then((cv) => {
+      if (!F || !F.gl || F.map.id !== mapId) return;
+      F.propQuads.push({ src: cv, w, h, x: p.x * T, y: base - vol.mid * T, z: p.y * T, rot: face[2], uv: [0, 0, 1, 1] });
+      buildGeometry();
+    }).catch(() => {});
+    return true;
+  }
   const el = solidQuad(host, artCropCss(p.art), w, h,
     p.x * T, base - vol.mid * T, p.y * T, face[2], p);
   if (p.label) el.title = p.label;
@@ -1825,36 +1864,51 @@ function buildDecor(sheets) {
  * costs that prop its volume, nothing else.
  */
 const _voxCache = {};
-function voxelProp(art, tx, ty, vol, lift) {
+/** One pixel-readable crop per ART name, cached, alpha HARD-THRESHOLDED —
+ *  kit art carries anti-aliased edges, and a half-transparent pixel makes a
+ *  half-transparent voxel: the playtest saw the wall through the statue. A
+ *  carved thing is solid or it is air. */
+function voxCrop(art) {
+  if (_voxCache[art]) return _voxCache[art];
   const a = ART[art];
   const rec = artTexRect(art);
-  if (!a || !rec) return;
+  if (!a || !rec) return Promise.reject(new Error('voxel: no art ' + art));
+  _voxCache[art] = new Promise((res, rej) => {
+    const im = new Image();
+    im.crossOrigin = 'anonymous';
+    im.onload = () => {
+      try {
+        const cv = document.createElement('canvas');
+        cv.width = a.w; cv.height = a.h;
+        const g = cv.getContext('2d', { willReadFrequently: true });
+        g.drawImage(im, a.x, a.y, a.w, a.h, 0, 0, a.w, a.h);
+        const id = g.getImageData(0, 0, a.w, a.h);
+        const d = id.data;
+        for (let i = 3; i < d.length; i += 4) d[i] = d[i] < 128 ? 0 : 255;
+        g.putImageData(id, 0, 0);
+        res(cv);
+      } catch (e) { delete _voxCache[art]; rej(e); }
+    };
+    im.onerror = () => { delete _voxCache[art]; rej(new Error('voxel: ' + art + ' sheet failed')); };
+    im.src = rec.url;
+  });
+  return _voxCache[art];
+}
+function voxelProp(art, tx, ty, vol, lift) {
+  const a = ART[art];
+  if (!a) return;
   const mapId = F.map.id;
-  const place = (cv) => {
+  voxCrop(art).then((cv) => {
     if (!F || !F.gl || F.map.id !== mapId) return;   // the map moved on
-    const q = extrudeSprite(cv, {
-      x: tx * T, y: -lift, z: ty * T,
-      h: vol.h * T, d: Math.min(0.6, vol.d || 0.3) * T,
-    });
+    const h = vol.h * T, w = h * (a.w / a.h);
+    // Depth never beats the art's own width — a barrel deeper than it is
+    // wide is a crate wearing a barrel's face (playtest: "too thick").
+    const d = Math.min(Math.min(0.6, vol.d || 0.3) * T, w * 0.8);
+    const q = extrudeSprite(cv, { x: tx * T, y: -lift, z: ty * T, h, d });
     if (!q.length) return;
     F.propQuads.push(...q);
     buildGeometry();   // fold them into the live buffer now, not next stride
-  };
-  if (!_voxCache[art]) {
-    _voxCache[art] = new Promise((res, rej) => {
-      const im = new Image();
-      im.crossOrigin = 'anonymous';
-      im.onload = () => {
-        const cv = document.createElement('canvas');
-        cv.width = a.w; cv.height = a.h;
-        cv.getContext('2d').drawImage(im, a.x, a.y, a.w, a.h, 0, 0, a.w, a.h);
-        res(cv);
-      };
-      im.onerror = () => { delete _voxCache[art]; rej(new Error('voxel: ' + art + ' sheet failed')); };
-      im.src = rec.url;
-    });
-  }
-  _voxCache[art].then(place).catch(() => { /* billboardless, not broken */ });
+  }).catch(() => { /* billboardless, not broken */ });
 }
 
 function buildProps(props) {
@@ -3837,6 +3891,7 @@ function togglePov() {
   F.host.classList.toggle('fp-pov3', true);
   if (!F.self) mountSelf();
   F._wtf = '';                       // force the camera transform to rewrite
+  buildGeometry();                   // the shoulder camera drops the ceilings
   toast('Over the shoulder.');
   povLabel();
 }
