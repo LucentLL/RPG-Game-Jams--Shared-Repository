@@ -279,8 +279,9 @@ function renderSide() {
       if (t || er) renderSide();
     };
   } else if (E.tab === 'props') {
-    pal.innerHTML = `<div class="med-hint">Click an object, then click the cell it stands in. Its size follows
-        the ladder automatically (×player rung shown). Eraser removes it.</div>`
+    pal.innerHTML = `<div class="med-hint">Click an object, then click WHERE it stands — quarter-tile precision,
+        and a small piece dropped on a bigger one rests on top of it. Size follows the ladder
+        automatically (×player rung shown). Eraser removes it.</div>`
       + PROPS.map((p) => `
         <button class="med-chip med-prop ${E.sel.kind === 'prop' && E.sel.id === p.id ? 'on' : ''}" data-prop="${p.id}">
           <span class="med-thumb">${artSprite(p.id, '', 'width:100%')}</span>
@@ -392,6 +393,24 @@ function onMapAction(act, pal) {
   }
 }
 
+/**
+ * Does an anchor at (ax, ay) land ON a taller placed prop — the walk's own
+ * restOn rule (delve-fp buildProps), asked at PLACEMENT time so a resting
+ * prop takes no 'f' cell: ledgers on a desk block nothing, per the charts.
+ */
+function restsOn(ax, ay, art) {
+  const hMe = PROP_VOL[art] ? PROP_VOL[art].h : 0;
+  return E.map.props.some((q) => {
+    const v = PROP_VOL[q.art], a = ART[q.art];
+    if (!v || !a || v.form === 'wall' || v.h <= hMe) return false;
+    const qy = Number.isInteger(q.y) ? q.y - 0.5 : q.y;   // propCell's reading
+    const w = (v.form === 'lie' ? v.d : v.h) * (a.w / a.h);
+    const d = v.d || 0.3;
+    return Math.abs(ax - q.x) <= w / 2 + 0.15
+      && ay >= qy - d / 2 - 0.15 && ay <= qy + d / 2 + 0.15;
+  });
+}
+
 /** Editor-side lint past validateMap's: things a draft walk would trip over. */
 function lint() {
   const out = [];
@@ -483,7 +502,20 @@ function apply(c, rightClick) {
   if (y < 0 || y >= E.map.grid.length || x < 0 || x >= E.map.grid[0].length) return;
   if (rightClick) { setCell(x, y, '.'); return; }
 
-  if (E.sel.kind === 'tile') { setCell(x, y, E.sel.id); return; }
+  if (E.sel.kind === 'tile') {
+    const was = (E.map.grid[y] || '')[x];
+    setCell(x, y, E.sel.id);
+    // The grid is one char per cell, so painting REPLACES — a vine over the
+    // abyss becomes climbable floor, which surprised the first playtest. Say
+    // so, and teach the climb grammar (a link serves a ledge) while at it.
+    if (E.sel.id === 'L' || E.sel.id === 'v') {
+      const ledgeBeside = [[0, -1], [0, 1], [1, 0], [-1, 0]]
+        .some(([dx, dy]) => ((E.map.grid[y + dy] || '')[x + dx]) === '^');
+      if (was === '#') toast('The abyss has no bottom to climb to — this cell is climbable floor now. Hanging INTO the pit comes with the depth update.');
+      else if (!ledgeBeside) toast('A climb links two heights: put a ▲ ledge beside it, or it is just dressed floor.');
+    }
+    return;
+  }
 
   if (E.sel.kind === 'erase') {
     // Nearest thing wins: prop → spawn → portal → tile back to floor.
@@ -520,24 +552,31 @@ function apply(c, rightClick) {
     const art = E.sel.id, vol = PROP_VOL[art];
     const w = lawfulWidth(art);
     if (!vol || w == null) return;
-    // Furniture stands on FLOOR. On a wall it would be entombed, on a ledge
-    // it would block nothing (no 'f' bake) — ONE COLLISION FACT says a thing
-    // blocks the space its art occupies, so the editor refuses the placements
-    // that cannot honor it rather than silently minting walk-through props.
-    const under = (E.map.grid[y] || '')[x];
-    if (under !== '.' && under !== 'f') { toast('Furniture needs a floor cell.'); return; }
+    // FORGE'S FREEDOM, kept tidy: the anchor is where you actually clicked,
+    // snapped to quarter-tiles — the abacus goes mid-cell, the ledgers go ON
+    // the desk. A fractional y is a literal placement in every lens (propCell
+    // only re-reads INTEGER anchors as foot lines), so what you place is what
+    // both cameras draw.
+    const q4 = (v, max) => Math.min(Math.max(Math.round(v * 4) / 4, 0.25), max - 0.25);
+    const ax = q4(c.fx, E.map.grid[0].length);
+    const ay = q4(c.fy, E.map.grid.length);
     if (vol.form === 'wall') {
       // Hung a hair proud of the cell's north edge — the charts' convention
       // (y ~ row + 0.02); wallSolid finds the actual stone from the map.
-      E.map.props.push({ art, x: x + 0.5, y: y + 0.02, w });
-    } else {
-      // Standing/lying: foot line on the cell's south edge, art rising north —
-      // the top-down's own anchor rule. The cell becomes an 'f' so it blocks;
-      // fOwn marks the 'f' as ours so the eraser can tell it from an authored one.
-      const fOwn = under === '.' ? 1 : undefined;
-      E.map.props.push({ art, x: x + 0.5, y: y + 1, w, ...(fOwn ? { fOwn } : {}) });
-      if (fOwn) setCell(x, y, 'f');
+      E.map.props.push({ art, x: ax, y: y + 0.02, w });
+      return;
     }
+    // A small thing dropped on a bigger thing's footprint RESTS on it (the
+    // walk's own restOn rule) — no 'f', it blocks nothing. On open ground,
+    // furniture still needs floor: on a wall it would be entombed, on a ledge
+    // it would block nothing, and ONE COLLISION FACT refuses both.
+    const resting = restsOn(ax, ay, art);
+    const cx = Math.floor(ax), cyRow = Number.isInteger(ay) ? ay - 1 : Math.floor(ay);
+    const under = (E.map.grid[cyRow] || '')[cx];
+    if (!resting && under !== '.' && under !== 'f') { toast('Furniture needs a floor cell — or a bigger piece to rest on.'); return; }
+    const fOwn = !resting && under === '.' ? 1 : undefined;
+    E.map.props.push({ art, x: ax, y: ay, w, ...(fOwn ? { fOwn } : {}) });
+    if (fOwn) setCell(cx, cyRow, 'f');
     return;
   }
 
