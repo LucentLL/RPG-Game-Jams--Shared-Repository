@@ -1974,8 +1974,11 @@ function buildProps(props) {
       // A carved thing OCCUPIES ITS GROUND (playtest: "I'm able to walk
       // through the lamp post") — a slim circle at the base, the post's
       // width and not the lamp's, so you brush past but never through.
-      // Things resting ON other things block nothing.
-      if (!(rest > 0)) {
+      // ONLY where the grid does not already own the collision: furniture
+      // stands on 'f' cells the chart blocks, and a second circle on top of
+      // a blocked cell bled into the lane beside it — the playtest's
+      // invisible desk. Things resting ON other things block nothing.
+      if (!(rest > 0) && !blocked(Math.floor(at.x), Math.floor(at.y))) {
         const bw = vol.d || 0.3;
         F.propBlockers.push({ x: at.x, y: at.y, r: Math.max(0.12, Math.min(0.3, bw * 0.55)) });
       }
