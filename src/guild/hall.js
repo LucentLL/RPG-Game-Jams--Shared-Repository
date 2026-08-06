@@ -38,6 +38,7 @@ import { saveGame, loadGame } from '../platform/storage.js';
 import { playTournamentMatch, playQuestBout, playHuntBout, battleEngineReady } from './battle-bridge.js';
 import { stopRanchLoop } from './ranch.js';
 import { renderBuild, setTool as buildTool, armBuilding, armProp, cellClick as buildCell, buildZoomIn, buildZoomOut, buildZoomFit } from './build-view.js';
+import { openMapEditor, resumeEditor } from './map-editor.js';
 import { artSprite, itemSprite, hasItemSprite } from './art.js';
 import { hasDiorama, roomSceneHTML, bindRoomScene, stopRoomLoop } from './rooms.js';
 import { openDelve, hasDelveMap, isDelveOpen, exitDelve, closeDelveSilent } from './delve.js';
@@ -987,6 +988,48 @@ async function strollRoom(mapId) {
     render();
   }
 }
+/**
+ * THE DRAFTING TABLE — the map editor, and the walk that tests a draft.
+ *
+ * The editor is pure UI over the delve-maps shape; the guild's only jobs are
+ * a walker (a roster hero, or the master when the roster is empty) and the
+ * same stroll hooks every interior walk uses — with onEnd returning to the
+ * DRAFTING TABLE, not the guild, so test-walk-tweak stays one loop. The
+ * openers' launch guard wants the guild screen active, so we flip to it for
+ * the duration of the bake; the delve takes the screen from there.
+ */
+function openEditor() {
+  openMapEditor({
+    walk: editorWalk,
+    back: () => { showScreen('guildScreen'); render({ top: true }); },
+  });
+}
+async function editorWalk(mapId, fp) {
+  const h = heroById(selectedId) || guild.roster[0] || ensureMaster(guild);
+  if (!hasDelveMap(mapId) || isDelveOpen() || isDelveFpOpen()) return;
+  try {
+    const hooks = {
+      locale: { glyph: '', name: 'the drafting table' },
+      fight: async () => null,
+      onKill: () => null,
+      onOre: () => null,
+      companions: () => [],
+      use: () => null,
+      onEnd: () => resumeEditor(),
+    };
+    hooks.swapView = makeSwapView(mapId, h, hooks);
+    showScreen('guildScreen');
+    const ok = await (fp ? openDelveFp(mapId, h, hooks) : openDelve(mapId, h, hooks));
+    // The openers' guards return false without throwing (gfx missing, a race
+    // on an already-open delve, the screen lost mid-bake) — never strand the
+    // author on the guild screen with the drafting table hidden.
+    if (!ok) resumeEditor();
+  } catch (e) {
+    console.warn('editor walk: failed to open', e);
+    resumeEditor();
+  }
+}
+
 /** Sell one unit of a hunted good (pelt / surplus game meat) at the Market. */
 function sellMaterial(matId) {
   if (!HUNT_MATERIALS.includes(matId)) return;
@@ -3511,6 +3554,7 @@ function groundsRoom() {
         </span>
       </div>
       <div class="tourney-lens quest-lens"><button class="tourney-play" onclick="__guild.walkGuild()">Walk the grounds — enter any building through its door</button></div>
+      <div class="tourney-lens quest-lens"><button class="tourney-play" onclick="__guild.mapEditor()">The drafting table — draw a new map, then walk it</button></div>
       <div class="fac-note">The estate plans are spread on the table in the Great Hall (and on the desk in your study). Read them to raise, move or pull down a building.</div>
     </div>
     <div class="plan-card">
@@ -4017,7 +4061,7 @@ export function openGuild() {
 // Every handler no-ops while a week is advancing (a played battle can be mid-flight;
 // rail buttons still render behind the battle screen and would corrupt the in-flight
 // week). practiceBout/advanceAll keep their own internal checks as a second belt.
-const __guildApi = { selectHero, setActivity, setTraining, setIntensity, scheduleAdd, scheduleRemoveAt, scheduleClear, setRecipe, setForgeMode, setRefineItem, setRefineGuard, setStudyMode, setEnchantMode, setSpecialization, setPotion, setDiscipline, usePotion, setDiet, setQuest, setHunt, selectWildsLocale, scoutRegion, setPlayHunt, exploreLocale, strollRoom, walkGuild, masterName, masterBuild, masterReroll, sellMaterial, setElective, setTrackKind, setSecondDiscipline, setCookRecipe, setEnchantPlanet, slotOrb, assignTo, setSpar, equipItem, unequipSlot, setPolicy, provision, buyMaterial, sellItem, buyBook, hire, promoteApprentice, dismissApprentice, bidTuition, sendOffer, rejectApplication, advanceAll, back, openRoom, toggleFullscreen, upgradeFacility, enterTournament, leaveTournament, setPlayNext, setPlayQuest, setAskTournaments, toggleDraw, selectCalEvent, praiseHero, scoldHero, openAssembly, closeAssembly, appointTrainer, practiceBout, openBuild, closeBuild, enterRoomFromRanch, manageMemberFromRanch, buildTool, buildArm: armBuilding, buildArmProp: armProp, buildCell, buildZoomIn, buildZoomOut, buildZoomFit, deskScroll, deskDispatch, makeContact, openGlobe: openWorldGlobe };
+const __guildApi = { selectHero, setActivity, setTraining, setIntensity, scheduleAdd, scheduleRemoveAt, scheduleClear, setRecipe, setForgeMode, setRefineItem, setRefineGuard, setStudyMode, setEnchantMode, setSpecialization, setPotion, setDiscipline, usePotion, setDiet, setQuest, setHunt, selectWildsLocale, scoutRegion, setPlayHunt, exploreLocale, strollRoom, walkGuild, masterName, masterBuild, masterReroll, sellMaterial, setElective, setTrackKind, setSecondDiscipline, setCookRecipe, setEnchantPlanet, slotOrb, assignTo, setSpar, equipItem, unequipSlot, setPolicy, provision, buyMaterial, sellItem, buyBook, hire, promoteApprentice, dismissApprentice, bidTuition, sendOffer, rejectApplication, advanceAll, back, openRoom, toggleFullscreen, upgradeFacility, enterTournament, leaveTournament, setPlayNext, setPlayQuest, setAskTournaments, toggleDraw, selectCalEvent, praiseHero, scoldHero, openAssembly, closeAssembly, appointTrainer, practiceBout, openBuild, closeBuild, enterRoomFromRanch, manageMemberFromRanch, buildTool, buildArm: armBuilding, buildArmProp: armProp, buildCell, buildZoomIn, buildZoomOut, buildZoomFit, deskScroll, deskDispatch, makeContact, openGlobe: openWorldGlobe, mapEditor: openEditor };
 window.__guild = {};
 for (const k in __guildApi) {
   window.__guild[k] = (...args) => {

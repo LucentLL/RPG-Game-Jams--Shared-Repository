@@ -522,6 +522,13 @@ export async function bakeEstate(grid, themeName = 'meadow') {
 /** Bake a map and preload its creature sheets — everything slow, done up front
  *  so the scene build itself is synchronous and can't interleave. */
 const _bakeCache = {};
+/**
+ * Drop a map's cached bake. The cache assumes "every other map is a constant"
+ * (below) — the map EDITOR broke that assumption: a re-saved draft must bake
+ * fresh or the next walk crosses the OLD floor plan under the new props.
+ */
+export function invalidateBake(mapId) { delete _bakeCache[mapId]; }
+
 async function prepMap(mapId) {
   const map = mapForLocale(mapId);
   if (!map) throw new Error('delve: no map ' + mapId);
