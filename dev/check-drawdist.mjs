@@ -84,11 +84,16 @@ function census(map, px, py, yaw, R, light, fogCull, merged) {
     }
     if (onClimb(x, y)) { tally.other += 1; veil(fog); }
     // Dome skirts: a lifted ceiling hangs a strip toward every lower one.
-    if (!light.sky && lv > 0) {
+    // The lift follows the cell's HIGHEST surface (a deck lifts too), exactly
+    // as the emitter reads it. (Region-roomed sky cells are uncensused here —
+    // the census has never modelled the campus's stamped rooms.)
+    const topOf = (x2, y2) => { const s = model.surfacesAt(x2, y2); return s.length ? Math.max(0, s[s.length - 1]) : 0; };
+    const myTop = topOf(x, y);
+    if (!light.sky && myTop > 0) {
       for (const [dx2, dy2] of [[0, 1], [0, -1], [1, 0], [-1, 0]]) {
         const nch = at(x + dx2, y + dy2);
         if (WALL[nch] || nch === '#') continue;
-        if (Math.max(0, heightAt(x + dx2, y + dy2)) < lv) { tally.riser++; veil(fog); }
+        if (topOf(x + dx2, y + dy2) < myTop) { tally.riser++; veil(fog); }
       }
     }
     // Stairs are eight real quads; a deck is a top, an underside and its lips.
@@ -120,7 +125,10 @@ function census(map, px, py, yaw, R, light, fogCull, merged) {
           if (!(WALL[ch] || LOW[ch]) || !open(x + sd.dx, y + sd.dy)) { i++; continue; }
           const h = LOW[ch] ? 1 : 2;
           const nf = Math.min(0, heightAt(x + sd.dx, y + sd.dy));   // face drop joins the run key
-          const uL = light.sky ? 0 : Math.max(0, heightAt(x + sd.dx, y + sd.dy)); // and the dome rise
+          // The dome rise mirrors the emitter's upOf: TALL faces only (never
+          // LOW runs), by the fronted cell's highest surface, indoors only.
+          const topOf2 = (x2, y2) => { const s2 = model.surfacesAt(x2, y2); return s2.length ? Math.max(0, s2[s2.length - 1]) : 0; };
+          const uL = (light.sky || h === 1) ? 0 : topOf2(x + sd.dx, y + sd.dy);
           const fcx = x + 0.5 + sd.dx * 0.5, fcy = y + 0.5 + sd.dy * 0.5;
           let n = 1;
           while (merged && n < CHUNK) {
@@ -129,7 +137,7 @@ function census(map, px, py, yaw, R, light, fogCull, merged) {
             if (!(WALL[c2] || LOW[c2]) || (LOW[c2] ? 1 : 2) !== h) break;
             if (!open(ax + sd.dx, ay + sd.dy)) break;
             if (Math.min(0, heightAt(ax + sd.dx, ay + sd.dy)) !== nf) break;
-            if ((light.sky ? 0 : Math.max(0, heightAt(ax + sd.dx, ay + sd.dy))) !== uL) break;
+            if (((light.sky || h === 1) ? 0 : topOf2(ax + sd.dx, ay + sd.dy)) !== uL) break;
             const w = sd.horiz ? n + 1 : 1, d = sd.horiz ? 1 : n + 1;
             if (!flat(farCorner(sd.horiz ? x : fcx - 0.5, sd.horiz ? fcy - 0.5 : y, w, d))) break;
             n++;

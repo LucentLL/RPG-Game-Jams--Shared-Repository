@@ -536,11 +536,17 @@ async function cutSurfaces(theme, opts = {}) {
     } catch (e) { settle(cv.toDataURL(), false); }
     setTimeout(() => settle(cv.toDataURL(), false), 1200);
   });
+  // Dome skirts: pixel-identical to the finished wall bake, but their OWN
+  // canvas so their texture IDENTITY is their own — the third-person camera
+  // drops ceilings by identity, and the skirts must go with the dome they rim.
+  const skirtCv = document.createElement('canvas');
+  skirtCv.width = wallCv.width; skirtCv.height = wallCv.height;
+  skirtCv.getContext('2d').drawImage(wallCv, 0, 0);
   const out = {
     floor: await urlOf(floor), ceil: await urlOf(ceil), lid: await urlOf(lid),
     wall: await urlOf(wallCv), low: await urlOf(lowCv),
     deckUnder: await urlOf(deckUnder), plank: plank ? await urlOf(plank) : null,
-    bank: await urlOf(bank),
+    bank: await urlOf(bank), skirt: await urlOf(skirtCv),
     ores: null, rail: rail ? await urlOf(rail) : null,
     ladder: ladderTexture(), _urls: urls,
   };
@@ -1245,7 +1251,14 @@ function wantSet(px, py, yaw, R, near, far) {
     // ceilings differ, a SKIRT hangs the gap closed; walls beside lifted
     // cells extend their faces upward the same way (see the wall-run pass).
     const roomed = SC !== S;
-    const ceilLift = Math.max(0, lv) * STEP_PX;
+    // The lift follows the cell's HIGHEST surface — a deck's crossing needs
+    // its headroom exactly as a terrace does; reading only the ground put a
+    // roofed tunnel's crossing walker head-through-the-roof (review).
+    const topSurf = (cx2, cy2) => {
+      const s2 = F.model.surfacesAt(cx2, cy2);
+      return s2.length ? s2[s2.length - 1] : 0;
+    };
+    const ceilLift = Math.max(0, topSurf(x, y)) * STEP_PX;
     if (!L.sky || roomed) {
       add('c' + id, SC.ceil, T, T, wx, -WALL_H - ceilLift, wz, 'rotateX(-90deg)', 'fp-ceil', fog);
       if (ceilLift > 0) {
@@ -1258,10 +1271,13 @@ function wantSet(px, py, yaw, R, near, far) {
         for (const sk of skirts) {
           const nch = at(sk.nx, sk.ny);
           if (WALL[nch] || nch === '#') continue;   // the wall's own extended face closes it
-          const nLift = Math.max(0, heightAt(sk.nx, sk.ny)) * STEP_PX;
+          const nLift = Math.max(0, topSurf(sk.nx, sk.ny)) * STEP_PX;
           if (nLift >= ceilLift) continue;
           const h2 = ceilLift - nLift;
-          add(sk.k + id, SC.wall, T, h2, sk.px, -WALL_H - nLift - h2 / 2, sk.pz, sk.rot, 'fp-wall', fog);
+          // Its own bake, not SC.wall: the shoulder camera drops ceilings by
+          // texture identity and the skirts must go WITH them, or the dome
+          // leaves its rim hanging in the air over the gallery (review).
+          add(sk.k + id, SC.skirt || SC.wall, T, h2, sk.px, -WALL_H - nLift - h2 / 2, sk.pz, sk.rot, 'fp-wall', fog);
         }
       }
     }
@@ -1333,9 +1349,12 @@ function wantSet(px, py, yaw, R, near, far) {
           const w2 = ddx ? T / 4 : T, d2 = ddx ? T : T / 4;
           add('t' + i + id, treadTex, w2, d2, tx2, topY, tz2, 'rotateX(90deg)', 'fp-floor', fog);
           // The riser under this tread's low edge, facing back down the run.
+          // Width is ALWAYS the tile: a quad's own X axis is what rotateY(±90)
+          // swings onto the world's Z, so an east/west riser T wide spans the
+          // cell's full depth — STEP_PX/4 there drew a 36px sliver (review).
           const rx = wx + ddx * (i / 4 - 0.5) * T, rz = wz + ddy * (i / 4 - 0.5) * T;
           const rot = ddy === 1 ? 'rotateY(180deg)' : ddy === -1 ? '' : ddx === 1 ? 'rotateY(-90deg)' : 'rotateY(90deg)';
-          add('t' + (i + 4) + id, SC.low, ddx ? STEP_PX / 4 : T, STEP_PX / 4,
+          add('t' + (i + 4) + id, SC.low, T, STEP_PX / 4,
             ddx ? rx : wx, topY + STEP_PX / 8, ddx ? wz : rz, rot, 'fp-wall', fog);
         }
       }
@@ -1490,8 +1509,11 @@ function wantSet(px, py, yaw, R, near, far) {
         // And a TALL wall fronting a lifted-ceiling cell (a terrace under a
         // roof — the dome) extends UP to meet that ceiling, or the dome shows
         // a gap over every wall it touches. Sky cells lift nothing.
-        const upOf = (ax2, ay2) => (!LOW[ch] && (!L.sky || surfAt(ax2, ay2) !== S)
-          ? Math.max(0, heightAt(ax2, ay2)) * STEP_PX : 0);
+        const upOf = (ax2, ay2) => {
+          if (LOW[ch] || (L.sky && surfAt(ax2, ay2) === S)) return 0;
+          const s2 = F.model.surfacesAt(ax2, ay2);   // highest surface: a deck lifts too
+          return Math.max(0, s2.length ? s2[s2.length - 1] : 0) * STEP_PX;
+        };
         const uL = upOf(x + sd.dx, y + sd.dy);
         // The face's own middle, half a tile off the cell centre toward the gap.
         const fcx = x + 0.5 + sd.dx * 0.5, fcy = y + 0.5 + sd.dy * 0.5;
@@ -1624,8 +1646,13 @@ function buildGeometry() {
      */
     if (F.pov === 3) {
       const ceils = new Set();
-      if (F.surf && F.surf.ceil) ceils.add(F.surf.ceil);
-      for (const s of Object.values(F.surfByTheme || {})) if (s && s.ceil) ceils.add(s.ceil);
+      for (const s of [F.surf, ...Object.values(F.surfByTheme || {})]) {
+        if (!s) continue;
+        if (s.ceil) ceils.add(s.ceil);
+        // A dome's rim goes with its ceiling — dropped skirts alone left
+        // bands of wall floating over the gallery in third person.
+        if (s.skirt) ceils.add(s.skirt);
+      }
       if (ceils.size) entries = entries.filter((w) => !ceils.has(w.tex));
     }
     const quads = entries.map(toGlQuad);
@@ -1926,7 +1953,10 @@ function lieSolid(host, p, vol, fp, base) {
   const w = fp.w * T, d = fp.d * T;
   // A bed blocks like a bed: its own footprint's circle, now that 'f' cells
   // no longer hard-block (@see canStandAt).
-  F.propBlockers.push({ x: fp.cx, y: fp.cy, r: Math.max(0.14, Math.min(0.5, Math.max(fp.w, fp.d) * 0.45)) });
+  F.propBlockers.push({
+    x: fp.cx, y: fp.cy, r: Math.max(0.14, Math.min(0.5, Math.max(fp.w, fp.d) * 0.45)),
+    lv: F.model.surfacesAt(Math.floor(fp.cx), Math.floor(fp.cy))[0] || 0,
+  });
   // Under GL the bed joins the BUFFER — a DOM solid composites over the
   // canvas with no depth test, which is how every bed on the estate showed
   // through every wall on the estate (playtest). Same numbers, real depth.
@@ -2210,7 +2240,10 @@ function buildProps(props) {
       // The 0.12 floor exists so a small thing still stops a foot — but never
       // wider than the art's own half-width (a potion bottle is 8px; a blocker
       // past its glass is "bigger than the art", the law's own definition).
-      F.propBlockers.push({ x: at.x, y: at.y, r: Math.min(wTiles / 2, Math.max(0.12, wTiles * 0.42)) || 0.06 });
+      F.propBlockers.push({
+        x: at.x, y: at.y, r: Math.min(wTiles / 2, Math.max(0.12, wTiles * 0.42)) || 0.06,
+        lv: F.model.surfacesAt(Math.floor(at.x), Math.floor(at.y))[0] || 0,
+      });
     }
     // Under GL a standing thing gets its VOLUME BACK — extruded from its own
     // pixels (@see voxel-sprite.js) — unless the table says `flat` (animated
@@ -2623,9 +2656,13 @@ function mount(prep, entry) {
     return null;
   };
   // Paint rects swap the ground fill only — never rooms (@see floorTexAt).
+  // BACKWARD: the editor stacks later rects on top; the walk must agree.
   F.paints = map.paint || [];
   F.paintThemeAt = (x, y) => {
-    for (const r of F.paints) if (x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h) return r.theme;
+    for (let i = F.paints.length - 1; i >= 0; i--) {
+      const r = F.paints[i];
+      if (x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h) return r.theme;
+    }
     return null;
   };
   // The light comes with the place. Everything that fades — quads, sprites, the

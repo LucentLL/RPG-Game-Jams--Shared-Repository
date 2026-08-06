@@ -45,8 +45,10 @@ import { buildCampusMap } from './campus.js';
  *      height and the ground beneath are DERIVED from the neighbours — a 'u'
  *      through a '2' terrace bores at ground 0 under a rock deck at 2; an 'n'
  *      between terraces hangs planks at their level. The passage below exists
- *      only with real headroom (two steps); a bridge over a ',' creek or over
- *      '#' chasm is deck-only, with the water or the void still under it.
+ *      only with real headroom (two steps); a bridge over a ',' creek is
+ *      deck-only, with the water still under it. A deck may NOT border the
+ *      '#' void — the abyss keeps its bottomlessness (validateMap and the
+ *      editor lint both refuse it; span a trench or open ground instead).
  *
  * Interiors may also carry:
  *   name    the room's title, shown in the HUD (and on arrival)
@@ -318,13 +320,17 @@ export function makeLevelModel(grid) {
   const grounded = (x, y) => !UNGROUND[at(x, y)];
   const ORTH = [[0, -1], [0, 1], [-1, 0], [1, 0]];
 
-  // Pass 1 — plain floors wear their authored level; climbs and decks wait.
+  // Pass 1 — plain floors wear their authored level; climbs, decks and ORE
+  // wait. A vein is rock continuous with the ground it stands in: giving it
+  // a flat 0 let a vein authored in a terrace flank open (when mined) into a
+  // pit no lint could see — it derives like a climb instead, the lowest
+  // ground it touches.
   const floor = [], deck = [];
   for (let y = 0; y < rows; y++) {
     floor.push(new Array(cols).fill(null)); deck.push(new Array(cols).fill(null));
     for (let x = 0; x < cols; x++) {
       const ch = at(x, y);
-      if (!grounded(x, y) || CLIMB_CH[ch] || DECK_CH[ch]) continue;
+      if (!grounded(x, y) || CLIMB_CH[ch] || DECK_CH[ch] || ch === 'o') continue;
       floor[y][x] = FLOOR_LV[ch] || 0;
     }
   }
@@ -338,7 +344,7 @@ export function makeLevelModel(grid) {
     for (let y = 0; y < rows; y++) {
       for (let x = 0; x < cols; x++) {
         const ch = at(x, y);
-        const isClimb = !!CLIMB_CH[ch], isDeck = !!DECK_CH[ch];
+        const isClimb = !!CLIMB_CH[ch] || ch === 'o', isDeck = !!DECK_CH[ch];
         if (!isClimb && !isDeck) continue;
         let lo = null, hi = null;
         for (const [dx, dy] of ORTH) {
@@ -363,12 +369,18 @@ export function makeLevelModel(grid) {
     }
   }
   // A derived cell nothing grounded touches (an authoring hole) stands at 0;
-  // a deck no higher than its ground is just floor and drops the deck.
+  // a deck no higher than its ground is just floor and drops the deck — and
+  // if THAT degenerate stands against the void, it stands nowhere: the model
+  // would otherwise manufacture ground at height over a chasm the painter
+  // has no pixels for (validateMap already warns the author off this shape).
   for (let y = 0; y < rows; y++) {
     for (let x = 0; x < cols; x++) {
       const ch = at(x, y);
-      if ((CLIMB_CH[ch] || DECK_CH[ch]) && floor[y][x] == null) floor[y][x] = 0;
-      if (DECK_CH[ch] && (deck[y][x] == null || deck[y][x] <= floor[y][x])) deck[y][x] = null;
+      if ((CLIMB_CH[ch] || DECK_CH[ch] || ch === 'o') && floor[y][x] == null) floor[y][x] = 0;
+      if (DECK_CH[ch] && (deck[y][x] == null || deck[y][x] <= floor[y][x])) {
+        deck[y][x] = null;
+        if (ORTH.some(([dx, dy]) => at(x + dx, y + dy) === '#')) floor[y][x] = null;
+      }
     }
   }
 

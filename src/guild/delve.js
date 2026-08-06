@@ -518,8 +518,13 @@ async function bakeMap(map, theme) {
   // stamped buildings); a paint rect swaps which sheet the floor fill comes
   // from and touches nothing else, which is why the two must never share a key.
   const paints = map.paint || [];
+  // BACKWARD: the editor draws later rects on top and erases the topmost, so
+  // the last rect painted must be the one the ground actually wears.
   const paintNameAt = (x, y) => {
-    for (const r of paints) if (x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h && THEMES[r.theme]) return r.theme;
+    for (let i = paints.length - 1; i >= 0; i--) {
+      const r = paints[i];
+      if (x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h && THEMES[r.theme]) return r.theme;
+    }
     return null;
   };
   const themeAt = (x, y) => THEMES[paintNameAt(x, y)] || THEMES[themeNameAt(x, y)] || theme;
@@ -588,7 +593,10 @@ async function bakeMap(map, theme) {
       if (FOOTED[ch]) {
         const f = ch === 'f' ? fw.get(x + ',' + y) : null;
         const cx = f ? f.x : x + 0.5, half = f ? f.half : 0.5;
-        solids.push({ x0: cx - half, x1: cx + half, y0: y + 1 - SOLID_DEPTH, y1: y + 1 });
+        solids.push({
+          x0: cx - half, x1: cx + half, y0: y + 1 - SOLID_DEPTH, y1: y + 1,
+          lv: model.surfacesAt(x, y)[0] || 0,   // the ground it stands on
+        });
       }
     }
   }
@@ -1212,12 +1220,23 @@ export function attachTerrain(parent, baked, opts = {}) {
       else if (s.dy === 1) ry = s.y + i / 4;           // rising south
       else { rw = 0.25; rh = 1; rx = s.dx === -1 ? s.x + (3 - i) / 4 : s.x + i / 4; }
       el('dv-block-top', cell(rx, ry, rw, rh) +
-        `background-image:url(${K.top});background-size:100% ${rh === 1 ? 100 : 400}%;` +
+        `background-image:url(${K.top});background-size:${rw === 1 ? 100 : 400}% ${rh === 1 ? 100 : 400}%;` +
         `transform:translateZ(${zTread}px);z-index:${zMode === 'under' ? 2 : base - 6};`);
-      // The riser under this tread's south lip — the only face the camera sees.
+      // The faces the tilted camera actually sees. Rising NORTH: each tread
+      // shows a quarter-block lip at its own south edge. Rising EAST/WEST:
+      // every quarter-tile strip runs the cell's full depth, so its SOUTH
+      // edge stands the strip's whole height over the grade floor — a lip
+      // alone left four shelves floating on a band of nothing (review).
+      // Rising SOUTH needs no face: its risers face away and the top tread
+      // lands flush against the higher ground.
       if (s.dy === -1) {
         el('dv-face', cell(s.x, ry + 0.25, 1, BLOCK_H / 4 / TILE) +
           `background-image:url(${K.face});background-size:100% 400%;` +
+          `transform-origin:50% 0;transform:translateZ(${zTread}px) rotateX(-90deg);z-index:${zMode === 'under' ? 1 : base - 2};`);
+      } else if (s.dx) {
+        const hT2 = ((i + 1) / 4) * BLOCK_H / TILE;    // full strip height, in tile units
+        el('dv-face', cell(rx, s.y + 1, 0.25, hT2) +
+          `background-image:url(${K.face});background-size:400% 100%;` +
           `transform-origin:50% 0;transform:translateZ(${zTread}px) rotateX(-90deg);z-index:${zMode === 'under' ? 1 : base - 2};`);
       }
     }
@@ -1580,9 +1599,14 @@ const tallAt = (x, y) => {
   const tx = Math.floor(x), ty = Math.floor(y);
   return tx < 0 || ty < 0 || tx >= D.cols || ty >= D.rows || D.tall[ty][tx];
 };
-/** Does the feet box clear every prop footprint? */
-const clearOfSolids = (x, y) => {
+/** Does the feet box clear every prop footprint? A body two or more levels
+ *  off a prop's floor clears it entirely — the barrel under the bridge does
+ *  not block the crossing above it (ONE COLLISION FACT, and the FP lens's
+ *  propBlockers rule word for word). Furniture is level-0 by editor law, so
+ *  a solid's own level is the ground of the cell it was baked in. */
+const clearOfSolids = (x, y, lv) => {
   for (const s of D.solids) {
+    if (lv != null && Math.abs(lv - (s.lv || 0)) >= 2) continue;
     if (x > s.x0 - BODY_R && x < s.x1 + BODY_R && y > s.y0 - BODY_R && y < s.y1 + BODY_R) return false;
   }
   return true;
@@ -1636,16 +1660,23 @@ const stepSurface = (lv, fx, fy, x, y) =>
 
 /** The surface the last successful canStand picked — consumed by tryMove. */
 let _pick = null;
-function canStand(x, y, fx, fy, lv) {
+function canStand(x, y, fx, fy, lv, noUnder) {
   _pick = null;
   if (!(passAt(x - BODY_R, y - BODY_R) && passAt(x + BODY_R, y - BODY_R) &&
     passAt(x - BODY_R, y + BODY_R) && passAt(x + BODY_R, y + BODY_R) &&
     // The extra standoff from a wall to the NORTH — see WALL_BACK. Props are
     // exempt (they use `solids`), so you can still tuck in behind an anvil.
     !tallAt(x - BODY_R, y - BODY_R - WALL_BACK) && !tallAt(x + BODY_R, y - BODY_R - WALL_BACK) &&
-    clearOfSolids(x, y))) return false;
+    clearOfSolids(x, y, lv))) return false;
   const pick = stepSurface(lv, fx, fy, x, y);
   if (pick == null) return false;
+  // A body too big for the passage refuses the under-surface of a deck —
+  // tested HERE, per axis, because a pre-check on the combined target let a
+  // slide leak a sovereign beneath the planks one axis at a time (review).
+  if (noUnder) {
+    const dk = D.model.deckAt(Math.floor(x), Math.floor(y));
+    if (dk != null && pick < dk) return false;
+  }
   _pick = pick;
   return true;
 }
@@ -1654,10 +1685,10 @@ function canStand(x, y, fx, fy, lv) {
  *  The step's ORIGIN is passed through so the level rule can see it — a move
  *  tested without one (a spawn, a wander target) is judged on footing alone.
  *  A successful axis commits the body to the surface the law picked. */
-function tryMove(e, dx, dy) {
+function tryMove(e, dx, dy, noUnder) {
   let moved = false;
-  if (dx && canStand(e.x + dx, e.y, e.x, e.y, e.lv)) { e.x += dx; e.lv = _pick; moved = true; }
-  if (dy && canStand(e.x, e.y + dy, e.x, e.y, e.lv)) { e.y += dy; e.lv = _pick; moved = true; }
+  if (dx && canStand(e.x + dx, e.y, e.x, e.y, e.lv, noUnder)) { e.x += dx; e.lv = _pick; moved = true; }
+  if (dy && canStand(e.x, e.y + dy, e.x, e.y, e.lv, noUnder)) { e.y += dy; e.lv = _pick; moved = true; }
   return moved;
 }
 
@@ -1723,13 +1754,10 @@ function moveCreatures(dt) {
     const step = Math.min(d, speed * dt);
     // A big body does not fit beneath a deck: rank 4-5 creatures stand taller
     // than the passage (ONE COLLISION FACT — you fit or you don't), so the
-    // under-surface of a bridge simply is not ground to them.
-    if (rank >= 4) {
-      const nx2 = Math.floor(c.x + dx / d * step), ny2 = Math.floor(c.y + dy / d * step);
-      const dk = D.model.deckAt(nx2, ny2);
-      if (dk != null && (c.lv || 0) < dk) { c.mode = 'idle'; c.t = 1.2; continue; }
-    }
-    const moved = tryMove(c, dx / d * step, dy / d * step);
+    // under-surface of a bridge simply is not ground to them. Enforced inside
+    // the per-axis test — a combined-target pre-check let the slide leak one
+    // axis at a time.
+    const moved = tryMove(c, dx / d * step, dy / d * step, rank >= 4);
     if (!moved) { c.mode = 'idle'; c.t = 0.8 + Math.random() * 1.5; continue; }
     c.row = Math.abs(dx) > Math.abs(dy) ? (dx > 0 ? 2 : 1) : (dy > 0 ? 0 : 3);
   }
@@ -1976,9 +2004,10 @@ async function workAt(useId, opts = {}) {
     piece.innerHTML = opts.itemHTML;
     u.el.querySelector('.dv-up').appendChild(piece);
   }
-  // Step in to the station and square up to it.
-  const standY = u.y + 0.58;
-  if (canStand(u.x, standY)) { p.x = u.x; p.y = standY; }
+  // Step in to the station and square up to it — and COMMIT the surface the
+  // step-in lands on, like every other position write (the teleport crossed a
+  // cell line with a stale lv and the standee rendered on the wrong floor).
+  if (canStand(u.x, u.y + 0.58)) { p.x = u.x; p.y = u.y + 0.58; p.lv = _pick; }
 
   const result = await swingLoop({
     tool: opts.tool, tx: u.x, ty: u.y, beats: opts.beats || 3, anim: opts.anim,

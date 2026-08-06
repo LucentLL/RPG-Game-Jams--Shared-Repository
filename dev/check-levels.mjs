@@ -77,6 +77,15 @@ const ok = (name, got, want) => {
   ok('gallery stair derives 1', m.floorAt(2, 2), 1);
   ok('stair serves the crow\'s nest', m.pickSurface(1, 2, 2, 2, 1), 2);
 }
+{ // A vein is rock continuous with the ground it stands in: authored in a
+  // terrace flank it opens (when mined) AT the terrace, not into a pit.
+  const m = makeLevelModel(['#####', '#^^^#', '#^o^#', '#^^^#', '#####']);
+  ok('flank vein derives the terrace level', m.floorAt(2, 2), 1);
+}
+{ // A grade vein still opens at grade (Hollowvein's seams).
+  const m = makeLevelModel(['#####', '#...#', '#.o.#', '#####']);
+  ok('grade vein derives 0', m.floorAt(2, 2), 0);
+}
 
 // ── 2. The shipped charts must resolve ──────────────────────────────────────
 
