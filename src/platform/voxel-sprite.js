@@ -35,6 +35,75 @@
 const SOLID = 12;
 
 /**
+ * The PLAN-ART extrusion — for things drawn from ABOVE (beds, rugs with
+ * thickness). The elevation extruder stands a picture up and walks its rim;
+ * this lays the picture flat as the TOP at `h` above the floor and drops
+ * WALLS from its silhouette to the ground — a mattress with sides, not a
+ * decal (playtest: "beds are flat in the floor"). Same 1px-strip rim trick:
+ * the plan's border pixels paint the walls.
+ * @param {HTMLCanvasElement} cv  the plan crop, pixel-readable
+ * @param {object} o  { x, z: world centre; y: the FLOOR (negative-up);
+ *                      w, d: world footprint; h: thickness (world px) }
+ */
+export function extrudePlan(cv, o) {
+  const W = cv.width, H = cv.height;
+  let data;
+  try {
+    data = cv.getContext('2d', { willReadFrequently: true }).getImageData(0, 0, W, H).data;
+  } catch (e) { return []; }
+  const solid = (x, y) => x >= 0 && y >= 0 && x < W && y < H && data[(y * W + x) * 4 + 3] >= SOLID;
+  const w = o.w, d = o.d, t = o.h;
+  const sx = w / W, sz = d / H;
+  const x0 = o.x - w / 2, z0 = o.z - d / 2, top = o.y - t;
+  const quads = [{ src: cv, w, h: d, x: o.x, y: top, z: o.z, rot: 'rotateX(90deg)', uv: [0, 0, 1, 1] }];
+  // North/south walls — runs along art rows (art +y is world +z, south).
+  for (let y = 0; y <= H; y++) {
+    for (let x = 0; x < W; x++) {
+      const nFace = solid(x, y) && !solid(x, y - 1);
+      const sFace = solid(x, y - 1) && !solid(x, y);
+      if (!nFace && !sFace) continue;
+      const test = nFace
+        ? (xx) => solid(xx, y) && !solid(xx, y - 1)
+        : (xx) => solid(xx, y - 1) && !solid(xx, y);
+      let x1 = x;
+      while (x1 + 1 < W && test(x1 + 1)) x1++;
+      const runW = (x1 - x + 1) * sx;
+      const v = nFace ? (y + 0.5) / H : (y - 0.5) / H;
+      quads.push({
+        src: cv, w: runW, h: t,
+        x: x0 + x * sx + runW / 2, y: top + t / 2, z: z0 + y * sz,
+        rot: nFace ? 'rotateY(180deg)' : '',
+        uv: [x / W, v, (x1 + 1) / W, v],
+      });
+      x = x1;
+    }
+  }
+  // East/west walls — runs along art columns.
+  for (let x = 0; x <= W; x++) {
+    for (let y = 0; y < H; y++) {
+      const wFace = solid(x, y) && !solid(x - 1, y);
+      const eFace = solid(x - 1, y) && !solid(x, y);
+      if (!wFace && !eFace) continue;
+      const test = wFace
+        ? (yy) => solid(x, yy) && !solid(x - 1, yy)
+        : (yy) => solid(x - 1, yy) && !solid(x, yy);
+      let y1 = y;
+      while (y1 + 1 < H && test(y1 + 1)) y1++;
+      const runD = (y1 - y + 1) * sz;
+      const u = wFace ? (x + 0.5) / W : (x - 0.5) / W;
+      quads.push({
+        src: cv, w: runD, h: t,
+        x: x0 + x * sx, y: top + t / 2, z: z0 + y * sz + runD / 2,
+        rot: wFace ? 'rotateY(-90deg)' : 'rotateY(90deg)',
+        uv: [u, y / H, u, (y1 + 1) / H],
+      });
+      y = y1;
+    }
+  }
+  return quads;
+}
+
+/**
  * Extrude one sprite crop into a quad list.
  * @param {HTMLCanvasElement} cv  the crop, drawn 1:1 and pixel-readable
  * @param {object} o  { x, z: world centre; y: the FOOT line (negative-up);

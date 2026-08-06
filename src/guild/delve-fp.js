@@ -32,7 +32,7 @@ import { icon } from './icons.js';
 import { createLook, readPad, padReset, touchPrimary, onTouchPrimary, PAD } from '../platform/input.js';
 import { claimPad } from '../platform/ui-pad.js';
 import { perspectiveFor, camLean, onView, view, vpStatus } from '../platform/view-prefs.js';
-import { extrudeSprite } from '../platform/voxel-sprite.js';
+import { extrudeSprite, extrudePlan } from '../platform/voxel-sprite.js';
 import { createGlWorld } from '../platform/gl-world.js';
 
 /**
@@ -1733,11 +1733,14 @@ function lieSolid(host, p, vol, fp, base) {
   // canvas with no depth test, which is how every bed on the estate showed
   // through every wall on the estate (playtest). Same numbers, real depth.
   if (glOn()) {
-    const y = base - Math.max(2, vol.h * T * 0.5);
+    // A bed is a MATTRESS, not a rug: the plan art becomes the TOP at the
+    // volume table's own thickness, and walls drop from its silhouette to
+    // the floor (@see extrudePlan — playtest: "beds are flat in the floor").
     const mapId = F.map.id;
     voxCrop(p.art).then((cv) => {
       if (!F || !F.gl || F.map.id !== mapId) return;
-      F.propQuads.push({ src: cv, w, h: d, x: fp.cx * T, y, z: fp.cy * T, rot: 'rotateX(90deg)', uv: [0, 0, 1, 1] });
+      const t = Math.max(8, vol.h * T * 0.85);
+      F.propQuads.push(...extrudePlan(cv, { x: fp.cx * T, y: base, z: fp.cy * T, w, d, h: t }));
       buildGeometry();
     }).catch(() => {});
     return;
@@ -1985,8 +1988,19 @@ function buildProps(props) {
      * the fallback for props no chart gives a width.
      */
     const artRec = ART[p.art];
-    const wTiles = p.w ? p.w / 48 : vol.h * (artRec.w / artRec.h);
-    const hTiles = wTiles * (artRec.h / artRec.w);
+    let wTiles = p.w ? p.w / 48 : vol.h * (artRec.w / artRec.h);
+    let hTiles = wTiles * (artRec.h / artRec.w);
+    // THE LAW SURVIVES THE ROOF: a prop that cannot fit under a ceiling is
+    // scaled WHOLE (width and height together — the aspect is the art's own
+    // truth) and reported, because the real fix is the CHART's number, never
+    // a per-lens patch (playtest: "cabinet extending through the roof").
+    const CEIL_T = 1.35;
+    if (hTiles > CEIL_T) {
+      console.warn(`delve-fp: ${p.art} at ${at.x},${at.y} runs ${hTiles.toFixed(2)} tiles tall — scaled to fit ${CEIL_T}; `
+        + `re-author its chart w (max ≈ ${(CEIL_T * (artRec.w / artRec.h) * 48).toFixed(0)}px)`);
+      const s = CEIL_T / hTiles;
+      hTiles *= s; wTiles *= s;
+    }
     /**
      * ONE COLLISION FACT: a thing blocks the space its ART occupies. The
      * circle's radius comes from the drawn width — canStandAt exempts 'f'
@@ -3346,7 +3360,10 @@ function foeHit(prey, guarding) {
   if (!rollHit((1 / oddsVs(prey)) * guard, 0)) {
     F.haul.dodged = (F.haul.dodged || 0) + 1;
     // Whose whiff it was has to be legible, or the fight is two identical words.
-    floater(guarding() ? 'blocked' : 'dodged', 'fp-parry');
+    // The PARAMETER, not the module function it shadows — calling the boolean
+    // threw on the first evaded blow and killed the frame loop dead: the
+    // playtest's "game freezes as soon as a monster approaches".
+    floater(guarding ? 'blocked' : 'dodged', 'fp-parry');
     return;
   }
   F.haul.taken = (F.haul.taken || 0) + 1;
