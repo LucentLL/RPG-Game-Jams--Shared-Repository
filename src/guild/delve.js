@@ -133,8 +133,10 @@ export function loadImg(url) {
 // ---------------------------------------------------------------------------
 
 /** Full-height cells: chasm, veins, raised blocks, and a building's footprint.
- *  Nothing stands in these, and a walker is held clear of them (WALL_BACK). */
-const BLOCKING = { '#': 1, o: 1, B: 1, b: 1, F: 1 };
+ *  Nothing stands in these, and a walker is held clear of them (WALL_BACK).
+ *  'D' is a door — a wall until it opens; mountScene unblocks the ones this
+ *  session has already opened, exactly as it clears worked seams. */
+const BLOCKING = { '#': 1, o: 1, B: 1, b: 1, F: 1, D: 1 };
 /**
  * A LEDGE — walkable ground one step up. It bakes as the low raised block it
  * already is ('b': a lifted top plus side panels, exactly a shelf), but unlike
@@ -155,7 +157,9 @@ const CLIMB = { L: 'ladder', v: 'vine' };
 const bakeChar = (ch, x, y, model) => {
   if (ch === LEDGE) return 'b';
   if (ch === '2' || ch === '3' || ch === ',') return ch;
-  if (CLIMB_CH[ch] || DECK_CH[ch]) {
+  // A door or a key cell paints as the ground beneath it: the door itself is
+  // live geometry (it has to be able to OPEN), the key a standee.
+  if (CLIMB_CH[ch] || DECK_CH[ch] || ch === 'D' || ch === 'K') {
     const f = model ? model.floorAt(x, y) : 0;
     return (f != null && f < 0) ? ',' : '.';
   }
@@ -442,7 +446,7 @@ function extractGeometry(grid, themeNameAt, extras) {
   // The height vocabulary past the ledge needs the level model and the
   // AUTHORED grid (the render grid has already translated it away). Without
   // them (bakeEstate's bare planes) these lists stay empty, harmlessly.
-  const pits = [], stairs = [], decks = [];
+  const pits = [], stairs = [], decks = [], doors = [];
   const model = extras && extras.model, agrid = extras && extras.agrid;
   if (model && agrid) {
     const aat = (x, y) => (x < 0 || y < 0 || x >= cols || y >= rows) ? '#' : agrid[y][x];
@@ -484,10 +488,11 @@ function extractGeometry(grid, themeNameAt, extras) {
           const lips = ORTH.map(([dx, dy]) => !model.surfacesAt(x + dx, y + dy).includes(d));
           decks.push({ x, y, ch, lv: d, under: lv, lips });
         }
+        if (ch === 'D') doors.push({ x, y, lv: lv || 0 });
       }
     }
   }
-  return { faces, blocks, pits, stairs, decks };
+  return { faces, blocks, pits, stairs, decks, doors };
 }
 
 /**
@@ -589,7 +594,7 @@ async function bakeMap(map, theme) {
       // gap between their feet and the surface they are standing on. Terraces,
       // trenches and decks are all floor for the same reason — the LEVEL law
       // (baked.model) is what actually rules a step, not a wall test.
-      tall[y].push(ch === '#' || ch === 'B' || ch === 'b' || ch === 'F');
+      tall[y].push(ch === '#' || ch === 'B' || ch === 'b' || ch === 'F' || ch === 'D');
       if (FOOTED[ch]) {
         const f = ch === 'f' ? fw.get(x + ',' + y) : null;
         const cx = f ? f.x : x + 0.5, half = f ? f.half : 0.5;
@@ -684,6 +689,59 @@ async function prepMap(mapId) {
     catch (e) { console.warn('delve: creature sheet missing for', s.prey, e); }
   }
   return { map, theme, baked, spawns };
+}
+
+/** A door face, drawn: planked wood under iron bands, with a ring to pull —
+ *  and a keyhole plate on the locked variant. Drawn rather than cropped
+ *  because no owned sheet carries a bare 1×2 door tile (the kits paint doors
+ *  INTO facades); per the art law, that fact is stated here. Cached per state. */
+const _doorUrls = {};
+export function doorTexture(locked) {
+  const key = locked ? 'locked' : 'plain';
+  if (_doorUrls[key]) return _doorUrls[key];
+  const cv = document.createElement('canvas');
+  cv.width = 48; cv.height = 96;
+  const g = cv.getContext('2d');
+  g.fillStyle = '#4a3320';
+  g.fillRect(0, 0, 48, 96);
+  for (let i = 0; i < 4; i++) {                       // planks and their seams
+    g.fillStyle = i % 2 ? '#553b25' : '#4e3622';
+    g.fillRect(i * 12, 0, 12, 96);
+    g.fillStyle = '#33241a';
+    g.fillRect(i * 12, 0, 1, 96);
+  }
+  g.fillStyle = '#2b2f36';                            // iron bands
+  g.fillRect(0, 14, 48, 7);
+  g.fillRect(0, 74, 48, 7);
+  g.fillStyle = '#4a505c';                            // studs
+  for (let x = 5; x < 48; x += 12) { g.fillRect(x, 16, 3, 3); g.fillRect(x, 76, 3, 3); }
+  g.strokeStyle = '#20242c'; g.lineWidth = 3;         // the pull ring
+  g.beginPath(); g.arc(36, 52, 5, 0, 7); g.stroke();
+  if (locked) {                                       // the keyhole plate
+    g.fillStyle = '#8a8f9a';
+    g.fillRect(8, 44, 12, 16);
+    g.fillStyle = '#1c202a';
+    g.beginPath(); g.arc(14, 50, 2.4, 0, 7); g.fill();
+    g.fillRect(13, 50, 2.5, 6);
+  }
+  return (_doorUrls[key] = cv.toDataURL());
+}
+
+/** The key itself, drawn small and gold — a pickup must read at 18px. */
+let _keyUrl = null;
+export function keyTexture() {
+  if (_keyUrl) return _keyUrl;
+  const cv = document.createElement('canvas');
+  cv.width = 24; cv.height = 24;
+  const g = cv.getContext('2d');
+  g.strokeStyle = '#d8a83c'; g.lineWidth = 3;
+  g.beginPath(); g.arc(8, 8, 4.5, 0, 7); g.stroke();   // the bow
+  g.fillStyle = '#d8a83c';
+  g.fillRect(11, 7, 10, 3);                             // the shaft
+  g.fillRect(17, 10, 3, 4); g.fillRect(13, 10, 3, 3);   // the wards
+  g.fillStyle = '#f2d27a';
+  g.fillRect(11, 7, 10, 1);                             // a glint along the top
+  return (_keyUrl = cv.toDataURL());
 }
 
 /** Shingles for the gabled roofs — drawn, cached, tiled at 48px. */
@@ -831,12 +889,25 @@ function mountScene(prep, entry) {
   // tops ('2'/'3' terraces, decks) carry their level: the fade must never
   // fire for the walker standing ON them, only for one hidden BEHIND or
   // BENEATH — updateXray reads topLv/deck against the walker's committed lv.
-  D.decks = [];
+  D.decks = []; D.doors = []; D.keyCells = [];
   // Which way each stair cell rises — liftFor tracks feet along the treads.
   D.stairDirs = new Map((baked.stairs || []).map((s) => [s.x + ',' + s.y, [s.dx, s.dy]]));
   for (const b of attachTerrain(field, baked, { zMode: 'y' })) {
     if (b.deck) {
       D.decks.push({ x: b.x, y: b.y, lv: b.deck.lv, els: b.els, on: 0 });
+      continue;
+    }
+    if (b.doorAt) {
+      // Doors wired to the session's ledger: locked by the chart, re-opened
+      // if this session already opened them (a portal must not shut them).
+      const key = map.id + ':' + b.x + ',' + b.y;
+      const rec = {
+        x: b.x, y: b.y, lv: b.doorAt.lv, els: b.els, key, open: false, warned: 0,
+        locked: (map.locks || []).some(([lx, ly]) => lx === b.x && ly === b.y),
+      };
+      if (rec.locked) b.els[0].style.backgroundImage = `url(${doorTexture(true)})`;
+      D.doors.push(rec);
+      if (D.opened.has(key)) openDoorCell(rec);
       continue;
     }
     if (b.h <= TILE) continue;
@@ -871,6 +942,11 @@ function mountScene(prep, entry) {
       if (ch === 's' || ch === 'w' || ch === 'd') D.exit = { x: x + 0.5, y: y + 0.5, lv: (baked.model.surfacesAt(x, y)[0] || 0) };
       // The thing you climb, standing against the face of the ledge it serves.
       if (CLIMB[ch]) addProp(`<span class="dv-${CLIMB[ch]}"></span>`, x + 0.5, y + 1, 30);
+      // A key still waiting to be taken (a taken one stays taken — the ledger).
+      if (ch === 'K' && !D.keysTaken.has(map.id + ':' + x + ',' + y)) {
+        const el = addProp(`<img src="${keyTexture()}" style="width:100%;image-rendering:pixelated" alt="">`, x + 0.5, y + 0.9, 18);
+        D.keyCells.push({ x, y, el, key: map.id + ':' + x + ',' + y, taken: false });
+      }
       if (ch === 'w') addProp(artSprite('wagon', 'dv-wagon'), x + 0.5, y + 1, 82);
       else if (ch === 't' && map.theme === 'meadow') addProp(artSprite('treeTall', 'dv-tree'), x + 0.5, y + 1, 96);
       else if (ch === 't') addPropCanvas('stalag', baked.sheets, x + 0.5, y + 0.97);
@@ -1012,6 +1088,10 @@ export async function openDelve(localeId, member, hooks, carry) {
       player: null, creatures: [], ores: [], portals: [], companions: [],
       exit: null, exitArmed: false, portalArmed: false, settleUntil: 0,
       mined: new Set(),
+      // The doors this session has opened, the keys it has lifted and still
+      // carries — the same ledger shape as `mined`, and it crosses portals
+      // and view swaps the same way.
+      opened: new Set(), keysTaken: new Set(), keyCount: 0,
       // Where the way out leads. Walking into a building pushes the spot you
       // stepped in from, so its door puts you back on the grounds instead of
       // ending the walk. Empty = the exit really is the way home.
@@ -1023,6 +1103,9 @@ export async function openDelve(localeId, member, hooks, carry) {
     if (carry) {
       D.stack = (carry.stack || []).slice();
       D.mined = new Set(carry.mined || []);
+      D.opened = new Set(carry.opened || []);
+      D.keysTaken = new Set(carry.keysTaken || []);
+      D.keyCount = carry.keyCount || 0;
       if (carry.haul) D.haul = carry.haul;
     }
     // From here the session object exists, so a throw would leave a half-built
@@ -1272,6 +1355,23 @@ export function attachTerrain(parent, baked, opts = {}) {
         `transform-origin:100% 50%;transform:translateZ(${zTop}px) rotateY(-90deg);z-index:${zDeck};`));
     }
     blocks.push({ x: d.x, y: d.y, h: d.lv * BLOCK_H, els, deck: { lv: d.lv, under: d.under } });
+  }
+  // Doors — walls that will open. Each is a tall slab wearing the drawn door
+  // face (FIRST el — mountScene swaps it for the locked variant), standing at
+  // its derived floor. State is mountScene's business; this only builds wood.
+  for (const d of (baked.doors || [])) {
+    const hD = (tex.block.B || tex.block.b).h;
+    const lift = d.lv * BLOCK_H;
+    const zDoor = 10 + (d.y + 1) * TILE - 2;
+    const els = [
+      el('dv-face dv-door', cell(d.x, d.y + 1, 1, hD / TILE) +
+        `background-image:url(${doorTexture(false)});background-size:100% 100%;` +
+        `transform-origin:50% 0;transform:translateZ(${lift + hD}px) rotateX(-90deg);z-index:${zDoor};`),
+      el('dv-block-top', cell(d.x, d.y, 1, 1) +
+        `background-image:url(${(tex.block.B || tex.block.b).top});background-size:100% 100%;` +
+        `transform:translateZ(${lift + hD}px);z-index:${zDoor - 4};`),
+    ];
+    blocks.push({ x: d.x, y: d.y, h: hD, els, doorAt: { lv: d.lv } });
   }
   return blocks;
 }
@@ -2067,6 +2167,49 @@ function checkPortals() {
   for (const q of D.portals) if (near(q) < 0.8 && level(q)) { usePortal(q); return; }
 }
 
+/** Open a door NOW: the ledger, the way through, and the wood fading back.
+ *  Passability and the tall standoff both open — a door is a wall until it
+ *  is not one (per-session copies, so the bake cache never learns this). */
+function openDoorCell(d) {
+  d.open = true;
+  D.opened.add(d.key);
+  D.pass[d.y][d.x] = true;
+  D.tall[d.y][d.x] = false;
+  for (const el of d.els) el.classList.add('dv-gone');
+}
+
+/** Keys are taken by walking over them; doors open by walking up to them —
+ *  the delve's grammar for both (a vein is bumped, a portal approached).
+ *  Both level with the walker, and a locked door asks for a key ONCE per
+ *  approach rather than nagging every frame. */
+function checkDoorsAndKeys() {
+  if (D.working || D.fighting || D.transiting || D.ended) return;
+  const p = D.player;
+  for (const k of D.keyCells) {
+    if (k.taken) continue;
+    if (Math.abs((p.lv || 0) - groundAt(k.x + 0.5, k.y + 0.5)) > 0.5) continue;
+    if (Math.hypot(k.x + 0.5 - p.x, k.y + 0.5 - p.y) < 0.6) {
+      k.taken = true; D.keysTaken.add(k.key); D.keyCount++;
+      k.el.remove();
+      toast(`A key — worn iron, still warm. (${D.keyCount} carried)`);
+    }
+  }
+  for (const d of D.doors) {
+    if (d.open) continue;
+    const dist = Math.hypot(d.x + 0.5 - p.x, d.y + 0.5 - p.y);
+    if (dist > 1.4) { d.warned = 0; continue; }
+    if (dist > 0.95) continue;
+    if (Math.abs((p.lv || 0) - d.lv) > 0.5) continue;
+    if (d.locked && D.keyCount < 1) {
+      if (!d.warned) { d.warned = 1; toast('Locked. Somewhere there is a key.'); }
+      continue;
+    }
+    if (d.locked) { D.keyCount--; toast('The key turns — the lock gives.'); }
+    else toast('The door swings open.');
+    openDoorCell(d);
+  }
+}
+
 function checkEncounters() {
   const p = D.player;
   for (const c of D.creatures) {
@@ -2222,6 +2365,7 @@ function stepSim(now) {
     moveCreatures(dt);
     moveCompanions(dt);
     checkOres();
+    checkDoorsAndKeys();
     if (!settling) checkExit();
     if (!settling && !D.ended) checkPortals();
     if (D.grace) {
@@ -2339,6 +2483,7 @@ function swapToFp() {
   D.transiting = true;   // freeze the sim while the other view bakes
   const carry = {
     swap: true, mapId: D.map.id, at: [D.player.x, D.player.y], lev: D.player.lv,
+    opened: [...D.opened], keysTaken: [...D.keysTaken], keyCount: D.keyCount,
     // The FACING crosses too — the lenses are 1:1 by decree, so the crawler
     // must open looking where the walker was looking, not down the openest run.
     dir: Math.round((((D.player.actor.facing * 180 / Math.PI) % 360) + 360) % 360 / 45) % 8,

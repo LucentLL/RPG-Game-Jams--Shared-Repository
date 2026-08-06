@@ -25,7 +25,7 @@
 import { ART_BASE } from '../config/assets.js';
 import { THEMES, LIGHTS, DECALS, ORE_KINDS, oreKindAt, mapForLocale, validateMap, makeLevelModel, DECK_CH } from './delve-maps.js';
 import { preyById } from './locales.js';
-import { loadImg, SHEET_URLS } from './delve.js';
+import { loadImg, SHEET_URLS, doorTexture, keyTexture } from './delve.js';
 import { ART, artSprite, artCropCss, artTexRect, WORN, wornWeapon, wornShield, wornPick } from './art.js';
 import { propVolume, propCell, footprint, REST_SLOP, PLAYER_H } from './prop-volume.js';
 import { icon } from './icons.js';
@@ -281,7 +281,10 @@ const REGEN_COST = 8, REGEN_FLOOR = 40;     // and every bout lowers the ceiling
 
 /** Cells that are a full wall you cannot see over. 'o' is an ore face — a wall
  *  made of the thing you want, which is why you mine it by walking into it. */
-const WALL = { '#': 1, B: 1, F: 1, o: 1 };
+// 'D' is a door: a wall while shut. Opening it rewrites the session grid
+// ('D' → '.'), the same move a worked seam makes — so every consumer of the
+// chars (blocked, wall runs, the automap) agrees without asking twice.
+const WALL = { '#': 1, B: 1, F: 1, o: 1, D: 1 };
 /** Waist-high: blocks the step, does not block the view. */
 const LOW = { b: 1 };
 /** Standing props — the floor stays open under them and they draw as billboards. */
@@ -1481,7 +1484,8 @@ function wantSet(px, py, yaw, R, near, far) {
   const wallTex = (x, y) => {
     const ch = at(x, y), SC = surfAt(x, y);
     return ch === 'o' ? ((S.ores && S.ores[oreKindAt(x, y)]) || SC.wall)
-      : (LOW[ch] ? SC.low : SC.wall);
+      : ch === 'D' ? doorTexture(F.locks.has(x + ',' + y))
+        : (LOW[ch] ? SC.low : SC.wall);
   };
   const open = (x, y) => !WALL[at(x, y)] && !LOW[at(x, y)];
   // key, the neighbour a face looks at, its rotation, and where the plane sits.
@@ -2039,6 +2043,14 @@ function buildDecor(sheets) {
           const name = pick(theme);
           decalBillboard(sheets, name, x + 0.5, y + 0.5, DECOR_H[name] || 700 * K);
         }
+      }
+      // A key waiting on its cell — taken ones stay taken (the ledger).
+      if (ch === 'K' && !F.keysTaken.has(map.id + ':' + x + ',' + y)) {
+        const el = addBillboard('fp-marker fpm-key',
+          `<img src="${keyTexture()}" style="width:40%;image-rendering:pixelated" alt=""><span class="fpm-label">A key</span>`,
+          560 * K, 560 * K);
+        standDecor(el, x + 0.5, y + 0.5);
+        F.keyCells.push({ x, y, el, key: map.id + ':' + x + ',' + y, taken: false });
       }
       const sign = EXIT_SIGN[ch];
       if (sign || ch === '+') {
@@ -2678,6 +2690,9 @@ function mount(prep, entry) {
   mountSky();
   F.cols = map.grid[0].length; F.rows = map.grid.length;
   F.mined = F.mined || new Set();
+  F.opened = F.opened || new Set();
+  F.keysTaken = F.keysTaken || new Set();
+  F.keyCount = F.keyCount || 0;
   // A face already worked stays worked. `map.grid` is the module's own copy and
   // is never mutated, so coming back through a door would otherwise restore the
   // seam as solid rock that mineOre then refuses to touch again — a wall with no
@@ -2716,6 +2731,11 @@ function mount(prep, entry) {
   F.yawQ = Math.round(F.yaw / YAW_Q);                     // and neither does the cone
   F.seen.add(F.map.id + ':' + F.cellKey);                 // you have seen where you stand
   F.creatures = []; F.decor = []; F.solids = []; F.doors = []; F.shots = []; F.armed = false;
+  F.keyCells = [];
+  // The chart's locks, and the doors this session already opened — the grid
+  // rewrite mirrors the worked-seam one F.grid was born with.
+  F.locks = new Set((map.locks || []).map(([lx, ly]) => lx + ',' + ly));
+  F.grid = F.grid.map((row, y) => row.replace(/D/g, (m, x) => (F.opened.has(map.id + ':' + x + ',' + y) ? '.' : m)));
   F.settleUntil = performance.now() + 350;   // delve.js's, not the old STEP_MS's
 
   const stage = F.host.querySelector('.fp-stage');
@@ -2836,6 +2856,9 @@ export async function openDelveFp(localeId, member, hooks, carry) {
     if (carry) {
       F.stack = (carry.stack || []).slice();
       F.mined = new Set(carry.mined || []);
+      F.opened = new Set(carry.opened || []);
+      F.keysTaken = new Set(carry.keysTaken || []);
+      F.keyCount = carry.keyCount || 0;
       if (carry.haul) F.haul = { kills: {}, gold: 0, mats: {}, field: 0, bouts: 0, swings: 0, ...carry.haul };
     }
     try {
@@ -3257,6 +3280,8 @@ function steer(dt) {
   // A pick reaches the vein you are level with (±1 step), not one a storey off.
   if (hit && at(hit.x, hit.y) === 'o'
     && Math.abs((F.lv || 0) - heightAt(hit.x, hit.y)) <= 1) mineOre(hit.x, hit.y);
+  // A shut door is worked the same way — by walking into it.
+  else if (hit && at(hit.x, hit.y) === 'D') openDoor(hit.x, hit.y);
 
   // The four smoothed values, each with a hard-zero threshold so an idle frame
   // still compares equal and writes nothing — that guard IS the mobile budget.
@@ -3852,6 +3877,44 @@ function updateVitals() {
 
 /** Work a vein out of the wall in front of you. The face becomes floor, so the
  *  seam you broke is the way on — a mine opens up as you take it apart. */
+/**
+ * Work a door you walked into. The step law vets the doorstep first — a door
+ * in a terrace wall does not open for a body a level below it — then a lock
+ * asks for a key, and an opening rewrites the session grid exactly as a
+ * worked seam does: every consumer of the chars agrees at once.
+ */
+function openDoor(x, y) {
+  const key = F.map.id + ':' + x + ',' + y;
+  if (F.opened.has(key)) return;
+  if (F.model.pickSurface(F.lv != null ? F.lv : 0, Math.floor(F.px), Math.floor(F.py), x, y) == null) return;
+  if (F.locks.has(x + ',' + y) && F.keyCount < 1) {
+    const now = performance.now();
+    if (!F._lockNagAt || now - F._lockNagAt > 1600) {
+      F._lockNagAt = now;
+      toast('Locked. Somewhere there is a key.');
+    }
+    return;
+  }
+  if (F.locks.has(x + ',' + y)) { F.keyCount--; toast('The key turns — the lock gives.'); }
+  else toast('The door swings open.');
+  F.opened.add(key);
+  F.grid = F.grid.map((row, ry) => (ry === y ? row.slice(0, x) + '.' + row.slice(x + 1) : row));
+  buildGeometry();
+}
+
+/** Keys are lifted by walking over them — level with them, like everything. */
+function checkKeys() {
+  for (const k of F.keyCells) {
+    if (k.taken) continue;
+    if (Math.abs((F.lv || 0) - heightAt(k.x, k.y)) > 0.5) continue;
+    if (Math.hypot(k.x + 0.5 - F.px, k.y + 0.5 - F.py) < 0.6) {
+      k.taken = true; F.keysTaken.add(k.key); F.keyCount++;
+      k.el.remove();
+      toast(`A key — worn iron, still warm. (${F.keyCount} carried)`);
+    }
+  }
+}
+
 function mineOre(x, y) {
   const key = F.map.id + ':' + x + ',' + y;
   if (F.mined.has(key)) return;
@@ -4218,8 +4281,9 @@ function drawMap() {
       // with a corridor sketched in that it does not have.
       if (!F.seen.has(F.map.id + ':' + x + ',' + y) && Math.hypot(dx, dy) > 3.5) continue;
       const ch = at(x, y);
-      g.fillStyle = WALL[ch] ? '#3b3128' : LOW[ch] ? '#5a4a36' : ch === '#' ? 'transparent'
-        : EXIT[ch] ? '#d4a843' : ch === '+' ? '#8ab4d8' : '#7d6a4e';
+      g.fillStyle = ch === 'D' ? '#8a6a42' : WALL[ch] ? '#3b3128' : LOW[ch] ? '#5a4a36'
+        : ch === '#' ? 'transparent'
+          : ch === 'K' ? '#d8a83c' : EXIT[ch] ? '#d4a843' : ch === '+' ? '#8ab4d8' : '#7d6a4e';
       g.fillRect((dx + R) * cell, (dy + R) * cell, cell - 0.5, cell - 0.5);
       // Height shading — the automap tells terraces from trenches at a glance.
       const lv = heightAt(x, y);
@@ -4257,6 +4321,7 @@ function stepSim(now) {
   if (!busy()) readDevices();
   if (!busy()) steer(dt);
   if (!busy()) onCellChange();
+  if (!busy()) checkKeys();
   if (!busy()) checkDoors();
   if (!busy()) moveCreatures(dt);
   if (!busy()) checkArmed();
@@ -4339,6 +4404,7 @@ function swapToTop() {
     // The facing crosses too — the walker turns to look where you were looking.
     dir: Math.round((((F.yaw * 180 / Math.PI) % 360) + 360) % 360 / 45) % 8,
     stack: F.stack.slice(), mined: [...F.mined], haul: F.haul,
+    opened: [...F.opened], keysTaken: [...F.keysTaken], keyCount: F.keyCount,
   };
   hooks.swapView('top', carry).then((ok) => { if (!ok && F) F.transiting = false; });
 }

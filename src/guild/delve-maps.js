@@ -37,6 +37,14 @@ import { buildCampusMap } from './campus.js';
  *   L  ladder · v  vine — the climb link. Ground you walk onto, dressed with
  *      the thing you climb, and the ONLY cell a change of level is legal across.
  *      Put one directly south of the ledge it serves so it leans on its face.
+ *   D  DOOR — a wall that opens. Shut it blocks and draws as a door face in
+ *      the wall run; walk into it and it opens (for the session — opened
+ *      doors ride the same ledger as worked seams, across portals and view
+ *      swaps). A door listed in the chart's `locks` array is LOCKED: it opens
+ *      only by spending a key. Its floor level derives from the ground around
+ *      it, so a door can stand in a terrace wall as honestly as at grade.
+ *   K  KEY — a floor cell with a key waiting on it. Walk over it to take it;
+ *      each key spends on one locked door. Collected keys ride the ledger.
  *   S  STAIRS — a climb link at FULL walk speed, drawn as real steps. Same
  *      one-rung law as the ladder; what stairs buy is pace and dignity.
  *   u  TUNNEL · n  BRIDGE — TWO walkable surfaces in one cell: the low ground
@@ -320,17 +328,18 @@ export function makeLevelModel(grid) {
   const grounded = (x, y) => !UNGROUND[at(x, y)];
   const ORTH = [[0, -1], [0, 1], [-1, 0], [1, 0]];
 
-  // Pass 1 — plain floors wear their authored level; climbs, decks and ORE
-  // wait. A vein is rock continuous with the ground it stands in: giving it
-  // a flat 0 let a vein authored in a terrace flank open (when mined) into a
-  // pit no lint could see — it derives like a climb instead, the lowest
-  // ground it touches.
+  // Pass 1 — plain floors wear their authored level; climbs, decks and the
+  // OPENABLE cells wait. A vein is rock continuous with the ground it stands
+  // in — a flat 0 let a vein authored in a terrace flank open (when mined)
+  // into a pit no lint could see — and a door or a key is the same story:
+  // each derives like a climb, the lowest ground it touches.
+  const DERIVED = { o: 1, D: 1, K: 1 };
   const floor = [], deck = [];
   for (let y = 0; y < rows; y++) {
     floor.push(new Array(cols).fill(null)); deck.push(new Array(cols).fill(null));
     for (let x = 0; x < cols; x++) {
       const ch = at(x, y);
-      if (!grounded(x, y) || CLIMB_CH[ch] || DECK_CH[ch] || ch === 'o') continue;
+      if (!grounded(x, y) || CLIMB_CH[ch] || DECK_CH[ch] || DERIVED[ch]) continue;
       floor[y][x] = FLOOR_LV[ch] || 0;
     }
   }
@@ -344,7 +353,7 @@ export function makeLevelModel(grid) {
     for (let y = 0; y < rows; y++) {
       for (let x = 0; x < cols; x++) {
         const ch = at(x, y);
-        const isClimb = !!CLIMB_CH[ch] || ch === 'o', isDeck = !!DECK_CH[ch];
+        const isClimb = !!CLIMB_CH[ch] || ch === 'o' || ch === 'D' || ch === 'K', isDeck = !!DECK_CH[ch];
         if (!isClimb && !isDeck) continue;
         let lo = null, hi = null;
         for (const [dx, dy] of ORTH) {
@@ -376,7 +385,7 @@ export function makeLevelModel(grid) {
   for (let y = 0; y < rows; y++) {
     for (let x = 0; x < cols; x++) {
       const ch = at(x, y);
-      if ((CLIMB_CH[ch] || DECK_CH[ch] || ch === 'o') && floor[y][x] == null) floor[y][x] = 0;
+      if ((CLIMB_CH[ch] || DECK_CH[ch] || ch === 'o' || ch === 'D' || ch === 'K') && floor[y][x] == null) floor[y][x] = 0;
       if (DECK_CH[ch] && (deck[y][x] == null || deck[y][x] <= floor[y][x])) {
         deck[y][x] = null;
         if (ORTH.some(([dx, dy]) => at(x + dx, y + dy) === '#')) floor[y][x] = null;
@@ -445,11 +454,11 @@ export const DELVE_MAPS = {
       '###..########...........##', //  4  ← neck down to the west galleries
       '###..########....r......##', //  5
       '##........###.....o.....##', //  6  ← west galleries · north hall
-      '##....BB................##', //  7
+      '##....BB..K.............##', //  7  ← the key, deep in the north hall
       '##..t.................r.##', //  8
       '##........###########..###', //  9  ← east stair-shaft neck
       '#####..##############..###', // 10
-      '#####..##############..###', // 11
+      '#####D###############D####', // 11  ← a door on each neck; the east one is LOCKED
       '#####..##############..###', // 12
       '##..........###....BB...##', // 13  ← entry floor · east chamber
       '##..s.......###.....r...##', // 14
@@ -461,6 +470,8 @@ export const DELVE_MAPS = {
       '##########################', // 20
     ],
     entry: [4.5, 15.5],
+    // The east neck's door spends a key; the west one only asks to be pushed.
+    locks: [[21, 11]],
     spawns: [
       { prey: 'slime', x: 7, y: 15 }, { prey: 'slime', x: 3, y: 16 },
       { prey: 'beetle', x: 17, y: 14 }, { prey: 'beetle', x: 19, y: 4 },
@@ -885,6 +896,11 @@ export function validateMap(map) {
     const ch = at(p.x, p.y);
     if (!ch || ch === '#' || 'BbFfrtmo'.includes(ch)) console.warn(`delve map ${map.id}: portal at ${p.x},${p.y} sits on '${ch}' — unreachable`);
     if (!DELVE_MAPS[p.to]) console.warn(`delve map ${map.id}: portal leads to unknown map '${p.to}'`);
+  }
+  // A lock must name a door: a `locks` entry off any 'D' cell is a latch on
+  // nothing, silently unopenable content.
+  for (const [lx, ly] of (map.locks || [])) {
+    if (at(lx, ly) !== 'D') console.warn(`delve map ${map.id}: lock at ${lx},${ly} sits on '${at(lx, ly)}' — locks belong on 'D' doors`);
   }
   // A deck cell against the void has no honest answer for what runs beneath
   // it (the model would manufacture ground over the chasm) — span a ','

@@ -53,10 +53,12 @@ function normalize(m) {
   if (!Array.isArray(m.grid) || !m.grid.length) m.grid = blank(20, 14).grid;
   m.grid = m.grid.map(String);
   if (!Array.isArray(m.entry) || m.entry.length !== 2) m.entry = [2.5, 2.5];
-  for (const k of ['props', 'spawns', 'portals', 'paint', 'regions']) if (!Array.isArray(m[k])) m[k] = [];
+  for (const k of ['props', 'spawns', 'portals', 'paint', 'regions', 'locks']) if (!Array.isArray(m[k])) m[k] = [];
   // A paint rect is four finite numbers or it is nothing — a NaN rect would
   // draw nowhere on the plan and still ride along in the export.
   m.paint = m.paint.filter((r) => r && [r.x, r.y, r.w, r.h].every(Number.isFinite) && r.w > 0 && r.h > 0);
+  // A lock is a [x, y] pair on the grid or it is nothing.
+  m.locks = m.locks.filter((l) => Array.isArray(l) && Number.isFinite(l[0]) && Number.isFinite(l[1]));
   return m;
 }
 
@@ -89,6 +91,10 @@ const TILES = [
   { ch: 'n', name: 'Bridge (planked deck)', color: '#8a6a42', glyph: '≃' },
   { ch: 'L', name: 'Ladder (climb)', color: '#a58448', glyph: 'H' },
   { ch: 'v', name: 'Vine (climb)', color: '#4f7a42', glyph: '≀' },
+  // The moving parts: a door is a wall that opens when walked into (lock it
+  // with the Flags tab's Lock), a key spends on one locked door.
+  { ch: 'D', name: 'Door (walk to open)', color: '#8a6a42', glyph: '▯' },
+  { ch: 'K', name: 'Key', color: '#d8a83c', glyph: 'K' },
   { ch: 'o', name: 'Ore node', color: '#c9a86a', glyph: '◆' },
   { ch: 'r', name: 'Boulder', color: '#7d766c', glyph: '●' },
   { ch: 't', name: 'Stalagmite / tree', color: '#4d6b3e', glyph: '♦' },
@@ -124,6 +130,7 @@ const FLAGS = [
   { id: 'entry', name: 'Entry point', hint: 'Where the walker arrives. One per map.' },
   { id: 'spawn', name: 'Creature spawn', hint: 'Pick a creature, then click a floor cell.' },
   { id: 'portal', name: 'Portal', hint: 'Walk near it to travel to another map.' },
+  { id: 'lock', name: 'Lock', hint: 'Click a door (D) to lock or unlock it — a locked door spends a key.' },
 ];
 
 const STORE_KEY = 'crucible.editorMaps';
@@ -315,7 +322,7 @@ function renderSide() {
     pal.innerHTML = `<div class="med-hint">Entry, creatures and portals. Click the map to place the armed flag.</div>`
       + FLAGS.map((f) => `
         <button class="med-chip ${E.sel.kind === 'flag' && E.sel.id === f.id ? 'on' : ''}" data-flag="${f.id}" title="${f.hint}">
-          <span class="med-swatch" style="background:#3c4457">${f.id === 'entry' ? '⚑' : f.id === 'spawn' ? '☠' : '◈'}</span>${f.name}
+          <span class="med-swatch" style="background:#3c4457">${f.id === 'entry' ? '⚑' : f.id === 'spawn' ? '☠' : f.id === 'lock' ? '▣' : '◈'}</span>${f.name}
         </button>`).join('')
       + `<div class="med-field"><label>Creature</label><select class="med-prey">
           ${Object.keys(PREY).map((k) => `<option value="${k}" ${k === E.prey ? 'selected' : ''}>${PREY[k].name || k}</option>`).join('')}
@@ -559,6 +566,14 @@ function lint() {
     }
   }
 
+  // The moving parts: a latch on nothing, and more locks than keys.
+  for (const [lx, ly] of (m.locks || [])) {
+    if (at(lx, ly) !== 'D') out.push(`lock at ${lx},${ly} sits on '${at(lx, ly) || 'void'}' — locks belong on doors`);
+  }
+  const nLocks = (m.locks || []).filter(([lx, ly]) => at(lx, ly) === 'D').length;
+  const nKeys = (m.grid.join('').match(/K/g) || []).length;
+  if (nLocks > nKeys) out.push(`${nLocks} locked door${nLocks > 1 ? 's' : ''} but only ${nKeys} key${nKeys === 1 ? '' : 's'} — something stays shut forever`);
+
   // (No open-sky rule for tall terraces: indoors the ceiling RISES with the
   // floor — a terrace under a roof is a dome, per delve-fp's sector ceilings.)
 
@@ -702,6 +717,11 @@ function apply(c, rightClick) {
   if (E.sel.kind === 'tile') {
     const was = (E.map.grid[y] || '')[x];
     setCell(x, y, E.sel.id);
+    // A lock belongs to its door: painting anything else over a locked 'D'
+    // takes the latch with the wood (a lock on plain floor is a lint ghost).
+    if (was === 'D' && E.sel.id !== 'D' && Array.isArray(E.map.locks)) {
+      E.map.locks = E.map.locks.filter(([lx, ly]) => lx !== x || ly !== y);
+    }
     // The grid is one char per cell, so painting REPLACES — a vine over the
     // abyss becomes climbable floor, which surprised the first playtest. Say
     // so, and teach the climb grammar (a link serves a level) while at it.
@@ -806,6 +826,14 @@ function apply(c, rightClick) {
   }
 
   if (E.sel.kind === 'flag') {
+    if (E.sel.id === 'lock') {
+      if ((E.map.grid[y] || '')[x] !== 'D') { toast('Locks belong on doors — paint a D first.'); E.undo.pop(); return; }
+      E.map.locks = E.map.locks || [];
+      const i = E.map.locks.findIndex(([lx, ly]) => lx === x && ly === y);
+      if (i >= 0) { E.map.locks.splice(i, 1); toast('Unlocked.'); }
+      else { E.map.locks.push([x, y]); toast('Locked — this door will spend a key.'); }
+      return;
+    }
     if (E.sel.id === 'entry') E.map.entry = [x + 0.5, y + 0.5];
     else if (E.sel.id === 'spawn') E.map.spawns.push({ prey: E.prey, x, y });
     else if (E.sel.id === 'portal') {
@@ -946,6 +974,14 @@ function draw() {
     g.font = `${Math.round(s * 0.32)}px serif`;
     g.fillText(p.to, p.x * s, p.y * s + s * 0.45);
     g.font = `${Math.round(s * 0.6)}px serif`;
+  }
+  // Locks: a gold plate with a keyhole over the door that wears one.
+  for (const [lx, ly] of m.locks || []) {
+    g.fillStyle = '#d8a83c';
+    g.fillRect(lx * s + s * 0.32, ly * s + s * 0.3, s * 0.36, s * 0.4);
+    g.fillStyle = '#1c202a';
+    g.beginPath(); g.arc((lx + 0.5) * s, (ly + 0.44) * s, s * 0.07, 0, 7); g.fill();
+    g.fillRect((lx + 0.47) * s, (ly + 0.44) * s, s * 0.06, s * 0.18);
   }
   g.fillStyle = '#ffd76b';
   g.fillText('⚑', m.entry[0] * s, m.entry[1] * s);
