@@ -15,7 +15,7 @@
  * of: a 2026-08-03 phone capture lost whole surfaces, the HUD among them, at a
  * censused ~227. That number is where the budgets below come from.
  */
-import { DELVE_MAPS, THEMES, LIGHTS } from '../src/guild/delve-maps.js';
+import { DELVE_MAPS, THEMES, LIGHTS, makeLevelModel, DECK_CH } from '../src/guild/delve-maps.js';
 import { buildCampusMap } from '../src/guild/campus.js';
 
 // The renderer's own numbers. Kept in one place here so a change over there
@@ -35,8 +35,18 @@ function gridOf(map) {
 function census(map, px, py, yaw, R, light, fogCull, merged) {
   const { g, cols, rows } = gridOf(map);
   const at = (x, y) => (x < 0 || y < 0 || x >= cols || y >= rows ? '#' : (g[y][x] || '#'));
-  const heightAt = (x, y) => (at(x, y) === '^' ? 1 : 0);
+  // The SHARED level model — the census no longer keeps its own copy of the
+  // height vocabulary, which is exactly how it had started to drift.
+  const model = map._model || (map._model = makeLevelModel(map.grid));
+  const heightAt = (x, y) => { const f = model.floorAt(x, y); return f == null ? 0 : f; };
   const onClimb = (x, y) => at(x, y) === 'L' || at(x, y) === 'v';
+  let maxLv = 0;
+  for (let y = 0; y < rows; y++) {
+    for (let x = 0; x < cols; x++) {
+      const s = model.surfacesAt(x, y);
+      if (s.length && s[s.length - 1] > maxLv) maxLv = s[s.length - 1];
+    }
+  }
   const fogD = (d) => Math.min(1, Math.max(0, (d - light.near) / (light.far - light.near)));
   const fogAt = (x, y) => fogD(Math.hypot(x - px, y - py));
   const hx = Math.sin(yaw), hy = -Math.cos(yaw);
@@ -56,13 +66,41 @@ function census(map, px, py, yaw, R, light, fogCull, merged) {
     const fog = fogAt(x + 0.5, y + 0.5);
     if (fog >= fogCull) return;
     const ch = at(x, y);
-    if (WALL[ch] || LOW[ch]) { if (LOW[ch]) { tally.other++; veil(fog); } return; }   // faces are runs
+    if (WALL[ch] || LOW[ch]) {
+      if (LOW[ch]) { tally.other++; veil(fog); }                       // lid
+      else if (ch !== '#' && maxLv >= 2) { tally.other++; veil(fog); } // wall top
+      return;                                                          // faces are runs
+    }
     if (ch === '#') return;
+    const lv = heightAt(x, y);
     tally.floor++; veil(fog);                         // floor
     if (!light.sky) { tally.floor++; veil(fog); }     // ceiling
     if (ch === '=') { tally.other++; veil(fog); }     // rail
-    if (heightAt(x, y)) { tally.riser += 4; for (let i = 0; i < 4; i++) veil(fog); }
+    // Signed risers: one exposed band per side where the ground falls away.
+    for (const [dx2, dy2] of [[0, 1], [0, -1], [1, 0], [-1, 0]]) {
+      const nch = at(x + dx2, y + dy2);
+      const cover = (WALL[nch] || nch === '#') ? Infinity : LOW[nch] ? 560 / 430 : heightAt(x + dx2, y + dy2);
+      if (cover < lv) { tally.riser++; veil(fog); }
+    }
     if (onClimb(x, y)) { tally.other += 1; veil(fog); }
+    // Dome skirts: a lifted ceiling hangs a strip toward every lower one.
+    if (!light.sky && lv > 0) {
+      for (const [dx2, dy2] of [[0, 1], [0, -1], [1, 0], [-1, 0]]) {
+        const nch = at(x + dx2, y + dy2);
+        if (WALL[nch] || nch === '#') continue;
+        if (Math.max(0, heightAt(x + dx2, y + dy2)) < lv) { tally.riser++; veil(fog); }
+      }
+    }
+    // Stairs are eight real quads; a deck is a top, an underside and its lips.
+    if (model.stairAt(x, y)) { tally.other += 8; for (let i = 0; i < 8; i++) veil(fog); }
+    if (DECK_CH[ch] && model.deckAt(x, y) != null) {
+      const d = model.deckAt(x, y);
+      let q = 2;
+      for (const [dx2, dy2] of [[0, 1], [0, -1], [1, 0], [-1, 0]]) {
+        if (!model.surfacesAt(x + dx2, y + dy2).includes(d)) q++;
+      }
+      tally.other += q; for (let i = 0; i < q; i++) veil(fog);
+    }
   };
   /** Vertical faces, merged along their runs exactly as buildGeometry does. */
   const wallPass = () => {
@@ -81,6 +119,8 @@ function census(map, px, py, yaw, R, light, fogCull, merged) {
           const ch = at(x, y);
           if (!(WALL[ch] || LOW[ch]) || !open(x + sd.dx, y + sd.dy)) { i++; continue; }
           const h = LOW[ch] ? 1 : 2;
+          const nf = Math.min(0, heightAt(x + sd.dx, y + sd.dy));   // face drop joins the run key
+          const uL = light.sky ? 0 : Math.max(0, heightAt(x + sd.dx, y + sd.dy)); // and the dome rise
           const fcx = x + 0.5 + sd.dx * 0.5, fcy = y + 0.5 + sd.dy * 0.5;
           let n = 1;
           while (merged && n < CHUNK) {
@@ -88,6 +128,8 @@ function census(map, px, py, yaw, R, light, fogCull, merged) {
             const c2 = at(ax, ay);
             if (!(WALL[c2] || LOW[c2]) || (LOW[c2] ? 1 : 2) !== h) break;
             if (!open(ax + sd.dx, ay + sd.dy)) break;
+            if (Math.min(0, heightAt(ax + sd.dx, ay + sd.dy)) !== nf) break;
+            if ((light.sky ? 0 : Math.max(0, heightAt(ax + sd.dx, ay + sd.dy))) !== uL) break;
             const w = sd.horiz ? n + 1 : 1, d = sd.horiz ? 1 : n + 1;
             if (!flat(farCorner(sd.horiz ? x : fcx - 0.5, sd.horiz ? fcy - 0.5 : y, w, d))) break;
             n++;
@@ -105,7 +147,11 @@ function census(map, px, py, yaw, R, light, fogCull, merged) {
       for (let x = bx; x < bx + s; x++) {
         const ch = at(x, y);
         if (WALL[ch] || LOW[ch] || ch === '#' || ch === '=') return false;
-        if (heightAt(x, y) || onClimb(x, y)) return false;
+        if (heightAt(x, y) || model.climbAt(x, y) || DECK_CH[ch]) return false;
+        for (const [dx2, dy2] of [[0, 1], [0, -1], [1, 0], [-1, 0]]) {
+          const nch = at(x + dx2, y + dy2);
+          if (!WALL[nch] && !LOW[nch] && nch !== '#' && heightAt(x + dx2, y + dy2) < 0) return false;
+        }
       }
     }
     return true;

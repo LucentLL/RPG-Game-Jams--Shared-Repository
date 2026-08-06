@@ -23,7 +23,7 @@
  * a place you look at from above; the delve is a place you are inside.
  */
 import { ART_BASE } from '../config/assets.js';
-import { THEMES, LIGHTS, DECALS, ORE_KINDS, oreKindAt, mapForLocale, validateMap } from './delve-maps.js';
+import { THEMES, LIGHTS, DECALS, ORE_KINDS, oreKindAt, mapForLocale, validateMap, makeLevelModel, DECK_CH } from './delve-maps.js';
 import { preyById } from './locales.js';
 import { loadImg, SHEET_URLS } from './delve.js';
 import { ART, artSprite, artCropCss, artTexRect, WORN, wornWeapon, wornShield, wornPick } from './art.js';
@@ -389,6 +389,7 @@ let _blobOk = true;
 
 async function cutSurfaces(theme, opts = {}) {
   const need = new Set(['cliffs', theme.sheet, theme.walls && theme.walls.sheet].filter(Boolean));
+  if (opts.plank) need.add('woodwall');   // bridge decks are planked
   const sheets = {};
   for (const k of need) sheets[k] = await loadImg(SHEET_URLS[k] || (SHEET_URLS.cliffs));
   const src = theme.src || 48;
@@ -404,6 +405,18 @@ async function cutSurfaces(theme, opts = {}) {
   // not ceiling-dark — reusing the ceil bake for them turned every aisle-stack
   // top into a shadowed hole.
   const lid = panel(floorImg, fill[0] * src, fill[1] * src, src, src, 0.586);
+  // A deck's UNDERSIDE is its own bake even where the pixels could match the
+  // ceiling's: the third-person camera drops ceiling quads by TEXTURE
+  // IDENTITY, and a bridge that vanishes over the shoulder is a hole. Planks
+  // for 'n' bridges ride along when the map asked for them.
+  const deckUnder = panel(floorImg, fill[0] * src, fill[1] * src, src, src, 0.68);
+  const plank = opts.plank && sheets.woodwall
+    ? panel(sheets.woodwall, 3 * 48, 0, 48, 48, 0.12) : null;
+  // BELOW-GRADE risers (a creek's bank, a trench wall) are cut earth — the
+  // kit's own rock face — never the hedge/aisle texture a raised ledge wears:
+  // on a sky map SC.low is a row of tree trunks, and a creek walled with
+  // hedges is a maze, not a stream bed.
+  const bank = panel(sheets.cliffs, theme.faceTop.m[0] * 48, theme.faceTop.m[1] * 48, 48, 48, 0.15);
 
   // Kept as CANVASES, not data URIs: the ore faces are the wall with a seam in
   // it, and re-decoding a data URI four times to paint on it is a round trip
@@ -526,6 +539,8 @@ async function cutSurfaces(theme, opts = {}) {
   const out = {
     floor: await urlOf(floor), ceil: await urlOf(ceil), lid: await urlOf(lid),
     wall: await urlOf(wallCv), low: await urlOf(lowCv),
+    deckUnder: await urlOf(deckUnder), plank: plank ? await urlOf(plank) : null,
+    bank: await urlOf(bank),
     ores: null, rail: rail ? await urlOf(rail) : null,
     ladder: ladderTexture(), _urls: urls,
   };
@@ -699,8 +714,17 @@ const at = (x, y) => {
 const isWall = (x, y) => !!WALL[at(x, y)];
 const isLow = (x, y) => !!LOW[at(x, y)];
 const blocked = (x, y) => isWall(x, y) || isLow(x, y) || !!PROP[at(x, y)];
-const heightAt = (x, y) => (at(x, y) === '^' ? 1 : 0);
+/** The GROUND level under a cell, signed (the shared model's floor — a deck
+ *  cell answers with the passage beneath, which is where statics stand). */
+const heightAt = (x, y) => {
+  const f = F.model && F.model.floorAt(x, y);
+  return f == null ? 0 : f;
+};
+/** Ladder or vine — the slow climbs. Stairs are their own question: they share
+ *  the LEGALITY (the model's business) but none of the dressing — no rungs, no
+ *  climb pace, no climb pose. */
 const onClimb = (x, y) => { const c = at(x, y); return c === 'L' || c === 'v'; };
+const onStairs = (x, y) => !!(F.model && F.model.stairAt(x, y));
 
 /**
  * How wide the walker is, in tiles — and the number the whole continuous
@@ -732,7 +756,11 @@ const BODY = 0.28;
  * ledge still needs a ladder to go UP and none to drop off, because a ledge is
  * a thing you climb to reach, not a pen you must climb to leave.
  */
-function canStandAt(x, y, fx, fy) {
+/** The surface the last successful canStandAt picked — consumed by slide(),
+ *  which commits the mover to it. */
+let _pick = null;
+function canStandAt(x, y, fx, fy, lv) {
+  _pick = null;
   for (const cx of [x - BODY, x + BODY]) {
     for (const cy of [y - BODY, y + BODY]) {
       const gx = Math.floor(cx), gy = Math.floor(cy);
@@ -746,13 +774,24 @@ function canStandAt(x, y, fx, fy) {
     }
   }
   // Carved props occupy their ground (@see buildProps) — a circle test, so
-  // walking past a lamp post is a brush and walking into it is a stop.
+  // walking past a lamp post is a brush and walking into it is a stop. A body
+  // two or more levels off the prop's floor clears it entirely: the barrel
+  // under the bridge does not block the crossing above it.
   for (const b of (F.propBlockers || [])) {
+    if (lv != null && Math.abs(lv - (b.lv || 0)) >= 2) continue;
     const dx = x - b.x, dy = y - b.y, rr = b.r + BODY;
     if (dx * dx + dy * dy < rr * rr) return false;
   }
-  const f = [Math.floor(fx), Math.floor(fy)], t = [Math.floor(x), Math.floor(y)];
-  return heightAt(f[0], f[1]) >= heightAt(t[0], t[1]) || onClimb(f[0], f[1]) || onClimb(t[0], t[1]);
+  // THE STEP LAW — the shared model's answer, verbatim in every lens (ONE
+  // RULES FACT): down is always legal, up is one rung across a climb cell,
+  // and a two-surface cell hands you whichever floor your level earns.
+  const pick = fx == null
+    ? (F.model.surfacesAt(Math.floor(x), Math.floor(y))[0] ?? null)
+    : F.model.pickSurface(lv != null ? lv : heightAt(Math.floor(fx), Math.floor(fy)),
+      Math.floor(fx), Math.floor(fy), Math.floor(x), Math.floor(y));
+  if (pick == null) return false;
+  _pick = pick;
+  return true;
 }
 
 /**
@@ -776,17 +815,21 @@ function canStandAt(x, y, fx, fy) {
  */
 function slide(e, dx, dy) {
   const ox = e.x, oy = e.y;
-  const stuck = !canStandAt(ox, oy, ox, oy);
+  const stuck = !canStandAt(ox, oy, ox, oy, e.lv);
+  // The stuck escape relaxes the BODY to a point, never the level law — a
+  // wedged arrival may walk out of a prop's circle, not up a terrace face.
   const ok = stuck
-    ? (x, y) => !blocked(Math.floor(x), Math.floor(y))    // already illegal: walk out on a point
-    : (x, y) => canStandAt(x, y, ox, oy);
+    ? (x, y) => !blocked(Math.floor(x), Math.floor(y))
+      && (_pick = F.model.pickSurface(e.lv != null ? e.lv : 0,
+        Math.floor(ox), Math.floor(oy), Math.floor(x), Math.floor(y))) != null
+    : (x, y) => canStandAt(x, y, ox, oy, e.lv);
   let hit = null;
   if (dx) {
-    if (ok(ox + dx, oy)) e.x = ox + dx;
+    if (ok(ox + dx, oy)) { e.x = ox + dx; if (_pick != null) e.lv = _pick; }
     else hit = { x: Math.floor(ox + dx + Math.sign(dx) * BODY), y: Math.floor(oy) };
   }
   if (dy) {
-    if (ok(e.x, oy + dy)) e.y = oy + dy;
+    if (ok(e.x, oy + dy)) { e.y = oy + dy; if (_pick != null) e.lv = _pick; }
     else if (!hit) hit = { x: Math.floor(e.x), y: Math.floor(oy + dy + Math.sign(dy) * BODY) };
   }
   return hit;
@@ -932,11 +975,22 @@ onView(() => {
 });
 
 /** Nothing solid on the floor between two points. Sampled rather than swept —
- *  over a tile and a quarter of reach, eight samples is finer than the grid. */
-function clearLine(ax, ay, bx, by) {
+ *  over a tile and a quarter of reach, eight samples is finer than the grid.
+ *  LEVEL-AWARE when the endpoints' surfaces are given: a full level of ground
+ *  standing above both endpoints blocks the line (a terrace ridge is rock,
+ *  even though its top is floor), and a deck plane lying BETWEEN the two
+ *  levels blocks it too — nothing notices, aims or shoots through a bridge. */
+function clearLine(ax, ay, bx, by, la, lb) {
+  const lvl = la != null && lb != null;
+  const hi = lvl ? Math.max(la, lb) : 0, lo = lvl ? Math.min(la, lb) : 0;
   for (let i = 1; i < 8; i++) {
     const t = i / 8;
-    if (blocked(Math.floor(ax + (bx - ax) * t), Math.floor(ay + (by - ay) * t))) return false;
+    const gx = Math.floor(ax + (bx - ax) * t), gy = Math.floor(ay + (by - ay) * t);
+    if (blocked(gx, gy)) return false;
+    if (!lvl) continue;
+    if (heightAt(gx, gy) >= hi + 1) return false;
+    const dk = F.model.deckAt(gx, gy);
+    if (dk != null && dk > lo && dk <= hi) return false;
   }
   return true;
 }
@@ -1107,6 +1161,12 @@ function wantSet(px, py, yaw, R, near, far) {
     const t = F.regionThemeAt && F.regionThemeAt(x, y);
     return (t && F.surfByTheme[t]) || S;
   };
+  // PAINT swaps the ground fill and nothing else — no walls, no ceiling, no
+  // room. (A region is a room; the Surfaces palette writes paint.)
+  const floorTexAt = (x, y, SC) => {
+    const t = F.paintThemeAt && F.paintThemeAt(x, y);
+    return (t && F.surfByTheme[t] && F.surfByTheme[t].floor) || SC.floor;
+  };
   const cx = Math.floor(px), cy = Math.floor(py);
   const want = new Map();
   /** How many times a merged quad repeats its own tile, across and down. The
@@ -1165,37 +1225,146 @@ function wantSet(px, py, yaw, R, near, far) {
       // lid, not ceil: a lid is floor-lit (you look DOWN at it under the
       // room's light), and the ceil bake is tuned for the dark overhead.
       if (LOW[ch]) add('d' + id, SC.lid || SC.ceil, T, T, wx, -LOW_H, wz, 'rotateX(90deg)', 'fp-floor', fog);
+      // Once any surface climbs to eye-above-the-walls (level 2 up), walls
+      // need TOPS or they read as open-topped hollow boxes from a terrace.
+      // Charts that never leave the ground pay nothing.
+      else if (ch !== '#' && F.maxLv >= 2) {
+        add('wt' + id, SC.lid || SC.ceil, T, T, wx, -WALL_H, wz, 'rotateX(90deg)', 'fp-floor', fog);
+      }
       return;
     }
     if (ch === '#') return;
-    const lift = -heightAt(x, y) * STEP_PX;
-    add('f' + id, SC.floor, T, T, wx, lift, wz, 'rotateX(90deg)', 'fp-floor', fog);
+    const lv = heightAt(x, y);
+    const lift = -lv * STEP_PX;
+    add('f' + id, floorTexAt(x, y, SC), T, T, wx, lift, wz, 'rotateX(90deg)', 'fp-floor', fog);
     // A cell inside a stamped room is INDOORS whatever the weather outside —
     // it gets that room's ceiling even on a map whose light is open sky.
+    // THE CEILING RISES WITH THE FLOOR (Doom's sector model, first tooth): a
+    // raised cell keeps WALL_H of headroom, so a terrace under a mine's roof
+    // is a dome, not a place your head leaves the world. Where neighbouring
+    // ceilings differ, a SKIRT hangs the gap closed; walls beside lifted
+    // cells extend their faces upward the same way (see the wall-run pass).
     const roomed = SC !== S;
-    if (!L.sky || roomed) add('c' + id, SC.ceil, T, T, wx, -WALL_H, wz, 'rotateX(-90deg)', 'fp-ceil', fog);
+    const ceilLift = Math.max(0, lv) * STEP_PX;
+    if (!L.sky || roomed) {
+      add('c' + id, SC.ceil, T, T, wx, -WALL_H - ceilLift, wz, 'rotateX(-90deg)', 'fp-ceil', fog);
+      if (ceilLift > 0) {
+        const skirts = [
+          { k: 'gs', nx: x, ny: y + 1, rot: '', px: wx, pz: (y + 1) * T },
+          { k: 'gn', nx: x, ny: y - 1, rot: 'rotateY(180deg)', px: wx, pz: y * T },
+          { k: 'ge', nx: x + 1, ny: y, rot: 'rotateY(90deg)', px: (x + 1) * T, pz: wz },
+          { k: 'gw', nx: x - 1, ny: y, rot: 'rotateY(-90deg)', px: x * T, pz: wz },
+        ];
+        for (const sk of skirts) {
+          const nch = at(sk.nx, sk.ny);
+          if (WALL[nch] || nch === '#') continue;   // the wall's own extended face closes it
+          const nLift = Math.max(0, heightAt(sk.nx, sk.ny)) * STEP_PX;
+          if (nLift >= ceilLift) continue;
+          const h2 = ceilLift - nLift;
+          add(sk.k + id, SC.wall, T, h2, sk.px, -WALL_H - nLift - h2 / 2, sk.pz, sk.rot, 'fp-wall', fog);
+        }
+      }
+    }
     // Rails lie ON the floor, a hair above it so the two don't fight for depth.
     if (ch === '=' && S.rail) add('r' + id, S.rail, T, T, wx, lift - 1, wz, 'rotateX(90deg)', 'fp-floor', fog);
-    // A ledge's risers — one per side that faces lower ground, or the shelf
-    // reads as a floor plane floating on nothing from every angle but the
-    // south (the playtest's "invisible sides"). A side that meets solid rock
-    // or the map edge is buried and costs nothing.
-    if (heightAt(x, y)) {
-      const ry = -STEP_PX / 2;
-      const lower = (nx, ny) => !heightAt(nx, ny) && !WALL[at(nx, ny)] && !LOW[at(nx, ny)];
-      if (lower(x, y + 1)) add('zs' + id, SC.low, T, STEP_PX, wx, ry, (y + 1) * T, '', 'fp-wall', fogAt(x + 0.5, y + 1));
-      if (lower(x, y - 1)) add('zn' + id, SC.low, T, STEP_PX, wx, ry, y * T, 'rotateY(180deg)', 'fp-wall', fogAt(x + 0.5, y));
-      if (lower(x + 1, y)) add('ze' + id, SC.low, T, STEP_PX, (x + 1) * T, ry, wz, 'rotateY(90deg)', 'fp-wall', fogAt(x + 1, y + 0.5));
-      if (lower(x - 1, y)) add('zw' + id, SC.low, T, STEP_PX, x * T, ry, wz, 'rotateY(-90deg)', 'fp-wall', fogAt(x, y + 0.5));
+    /**
+     * RISERS, signed and general: every side of this cell where the ground
+     * falls away gets the exposed band of vertical face — from the higher
+     * floor down to whatever stands below it. That one rule is the ledge's
+     * old riser, the terrace's taller flank, AND the trench's inner wall
+     * (emitted by the RIM cell, whose floor is the higher one). A neighbour's
+     * own masonry buries the band it covers: a '2' beside a waist block shows
+     * only the strip above the block's top, and a mere ledge beside it shows
+     * nothing, exactly as before.
+     */
+    const sides = [
+      { k: 'zs', nx: x, ny: y + 1, rot: '', fx: x + 0.5, fy: y + 1, px: wx, pz: (y + 1) * T },
+      { k: 'zn', nx: x, ny: y - 1, rot: 'rotateY(180deg)', fx: x + 0.5, fy: y, px: wx, pz: y * T },
+      { k: 'ze', nx: x + 1, ny: y, rot: 'rotateY(90deg)', fx: x + 1, fy: y + 0.5, px: (x + 1) * T, pz: wz },
+      { k: 'zw', nx: x - 1, ny: y, rot: 'rotateY(-90deg)', fx: x, fy: y + 0.5, px: x * T, pz: wz },
+    ];
+    for (const sd of sides) {
+      const nch = at(sd.nx, sd.ny);
+      // Covered up to: a wall/void neighbour buries everything (its own face
+      // spans the gap — the wall-run pass extends below grade); a low block
+      // buries LOW_H; open ground buries up to its own floor.
+      const cover = (WALL[nch] || nch === '#') ? Infinity : LOW[nch] ? LOW_H / STEP_PX : heightAt(sd.nx, sd.ny);
+      if (cover >= lv) continue;
+      const h = (lv - cover) * STEP_PX;
+      // Any band reaching below grade is cut earth (the bank), not dressing.
+      const rtex = cover < 0 ? (S.bank || SC.low) : SC.low;
+      add(sd.k + id, rtex, T, h, sd.px, -(cover * STEP_PX) - h / 2, sd.pz, sd.rot, 'fp-wall',
+        fogAt(sd.fx, sd.fy), 1, Math.max(1, Math.round(lv - cover)));
     }
     // The rungs. A climb cell is the ONLY place the level may change, so the
     // ladder is drawn flat against whichever neighbouring face it serves —
     // a thing you can see and aim at, not a square that silently lifts you.
+    // Drawn from THIS cell's floor up to the neighbour's, however far that is
+    // (a vine out of a trench hangs a full step below grade). Stairs draw no
+    // rungs — their treads are real geometry below.
     if (S.ladder && onClimb(x, y)) {
-      if (heightAt(x, y + 1)) add('l0' + id, S.ladder, T * 0.42, STEP_PX, wx, -STEP_PX / 2, (y + 1) * T - 6 * K, 'rotateY(180deg)', 'fp-ladder', fog);
-      if (heightAt(x, y - 1)) add('l1' + id, S.ladder, T * 0.42, STEP_PX, wx, -STEP_PX / 2, y * T + 6 * K, '', 'fp-ladder', fog);
-      if (heightAt(x + 1, y)) add('l2' + id, S.ladder, T * 0.42, STEP_PX, (x + 1) * T - 6 * K, -STEP_PX / 2, wz, 'rotateY(-90deg)', 'fp-ladder', fog);
-      if (heightAt(x - 1, y)) add('l3' + id, S.ladder, T * 0.42, STEP_PX, x * T + 6 * K, -STEP_PX / 2, wz, 'rotateY(90deg)', 'fp-ladder', fog);
+      const rungs = [
+        { k: 'l0', nx: x, ny: y + 1, rot: 'rotateY(180deg)', px: wx, pz: (y + 1) * T - 6 * K },
+        { k: 'l1', nx: x, ny: y - 1, rot: '', px: wx, pz: y * T + 6 * K },
+        { k: 'l2', nx: x + 1, ny: y, rot: 'rotateY(-90deg)', px: (x + 1) * T - 6 * K, pz: wz },
+        { k: 'l3', nx: x - 1, ny: y, rot: 'rotateY(90deg)', px: x * T + 6 * K, pz: wz },
+      ];
+      for (const r of rungs) {
+        const nf = heightAt(r.nx, r.ny);
+        if (WALL[at(r.nx, r.ny)] || at(r.nx, r.ny) === '#' || nf <= lv) continue;
+        const h = (nf - lv) * STEP_PX;
+        add(r.k + id, S.ladder, T * 0.42, h, r.px, -(lv * STEP_PX) - h / 2, r.pz, r.rot, 'fp-ladder', fog);
+      }
+    }
+    // STAIRS — four real treads and their risers, rising toward the level
+    // they serve. Doom's steps, not a decal: feet and eye track them because
+    // the surfaces are actually there.
+    if (onStairs(x, y)) {
+      const dir = [[0, -1], [0, 1], [-1, 0], [1, 0]].find(([ddx, ddy]) =>
+        F.model.surfacesAt(x + ddx, y + ddy).includes(lv + 1));
+      if (dir) {
+        const [ddx, ddy] = dir;
+        const treadTex = SC.lid || SC.floor;
+        for (let i = 0; i < 4; i++) {
+          const topY = -(lv + (i + 1) / 4) * STEP_PX;
+          // The tread strip's centre, walking from the low edge toward `dir`.
+          const off = (i + 0.5) / 4 - 0.5;   // −0.375 … +0.375 across the cell
+          const tx2 = wx + ddx * off * T, tz2 = wz + ddy * off * T;
+          const w2 = ddx ? T / 4 : T, d2 = ddx ? T : T / 4;
+          add('t' + i + id, treadTex, w2, d2, tx2, topY, tz2, 'rotateX(90deg)', 'fp-floor', fog);
+          // The riser under this tread's low edge, facing back down the run.
+          const rx = wx + ddx * (i / 4 - 0.5) * T, rz = wz + ddy * (i / 4 - 0.5) * T;
+          const rot = ddy === 1 ? 'rotateY(180deg)' : ddy === -1 ? '' : ddx === 1 ? 'rotateY(-90deg)' : 'rotateY(90deg)';
+          add('t' + (i + 4) + id, SC.low, ddx ? STEP_PX / 4 : T, STEP_PX / 4,
+            ddx ? rx : wx, topY + STEP_PX / 8, ddx ? wz : rz, rot, 'fp-wall', fog);
+        }
+      }
+    }
+    // DECKS — the two-surface cells. The crossing is a real floor at deck
+    // height wearing planks ('n') or the ground's own dressing ('u'); its
+    // underside is a DEDICATED bake (never the ceiling's identity — the
+    // third-person camera deletes every .ceil texture from the buffer), hung
+    // a thin slab below the top so the passage keeps its lawful headroom.
+    if (DECK_CH[ch]) {
+      const dlv = F.model.deckAt(x, y);
+      if (dlv != null) {
+        const topY = -dlv * STEP_PX;
+        const SLAB = STEP_PX * 0.2;
+        const deckTex = (ch === 'n' && S.plank) || SC.lid || SC.floor;
+        const underTex = S.deckUnder || deckTex;
+        add('k' + id, deckTex, T, T, wx, topY, wz, 'rotateX(90deg)', 'fp-floor', fog);
+        add('ku' + id, underTex, T, T, wx, topY + SLAB, wz, 'rotateX(-90deg)', 'fp-ceil', fog);
+        const lips = [
+          { k: 'ks', nx: x, ny: y + 1, rot: '', px: wx, pz: (y + 1) * T },
+          { k: 'kn', nx: x, ny: y - 1, rot: 'rotateY(180deg)', px: wx, pz: y * T },
+          { k: 'ke', nx: x + 1, ny: y, rot: 'rotateY(90deg)', px: (x + 1) * T, pz: wz },
+          { k: 'kw', nx: x - 1, ny: y, rot: 'rotateY(-90deg)', px: x * T, pz: wz },
+        ];
+        for (const lp of lips) {
+          if (F.model.surfacesAt(lp.nx, lp.ny).includes(dlv)) continue;   // the crossing continues
+          add(lp.k + id, deckTex, T, SLAB, lp.px, topY + SLAB / 2, lp.pz, lp.rot, 'fp-wall', fog);
+        }
+      }
     }
   };
 
@@ -1212,12 +1381,22 @@ function wantSet(px, py, yaw, R, near, far) {
    */
   const evenGround = (bx, by, n) => {
     const SC = surfAt(bx, by);
+    const ft = floorTexAt(bx, by, SC);
     for (let y = by; y < by + n; y++) {
       for (let x = bx; x < bx + n; x++) {
         const ch = at(x, y);
         if (WALL[ch] || LOW[ch] || ch === '#' || ch === '=') return false;
-        if (heightAt(x, y) || onClimb(x, y)) return false;
+        // Any level fact splits the block: a height, a climb (stairs
+        // included), a deck — and a cell whose neighbour falls away, because
+        // THAT cell emits the rim's riser and a merged block would swallow it
+        // (the creek bank was the first casualty).
+        if (heightAt(x, y) || F.model.climbAt(x, y) || DECK_CH[ch]) return false;
+        for (const [ddx, ddy] of [[0, -1], [0, 1], [-1, 0], [1, 0]]) {
+          const nch = at(x + ddx, y + ddy);
+          if (!WALL[nch] && !LOW[nch] && nch !== '#' && heightAt(x + ddx, y + ddy) < 0) return false;
+        }
         if (surfAt(x, y) !== SC) return false;
+        if (floorTexAt(x, y, surfAt(x, y)) !== ft) return false;
       }
     }
     return true;
@@ -1231,7 +1410,7 @@ function wantSet(px, py, yaw, R, near, far) {
   const emitBlock = (bx, by, n) => {
     const SC = surfAt(bx, by);
     const w = n * T, mx = (bx + n / 2) * T, mz = (by + n / 2) * T;
-    add(`f${n}:${bx},${by}`, SC.floor, w, w, mx, 0, mz, 'rotateX(90deg)', 'fp-floor', 0, n, n);
+    add(`f${n}:${bx},${by}`, floorTexAt(bx, by, SC), w, w, mx, 0, mz, 'rotateX(90deg)', 'fp-floor', 0, n, n);
     if (!L.sky || SC !== S) add(`c${n}:${bx},${by}`, SC.ceil, w, w, mx, -WALL_H, mz, 'rotateX(-90deg)', 'fp-ceil', 0, n, n);
   };
 
@@ -1303,6 +1482,17 @@ function wantSet(px, py, yaw, R, near, far) {
         const ch = at(x, y);
         if (!(WALL[ch] || LOW[ch]) || !open(x + sd.dx, y + sd.dy)) { i++; continue; }
         const h = LOW[ch] ? LOW_H : WALL_H, tex = wallTex(x, y);
+        // A wall fronting SUNKEN ground extends its face down to that floor —
+        // stopping at grade left a see-through band under every wall on a
+        // moat, the trench's most natural authoring. The drop joins the
+        // run-match key so a run splits where the ground under it changes.
+        const nf = Math.min(0, heightAt(x + sd.dx, y + sd.dy));
+        // And a TALL wall fronting a lifted-ceiling cell (a terrace under a
+        // roof — the dome) extends UP to meet that ceiling, or the dome shows
+        // a gap over every wall it touches. Sky cells lift nothing.
+        const upOf = (ax2, ay2) => (!LOW[ch] && (!L.sky || surfAt(ax2, ay2) !== S)
+          ? Math.max(0, heightAt(ax2, ay2)) * STEP_PX : 0);
+        const uL = upOf(x + sd.dx, y + sd.dy);
         // The face's own middle, half a tile off the cell centre toward the gap.
         const fcx = x + 0.5 + sd.dx * 0.5, fcy = y + 0.5 + sd.dy * 0.5;
         let n = 1;
@@ -1312,6 +1502,8 @@ function wantSet(px, py, yaw, R, near, far) {
           if (!(WALL[c2] || LOW[c2])) break;
           if ((LOW[c2] ? LOW_H : WALL_H) !== h || wallTex(ax, ay) !== tex) break;
           if (!open(ax + sd.dx, ay + sd.dy)) break;
+          if (Math.min(0, heightAt(ax + sd.dx, ay + sd.dy)) !== nf) break;
+          if (upOf(ax + sd.dx, ay + sd.dy) !== uL) break;
           // The run is a segment on the face plane; both ends must be inside
           // the clear disc or its single veil would flatten a real gradient.
           const w = sd.horiz ? n + 1 : 1, d = sd.horiz ? 1 : n + 1;
@@ -1326,9 +1518,11 @@ function wantSet(px, py, yaw, R, near, far) {
           // one tile ALONG Z — and a four-cell run of them is `4T` wide in the
           // element and 4T deep in the world. Sizing those at `T` drew the run
           // squeezed into one tile with its texture repeated four times inside.
-          add(`${sd.k}${n}:${x},${y}`, tex, n * T, h,
-            (sd.horiz ? x + n / 2 : x + sd.off) * T, -h / 2, (sd.horiz ? y + sd.off : y + n / 2) * T,
-            sd.rot, 'fp-wall', fogAt(mid[0], mid[1]), n, 1);
+          const drop = -nf * STEP_PX;          // 0 on level ground
+          const h2 = h + drop + uL;            // grade face + below-grade drop + dome rise
+          add(`${sd.k}${n}:${x},${y}`, tex, n * T, h2,
+            (sd.horiz ? x + n / 2 : x + sd.off) * T, -(h + uL) + h2 / 2, (sd.horiz ? y + sd.off : y + n / 2) * T,
+            sd.rot, 'fp-wall', fogAt(mid[0], mid[1]), n, h2 / h);
         }
         i += n;
       }
@@ -1453,9 +1647,11 @@ function buildGeometry() {
     if (L.sky && F.surf && F.surf.floor) {
       const reach = Math.max(F.cols, F.rows) + L.far * 2;
       const n = Math.ceil(reach * 2);
+      // The skirt sinks below the chart's DEEPEST floor: at grade+2 it
+      // depth-beat every sunken cell and the creek rendered as phantom grass.
       quads.push({
         src: F.surf.floor, w: n * T, h: n * T,
-        x: (F.cols / 2) * T, y: 2, z: (F.rows / 2) * T,
+        x: (F.cols / 2) * T, y: 2 + Math.max(0, -F.minLv) * STEP_PX, z: (F.rows / 2) * T,
         rot: 'rotateX(90deg)', repX: n, repY: n,
       });
     }
@@ -2137,6 +2333,8 @@ function spawnCreature(prey, img, x, y) {
   cv.style.width = '100%'; cv.style.height = '100%';
   const c = {
     prey, img, el, cv, fw, fh, box, x, y, home: { x, y },
+    // Committed surface — spawns stand on the ground of their cell.
+    lv: (F.model ? (F.model.surfacesAt(Math.floor(x), Math.floor(y))[0] || 0) : 0),
     mode: 'idle', t: 1 + Math.random() * 2, tx: x, ty: y,
     row: 0, col: 1, drawn: -1, phase: Math.random() * 4, vx: 0, vy: 0,
     hp: HP_MAX, atkAt: 0, hurtUntil: 0, bar: el.querySelector('.fp-hp'),
@@ -2384,13 +2582,18 @@ async function prep(mapId) {
   if (!map) throw new Error('delve-fp: no map ' + mapId);
   validateMap(map);
   const theme = THEMES[map.theme];
-  const surf = await cutSurfaces(theme);
+  const surf = await cutSurfaces(theme, { plank: map.grid.some((r) => r.includes('n')) });
   // REGIONS — rooms stamped into this plane with textures of their own (the
   // campus). One surface set per distinct theme, picked per cell at build time,
   // so a kitchen's wall ring is scrubbed stone and the meadow around it grass.
-  // Baked in parallel and without ore faces — rooms have no seams.
+  // Baked in parallel and without ore faces — rooms have no seams. PAINT
+  // themes (the Surfaces palette) join the same pool: their sets are baked
+  // whole but only their FLOOR is ever read (@see floorTexAt).
   const surfByTheme = {};
-  const names = [...new Set((map.regions || []).map((r) => r.theme))].filter((n) => THEMES[n]);
+  const names = [...new Set([
+    ...(map.regions || []).map((r) => r.theme),
+    ...(map.paint || []).map((r) => r.theme),
+  ])].filter((n) => THEMES[n]);
   const sets = await Promise.all(names.map((n) => cutSurfaces(THEMES[n], { ores: false })));
   names.forEach((n, i) => { surfByTheme[n] = sets[i]; });
   const props = await decorSheets(map);
@@ -2419,6 +2622,12 @@ function mount(prep, entry) {
     for (const r of F.regions) if (x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h) return r.theme;
     return null;
   };
+  // Paint rects swap the ground fill only — never rooms (@see floorTexAt).
+  F.paints = map.paint || [];
+  F.paintThemeAt = (x, y) => {
+    for (const r of F.paints) if (x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h) return r.theme;
+    return null;
+  };
   // The light comes with the place. Everything that fades — quads, sprites, the
   // stage behind them — reads it, so switching a map switches the whole mood in
   // one assignment rather than in six. A coarse-pointer device takes the
@@ -2437,6 +2646,21 @@ function mount(prep, entry) {
   // seam as solid rock that mineOre then refuses to touch again — a wall with no
   // way through it, in the middle of the passage you opened.
   F.grid = map.grid.map((row, y) => row.replace(/o/g, (m, x) => (F.mined.has(map.id + ':' + x + ',' + y) ? '.' : m)));
+  // The height law (ONE RULES FACT). Built from the AUTHORED grid — a mined
+  // seam opens at the level the model already knew ('o' is ground to it).
+  F.model = makeLevelModel(map.grid);
+  // The chart's vertical extremes, asked once: the GL skirt sinks below the
+  // deepest floor, and wall tops are only built once anything can look down
+  // on them (a walker on a lv-2 surface stands eye-above every wall).
+  F.minLv = 0; F.maxLv = 0;
+  for (let y = 0; y < F.rows; y++) {
+    for (let x = 0; x < F.cols; x++) {
+      const s = F.model.surfacesAt(x, y);
+      if (!s.length) continue;
+      if (s[0] < F.minLv) F.minLv = s[0];
+      if (s[s.length - 1] > F.maxLv) F.maxLv = s[s.length - 1];
+    }
+  }
   const at0 = entry || map.entry;
   // NOT floored to a centre. Every campus chart authors its entry 0.2 tiles
   // clear of its own doorway ([4.5, 7.3]), and snapping moved you back TOWARD
@@ -2447,7 +2671,10 @@ function mount(prep, entry) {
   // easing into the new one and the eye would rise out of the floor on arrival.
   F.yaw = openestYaw(Math.floor(F.px), Math.floor(F.py));
   F.vx = 0; F.vy = 0; F.sway = 0; F.bobPhase = 0; F.prevYaw = F.yaw;
-  F.lev = heightAt(Math.floor(F.px), Math.floor(F.py));   // snapped, never lerped
+  // A fresh arrival commits to the GROUND surface (a deck-top arrival is a
+  // view-swap carry's business — the caller overrides F.lv after mount).
+  F.lv = F.model.surfacesAt(Math.floor(F.px), Math.floor(F.py))[0] || 0;
+  F.lev = F.lv;                                           // snapped, never lerped
   F.cellKey = Math.floor(F.px) + ',' + Math.floor(F.py);  // so frame one re-fires nothing
   F.yawQ = Math.round(F.yaw / YAW_Q);                     // and neither does the cone
   F.seen.add(F.map.id + ':' + F.cellKey);                 // you have seen where you stand
@@ -2556,7 +2783,7 @@ export async function openDelveFp(localeId, member, hooks, carry) {
       keys: {}, latched: {}, padKeys: {}, padAxes: null, look: null,
       // The continuous walker's state. Every one of these is hard-reset in
       // mount(), because a portal must not carry the last room's easing in.
-      vx: 0, vy: 0, lev: 0, bobPhase: 0, sway: 0, prevYaw: 0,
+      vx: 0, vy: 0, lev: 0, lv: 0, bobPhase: 0, sway: 0, prevYaw: 0,
       cellKey: '', yawQ: 0, viewR: 8, gl: null, selfFace: null,
       last: 0, raf: 0, ended: false, transiting: false,
       creatures: [], decor: [], solids: [], doors: [], shots: [], armed: false,
@@ -2581,6 +2808,12 @@ export async function openDelveFp(localeId, member, hooks, carry) {
       if (carry && carry.dir != null) {
         F.yaw = carry.dir * Math.PI / 4;
         F.prevYaw = F.yaw; F.yawQ = Math.round(F.yaw / YAW_Q);
+      }
+      // And the SURFACE: a body on a bridge must arrive on it, not under it —
+      // validated against what the arrival cell actually offers.
+      if (carry && carry.lev != null
+        && F.model.surfacesAt(Math.floor(F.px), Math.floor(F.py)).includes(carry.lev)) {
+        F.lv = carry.lev; F.lev = carry.lev;
       }
       wireInput();
       // The stick arrives with the first touch, exactly like the top-down's.
@@ -2885,7 +3118,8 @@ function trySwing() {
     const vx = c.x - F.px, vy = c.y - F.py, d = Math.hypot(vx, vy) || 1e-6;
     if (d > bd) continue;
     if ((vx * dx + vy * dy) / d < SWING_CONE) continue;   // it has to be in front
-    if (!clearLine(F.px, F.py, c.x, c.y)) continue;      // and not behind the rock
+    if (Math.abs((c.lv || 0) - (F.lv || 0)) > 1) continue; // a step of reach, not a storey
+    if (!clearLine(F.px, F.py, c.x, c.y, F.lv || 0, c.lv || 0)) continue; // and not behind the rock
     best = c; bd = d;
   }
   if (best) strike(best);
@@ -2968,11 +3202,12 @@ function steer(dt) {
   const L = Math.hypot(dx, dy);
   if (L > 1) { dx /= L; dy /= L; }
   const cx = Math.floor(F.px), cy = Math.floor(F.py);
+  // Rungs cost time; stairs are the climb taken at a walk.
   const sp = WALK_SPEED * (onClimb(cx, cy) ? CLIMB_RATE : 1);
   const ox = F.px, oy = F.py;
-  const e = { x: F.px, y: F.py };
+  const e = { x: F.px, y: F.py, lv: F.lv };
   const hit = slide(e, dx * sp * dt, dy * sp * dt);
-  F.px = e.x; F.py = e.y;
+  F.px = e.x; F.py = e.y; F.lv = e.lv;
   // ACHIEVED velocity, not intended — the idiom moveCreatures already uses.
   // Walking into a wall must read as standing still, or the standee marches on
   // the spot and the bob never stops.
@@ -2982,11 +3217,15 @@ function steer(dt) {
   // WALK-INTO-ORE SURVIVES. The grid-locked crawler knew which cell it had
   // failed to enter because it asked before moving; `slide` reports the cell
   // that refused each axis, which is the same knowledge after the fact.
-  if (hit && at(hit.x, hit.y) === 'o') mineOre(hit.x, hit.y);
+  // A pick reaches the vein you are level with (±1 step), not one a storey off.
+  if (hit && at(hit.x, hit.y) === 'o'
+    && Math.abs((F.lv || 0) - heightAt(hit.x, hit.y)) <= 1) mineOre(hit.x, hit.y);
 
   // The four smoothed values, each with a hard-zero threshold so an idle frame
   // still compares equal and writes nothing — that guard IS the mobile budget.
-  const want = heightAt(Math.floor(F.px), Math.floor(F.py));
+  // The eye eases toward the COMMITTED surface, not the cell's ground — which
+  // is the whole difference between walking a bridge and walking under one.
+  const want = F.lv != null ? F.lv : heightAt(Math.floor(F.px), Math.floor(F.py));
   const k = 1 - Math.exp(-dt / 0.09);            // ~the old 205ms ease
   F.lev += (want - F.lev) * k;
   if (Math.abs(want - F.lev) < 0.01) F.lev = want;
@@ -3057,7 +3296,10 @@ function onCellChange() {
  */
 function checkDoors() {
   if (!F.armed || F.transiting || F.ended) return;
-  const near = (q) => Math.hypot(q.x - F.px, q.y - F.py) < 0.8;
+  // Level with the doorway, not merely over it — crossing a bridge above the
+  // way out must not end the walk (ONE RULES FACT, level gates everywhere).
+  const near = (q) => Math.hypot(q.x - F.px, q.y - F.py) < 0.8
+    && Math.abs((F.lv || 0) - (F.model.surfacesAt(Math.floor(q.x), Math.floor(q.y))[0] || 0)) <= 0.5;
   for (const q of (F.map.portals || [])) {
     if (q.dead || !near(q)) continue;
     usePortal(q); return;
@@ -3130,7 +3372,8 @@ function moveCreatures(dt) {
     const rank = c.prey.rank || 1;
     const px = c.x, py = c.y;
 
-    if (!c.aggro && dist < NOTICE[Math.min(5, rank)] && clearLine(c.x, c.y, F.px, F.py)) {
+    if (!c.aggro && dist < NOTICE[Math.min(5, rank)]
+      && clearLine(c.x, c.y, F.px, F.py, c.lv || 0, F.lv || 0)) {
       c.aggro = true;
       c.noticedAt = now;
     }
@@ -3180,8 +3423,21 @@ function moveCreatures(dt) {
     }
     const step = Math.min(d, speed * dt);
     const nx = c.x + dx / d * step, ny = c.y + dy / d * step;
-    if (!blocked(Math.floor(nx), Math.floor(c.y))) c.x = nx;
-    if (!blocked(Math.floor(c.x), Math.floor(ny))) c.y = ny;
+    // The same step law the walker obeys (ONE RULES FACT): a creature cannot
+    // stroll up a terrace either, and a big body (rank 4+, taller than the
+    // passage) does not fit beneath a deck — you fit or you don't.
+    const okc = (X, Y) => {
+      const gx = Math.floor(X), gy = Math.floor(Y);
+      if (blocked(gx, gy)) return false;
+      const pk = F.model.pickSurface(c.lv != null ? c.lv : 0, Math.floor(c.x), Math.floor(c.y), gx, gy);
+      if (pk == null) return false;
+      const dk = F.model.deckAt(gx, gy);
+      if (rank >= 4 && dk != null && pk < dk) return false;
+      c.lv = pk;
+      return true;
+    };
+    if (okc(nx, c.y)) c.x = nx;
+    if (okc(c.x, ny)) c.y = ny;
     // Actual velocity, not intent — a creature grinding along a wall it cannot
     // get past should show the direction it is really going, which is nowhere.
     c.vx = (c.x - px) / (dt || 1e-6); c.vy = (c.y - py) / (dt || 1e-6);
@@ -3425,7 +3681,9 @@ function slay(c) {
   // Decor is placed with an explicit lift; a creature carried its own from the
   // floor it stood on. Without this the corpse's transform reads `undefinedpx`,
   // the whole declaration is dropped, and the body snaps to the world origin.
-  c.lift = -heightAt(Math.floor(c.x), Math.floor(c.y)) * STEP_PX;
+  // The surface it DIED on, not the cell's ground — a thing slain on a bridge
+  // leaves its corpse on the planks, not on the creek bed below.
+  c.lift = -(c.lv != null ? c.lv : heightAt(Math.floor(c.x), Math.floor(c.y))) * STEP_PX;
   F.decor.push(c);
   // Only so many. A long delve should not end up rendering a battlefield.
   const bodies = F.decor.filter((d) => d.death != null);
@@ -3469,7 +3727,7 @@ function fightTick(dt) {
     // It still has to SEE you, so rock is cover — which is the first tactical
     // use the corridor's own shape has ever had.
     if (c.prey.ranged && c.aggro && c.staggerUntil <= now && d > RANGED_MIN && d < RANGED_MAX
-        && clearLine(c.x, c.y, F.px, F.py)) {
+        && clearLine(c.x, c.y, F.px, F.py, c.lv || 0, F.lv || 0)) {
       if (!c.shotAt) c.shotAt = now + RANGED_MS * 0.5;   // (unchanged — the shot aims by vector, not facing)
       else if (now >= c.shotAt) {
         c.shotAt = now + RANGED_MS * (0.8 + Math.random() * 0.5);
@@ -3477,7 +3735,8 @@ function fightTick(dt) {
         spawnShot(c.prey.ranged, 'foe', c.x, c.y, (F.px - c.x) * k, (F.py - c.y) * k, c.prey);
       }
     }
-    const inReach = d <= MELEE && clearLine(F.px, F.py, c.x, c.y);
+    const inReach = d <= MELEE && Math.abs((c.lv || 0) - (F.lv || 0)) <= 1
+      && clearLine(F.px, F.py, c.x, c.y, F.lv || 0, c.lv || 0);
     if (!inReach || c.staggerUntil > now) {
       // Step out of a wind-up and the blow does not land — which is what makes
       // backing off an answer rather than a delay.
@@ -3629,7 +3888,14 @@ function render() {
   // ledge drop is a hop down rather than a mid-step teleport.
   // Smoothed every frame in steer() now, instead of eased across a stride.
   const lev = F.lev;
-  const ey = -EYE - lev * STEP_PX - back * Math.sin(orb);
+  let ey = -EYE - lev * STEP_PX - back * Math.sin(orb);
+  // Under a deck the chase camera's rise would put the lens inside (or above)
+  // the planks, photographing the deck top instead of the subject — clamp it
+  // just beneath the underside, the same instinct backOff has at rock.
+  if (pov3) {
+    const dk = F.model.deckAt(Math.floor(F.px), Math.floor(F.py));
+    if (dk != null && (F.lv || 0) < dk) ey = Math.max(ey, -(dk * STEP_PX - STEP_PX * 0.2) + 8);
+  }
   // rotateY(+yaw), not −yaw. Forward is −Z, and CSS rotateY maps (x,y,z) to
   // (x·cosθ + z·sinθ, y, −x·sinθ + z·cosθ) — so facing east (yaw 90) has to send
   // world +X to view −Z, which needs +90. The negative sign put east BEHIND the
@@ -3764,7 +4030,7 @@ function render() {
       if (!(w > 0) || !(h > 0)) continue;
       sprites.push({
         src: c.cv, uv: null, w, h,
-        x: c.x * T, y: -heightAt(Math.floor(c.x), Math.floor(c.y)) * STEP_PX, z: c.y * T, alpha: 1,
+        x: c.x * T, y: -(c.lv != null ? c.lv : heightAt(Math.floor(c.x), Math.floor(c.y))) * STEP_PX, z: c.y * T, alpha: 1,
       });
     }
     if (F.self && F.pov === 3) {
@@ -3784,7 +4050,7 @@ function render() {
   // write is guarded by the value it would write: standing still, this loop
   // touches no style at all, which is the difference between a scene that
   // re-rasterises 30 layers a frame and one that does nothing.
-  for (const c of F.creatures) place(c, c.x, c.y, -heightAt(Math.floor(c.x), Math.floor(c.y)) * STEP_PX);
+  for (const c of F.creatures) place(c, c.x, c.y, -(c.lv != null ? c.lv : heightAt(Math.floor(c.x), Math.floor(c.y))) * STEP_PX);
   for (const d of F.decor) place(d, d.x, d.y, d.lift);
   // The solids do NOT move. They were placed once in world space, standing on
   // their own ground (@see buildProps) — all a frame owes them is the dark.
@@ -3869,7 +4135,10 @@ function render() {
         // "easing" IS the climb in motion.
         const cellX = Math.floor(F.px), cellY = Math.floor(F.py);
         const centred = Math.abs(F.px - cellX - 0.5) < 0.3 && Math.abs(F.py - cellY - 0.5) < 0.3;
-        const climbing = Math.abs(heightAt(cellX, cellY) - F.lev) > 0.05
+        // Against the COMMITTED surface, not the cell's ground — standing on a
+        // bridge deck is standing, not an endless mime of climbing. Stairs
+        // never pose the climb either: they are walked (onClimb is L/v only).
+        const climbing = Math.abs((F.lv || 0) - F.lev) > 0.05
           || (onClimb(cellX, cellY) && centred);
         const desired = guarding() ? 'hold'
           : climbing ? 'climb'
@@ -3915,6 +4184,16 @@ function drawMap() {
       g.fillStyle = WALL[ch] ? '#3b3128' : LOW[ch] ? '#5a4a36' : ch === '#' ? 'transparent'
         : EXIT[ch] ? '#d4a843' : ch === '+' ? '#8ab4d8' : '#7d6a4e';
       g.fillRect((dx + R) * cell, (dy + R) * cell, cell - 0.5, cell - 0.5);
+      // Height shading — the automap tells terraces from trenches at a glance.
+      const lv = heightAt(x, y);
+      if (lv && !WALL[ch] && !LOW[ch] && ch !== '#') {
+        g.fillStyle = lv > 0 ? `rgba(255,244,214,${Math.min(0.42, 0.14 * lv)})` : 'rgba(0,0,0,0.35)';
+        g.fillRect((dx + R) * cell, (dy + R) * cell, cell - 0.5, cell - 0.5);
+      }
+      if (DECK_CH[ch] && F.model.deckAt(x, y) != null) {
+        g.fillStyle = ch === 'n' ? '#8a6a42' : '#6e6250';
+        g.fillRect((dx + R) * cell, (dy + R) * cell + cell * 0.3, cell - 0.5, cell * 0.4);
+      }
     }
   }
   g.fillStyle = '#e8e0d0';
@@ -4019,7 +4298,7 @@ function swapToTop() {
   if (!hooks.swapView) return;
   F.transiting = true;
   const carry = {
-    swap: true, mapId: F.map.id, at: [F.px, F.py],
+    swap: true, mapId: F.map.id, at: [F.px, F.py], lev: F.lv,
     // The facing crosses too — the walker turns to look where you were looking.
     dir: Math.round((((F.yaw * 180 / Math.PI) % 360) + 360) % 360 / 45) % 8,
     stack: F.stack.slice(), mined: [...F.mined], haul: F.haul,
@@ -4127,6 +4406,7 @@ window.__delveFp = { leave, close, help: () => helpUntil(9000), pov: togglePov }
 if (typeof window !== 'undefined') {
   window.__fpDebug = () => F && ({
     map: F.map && F.map.id, x: +F.px.toFixed(2), y: +F.py.toFixed(2),
+    lv: F.lv, lev: +F.lev.toFixed(3),   // committed surface · the eased eye
     dir: COMPASS[((Math.round(F.yaw / (Math.PI / 4)) % 8) + 8) % 8],
     yawDeg: +(F.yaw * 180 / Math.PI).toFixed(1),
     speed: +Math.hypot(F.vx, F.vy).toFixed(3),

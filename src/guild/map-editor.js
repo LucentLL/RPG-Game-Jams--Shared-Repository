@@ -16,7 +16,7 @@
  * Drafts persist in localStorage ('crucible.editorMaps') and export as JSON;
  * promoting one to a shipped chart is pasting that JSON into delve-maps.js.
  */
-import { DELVE_MAPS, THEMES, validateMap } from './delve-maps.js';
+import { DELVE_MAPS, THEMES, validateMap, makeLevelModel, CLIMB_CH, DECK_CH } from './delve-maps.js';
 import { invalidateBake } from './delve.js';
 import { ART, artSprite, artTexRect } from './art.js';
 import { PROP_VOL, PLAYER_H } from './prop-volume.js';
@@ -53,7 +53,10 @@ function normalize(m) {
   if (!Array.isArray(m.grid) || !m.grid.length) m.grid = blank(20, 14).grid;
   m.grid = m.grid.map(String);
   if (!Array.isArray(m.entry) || m.entry.length !== 2) m.entry = [2.5, 2.5];
-  for (const k of ['props', 'spawns', 'portals']) if (!Array.isArray(m[k])) m[k] = [];
+  for (const k of ['props', 'spawns', 'portals', 'paint', 'regions']) if (!Array.isArray(m[k])) m[k] = [];
+  // A paint rect is four finite numbers or it is nothing — a NaN rect would
+  // draw nowhere on the plan and still ride along in the export.
+  m.paint = m.paint.filter((r) => r && [r.x, r.y, r.w, r.h].every(Number.isFinite) && r.w > 0 && r.h > 0);
   return m;
 }
 
@@ -71,9 +74,19 @@ const TILES = [
   { ch: 'f', name: 'Furnishing cell', color: '#7c9a55', glyph: 'f' },
   { ch: 'd', name: 'Doorway (exit)', color: '#5a4632', glyph: '▢' },
   { ch: '+', name: 'Interior door (portal)', color: '#5a4632', glyph: '+' },
-  { ch: 's', name: 'Entry stairs (exit)', color: '#6b5d4a', glyph: 'S' },
+  // '▼', not 'S': the exit stairs go DOWN, and on the plan an 'S' glyph would
+  // be indistinguishable from the new Steps char.
+  { ch: 's', name: 'Entry stairs (exit)', color: '#6b5d4a', glyph: '▼' },
   { ch: 'w', name: 'Wagon exit', color: '#6b5d4a', glyph: 'W' },
   { ch: '^', name: 'Ledge (one step up)', color: '#9aa66d', glyph: '▲' },
+  // The height vocabulary (delve-maps.js) — the canvas's level shading carries
+  // most of the reading; the terraces need no glyph at all.
+  { ch: '2', name: 'Terrace (two steps)', color: '#a8b478', glyph: '' },
+  { ch: '3', name: 'Terrace (three steps)', color: '#b6c184', glyph: '' },
+  { ch: ',', name: 'Sunken floor (one down)', color: '#55663f', glyph: '' },
+  { ch: 'S', name: 'Steps (climb at a walk)', color: '#8a7a52', glyph: '≡' },
+  { ch: 'u', name: 'Tunnel (under-deck)', color: '#6e6250', glyph: '∩' },
+  { ch: 'n', name: 'Bridge (planked deck)', color: '#8a6a42', glyph: '≃' },
   { ch: 'L', name: 'Ladder (climb)', color: '#a58448', glyph: 'H' },
   { ch: 'v', name: 'Vine (climb)', color: '#4f7a42', glyph: '≀' },
   { ch: 'o', name: 'Ore node', color: '#c9a86a', glyph: '◆' },
@@ -83,6 +96,12 @@ const TILES = [
   { ch: 'm', name: 'Minecart', color: '#6d6558', glyph: 'M' },
 ];
 const TILE_BY_CH = Object.fromEntries(TILES.map((t) => [t.ch, t]));
+
+/** Plan-view ground tint per theme — the wash draw() lays for floor cells AND
+ *  the swatch the Surfaces tab arms, one table so the chip matches the ground
+ *  it paints. Rooms not named here share the generic-interior brown. */
+const THEME_TINT = { meadow: '#5d8544', mine: '#8f7c58', interior: '#7a6a55', arena: '#c2b283' };
+const themeTint = (t) => THEME_TINT[t] || '#6f5d49';
 
 /**
  * THE SIZE LAW, applied at placement: the chart width every lens will draw,
@@ -122,7 +141,7 @@ const blank = (w, h) => ({
   grid: Array.from({ length: h }, (_, y) =>
     (y === 0 || y === h - 1) ? '#'.repeat(w)
       : '#' + '.'.repeat(w - 2) + '#'),
-  entry: [2.5, 2.5], spawns: [], props: [], portals: [],
+  entry: [2.5, 2.5], spawns: [], props: [], portals: [], paint: [],
 });
 
 const clone = (m) => JSON.parse(JSON.stringify(m));
@@ -175,7 +194,7 @@ export function openMapEditor(ctx) {
       map: normalize(last ? clone(last) : blank(20, 14)),
       sel: { kind: 'tile', id: '.' }, prey: Object.keys(PREY)[0],
       tab: 'tiles', tool: 'paint', zoom: 1.4, panX: 0, panY: 0,
-      undo: [], sheets: {}, painting: false, hover: null,
+      undo: [], sheets: {}, painting: false, hover: null, paintStart: null,
     };
   }
   buildDom(host);
@@ -222,6 +241,7 @@ function buildDom(host) {
           <button data-tab="tiles">Tiles</button>
           <button data-tab="props">Objects</button>
           <button data-tab="flags">Flags</button>
+          <button data-tab="paint">Surfaces</button>
           <button data-tab="map">Map</button>
         </div>
         <div class="med-palette"></div>
@@ -307,6 +327,25 @@ function renderSide() {
       if (b) { E.sel = { kind: 'flag', id: b.dataset.flag }; renderSide(); }
     };
     pal.querySelector('.med-prey').onchange = (e) => { E.prey = e.target.value; };
+  } else if (E.tab === 'paint') {
+    // Ground-fill dressing (the charts' `paint` array) — NOT regions: a
+    // region is a room with walls and a ceiling, and the drafting table does
+    // not author rooms. This tab only re-skins ground the grid already has.
+    pal.innerHTML = `<div class="med-hint">Paint the ground fill only — walls, rims and the sky stay the map's own. Drag a rectangle.</div>`
+      + Object.keys(THEMES).map((t) => `
+        <button class="med-chip ${E.sel.kind === 'paint' && E.sel.id === t ? 'on' : ''}" data-paint="${t}">
+          <span class="med-swatch" style="background:${themeTint(t)}"></span>${t}
+        </button>`).join('')
+      + `<button class="med-chip ${E.sel.kind === 'paintErase' ? 'on' : ''}" data-paint-erase="1">
+          <span class="med-swatch" style="background:#2b2f38">✕</span>Eraser
+          <span class="med-ch">del</span></button>`;
+    pal.onclick = (e) => {
+      const t = e.target.closest('[data-paint]');
+      const er = e.target.closest('[data-paint-erase]');
+      if (t) E.sel = { kind: 'paint', id: t.dataset.paint };
+      else if (er) E.sel = { kind: 'paintErase' };
+      if (t || er) renderSide();
+    };
   } else {
     const themes = Object.keys(THEMES);
     const templates = Object.keys(DELVE_MAPS).filter((k) => DELVE_MAPS[k]);
@@ -411,22 +450,148 @@ function restsOn(ax, ay, art) {
   });
 }
 
-/** Editor-side lint past validateMap's: things a draft walk would trip over. */
+/**
+ * The height law of the CURRENT grid — the SAME model every lens walks
+ * (delve-maps.js makeLevelModel), cached against the joined grid because
+ * draw() runs on every hover move and the flood is cheap but not free.
+ */
+function levelModel() {
+  const key = E.map.grid.join('\n');
+  if (E._modelKey !== key) { E._modelKey = key; E._model = makeLevelModel(E.map.grid); }
+  return E._model;
+}
+
+/** Editor-side lint past validateMap's: things a draft walk would trip over.
+ *  Every height question below is asked OF THE MODEL, never re-derived from
+ *  raw char adjacency — a lint that disagrees with the walk teaches lies. */
 function lint() {
   const out = [];
   const m = E.map;
   const W = m.grid[0].length, H = m.grid.length;
   const at = (x, y) => (m.grid[Math.floor(y)] || '')[Math.floor(x)];
+  const inside = (x, y) => x >= 0 && x < W && y >= 0 && y < H;
+  const model = levelModel();
+  const ORTH = [[0, -1], [0, 1], [-1, 0], [1, 0]];
   const e = at(m.entry[0], m.entry[1]);
   if (!e || '#BbFrtmo'.includes(e)) out.push(`entry at ${m.entry} stands in '${e || 'void'}'`);
   const exits = m.grid.join('').match(/[sdw]/g) || [];
   if (!exits.length && !(m.portals || []).length) out.push('no exit cell (s/d/w) — the walk cannot end');
   if (exits.length > 1) out.push(`${exits.length} exit cells — the top-down keeps only the last one scanned as the live exit`);
   for (const p of m.props) if (!PROP_VOL[p.art]) out.push(`prop '${p.art}' has no volume entry — author its ladder height first`);
-  const inside = (x, y) => x >= 0 && x < W && y >= 0 && y < H;
+
+  for (let y = 0; y < H; y++) {
+    for (let x = 0; x < W; x++) {
+      const ch = at(x, y);
+      if (CLIMB_CH[ch]) {
+        // A climb stands on the low ground it derived; its whole job is the
+        // level one rung up. No such neighbour → dressed floor. A neighbour
+        // MORE than one up → a wall the step law will refuse.
+        const lv = model.floorAt(x, y);
+        let serves = false, jump = false;
+        for (const [dx, dy] of ORTH) {
+          if (model.surfacesAt(x + dx, y + dy).includes(lv + 1)) serves = true;
+          const nf = model.floorAt(x + dx, y + dy), nd = model.deckAt(x + dx, y + dy);
+          if (nf != null && (nf > lv + 1 || (nd != null && nd > lv + 1))) jump = true;
+        }
+        // A jump alone is not a fault: a stair chute walled by tall masonry
+        // (the Gallery's pillar trick) faces 2s on both flanks and serves its
+        // ledge perfectly well. Only a climb with NOTHING one rung up is
+        // broken — and then the jump is the likeliest reason why.
+        if (!serves) {
+          out.push(jump
+            ? `climb at ${x},${y} faces a jump of more than one level — terrace by construction (add a landing)`
+            : `climb at ${x},${y} serves no higher ground`);
+        }
+      }
+      // validateMap's deck-over-void rule, surfaced in the status bar where
+      // the author is, not the console.
+      if (DECK_CH[ch] && ORTH.some(([dx, dy]) => (at(x + dx, y + dy) || '#') === '#')) {
+        out.push(`deck at ${x},${y} borders the void — bridge a ',' trench or open ground instead`);
+      }
+    }
+  }
+
+  // Every pit needs its own way back out: dropping in is always legal, and
+  // the climb is the only way up. A climb beside sunken floor floods WITH it
+  // (it derives the pit's level), so an escape is simply a member climb.
+  const seenPit = new Set();
+  for (let y = 0; y < H; y++) {
+    for (let x = 0; x < W; x++) {
+      const lv0 = model.floorAt(x, y);
+      if (lv0 == null || lv0 >= 0 || seenPit.has(y * W + x)) continue;
+      const stack = [[x, y]];
+      seenPit.add(y * W + x);
+      let escape = false;
+      while (stack.length) {
+        const [cx, cy] = stack.pop();
+        if (model.climbAt(cx, cy)) escape = true;
+        for (const [dx, dy] of ORTH) {
+          const nx = cx + dx, ny = cy + dy, k = ny * W + nx;
+          if (!inside(nx, ny) || seenPit.has(k)) continue;
+          const nlv = model.floorAt(nx, ny);
+          if (nlv != null && nlv < 0) { seenPit.add(k); stack.push([nx, ny]); }
+        }
+      }
+      if (!escape) out.push(`a pit at ${x},${y} has no way out — hang a vine or cut steps`);
+    }
+  }
+
+  // A deck run nothing can step ONTO is scenery wearing a bridge's clothes:
+  // some cell of the run must touch non-deck ground at the deck's own level.
+  const seenDeck = new Set();
+  for (let y = 0; y < H; y++) {
+    for (let x = 0; x < W; x++) {
+      if (model.deckAt(x, y) == null || seenDeck.has(y * W + x)) continue;
+      const stack = [[x, y]];
+      seenDeck.add(y * W + x);
+      let mounts = false;
+      while (stack.length) {
+        const [cx, cy] = stack.pop();
+        const d = model.deckAt(cx, cy);
+        for (const [dx, dy] of ORTH) {
+          const nx = cx + dx, ny = cy + dy, k = ny * W + nx;
+          if (model.deckAt(nx, ny) != null) {
+            if (inside(nx, ny) && !seenDeck.has(k)) { seenDeck.add(k); stack.push([nx, ny]); }
+          } else if (model.surfacesAt(nx, ny).includes(d)) mounts = true;
+        }
+      }
+      if (!mounts) out.push(`a deck at ${x},${y} nothing can step onto`);
+    }
+  }
+
+  // (No open-sky rule for tall terraces: indoors the ceiling RISES with the
+  // floor — a terrace under a roof is a dome, per delve-fp's sector ceilings.)
+
+  // An arrival takes the LOW surface (pickSurface with no origin — static
+  // things live on the ground), so a flag on a deck cell wakes up UNDER it.
+  if (model.deckAt(Math.floor(m.entry[0]), Math.floor(m.entry[1])) != null) out.push(`${m.entry[0]},${m.entry[1]} arrives on the GROUND under the deck`);
+  for (const sp of m.spawns) {
+    if (model.deckAt(Math.floor(sp.x), Math.floor(sp.y)) != null) out.push(`${sp.x},${sp.y} arrives on the GROUND under the deck`);
+  }
+  for (const p of m.portals || []) {
+    const dest = p.to === m.id ? m : DELVE_MAPS[p.to];
+    if (!dest || !Array.isArray(dest.grid) || !Array.isArray(p.at)) continue;
+    const dm = p.to === m.id ? model : makeLevelModel(dest.grid);
+    if (dm.deckAt(Math.floor(p.at[0]), Math.floor(p.at[1])) != null) out.push(`${p.at[0]},${p.at[1]} arrives on the GROUND under the deck`);
+  }
+
+  // The prop chart has no height slot yet, so furniture keeps to level 0 —
+  // a piece anywhere else would draw at the ground in one lens and float in
+  // another. (Off-map anchors are the resize lint's business, below.)
+  for (const p of m.props) {
+    const cx = Math.floor(p.x), cy = Number.isInteger(p.y) ? p.y - 1 : Math.floor(p.y);   // propCell's reading
+    if (inside(cx, cy) && model.floorAt(cx, cy) !== 0) out.push(`prop '${p.art}' stands off ground level — furniture keeps to level 0 for now`);
+  }
+
+  for (const r of m.paint) if (!THEMES[r.theme]) out.push(`paint rect at ${r.x},${r.y} names unknown theme '${r.theme}'`);
+
+  const gone = (r) => [r.x, r.y, r.w, r.h].every(Number.isFinite)
+    && (r.x >= W || r.y >= H || r.x + r.w <= 0 || r.y + r.h <= 0);
   const off = [...m.props.filter((p) => !inside(p.x, p.y - 0.5)).map((p) => p.art),
     ...m.spawns.filter((s) => !inside(s.x, s.y)).map((s) => s.prey),
-    ...(m.portals || []).filter((p) => !inside(p.x, p.y)).map(() => 'portal')];
+    ...(m.portals || []).filter((p) => !inside(p.x, p.y)).map(() => 'portal'),
+    ...m.paint.filter(gone).map(() => 'paint'),
+    ...(m.regions || []).filter((r) => r && gone(r)).map(() => 'region')];
   if (off.length) out.push(`off the map after a resize: ${off.join(', ')} — erase or move them`);
   return out;
 }
@@ -480,6 +645,14 @@ function onDown(ev) {
   if (ev.button === 1) { E.pan = { x: ev.clientX - E.panX, y: ev.clientY - E.panY }; return; }
   const c = cellAt(ev);
   if (c.y < 0 || c.y >= E.map.grid.length || c.x < 0 || c.x >= E.map.grid[0].length) return;
+  // The Surfaces tab drags RECTANGLES, not cells: arm the corner here and let
+  // onUp commit — one gesture, one undo step. Right-click stays out of the
+  // grid entirely while it is armed; the floor shortcut is the tile tools'.
+  if (E.sel.kind === 'paint') {
+    if (ev.button === 0) { E.paintStart = { x: c.x, y: c.y }; draw(); }
+    return;
+  }
+  if (E.sel.kind === 'paintErase' && ev.button === 2) return;
   snap();
   E.painting = true;
   apply(c, ev.button === 2);
@@ -494,9 +667,33 @@ function onMove(ev) {
   if (E.painting && E.sel.kind === 'tile') { apply(c, false); draw(); }
   else if (changed) draw();
 }
-function onUp() { if (E) { E.painting = false; E.pan = null; } }
+function onUp() {
+  if (!E) return;
+  // The armed Surfaces rect commits on release: snap() THEN push, so the
+  // whole drag is one undo step.
+  if (E.paintStart) {
+    const r = E.sel.kind === 'paint' ? dragRect() : null;
+    if (r) { snap(); E.map.paint.push({ ...r, theme: E.sel.id }); }
+    E.paintStart = null;
+    draw();
+  }
+  E.painting = false; E.pan = null;
+}
 
-/** One edit, routed by what is armed. Right-click always paints floor. */
+/** The live Surfaces drag as a grid rect — normalized and clamped, min 1×1
+ *  (the anchor cell is always on the map, so the clamp can never empty it). */
+function dragRect() {
+  if (!E.paintStart) return null;
+  const b = E.hover || E.paintStart;
+  const W = E.map.grid[0].length, H = E.map.grid.length;
+  const x0 = Math.max(0, Math.min(E.paintStart.x, b.x)), y0 = Math.max(0, Math.min(E.paintStart.y, b.y));
+  const x1 = Math.min(W - 1, Math.max(E.paintStart.x, b.x)), y1 = Math.min(H - 1, Math.max(E.paintStart.y, b.y));
+  if (x1 < x0 || y1 < y0) return null;
+  return { x: x0, y: y0, w: x1 - x0 + 1, h: y1 - y0 + 1 };
+}
+
+/** One edit, routed by what is armed. Right-click paints floor — except on
+ *  the Surfaces tab, whose right-clicks onDown never routes here. */
 function apply(c, rightClick) {
   const { x, y } = c;
   if (y < 0 || y >= E.map.grid.length || x < 0 || x >= E.map.grid[0].length) return;
@@ -507,13 +704,33 @@ function apply(c, rightClick) {
     setCell(x, y, E.sel.id);
     // The grid is one char per cell, so painting REPLACES — a vine over the
     // abyss becomes climbable floor, which surprised the first playtest. Say
-    // so, and teach the climb grammar (a link serves a ledge) while at it.
-    if (E.sel.id === 'L' || E.sel.id === 'v') {
-      const ledgeBeside = [[0, -1], [0, 1], [1, 0], [-1, 0]]
-        .some(([dx, dy]) => ((E.map.grid[y + dy] || '')[x + dx]) === '^');
-      if (was === '#') toast('The abyss has no bottom to climb to — this cell is climbable floor now. Hanging INTO the pit comes with the depth update.');
-      else if (!ledgeBeside) toast('A climb links two heights: put a ▲ ledge beside it, or it is just dressed floor.');
+    // so, and teach the climb grammar (a link serves a level) while at it.
+    if (CLIMB_CH[E.sel.id]) {
+      // Ask the MODEL, not the chars: a neighbour at any DIFFERENT derived
+      // level is height this climb could serve — the chars alone would miss
+      // a landing that is itself a climb, a deck, or plain ground the flood
+      // has already stepped.
+      const model = levelModel();
+      const lv = model.floorAt(x, y);
+      const stepBeside = [[0, -1], [0, 1], [1, 0], [-1, 0]].some(([dx, dy]) => {
+        const nch = (E.map.grid[y + dy] || '')[x + dx];
+        if (nch && '^23,'.includes(nch)) return true;
+        const nlv = model.floorAt(x + dx, y + dy);
+        return nlv != null && nlv !== lv;
+      });
+      if (was === '#') toast('The abyss has no bottom to climb to — this cell is floor now. For a pit you can hang into, paint a sunken floor \',\' and set the vine on its rim.');
+      else if (!stepBeside) toast('A climb links two heights: put a ▲ ledge beside it, or it is just dressed floor.');
     }
+    return;
+  }
+
+  if (E.sel.kind === 'paintErase') {
+    // Topmost wins — the rect painted later lies over the earlier one.
+    for (let i = E.map.paint.length - 1; i >= 0; i--) {
+      const r = E.map.paint[i];
+      if (x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h) { E.map.paint.splice(i, 1); return; }
+    }
+    E.undo.pop();   // nothing under the click — drop the pre-armed snapshot
     return;
   }
 
@@ -573,7 +790,15 @@ function apply(c, rightClick) {
     const resting = restsOn(ax, ay, art);
     const cx = Math.floor(ax), cyRow = Number.isInteger(ay) ? ay - 1 : Math.floor(ay);
     const under = (E.map.grid[cyRow] || '')[cx];
-    if (!resting && under !== '.' && under !== 'f') { toast('Furniture needs a floor cell — or a bigger piece to rest on.'); return; }
+    if (!resting && under !== '.' && under !== 'f') {
+      // '^23,Sun' spells the seven level chars: honest ground to WALK, but
+      // the prop chart has no height slot yet — a desk on a bridge would
+      // draw at level 0 in every lens and lie in all of them.
+      toast('^23,Sun'.includes(under)
+        ? 'Furniture keeps to ground level for now — terraces and decks cannot take a piece yet.'
+        : 'Furniture needs a floor cell — or a bigger piece to rest on.');
+      return;
+    }
     const fOwn = !resting && under === '.' ? 1 : undefined;
     E.map.props.push({ art, x: ax, y: ay, w, ...(fOwn ? { fOwn } : {}) });
     if (fOwn) setCell(cx, cyRow, 'f');
@@ -627,7 +852,8 @@ function draw() {
 
   const s = CELL * E.zoom;
   const m = E.map;
-  const themeFloor = { meadow: '#5d8544', mine: '#8f7c58', }[m.theme] || '#6f5d49';
+  const model = levelModel();
+  const themeFloor = themeTint(m.theme);
 
   for (let y = 0; y < m.grid.length; y++) {
     for (let x = 0; x < m.grid[y].length; x++) {
@@ -635,7 +861,21 @@ function draw() {
       const t = TILE_BY_CH[ch];
       g.fillStyle = ch === '.' || ch === 'f' ? themeFloor : (t ? t.color : '#a03a72');
       g.fillRect(x * s, y * s, s, s);
-      if (ch === '^') { g.fillStyle = 'rgba(255,255,255,.18)'; g.fillRect(x * s, y * s, s, s); }
+      // Level shading from the MODEL, not the chars: a terrace lightens per
+      // step, a pit darkens, and a climb shades at the ground it DERIVED —
+      // so the plan reads height exactly the way the lenses will walk it.
+      const lv = model.floorAt(x, y);
+      if (lv != null && lv !== 0) {
+        g.fillStyle = lv > 0 ? `rgba(255,255,255,${Math.min(0.4, 0.12 * lv)})` : 'rgba(0,0,0,.35)';
+        g.fillRect(x * s, y * s, s, s);
+      }
+      // A deck cell is TWO surfaces: the ground shading above stays honest,
+      // and a band across the middle is the deck you also stand on — planks
+      // for a bridge, the terrace top for a tunnel's bored-through rock.
+      if (model.deckAt(x, y) != null) {
+        g.fillStyle = ch === 'u' ? TILE_BY_CH['2'].color : TILE_BY_CH['n'].color;
+        g.fillRect(x * s, y * s + s * 0.2, s, s * 0.6);
+      }
       if (t && t.glyph) {
         g.fillStyle = 'rgba(255,255,255,.75)';
         g.font = `${Math.round(s * 0.5)}px serif`;
@@ -650,6 +890,26 @@ function draw() {
   const gw = m.grid[0].length * s, gh = m.grid.length * s;
   for (let x = 0; x <= m.grid[0].length; x++) { g.beginPath(); g.moveTo(x * s, 0); g.lineTo(x * s, gh); g.stroke(); }
   for (let y = 0; y <= m.grid.length; y++) { g.beginPath(); g.moveTo(0, y * s); g.lineTo(gw, y * s); g.stroke(); }
+
+  // Ground-fill paint (the charts' `paint` rects): a translucent wash of the
+  // theme's tint, dashed so it reads as dressing over the plan, named at the
+  // corner so the author knows which ground the lenses will lay there.
+  for (const r of m.paint || []) {
+    const tint = themeTint(r.theme);
+    g.globalAlpha = 0.25;
+    g.fillStyle = tint;
+    g.fillRect(r.x * s, r.y * s, r.w * s, r.h * s);
+    g.globalAlpha = 1;
+    g.strokeStyle = tint;
+    g.lineWidth = 1;
+    g.setLineDash([4, 3]);
+    g.strokeRect(r.x * s + 0.5, r.y * s + 0.5, r.w * s - 1, r.h * s - 1);
+    g.setLineDash([]);
+    g.fillStyle = 'rgba(255,255,255,.75)';
+    g.font = `${Math.max(9, Math.round(s * 0.32))}px serif`;
+    g.textAlign = 'left'; g.textBaseline = 'top';
+    g.fillText(r.theme, r.x * s + 3, r.y * s + 3);
+  }
 
   // Props: the real crops, drawn at their chart width against the 48px tile —
   // the same relative size every lens shows, which is the point of the law.
@@ -695,5 +955,15 @@ function draw() {
     g.strokeStyle = 'rgba(255,215,107,.9)';
     g.lineWidth = 2;
     g.strokeRect(E.hover.x * s + 1, E.hover.y * s + 1, s - 2, s - 2);
+  }
+
+  // The live Surfaces drag: the rect that will commit on release.
+  const pr = E.sel.kind === 'paint' ? dragRect() : null;
+  if (pr) {
+    g.strokeStyle = themeTint(E.sel.id);
+    g.lineWidth = 2;
+    g.setLineDash([5, 4]);
+    g.strokeRect(pr.x * s + 1, pr.y * s + 1, pr.w * s - 2, pr.h * s - 2);
+    g.setLineDash([]);
   }
 }

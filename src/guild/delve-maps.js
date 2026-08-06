@@ -28,9 +28,25 @@ import { buildCampusMap } from './campus.js';
  *      already is, but you stand on top of it, and you can only get up there
  *      across a climb cell — so a shelf is a place you reach, not a place you
  *      wander onto. Standees on it ride up by exactly the drawn height.
+ *   2 · 3  TERRACE — walkable floor two / three steps up. The same law as the
+ *      ledge, one rung per climb: a tower is terraced by construction
+ *      (. → climb → ^ → climb → 2 → climb → 3), never scaled in one stride.
+ *   ,  SUNKEN floor — one step DOWN (a trench, a creek bed, the pit the vine
+ *      hangs into). You may always walk off the edge and drop; climbing back
+ *      out is what the vine is for.
  *   L  ladder · v  vine — the climb link. Ground you walk onto, dressed with
  *      the thing you climb, and the ONLY cell a change of level is legal across.
  *      Put one directly south of the ledge it serves so it leans on its face.
+ *   S  STAIRS — a climb link at FULL walk speed, drawn as real steps. Same
+ *      one-rung law as the ladder; what stairs buy is pace and dignity.
+ *   u  TUNNEL · n  BRIDGE — TWO walkable surfaces in one cell: the low ground
+ *      runs under, a deck runs over, and which one you are on is decided by
+ *      the level you arrive at (the thing Doom itself never could). The deck's
+ *      height and the ground beneath are DERIVED from the neighbours — a 'u'
+ *      through a '2' terrace bores at ground 0 under a rock deck at 2; an 'n'
+ *      between terraces hangs planks at their level. The passage below exists
+ *      only with real headroom (two steps); a bridge over a ',' creek or over
+ *      '#' chasm is deck-only, with the water or the void still under it.
  *
  * Interiors may also carry:
  *   name    the room's title, shown in the HUD (and on arrival)
@@ -253,6 +269,148 @@ export function oreKindAt(x, y) {
   return kinds[h % kinds.length];
 }
 
+// ---------------------------------------------------------------------------
+// THE LEVEL MODEL — one height fact for every lens (ONE RULES FACT, CLAUDE.md)
+// ---------------------------------------------------------------------------
+
+/** Authored floor levels, in whole steps of BLOCK_H/STEP_PX. Every other
+ *  walkable char stands at 0. Signed on purpose: the pit is a level too. */
+export const FLOOR_LV = { '^': 1, 2: 2, 3: 3, ',': -1 };
+/** Two-surface cells: a deck runs over the low ground. 'u' dresses the deck as
+ *  the terrain it bores through, 'n' as planks. */
+export const DECK_CH = { u: 1, n: 1 };
+/** Climb links — the only cells a step UP is legal across. 'S' walks at full
+ *  speed; rungs cost time. */
+export const CLIMB_CH = { L: 'ladder', v: 'vine', S: 'stairs' };
+/** Steps of headroom a body needs to pass beneath a deck. The player is ~1.77
+ *  steps tall (760/900 tiles against a 430/900 step), so two is the least
+ *  honest clearance — a deck any lower is a lid, not a bridge. */
+export const MIN_CLEAR = 2;
+/** Cells nothing stands ON at any level (walls, void, footprints).
+ *  'f'/'r'/'t'/'m' ARE ground here: a boulder blocks a walk, not a level. So
+ *  is 'o' — a vein is a wall until it is MINED, and the cell it opens into
+ *  must already know its level or the step into the fresh space is refused
+ *  (passability owns the block; the model owns only the height). */
+const UNGROUND = { '#': 1, B: 1, b: 1, F: 1 };
+
+/**
+ * The height law of one grid, computed once and asked by every lens.
+ *
+ * Levels are per-CELL facts derived entirely from the chart:
+ * - a plain floor char stands at FLOOR_LV[ch] || 0;
+ * - a climb cell stands at the LOWEST adjacent ground (it is the way up from
+ *   there — the Sparring Ring's ladders read level 0 exactly as they always
+ *   have), resolved by flood so chained stairs land on the landing below them;
+ * - a deck cell ('u'/'n') carries TWO surfaces: ground = the lowest
+ *   neighbouring ground (the passage continues it), deck = the highest (the
+ *   crossing continues it), both resolved by flood so a long span holds its
+ *   height mid-air. The under-passage exists only with MIN_CLEAR of headroom.
+ *
+ * THE STEP LAW (pickSurface) is the shipped ledge law, generalized and
+ * tightened to one rung: dropping any distance is always legal; climbing is
+ * legal only across a climb cell and only ONE level per step. Multi-level
+ * ground is therefore terraced by construction — exactly the grammar the
+ * ledge shipped with, now tall enough to build a keep out of.
+ */
+export function makeLevelModel(grid) {
+  const rows = grid.length, cols = grid[0].length;
+  const at = (x, y) => (x < 0 || y < 0 || x >= cols || y >= rows) ? '#' : grid[y][x];
+  const grounded = (x, y) => !UNGROUND[at(x, y)];
+  const ORTH = [[0, -1], [0, 1], [-1, 0], [1, 0]];
+
+  // Pass 1 — plain floors wear their authored level; climbs and decks wait.
+  const floor = [], deck = [];
+  for (let y = 0; y < rows; y++) {
+    floor.push(new Array(cols).fill(null)); deck.push(new Array(cols).fill(null));
+    for (let x = 0; x < cols; x++) {
+      const ch = at(x, y);
+      if (!grounded(x, y) || CLIMB_CH[ch] || DECK_CH[ch]) continue;
+      floor[y][x] = FLOOR_LV[ch] || 0;
+    }
+  }
+  // Pass 2 — flood the derived cells until nothing moves. A climb takes the
+  // MIN of what it touches (it stands on the low ground it serves), a deck's
+  // ground the MIN and its deck the MAX (passage and crossing each continue
+  // the ground they came from). Bounded: each cell only ever tightens.
+  let moved = true, guard = rows * cols + 4;
+  while (moved && guard-- > 0) {
+    moved = false;
+    for (let y = 0; y < rows; y++) {
+      for (let x = 0; x < cols; x++) {
+        const ch = at(x, y);
+        const isClimb = !!CLIMB_CH[ch], isDeck = !!DECK_CH[ch];
+        if (!isClimb && !isDeck) continue;
+        let lo = null, hi = null;
+        for (const [dx, dy] of ORTH) {
+          // A CLIMB reads only real ground (and decks): chained through a
+          // neighbouring climb it would inherit that climb's low end — a
+          // stair on a gallery beside the gallery's own ladder read level 0
+          // and refused the terrace it visibly stood against. Decks keep the
+          // full chain; a long span holds its height through its own cells.
+          if (isClimb && CLIMB_CH[at(x + dx, y + dy)]) continue;
+          const nf = floor[y + dy] && floor[y + dy][x + dx];
+          const nd = deck[y + dy] && deck[y + dy][x + dx];
+          for (const v of [nf, nd]) {
+            if (v == null) continue;
+            lo = lo == null ? v : Math.min(lo, v);
+            hi = hi == null ? v : Math.max(hi, v);
+          }
+        }
+        if (lo == null) continue;
+        if (floor[y][x] !== lo) { floor[y][x] = lo; moved = true; }
+        if (isDeck && deck[y][x] !== hi) { deck[y][x] = hi; moved = true; }
+      }
+    }
+  }
+  // A derived cell nothing grounded touches (an authoring hole) stands at 0;
+  // a deck no higher than its ground is just floor and drops the deck.
+  for (let y = 0; y < rows; y++) {
+    for (let x = 0; x < cols; x++) {
+      const ch = at(x, y);
+      if ((CLIMB_CH[ch] || DECK_CH[ch]) && floor[y][x] == null) floor[y][x] = 0;
+      if (DECK_CH[ch] && (deck[y][x] == null || deck[y][x] <= floor[y][x])) deck[y][x] = null;
+    }
+  }
+
+  const floorAt = (x, y) => (grounded(x, y) && floor[y] ? floor[y][x] : null);
+  const deckAt = (x, y) => (deck[y] ? deck[y][x] : null) ?? null;
+  /** May a body pass BENEATH this cell's deck? */
+  const underOK = (x, y) => {
+    const d = deckAt(x, y), f = floorAt(x, y);
+    return d != null && f != null && d - f >= MIN_CLEAR;
+  };
+  /** Every level a body can stand at here, low to high. */
+  const surfacesAt = (x, y) => {
+    const f = floorAt(x, y);
+    if (f == null) return [];
+    const d = deckAt(x, y);
+    if (d == null) return [f];
+    return underOK(x, y) ? [f, d] : [d];
+  };
+  const climbAt = (x, y) => !!CLIMB_CH[at(x, y)];
+  /** Stairs are climbs that walk at full speed and draw as steps — every
+   *  OTHER climb behaviour (slow rungs, ladder dressing, climb pose) must
+   *  keep testing L/v, which is why this is its own question. */
+  const stairAt = (x, y) => CLIMB_CH[at(x, y)] === 'stairs';
+  /**
+   * THE STEP LAW. Which surface a body at `fromLv` lands on entering (x,y) —
+   * or null: no legal footing, the step is refused. Down is always legal (the
+   * ladder is the way up, never a fence); up is one rung, climb cells only.
+   * With no origin (a spawn, a wander probe, a fresh entry) the LOW surface
+   * answers — static things live on the ground.
+   */
+  const pickSurface = (fromLv, fx, fy, x, y) => {
+    const s = surfacesAt(x, y);
+    if (!s.length) return null;
+    if (fromLv == null || fx == null) return s[0];
+    const up = (climbAt(fx, fy) || climbAt(x, y)) ? 1 : 0;
+    let best = null;
+    for (const c of s) if (c <= fromLv + up && (best == null || c > best)) best = c;
+    return best;
+  };
+  return { cols, rows, floorAt, deckAt, underOK, surfacesAt, climbAt, stairAt, pickSurface };
+}
+
 /**
  * @typedef {Object} DelveMap
  * @property {string} id @property {string} theme  THEMES key
@@ -284,8 +442,8 @@ export const DELVE_MAPS = {
       '##..........###....BB...##', // 13  ← entry floor · east chamber
       '##..s.......###.....r...##', // 14
       '##....====m..........o..##', // 15
-      '##...o............^^^^t.##', // 16  ← the upper gallery, one step up
-      '##.r........###...^^^^..##', // 17
+      '##...o............^2^^t.##', // 16  ← the upper gallery — and its crow's nest, two up
+      '##.r........###...^S^^..##', // 17  ← the stair cut into the gallery
       '##..........###....L....##', // 18  ← the ladder up to it
       '##########################', // 19
       '##########################', // 20
@@ -313,9 +471,16 @@ export const DELVE_MAPS = {
       '##....................##', //  4
       '##.....r..........t...##', //  5
       '##....................##', //  6
-      '########..######..######', //  7  ← the creek ravine
-      '########..######..######', //  8
-      '########..######..######', //  9
+      // The creek is a real BED now (',' — one step down, dry shingle), not a
+      // bottomless ravine: drop in anywhere, and climb out only where a vine
+      // hangs. The old west ford stays level ground; the east crossing is a
+      // planked bridge AT GRADE over the water — one step of creek is no
+      // headroom, so the bridge is deck-only and dams the bed in two, which
+      // is why each half hangs its own vine. The east vine also serves the
+      // bridge itself: haul out of the creek straight onto the planks.
+      '########..,,,,,,nnv,,,##', //  7  ← the creek · the bridge · its vine
+      '########..v,,,,,nn,,,,##', //  8  ← the west reach's vine, by the ford
+      '########..,,,,,,nn,,,,##', //  9
       '##....................##', // 10
       '##...t..........r.....##', // 11
       '##.w..................##', // 12  ← the guild wagon (way home)
@@ -708,6 +873,19 @@ export function validateMap(map) {
     const ch = at(p.x, p.y);
     if (!ch || ch === '#' || 'BbFfrtmo'.includes(ch)) console.warn(`delve map ${map.id}: portal at ${p.x},${p.y} sits on '${ch}' — unreachable`);
     if (!DELVE_MAPS[p.to]) console.warn(`delve map ${map.id}: portal leads to unknown map '${p.to}'`);
+  }
+  // A deck cell against the void has no honest answer for what runs beneath
+  // it (the model would manufacture ground over the chasm) — span a ','
+  // creek or open ground instead; the abyss keeps its bottomlessness.
+  for (let y = 0; y < map.grid.length; y++) {
+    for (let x = 0; x < w; x++) {
+      if (!DECK_CH[map.grid[y][x]]) continue;
+      for (const [dx, dy] of [[0, -1], [0, 1], [-1, 0], [1, 0]]) {
+        if ((at(x + dx, y + dy) || '#') === '#') {
+          console.warn(`delve map ${map.id}: deck '${map.grid[y][x]}' at ${x},${y} borders the void — bridge a ',' trench or open ground instead`);
+        }
+      }
+    }
   }
   return true;
 }
