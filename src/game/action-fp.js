@@ -315,7 +315,13 @@ function buildDressing(T0) {
   const bbs = V.world.querySelector('.tfp-bbs');
   for (const p of T0.props) {
     const cx = (p.x + 0.5) * T, cz = (p.y + 0.5) * T;
-    const base = liftAt(T0, p.x + 0.5, p.y + 0.5);   // the ground THIS prop stands on
+    // The ground THIS prop stands on — and a flat prop reads the FLOOR, not
+    // liftAt: liftAt answers for a CLIMBER (half a step up, mid-rungs), and a
+    // ladder hung from that answer floats with its feet at knee height — the
+    // playtest's "ladders only go halfway". The foot belongs on the floor of
+    // its own cell; the head reaches the shelf by being one STEP tall.
+    const base = p.flat ? -hAt(T0, p.x + 0.5, p.y + 0.5) * STEP
+      : liftAt(T0, p.x + 0.5, p.y + 0.5);
     const h = (p.h || 1) * (p.kind === 'boulder' ? T : STEP);
     if (p.flat) {
       // AGAINST its shelf — pressed to the riser face it serves, not standing

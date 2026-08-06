@@ -2738,7 +2738,15 @@ function renderDraft(){
     if(isEquipped)card.className+=' selected';
     else if(!canFit)card.className+=' disabled';
     card.innerHTML=gearCardHTML(gear);
-    card.onclick=function(){if(canFit&&!isEquipped)equipDraftGear(gear)};
+    // Tap an equipped card to take it OFF again — on a phone a tap is also how
+    // you look at a thing, and an equip you cannot reverse in place is what
+    // the playtest reported as "forced to equip one".
+    card.onclick=function(){
+      if(isEquipped){
+        for(var k in run.equipped){ if(run.equipped[k]&&run.equipped[k].id===gear.id) run.equipped[k]=null; }
+        renderDraft();
+      } else if(canFit) equipDraftGear(gear);
+    };
     // Drag source — equipped/disabled cards aren't draggable.
     if (!isEquipped){
       card.draggable = true;
@@ -2823,15 +2831,13 @@ function canEquipGear(gear){
     if((lh&&isTwoHandedType(lh.type))||(rh&&isTwoHandedType(rh.type))) return false;
     // Must have an empty hand slot
     if(lh&&rh)return false;
-    // Enforce: one weapon + one shield, no dual wielding
-    var isWeapon=WEAPON_GEAR_TYPES.indexOf(gear.type)>=0;
+    // DUAL WIELDING IS A LOADOUT (playtest request 2026-08-05): two weapons
+    // share the pair of hands the same way sword-and-board always has. Only
+    // shield-with-shield stays refused — a loadout must be able to swing.
     var isShield=SHIELD_GEAR_TYPES.indexOf(gear.type)>=0;
     var existingGear=lh||rh;
     if(existingGear){
-      var existIsWeapon=WEAPON_GEAR_TYPES.indexOf(existingGear.type)>=0;
       var existIsShield=SHIELD_GEAR_TYPES.indexOf(existingGear.type)>=0;
-      // Can't equip same category as what's already equipped
-      if(isWeapon&&existIsWeapon)return false;
       if(isShield&&existIsShield)return false;
     }
     return true;
@@ -2864,11 +2870,11 @@ function _equipDroppedGear(gear, slotPos){
       var otherHand = (slotPos === 'LHand') ? 'RHand' : 'LHand';
       var existing  = run.equipped[otherHand];
       if (existing){
-        var draggedIsWeapon = WEAPON_GEAR_TYPES.indexOf(gear.type) >= 0;
-        var existIsWeapon   = WEAPON_GEAR_TYPES.indexOf(existing.type) >= 0;
-        if (draggedIsWeapon === existIsWeapon){
-          // Dropping a weapon when other hand also has a weapon (or shield with shield):
-          // clear the other hand so the new one can fit the rules.
+        var draggedIsShield = SHIELD_GEAR_TYPES.indexOf(gear.type) >= 0;
+        var existIsShield   = SHIELD_GEAR_TYPES.indexOf(existing.type) >= 0;
+        // Two weapons are a LOADOUT now (dual wield) — only shield-on-shield
+        // still bumps the other hand, because a pair of shields cannot swing.
+        if (draggedIsShield && existIsShield){
           run.equipped[otherHand] = null;
         }
       }
@@ -3857,7 +3863,11 @@ function tryActionAttack(attacker, defender, atkName, opts){
     var _wtype = equippedWeaponType(attacker);
     var _drawsBow = atk.range >= 2 && (_wtype === 'Bow' || _wtype === 'Crossbow');
     setFighterAnim(attacker, _drawsBow ? 'nockBow' : 'slash');
-    attacker._atkCD = (atk.range > 1 ? 0.95 : 0.7) + (chargeTier ? 0.25 : 0); // a charged swing recovers a touch slower
+    // Dual wield is SPEED: a melee blow recovers about a fifth faster with the
+    // off-hand harrying between swings.
+    var _cdBase = atk.range > 1 ? 0.95 : 0.7;
+    if (atk.range <= 1 && isDualWielding(attacker)) _cdBase *= 0.78;
+    attacker._atkCD = _cdBase + (chargeTier ? 0.25 : 0); // a charged swing recovers a touch slower
     /**
      * A ranged attack is a THING IN FLIGHT now, not a paid-up result with a
      * cosmetic streak. The shot leaves the hand here and the ROLL waits at
@@ -3923,6 +3933,14 @@ function equippedWeaponType(fighter){
 // Equipped ranged weapon → projectile kind (bows loose arrows; a rogue's off-hand
 // throws blades; a heavy crossbow throws the bigger bolt). No specific ammo → the
 // plain brown/gray arrow (arrow1 at colour 0).
+/** Both hands holding weapons? Dual wield reads as SPEED (the off-hand
+ *  harries between swings), never as a second damage roll — the roll chain
+ *  stays one fact. @see the cooldown discount in tryActionAttack. */
+function isDualWielding(f){
+  var g = f && f.gear; if (!g || !g.LHand || !g.RHand) return false;
+  var isW = function(t){ return WEAPON_GEAR_TYPES.indexOf(t) >= 0 || t === 'Crossbow'; };
+  return isW(g.LHand.type) && isW(g.RHand.type);
+}
 function projectileKindFor(attacker){
   var wt = equippedWeaponType(attacker);
   if (wt === 'Crossbow') return 'arrow2';
@@ -4328,6 +4346,7 @@ function startGuildTacticalBattle(p1Spec, p2Spec, label, opts){
     gamePhase='plan';
     showScreen('battleScreen');
     turnNum=1;moveQueue=[];lastMoveType=null;selectedAttack=null;executing=false;
+    document.getElementById('battleScreen').classList.remove('bs-executing');
     // Clear per-turn combat flags (same set startBattle clears)
     delete p1._dashing;delete p2._dashing;
     delete p1._disengaging;delete p2._disengaging;
@@ -4732,6 +4751,7 @@ function startBattle(){
   // any guild tactical match's transcript left in #log (review fix).
   if(run&&run.round===1){var _lg=document.getElementById('log');if(_lg)_lg.innerHTML='';}
   turnNum=1;moveQueue=[];lastMoveType=null;selectedAttack=null;executing=false;
+  document.getElementById('battleScreen').classList.remove('bs-executing');
   // Clear per-turn combat flags
   delete p1._dashing;delete p2._dashing;
   delete p1._disengaging;delete p2._disengaging;
@@ -5461,6 +5481,10 @@ function executeTurn(){
     }
   }
   executing=true;document.getElementById('execBtn').disabled=true;gamePhase='execute';
+  // The plan menu leaves while the turn PLAYS — the point of executing is to
+  // WATCH, and on a phone the panel was most of the window (playtest). The
+  // log stays; the controls return with the next plan phase.
+  document.getElementById('battleScreen').classList.add('bs-executing');
 
   // Set disengaging flag for OA suppression
   p1._disengaging=(selectedAttack==='_disengage');
@@ -5531,6 +5555,7 @@ function finishTurn(){
   gainMateriaXP(p1,'a',1);gainMateriaXP(p2,'a',1);
   if(checkWin())return;
   turnNum++;gamePhase='plan';moveQueue=[];lastMoveType=null;selectedAttack=null;executing=false;
+  document.getElementById('battleScreen').classList.remove('bs-executing');
   _tacFitPending=true; // re-frame the fighters at their new positions (unless the player re-aims the camera)
   // Clear per-turn flags
   delete p1._dashing;delete p2._dashing;
