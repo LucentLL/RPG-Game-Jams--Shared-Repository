@@ -215,8 +215,29 @@ function writeQuad(buf, at, q) {
  *  only in yaw, exactly as the DOM billboards' counter-rotation did. */
 function writeSprite(buf, at, s, rx, rz) {
   const hw = s.w / 2;
-  const wx = rx * hw, wz = rz * hw;
   const cx = s.x, cy = -s.y, cz = s.z;
+  if (s.roll) {
+    // A shot flies at its own angle: the right/up basis rolls in the camera
+    // plane, CENTRED on the anchor — an arrow pivots on its middle, not its
+    // feet. Sign matches CSS rotateZ (positive = clockwise on screen).
+    const th = s.roll * Math.PI / 180, c = Math.cos(th), sn = Math.sin(th);
+    const hh = s.h / 2;
+    const u = s.uv || UV_FULL;
+    const Rx = rx * c * hw, Ry = -sn * hw, Rz = rz * c * hw;
+    const Ux = rx * sn * hh, Uy = c * hh, Uz = rz * sn * hh;
+    const P = [
+      [cx - Rx + Ux, cy - Ry + Uy, cz - Rz + Uz, u[0], u[1]],
+      [cx + Rx + Ux, cy + Ry + Uy, cz + Rz + Uz, u[2], u[1]],
+      [cx + Rx - Ux, cy + Ry - Uy, cz + Rz - Uz, u[2], u[3]],
+      [cx - Rx - Ux, cy - Ry - Uy, cz - Rz - Uz, u[0], u[3]],
+    ];
+    for (const i of [0, 1, 2, 0, 2, 3]) {
+      const p = P[i];
+      buf[at++] = p[0]; buf[at++] = p[1]; buf[at++] = p[2]; buf[at++] = p[3]; buf[at++] = p[4];
+    }
+    return at;
+  }
+  const wx = rx * hw, wz = rz * hw;
   const top = cy + s.h;             // sprites stand ON their anchor point
   // `uv` is a sub-rectangle of a SHEET (@see artTexRect) — most of this game's
   // scenery is one crop out of a shared atlas, which the DOM says with a
@@ -458,6 +479,12 @@ export function createGlWorld(canvas) {
       // The far plane has to clear the chart, and the near plane has to be
       // close enough to stand against a wall: both in world px.
       perspective(proj, cam.fovY, W / H, 4, 200000);
+      // HEXEN'S LOOK-UP as one matrix cell: a free pitch SHEARS the projection
+      // (slides the horizon) instead of rotating the camera, so nothing
+      // changes size with the look. The caller passes tan(pitch)/tan(fovY/2);
+      // positive looks up. Applied in project() too, or the equivalence probe
+      // would disagree with the picture.
+      if (cam.shear) proj[9] = cam.shear;
       viewFromEye(viewM, cam.x, -cam.y, cam.z, cam.yaw, cam.pitch, cam.back || 0);
       multiply(vp, proj, viewM);
       gl.uniformMatrix4fv(loc.vp, false, vp);
@@ -534,6 +561,12 @@ export function createGlWorld(canvas) {
      */
     project(x, y, z) {
       perspective(proj, cam.fovY, W / H, 4, 200000);
+      // HEXEN'S LOOK-UP as one matrix cell: a free pitch SHEARS the projection
+      // (slides the horizon) instead of rotating the camera, so nothing
+      // changes size with the look. The caller passes tan(pitch)/tan(fovY/2);
+      // positive looks up. Applied in project() too, or the equivalence probe
+      // would disagree with the picture.
+      if (cam.shear) proj[9] = cam.shear;
       viewFromEye(viewM, cam.x, -cam.y, cam.z, cam.yaw, cam.pitch, cam.back || 0);
       multiply(vp, proj, viewM);
       const wx = x, wy = -y, wz = z;

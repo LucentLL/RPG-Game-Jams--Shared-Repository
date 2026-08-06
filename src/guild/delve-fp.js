@@ -733,7 +733,14 @@ const BODY = 0.28;
 function canStandAt(x, y, fx, fy) {
   for (const cx of [x - BODY, x + BODY]) {
     for (const cy of [y - BODY, y + BODY]) {
-      if (blocked(Math.floor(cx), Math.floor(cy))) return false;
+      const gx = Math.floor(cx), gy = Math.floor(cy);
+      if (!blocked(gx, gy)) continue;
+      // A FURNISHING cell blocks by its prop's own circle, not by its whole
+      // tile — the tile stood a body-width proud of a small shelf, and the
+      // playtest could not get near the thing it could plainly see. Every
+      // other blocked cell is architecture and stays a wall.
+      if ((F.grid[gy] && F.grid[gy][gx]) === 'f') continue;
+      return false;
     }
   }
   // Carved props occupy their ground (@see buildProps) — a circle test, so
@@ -1719,6 +1726,9 @@ function fogSolids() {
  */
 function lieSolid(host, p, vol, fp, base) {
   const w = fp.w * T, d = fp.d * T;
+  // A bed blocks like a bed: its own footprint's circle, now that 'f' cells
+  // no longer hard-block (@see canStandAt).
+  F.propBlockers.push({ x: fp.cx, y: fp.cy, r: Math.max(0.14, Math.min(0.5, Math.max(fp.w, fp.d) * 0.45)) });
   // Under GL the bed joins the BUFFER — a DOM solid composites over the
   // canvas with no depth test, which is how every bed on the estate showed
   // through every wall on the estate (playtest). Same numbers, real depth.
@@ -1965,27 +1975,37 @@ function buildProps(props) {
     }
     const rest = restOn(q);
     if (vol.form === 'lie') { lieSolid(host, p, vol, q.fp, ground - rest * T); continue; }
+    /**
+     * ONE SIZE FACT (CLAUDE.md law, user decree 2026-08-06: "all objects
+     * should be the same size, relatively, across perspectives — I'm
+     * building a game where each perspective is valid"). The chart's own
+     * authored width `p.w` (px against the 48px tile) is what the top-down
+     * draws; every lens derives from THAT, so a bookshelf cannot be knee-high
+     * here and shoulder-high there. The volume table's `h` survives only as
+     * the fallback for props no chart gives a width.
+     */
+    const artRec = ART[p.art];
+    const wTiles = p.w ? p.w / 48 : vol.h * (artRec.w / artRec.h);
+    const hTiles = wTiles * (artRec.h / artRec.w);
+    /**
+     * ONE COLLISION FACT: a thing blocks the space its ART occupies. The
+     * circle's radius comes from the drawn width — canStandAt exempts 'f'
+     * cells so the coarse tile-block stops standing a body-width proud of a
+     * small shelf ("bigger than art" collision is a bug by definition).
+     * Things resting ON other things block nothing.
+     */
+    if (!(rest > 0)) {
+      F.propBlockers.push({ x: at.x, y: at.y, r: Math.max(0.12, Math.min(0.42, wTiles * 0.42)) });
+    }
     // Under GL a standing thing gets its VOLUME BACK — extruded from its own
     // pixels (@see voxel-sprite.js) — unless the table says `flat` (animated
     // art, leafy organics: a carving cannot stir). The composited path keeps
-    // Hexen's answer: ONE SPRITE, turned to the walker every frame by place(),
-    // at the height this table finally knows, in the middle of its own tile.
+    // Hexen's answer: ONE SPRITE, turned to the walker every frame by place().
     if (glOn() && !vol.flat) {
-      // A carved thing OCCUPIES ITS GROUND (playtest: "I'm able to walk
-      // through the lamp post") — a slim circle at the base, the post's
-      // width and not the lamp's, so you brush past but never through.
-      // ONLY where the grid does not already own the collision: furniture
-      // stands on 'f' cells the chart blocks, and a second circle on top of
-      // a blocked cell bled into the lane beside it — the playtest's
-      // invisible desk. Things resting ON other things block nothing.
-      if (!(rest > 0) && !blocked(Math.floor(at.x), Math.floor(at.y))) {
-        const bw = vol.d || 0.3;
-        F.propBlockers.push({ x: at.x, y: at.y, r: Math.max(0.12, Math.min(0.3, bw * 0.55)) });
-      }
-      voxelProp(p.art, at.x, at.y, vol, rest * T);
+      voxelProp(p.art, at.x, at.y, { ...vol, h: hTiles }, rest * T);
       continue;
     }
-    artBillboardH(p.art, at.x, at.y, vol.h * T, p.label, rest * T);
+    artBillboardH(p.art, at.x, at.y, hTiles * T, p.label, rest * T);
   }
 }
 
