@@ -2074,6 +2074,8 @@ function drawCreature(c) {
   g.drawImage(c.img, c.col * c.fw + c.box.x, c.row * c.fh + c.box.y, c.box.w, c.box.h,
     0, 0, c.box.w, c.box.h);
   c.drawn = c.row * 4 + c.col;
+  // The rasteriser re-uploads this canvas when the stamp moves (@see texFor).
+  c.cv._glRev = (c.cv._glRev || 0) + 1;
 }
 
 function spawnCreature(prey, img, x, y) {
@@ -2565,7 +2567,9 @@ export async function openDelveFp(localeId, member, hooks, carry) {
     if (!carry) {
       toast(`${first} descends into ${p.map.name || hooks.locale.name}.`);
       if (!(hooks.gear && hooks.gear.weapon)) toast(`${first} goes in bare-handed — nothing in the weapon slot.`);
-      helpUntil(8000);
+      // No entry lecture — the playtest's words: "not skippable, lasts too
+      // long, should only come up if player selects it." The ? button and the
+      // ? key still teach anyone who asks.
     }
     povLabel();
     return true;
@@ -2775,13 +2779,15 @@ function readDevices() {
  *  `took`, because a guard is a state and not a press. */
 function guarding() { return !!(F.keys.block || (F.padKeys && F.padKeys.block)); }
 
-/** Show the control strip for a while. Shown on entry, and on ? or the HUD's
- *  own button — a crawler that never says which key walks is a maze. */
+/** Show the control strip — ONLY when asked (the ? button or the ? key; the
+ *  entry auto-show died by playtest verdict). A tap anywhere on the strip
+ *  dismisses it early, because "skippable" is most of what was asked for. */
 function helpUntil(ms) {
   if (!F) return;
   const el = F.host.querySelector('.fp-keys');
   if (!el) return;
   el.classList.add('on');
+  el.onpointerdown = () => { clearTimeout(F.helpTimer); el.classList.remove('on'); };
   clearTimeout(F.helpTimer);
   F.helpTimer = setTimeout(() => el.classList.remove('on'), ms);
 }
@@ -3697,6 +3703,35 @@ function render() {
     };
     for (const d of F.decor) if (!d.el.classList.contains('fp-marker')) add(d);
     for (const s of F.shots) add(s);
+    /**
+     * THE PEOPLE JOIN THE PICTURE (playtest: walking behind the lamp post
+     * "makes the character appear on top of it"). Creatures and the
+     * third-person self were DOM billboards composited OVER the canvas — no
+     * depth test, so no voxel could ever stand in front of them. Their
+     * canvases are LIVE textures (`_glRev` re-uploads on repaint), so they
+     * ride the sprite buffer and the depth buffer decides who is in front.
+     * The DOM els survive as LABELS — health bar, hurt flash — with only the
+     * drawn body hidden (@see delve.css .fp-gl-on rules).
+     */
+    for (const c of F.creatures) {
+      if (c._hidden || !c.el || c.el.style.display === 'none') continue;
+      const w = parseFloat(c.el.style.width), h = parseFloat(c.el.style.height);
+      if (!(w > 0) || !(h > 0)) continue;
+      sprites.push({
+        src: c.cv, uv: null, w, h,
+        x: c.x * T, y: -heightAt(Math.floor(c.x), Math.floor(c.y)) * STEP_PX, z: c.y * T, alpha: 1,
+      });
+    }
+    if (F.self && F.pov === 3) {
+      const sh = parseFloat(F.self.el.style.height) || 0;
+      // The compositor cell keeps ~31% of itself empty under the feet; a
+      // buffer sprite stands ON its anchor, so the anchor drops by that band
+      // or the member floats their own footroom above the floor.
+      if (sh > 0) sprites.push({
+        src: F.self.cv, uv: null, w: sh, h: sh,
+        x: F.px * T, y: -lev * STEP_PX + sh * 0.3125, z: F.py * T, alpha: 1,
+      });
+    }
     F.gl.setSprites(sprites);
     F.gl.draw();
   }
@@ -3782,7 +3817,15 @@ function render() {
       // One-shots (a swing, a bow draw, a hit taken) own the sprite while
       // they play; the stance logic reasserts itself the moment they lapse.
       if (now >= (F.self.busyUntil || 0)) {
-        const climbing = onClimb(Math.floor(F.px), Math.floor(F.py));
+        // Climb pose only while the LEVEL is actually easing, or standing in
+        // the middle third of the rungs' own cell — floor(px) alone flipped
+        // the pose a half-tile early and the member mimed the climb from the
+        // approach (playtest). F.lev eases toward heightAt in steer(), so
+        // "easing" IS the climb in motion.
+        const cellX = Math.floor(F.px), cellY = Math.floor(F.py);
+        const centred = Math.abs(F.px - cellX - 0.5) < 0.3 && Math.abs(F.py - cellY - 0.5) < 0.3;
+        const climbing = Math.abs(heightAt(cellX, cellY) - F.lev) > 0.05
+          || (onClimb(cellX, cellY) && centred);
         const desired = guarding() ? 'hold'
           : climbing ? 'climb'
             : Math.hypot(F.vx, F.vy) > 0.05 ? 'move' : 'idle';
@@ -3793,6 +3836,7 @@ function render() {
       // walker's do. Without the tick every anim froze on its first frame.
       F.self.gfx.tickActor(F.self.actor, now);
       F.self.gfx.renderActor(F.self.cv, F.self.actor);
+      F.self.cv._glRev = (F.self.cv._glRev || 0) + 1;   // the buffer copy follows
     }
   }
   // The compass element survives portal re-mounts (mount() rebuilds only the

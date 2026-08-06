@@ -455,6 +455,12 @@
    and lets this rule win; when it writes `none` the two agree anyway. */
 .fp-gl-on .fp-bb.fp-decor,
 .fp-gl-on .fp-bb.fp-shot { display: none; }
+/* People are IN the buffer now (depth-tested against the voxels — the lamp
+   post finally wins when it stands in front). The DOM els survive as label
+   carriers: the creature keeps its health bar, only the drawn BODY hides.
+   The self carries no labels and hides whole. */
+.fp-gl-on .fp-creature canvas { visibility: hidden; }
+.fp-gl-on .fp-self { visibility: hidden; }
 /* And what SURVIVES in the DOM — creatures, markers, furniture solids, the
    third-person self — must also survive the CANVAS. The canvas is the STAGE'S
    SIBLING (host > sky · canvas z1 · stage), so the contest is settled between
