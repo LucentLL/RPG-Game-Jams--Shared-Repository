@@ -50,7 +50,7 @@ function normalize(m) {
   m.id = freeId(m.id);   // freeId suffixes a shipped id ('classroom' → 'classroom-draft')
   m.name = String(m.name || m.id);
   m.theme = THEMES[m.theme] ? m.theme : 'meadow';
-  if (!Array.isArray(m.grid) || !m.grid.length) m.grid = blank(20, 14).grid;
+  if (!Array.isArray(m.grid) || !m.grid.length) m.grid = blank(36, 24).grid;
   m.grid = m.grid.map(String);
   if (!Array.isArray(m.entry) || m.entry.length !== 2) m.entry = [2.5, 2.5];
   for (const k of ['props', 'spawns', 'portals', 'paint', 'regions', 'locks']) if (!Array.isArray(m[k])) m[k] = [];
@@ -198,7 +198,7 @@ export function openMapEditor(ctx) {
     for (const id in saved) register(normalize(saved[id]));
     const last = Object.values(saved)[0];
     E = {
-      map: normalize(last ? clone(last) : blank(20, 14)),
+      map: normalize(last ? clone(last) : blank(36, 24)),
       sel: { kind: 'tile', id: '.' }, prey: Object.keys(PREY)[0],
       tab: 'tiles', tool: 'paint', zoom: 1.4, panX: 0, panY: 0,
       undo: [], sheets: {}, painting: false, hover: null, paintStart: null,
@@ -235,6 +235,7 @@ function buildDom(host) {
           <span class="med-title"></span>
           <span class="med-spacer"></span>
           <button class="med-btn" data-act="undo" title="Undo (Ctrl+Z)">↺ Undo</button>
+          <button class="med-btn" data-act="view3d" title="Toggle the extruded 3D view">⬒ 3D</button>
           <button class="med-btn" data-act="zoomOut">−</button>
           <button class="med-btn" data-act="zoomIn">+</button>
           <button class="med-btn med-primary" data-act="walk" title="Save and walk this map top-down">Walk it</button>
@@ -362,8 +363,8 @@ function renderSide() {
       <div class="med-field"><label>Theme</label><select class="med-theme">
         ${themes.map((t) => `<option ${t === E.map.theme ? 'selected' : ''}>${t}</option>`).join('')}</select></div>
       <div class="med-field"><label>Size</label>
-        <input class="med-w" type="number" min="6" max="60" value="${E.map.grid[0].length}"> ×
-        <input class="med-h" type="number" min="6" max="60" value="${E.map.grid.length}">
+        <input class="med-w" type="number" min="6" max="96" value="${E.map.grid[0].length}"> ×
+        <input class="med-h" type="number" min="6" max="96" value="${E.map.grid.length}">
         <button class="med-btn" data-act="resize">Apply</button></div>
       <div class="med-row">
         <button class="med-btn" data-act="new">New</button>
@@ -408,8 +409,10 @@ function renderSide() {
 
 function onMapAction(act, pal) {
   if (act === 'resize') {
-    const w = Math.max(6, Math.min(60, +pal.querySelector('.med-w').value || 20));
-    const h = Math.max(6, Math.min(60, +pal.querySelector('.med-h').value || 14));
+    // 96 on a side is town scale — the whole campus is 26×46. Past that the
+    // top-down bake canvas (48px per cell) is what starts to hurt a phone.
+    const w = Math.max(6, Math.min(96, +pal.querySelector('.med-w').value || 20));
+    const h = Math.max(6, Math.min(96, +pal.querySelector('.med-h').value || 14));
     snap();
     E.map.grid = Array.from({ length: h }, (_, y) => {
       const row = E.map.grid[y] || '';
@@ -417,7 +420,7 @@ function onMapAction(act, pal) {
     });
     draw(); renderSide();
   } else if (act === 'new') {
-    snap(); E.map = blank(20, 14); E.panX = E.panY = 0; draw(); renderSide();
+    snap(); E.map = blank(36, 24); E.panX = E.panY = 0; draw(); renderSide();
   } else if (act === 'save') {
     persist(); renderSide();
   } else if (act === 'validate') {
@@ -616,6 +619,11 @@ function onBarClick(e) {
   if (!b) return;
   const act = b.dataset.act;
   if (act === 'back') { walkCtx && walkCtx.back ? walkCtx.back() : history.back(); }
+  else if (act === 'view3d') {
+    E.view = E.view === 'iso' ? 'plan' : 'iso';
+    b.textContent = E.view === 'iso' ? '▦ Plan' : '⬒ 3D';
+    draw();
+  }
   else if (act === 'undo') undo();
   else if (act === 'zoomIn') { E.zoom = Math.min(3, E.zoom * 1.25); draw(); }
   else if (act === 'zoomOut') { E.zoom = Math.max(0.4, E.zoom / 1.25); draw(); }
@@ -653,8 +661,20 @@ function cellAt(ev) {
   const r = cv.getBoundingClientRect();
   const px = (ev.clientX - r.left) - E.panX, py = (ev.clientY - r.top) - E.panY;
   const s = CELL * E.zoom;
+  if (E.view === 'iso') {
+    // Invert the dimetric projection on the ground plane: picking answers at
+    // level 0, which is where painting happens — the plan view stays the
+    // precision instrument, the 3D view is where you SEE what you built.
+    const u = (px - isoOX()) / s, v = py / (s * 0.5);
+    const fx = (v + u) / 2, fy = (v - u) / 2;
+    return { x: Math.floor(fx), y: Math.floor(fy), fx, fy };
+  }
   return { x: Math.floor(px / s), y: Math.floor(py / s), fx: px / s, fy: py / s };
 }
+
+/** The 3D view's x-offset: cell (0, rows) is the leftmost point the dimetric
+ *  projection produces, so shift by rows·s to keep the whole map on-canvas. */
+function isoOX() { return E.map.grid.length * CELL * E.zoom; }
 
 function onDown(ev) {
   if (ev.button === 1) { E.pan = { x: ev.clientX - E.panX, y: ev.clientY - E.panY }; return; }
@@ -863,6 +883,192 @@ function sheetFor(art, onload) {
   return img.complete && img.naturalWidth ? { img, rec } : null;
 }
 
+/** Darken/lighten a colour by factor f (1 = unchanged). Accepts #rrggbb AND
+ *  its own rgb() output, so a shade of a shade stays a colour — feeding one
+ *  back through a hex-only parser was how every terrace face went black. */
+function shade(col, f) {
+  let r, gc, b2;
+  if (col[0] === '#') {
+    const n = parseInt(col.slice(1), 16);
+    r = n >> 16; gc = (n >> 8) & 255; b2 = n & 255;
+  } else {
+    [r, gc, b2] = (col.match(/\d+/g) || [0, 0, 0]).map(Number);
+  }
+  const c = (v) => Math.max(0, Math.min(255, Math.round(v * f)));
+  return `rgb(${c(r)},${c(gc)},${c(b2)})`;
+}
+
+/**
+ * THE 3D VIEW — the same draft, stood up. A dimetric extrusion of the level
+ * model: floors at their level, walls and doors as prisms, decks as hovering
+ * slabs, stairs as steps, props as their real art standing at their feet and
+ * wall-hung pieces raised to the height they hang at. Everything is drawn
+ * from the SAME model the lenses walk (ONE RULES FACT — this is a camera,
+ * not a second opinion), painted back-to-front along the x+y diagonals.
+ * Props and flags come in a second pass ON TOP by design: an author must
+ * never lose sight of a thing they placed behind a wall.
+ */
+function drawIso(g, s, m, model, themeFloor) {
+  const W = m.grid[0].length, H = m.grid.length;
+  const ox = isoOX(), ZH = s * 0.5;
+  const P = (x, y, z) => [(x - y) * s + ox, (x + y) * s * 0.5 - (z || 0) * ZH];
+  const quad = (a, b2, c, d, fill) => {
+    g.fillStyle = fill;
+    g.beginPath();
+    g.moveTo(a[0], a[1]); g.lineTo(b2[0], b2[1]); g.lineTo(c[0], c[1]); g.lineTo(d[0], d[1]);
+    g.closePath(); g.fill();
+  };
+  const top = (x, y, z, fill) => quad(P(x, y, z), P(x + 1, y, z), P(x + 1, y + 1, z), P(x, y + 1, z), fill);
+  // The two faces the camera sees: south-west (the y+1 edge) and south-east
+  // (the x+1 edge), each shaded so the prism reads as a solid.
+  const faceSW = (x, y, zTop, zBot, fill) =>
+    quad(P(x, y + 1, zTop), P(x + 1, y + 1, zTop), P(x + 1, y + 1, zBot), P(x, y + 1, zBot), fill);
+  const faceSE = (x, y, zTop, zBot, fill) =>
+    quad(P(x + 1, y, zTop), P(x + 1, y + 1, zTop), P(x + 1, y + 1, zBot), P(x + 1, y, zBot), fill);
+  const WALL_LV = { B: 2, F: 2, D: 2, o: 2, b: 1 };
+  const paintAt = (x, y) => {
+    for (let i = (m.paint || []).length - 1; i >= 0; i--) {
+      const r = m.paint[i];
+      if (x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h) return themeTint(r.theme);
+    }
+    return null;
+  };
+  const lockAt = (x, y) => (m.locks || []).some(([lx, ly]) => lx === x && ly === y);
+  const floorOf = (x, y) => {
+    const f = model.floorAt(x, y);
+    return f == null ? null : f;
+  };
+
+  // ── Terrain, back to front along the diagonals ───────────────────────────
+  for (let d = 0; d <= W + H - 2; d++) {
+    for (let y = Math.max(0, d - W + 1); y <= Math.min(H - 1, d); y++) {
+      const x = d - y;
+      if (x < 0 || x >= W) continue;
+      const ch = m.grid[y][x];
+      if (ch === '#') continue;                       // the void draws nothing
+      const t = TILE_BY_CH[ch];
+      const lv = floorOf(x, y);
+      const base = lv == null ? 0 : lv;
+      let fill = paintAt(x, y) || (ch === '.' || ch === 'f' || lv != null ? themeFloor : (t ? t.color : '#a03a72'));
+      // Height keeps the plan's reading: brighter per step up, darker sunken.
+      if (lv != null && lv !== 0) fill = shade(paintAt(x, y) || themeFloor, 1 + 0.14 * lv);
+      // The ground itself (walls stand on plane 0 and skip it).
+      if (!WALL_LV[ch] || ch === 'D' || ch === 'o') {
+        top(x, y, base, fill);
+        // Risers where the ground falls away toward the camera.
+        const sf = floorOf(x, y + 1), ef = floorOf(x + 1, y);
+        const sDrop = m.grid[y + 1] && m.grid[y + 1][x] === '#' ? base - 1 : sf;
+        const eDrop = (m.grid[y] || '')[x + 1] === '#' ? base - 1 : ef;
+        if (sDrop != null && sDrop < base) faceSW(x, y, base, sDrop, shade(fill, 0.62));
+        if (eDrop != null && eDrop < base) faceSE(x, y, base, eDrop, shade(fill, 0.5));
+      }
+      // Standing masonry: walls, veins, doors, waist blocks — real prisms.
+      if (WALL_LV[ch]) {
+        const b0 = (ch === 'D' || ch === 'o') ? base : 0;
+        const zTop = b0 + WALL_LV[ch];
+        const wf = ch === 'D' ? '#6a4a2a' : (t ? t.color : '#888');
+        top(x, y, zTop, shade(wf, 1.12));
+        faceSW(x, y, zTop, b0, shade(wf, 0.72));
+        faceSE(x, y, zTop, b0, shade(wf, 0.55));
+        if (ch === 'D' && lockAt(x, y)) {              // the keyhole plate
+          const [kx, ky] = P(x + 0.55, y + 1, b0 + 1);
+          g.fillStyle = '#d8a83c'; g.fillRect(kx - s * 0.08, ky - s * 0.12, s * 0.16, s * 0.22);
+          g.fillStyle = '#1c202a'; g.beginPath(); g.arc(kx, ky - s * 0.04, s * 0.035, 0, 7); g.fill();
+        }
+      }
+      // Stairs: four rising treads toward the level they serve.
+      if (model.stairAt(x, y)) {
+        const dir = [[0, -1], [0, 1], [-1, 0], [1, 0]].find(([dx2, dy2]) =>
+          model.surfacesAt(x + dx2, y + dy2).includes(base + 1));
+        for (let i = 0; i < 4; i++) {
+          const f2 = (i + 0.5) / 4 - 0.5;
+          const cx2 = x + (dir ? dir[0] * f2 : 0), cy2 = y + (dir ? dir[1] * f2 : 0);
+          top(cx2 + 0.125, cy2 + 0.125, base + (i + 1) / 4, shade(themeFloor, 1.05 + i * 0.06));
+        }
+      }
+      // A deck hovers at its own level, its slab faces hanging beneath.
+      const dk = model.deckAt(x, y);
+      if (dk != null) {
+        const dfill = ch === 'n' ? '#8a6a42' : shade(themeFloor, 1.2);
+        top(x, y, dk, dfill);
+        faceSW(x, y, dk, dk - 0.3, shade(dfill, 0.62));
+        faceSE(x, y, dk, dk - 0.3, shade(dfill, 0.5));
+      }
+      // Climbs keep their glyph, planted on the ground they derive.
+      if (t && t.glyph && !WALL_LV[ch]) {
+        const [gx2, gy2] = P(x + 0.5, y + 0.5, base);
+        g.fillStyle = 'rgba(255,255,255,.8)';
+        g.font = `${Math.round(s * 0.42)}px serif`;
+        g.textAlign = 'center'; g.textBaseline = 'middle';
+        g.fillText(t.glyph, gx2, gy2);
+      }
+    }
+  }
+
+  // ── Props: the real art, standing up — wall pieces at hanging height ─────
+  const redraw = () => E && draw();
+  for (const p of [...m.props].sort((a, b) => (a.x + a.y) - (b.x + b.y))) {
+    const a = ART[p.art];
+    const got = a && sheetFor(p.art, redraw);
+    const vol = PROP_VOL[p.art];
+    const cy = Number.isInteger(p.y) ? p.y - 0.5 : p.y;
+    const lvP = floorOf(Math.floor(p.x), Math.floor(cy)) || 0;
+    const wPx = ((p.w || 48) / 48) * s;
+    const hPx = a ? wPx * (a.h / a.w) : wPx;
+    // A hung piece rises to the height it hangs at, with a stem to its wall.
+    const hang = vol && vol.form === 'wall' ? (vol.mid || 1) * s : 0;
+    const [fx2, fy2] = P(p.x, cy, lvP);
+    const x0 = fx2 - wPx / 2, y0 = fy2 - hPx - hang;
+    if (hang) {
+      g.strokeStyle = 'rgba(255,255,255,.35)';
+      g.beginPath(); g.moveTo(fx2, fy2); g.lineTo(fx2, y0 + hPx); g.stroke();
+    }
+    if (got) {
+      const { img, rec } = got;
+      const iw = img.naturalWidth, ih = img.naturalHeight;
+      g.drawImage(img, rec.uv[0] * iw, rec.uv[1] * ih, (rec.uv[2] - rec.uv[0]) * iw, (rec.uv[3] - rec.uv[1]) * ih,
+        x0, y0, wPx, hPx);
+    } else {
+      g.fillStyle = 'rgba(200,170,110,.55)';
+      g.fillRect(x0, y0, wPx, hPx);
+    }
+  }
+
+  // ── Flags, planted at their ground ───────────────────────────────────────
+  g.font = `${Math.round(s * 0.55)}px serif`;
+  g.textAlign = 'center'; g.textBaseline = 'middle';
+  for (const sp of m.spawns || []) {
+    const [cx2, cy2] = P(sp.x + 0.5, sp.y + 0.5, floorOf(sp.x, sp.y) || 0);
+    g.fillStyle = 'rgba(200,60,60,.85)';
+    g.beginPath(); g.arc(cx2, cy2, s * 0.26, 0, 7); g.fill();
+    g.fillStyle = '#fff';
+    g.fillText((PREY[sp.prey] && PREY[sp.prey].name ? PREY[sp.prey].name : sp.prey)[0].toUpperCase(), cx2, cy2);
+  }
+  for (const p of m.portals || []) {
+    const [cx2, cy2] = P(p.x, p.y, 0);
+    g.fillStyle = 'rgba(90,140,255,.9)';
+    g.fillText('◈', cx2, cy2);
+  }
+  {
+    const [ex2, ey2] = P(m.entry[0], m.entry[1], 0);
+    g.fillStyle = '#ffd76b';
+    g.fillText('⚑', ex2, ey2);
+  }
+
+  // Hover: the picked ground diamond.
+  if (E.hover && E.hover.x >= 0 && E.hover.y >= 0 && E.hover.y < H && E.hover.x < W) {
+    const hb = floorOf(E.hover.x, E.hover.y) || 0;
+    g.strokeStyle = 'rgba(255,215,107,.9)';
+    g.lineWidth = 2;
+    const pts = [P(E.hover.x, E.hover.y, hb), P(E.hover.x + 1, E.hover.y, hb),
+      P(E.hover.x + 1, E.hover.y + 1, hb), P(E.hover.x, E.hover.y + 1, hb)];
+    g.beginPath();
+    g.moveTo(pts[0][0], pts[0][1]);
+    for (const pt of pts.slice(1)) g.lineTo(pt[0], pt[1]);
+    g.closePath(); g.stroke();
+  }
+}
+
 function draw() {
   const cv = document.querySelector('.med-canvas');
   if (!cv || !E) return;
@@ -882,6 +1088,8 @@ function draw() {
   const m = E.map;
   const model = levelModel();
   const themeFloor = themeTint(m.theme);
+
+  if (E.view === 'iso') { drawIso(g, s, m, model, themeFloor); return; }
 
   for (let y = 0; y < m.grid.length; y++) {
     for (let x = 0; x < m.grid[y].length; x++) {
