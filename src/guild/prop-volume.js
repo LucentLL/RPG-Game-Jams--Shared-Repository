@@ -126,18 +126,25 @@ export const PROP_VOL = /** @type {Record<string, Volume>} */ ({
   bunkPosted:   { form: 'lie', h: 0.30, d: 0.95 },
 
   // ── Round and irregular uprights ──────────────────────────────────────────
+  // `flat: true` opts a prop OUT of the voxel extrusion (playtest 2026-08-06):
+  // animated art and leafy organics read better as sprites — the same call the
+  // voxel mod's own overworld makes. `d` is now ALSO the extrusion depth, so a
+  // pole can say it is a pole instead of inheriting a crate's default.
   provisionBarrel: { form: 'stand', h: 0.42 },
   quenchBarrel:    { form: 'stand', h: 0.42 },
   storeBarrel:     { form: 'stand', h: 0.42 },
-  cauldronBoil:    { form: 'stand', h: 0.52 },
-  herbBasket:      { form: 'stand', h: 0.26 },
+  // The witch-hatted cauldron is FOUR FRAMES of art (.apoth-boil walks them
+  // top-down) — a carving cannot stir, so she stays a sprite, at the height
+  // the art actually draws her rather than the pot's old waist-high number.
+  cauldronBoil:    { form: 'stand', h: 1.25, flat: true },
+  herbBasket:      { form: 'stand', h: 0.26, flat: true },
   potionGreen:     { form: 'stand', h: 0.20 },
   bedCandle:       { form: 'stand', h: 0.34 },
   globe:           { form: 'stand', h: 0.55 },   // a floor globe on its stand
   gmBust:          { form: 'stand', h: 0.70 },
   armorKnight:     { form: 'stand', h: 0.88 },
   armorSteel:      { form: 'stand', h: 0.88 },
-  trainDummy:      { form: 'stand', h: 0.88 },
+  trainDummy:      { form: 'stand', h: 0.88, d: 0.22 },
   statue:          { form: 'stand', h: 1.15 },
   // Outdoors, where nothing has a ceiling to pierce but you still walk around
   // it. These are PLACEABLES — a handful per estate, bought one at a time — so
@@ -145,7 +152,7 @@ export const PROP_VOL = /** @type {Record<string, Volume>} */ ({
   // stand on.
   well:            { form: 'stand', h: 1.10 },
   stall:           { form: 'stand', h: 1.05 },
-  lampPost:        { form: 'stand', h: 1.25 },
+  lampPost:        { form: 'stand', h: 1.25, d: 0.10 },   // a post is a post, not a crate
   // NOT treeTall, deliberately. The meadow grows trees from its GRID as well as
   // from the placeable list, and the grid ones are legion — the estate's open
   // ground is already the map that runs out of compositor layers first (@see

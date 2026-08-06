@@ -474,7 +474,12 @@ export function createGlWorld(canvas) {
         geoDirty = false;
       }
       gl.uniform1f(loc.alpha, 1);
-      gl.uniform1f(loc.cutout, 0.02);
+      // Doom's alpha test, at Doom's threshold. 0.02 let MIPMAP-AVERAGED
+      // half-pixels through — and a translucent fragment still writes DEPTH,
+      // so a voxel prop's own back face occluded its front and the playtest
+      // saw the floor through the target dummy. Pixel art is solid or air;
+      // the world's opaque bakes never notice the difference.
+      gl.uniform1f(loc.cutout, 0.5);
       for (const run of geoRuns) {
         const t = texFor(run.src, true);
         if (!t) continue;                 // still decoding — it lands next frame

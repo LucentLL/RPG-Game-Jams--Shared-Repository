@@ -736,6 +736,12 @@ function canStandAt(x, y, fx, fy) {
       if (blocked(Math.floor(cx), Math.floor(cy))) return false;
     }
   }
+  // Carved props occupy their ground (@see buildProps) — a circle test, so
+  // walking past a lamp post is a brush and walking into it is a stop.
+  for (const b of (F.propBlockers || [])) {
+    const dx = x - b.x, dy = y - b.y, rr = b.r + BODY;
+    if (dx * dx + dy * dy < rr * rr) return false;
+  }
   const f = [Math.floor(fx), Math.floor(fy)], t = [Math.floor(x), Math.floor(y)];
   return heightAt(f[0], f[1]) >= heightAt(t[0], t[1]) || onClimb(f[0], f[1]) || onClimb(t[0], t[1]);
 }
@@ -1960,10 +1966,22 @@ function buildProps(props) {
     const rest = restOn(q);
     if (vol.form === 'lie') { lieSolid(host, p, vol, q.fp, ground - rest * T); continue; }
     // Under GL a standing thing gets its VOLUME BACK — extruded from its own
-    // pixels (@see voxel-sprite.js). The composited path keeps Hexen's answer:
-    // ONE SPRITE, turned to the walker every frame by place(), at the height
-    // this table finally knows, in the middle of its own tile.
-    if (glOn()) { voxelProp(p.art, at.x, at.y, vol, rest * T); continue; }
+    // pixels (@see voxel-sprite.js) — unless the table says `flat` (animated
+    // art, leafy organics: a carving cannot stir). The composited path keeps
+    // Hexen's answer: ONE SPRITE, turned to the walker every frame by place(),
+    // at the height this table finally knows, in the middle of its own tile.
+    if (glOn() && !vol.flat) {
+      // A carved thing OCCUPIES ITS GROUND (playtest: "I'm able to walk
+      // through the lamp post") — a slim circle at the base, the post's
+      // width and not the lamp's, so you brush past but never through.
+      // Things resting ON other things block nothing.
+      if (!(rest > 0)) {
+        const bw = vol.d || 0.3;
+        F.propBlockers.push({ x: at.x, y: at.y, r: Math.max(0.12, Math.min(0.3, bw * 0.55)) });
+      }
+      voxelProp(p.art, at.x, at.y, vol, rest * T);
+      continue;
+    }
     artBillboardH(p.art, at.x, at.y, vol.h * T, p.label, rest * T);
   }
 }
@@ -2398,8 +2416,9 @@ function mount(prep, entry) {
   // A fresh .fp-geo means the retained-quad registry starts empty with it.
   F.geo = new Map();
   // Extruded props belong to the MAP — a portal starts the list clean and the
-  // sheet decodes refill it (@see voxelProp).
+  // sheet decodes refill it (@see voxelProp). Their ground circles likewise.
   F.propQuads = [];
+  F.propBlockers = [];
   // The third-person self rides across portals — a fresh stage orphaned it.
   if (F.self) { F.world.querySelector('.fp-bbs').appendChild(F.self.el); F.self._tf = ''; }
   // The world element is NEW but render()'s write-guard cache is not: a portal
@@ -4037,6 +4056,7 @@ if (typeof window !== 'undefined') {
     decor: F.decor.length, solids: F.solids.length,
     solidsDrawn: F.solids.filter((s) => !s.off).length,
     voxProps: (F.propQuads || []).length,
+    propBlockers: (F.propBlockers || []).length,
     haul: F.haul.gold, seen: F.seen.size, power: F.hooks.power, fatigue: F.hooks.fatigue,
     fight: { swings: F.haul.swings|0, landed: F.haul.landed|0, missed: F.haul.missed|0, foeHits: F.haul.taken|0, foeMisses: F.haul.dodged|0, bouts: F.haul.bouts },
     // The three numbers that decide whether a swing lands: how far the nearest
