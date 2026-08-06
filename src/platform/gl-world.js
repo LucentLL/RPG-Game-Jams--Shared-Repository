@@ -188,13 +188,20 @@ function writeQuad(buf, at, q) {
   // Y is negated ONCE, here: the caller counts up as negative.
   const cx = q.x, cy = -q.y, cz = q.z;
   const ru = q.repX || 1, rv = q.repY || 1;
+  // `uv` is the same four-number rect writeSprite takes — a crop of the
+  // texture instead of a tiling of it (the two are exclusive by nature). The
+  // voxel extruder lives on this: a rim quad maps a ONE-PIXEL strip of its
+  // own sprite, so the silhouette's border colours paint the sides.
+  const u = q.uv;
+  const u0 = u ? u[0] : 0, v0 = u ? u[1] : 0;
+  const u1 = u ? u[2] : ru, v1 = u ? u[3] : rv;
   // Corners: top-left, top-right, bottom-right, bottom-left in the quad's own
   // frame, so the texture lands the same way up it does in CSS.
   const P = [
-    [cx - wx - hx, cy - (wy + hy), cz - wz - hz, 0, 0],
-    [cx + wx - hx, cy + (wy - hy), cz + wz - hz, ru, 0],
-    [cx + wx + hx, cy + (wy + hy), cz + wz + hz, ru, rv],
-    [cx - wx + hx, cy - (wy - hy), cz - wz + hz, 0, rv],
+    [cx - wx - hx, cy - (wy + hy), cz - wz - hz, u0, v0],
+    [cx + wx - hx, cy + (wy - hy), cz + wz - hz, u1, v0],
+    [cx + wx + hx, cy + (wy + hy), cz + wz + hz, u1, v1],
+    [cx - wx + hx, cy - (wy - hy), cz - wz + hz, u0, v1],
   ];
   for (const i of [0, 1, 2, 0, 2, 3]) {
     const p = P[i];

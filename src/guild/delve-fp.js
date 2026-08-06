@@ -32,6 +32,7 @@ import { icon } from './icons.js';
 import { createLook, readPad, padReset, touchPrimary, onTouchPrimary, PAD } from '../platform/input.js';
 import { claimPad } from '../platform/ui-pad.js';
 import { perspectiveFor, camLean, onView, view, vpStatus } from '../platform/view-prefs.js';
+import { extrudeSprite } from '../platform/voxel-sprite.js';
 import { createGlWorld } from '../platform/gl-world.js';
 
 /**
@@ -1428,6 +1429,8 @@ function buildGeometry() {
         rot: 'rotateX(90deg)', repX: n, repY: n,
       });
     }
+    // The furniture's extruded volumes ride the same buffer (@see voxelProp).
+    if (F.propQuads && F.propQuads.length) quads.push(...F.propQuads);
     F.gl.setGeometry(quads);
     return;
   }
@@ -1814,6 +1817,46 @@ function buildDecor(sheets) {
  * A prop with no volume keeps the OLD billboard, sized from the top-down view's
  * pixel width — which is the sizing this replaces, so it is a gap, not a default.
  */
+/**
+ * REAL VOLUME, from the art itself — the DramaticShape recipe (@see
+ * voxel-sprite.js). GL only; one extrusion per ART NAME is cached as its
+ * pixel-readable crop, then placed per prop. Quads land in F.propQuads and
+ * buildGeometry spreads them into every rebuild; a sheet that never decodes
+ * costs that prop its volume, nothing else.
+ */
+const _voxCache = {};
+function voxelProp(art, tx, ty, vol, lift) {
+  const a = ART[art];
+  const rec = artTexRect(art);
+  if (!a || !rec) return;
+  const mapId = F.map.id;
+  const place = (cv) => {
+    if (!F || !F.gl || F.map.id !== mapId) return;   // the map moved on
+    const q = extrudeSprite(cv, {
+      x: tx * T, y: -lift, z: ty * T,
+      h: vol.h * T, d: Math.min(0.6, vol.d || 0.3) * T,
+    });
+    if (!q.length) return;
+    F.propQuads.push(...q);
+    buildGeometry();   // fold them into the live buffer now, not next stride
+  };
+  if (!_voxCache[art]) {
+    _voxCache[art] = new Promise((res, rej) => {
+      const im = new Image();
+      im.crossOrigin = 'anonymous';
+      im.onload = () => {
+        const cv = document.createElement('canvas');
+        cv.width = a.w; cv.height = a.h;
+        cv.getContext('2d').drawImage(im, a.x, a.y, a.w, a.h, 0, 0, a.w, a.h);
+        res(cv);
+      };
+      im.onerror = () => { delete _voxCache[art]; rej(new Error('voxel: ' + art + ' sheet failed')); };
+      im.src = rec.url;
+    });
+  }
+  _voxCache[art].then(place).catch(() => { /* billboardless, not broken */ });
+}
+
 function buildProps(props) {
   const host = SOLID_HOST();
   const plan = props.map((p) => {
@@ -1862,8 +1905,11 @@ function buildProps(props) {
     }
     const rest = restOn(q);
     if (vol.form === 'lie') { lieSolid(host, p, vol, q.fp, ground - rest * T); continue; }
-    // ONE SPRITE, turned to the walker every frame by place() — Hexen's answer,
-    // at the height this table finally knows, in the middle of its own tile.
+    // Under GL a standing thing gets its VOLUME BACK — extruded from its own
+    // pixels (@see voxel-sprite.js). The composited path keeps Hexen's answer:
+    // ONE SPRITE, turned to the walker every frame by place(), at the height
+    // this table finally knows, in the middle of its own tile.
+    if (glOn()) { voxelProp(p.art, at.x, at.y, vol, rest * T); continue; }
     artBillboardH(p.art, at.x, at.y, vol.h * T, p.label, rest * T);
   }
 }
@@ -2297,6 +2343,9 @@ function mount(prep, entry) {
   F.world = stage.querySelector('.fp-world');
   // A fresh .fp-geo means the retained-quad registry starts empty with it.
   F.geo = new Map();
+  // Extruded props belong to the MAP — a portal starts the list clean and the
+  // sheet decodes refill it (@see voxelProp).
+  F.propQuads = [];
   // The third-person self rides across portals — a fresh stage orphaned it.
   if (F.self) { F.world.querySelector('.fp-bbs').appendChild(F.self.el); F.self._tf = ''; }
   // The world element is NEW but render()'s write-guard cache is not: a portal
@@ -3932,6 +3981,7 @@ if (typeof window !== 'undefined') {
     // has taken out of the compositor entirely.
     decor: F.decor.length, solids: F.solids.length,
     solidsDrawn: F.solids.filter((s) => !s.off).length,
+    voxProps: (F.propQuads || []).length,
     haul: F.haul.gold, seen: F.seen.size, power: F.hooks.power, fatigue: F.hooks.fatigue,
     fight: { swings: F.haul.swings|0, landed: F.haul.landed|0, missed: F.haul.missed|0, foeHits: F.haul.taken|0, foeMisses: F.haul.dodged|0, bouts: F.haul.bouts },
     // The three numbers that decide whether a swing lands: how far the nearest
