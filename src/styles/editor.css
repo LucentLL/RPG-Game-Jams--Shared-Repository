@@ -31,6 +31,12 @@
    the canvas fills it; pan with middle-drag, so no scrollbars fight paint. */
 .med-view { flex: 1 1 auto; position: relative; overflow: hidden; min-height: 0; }
 .med-canvas { position: absolute; inset: 0; touch-action: none; cursor: crosshair; }
+/* An empty hand is a different cursor, because it is a different verb: the
+   crosshair means "this will place something" and the arrow means "this will
+   pick something up". Nobody should have to remember which mode they are in. */
+.med-canvas.med-picking { cursor: default; }
+/* The armed/empty toggle in the toolbar, lit while the hand is empty. */
+.med-hand.on { background: #1d3346; border-color: #4d7ea8; color: #9fd8ff; }
 
 .med-status {
   flex: 0 0 auto; padding: 4px 10px; min-height: 24px; font-size: 12px;

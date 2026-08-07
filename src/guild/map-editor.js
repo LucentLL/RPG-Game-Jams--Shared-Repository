@@ -301,6 +301,9 @@ export function openMapEditor(ctx) {
       tab: 'tiles', tool: 'paint', zoom: 1.4, panX: 0, panY: 0,
       undo: [], sheets: {}, painting: false, hover: null, paintStart: null,
       view: 'plan', rot: 0, mods: {}, rectStart: null, rectMode: null, pending: null,
+      // `pick` is what the eye has selected; `held` is the tool set down to
+      // make room for it (@see toggleHand).
+      pick: null, held: null,
     };
   }
   buildDom(host);
@@ -335,6 +338,7 @@ function buildDom(host) {
           <button class="med-btn" data-act="back">← Guild</button>
           <span class="med-title"></span>
           <span class="med-spacer"></span>
+          <button class="med-btn med-hand" data-act="hand" title="Put the tool down (Esc) — then tapping the map selects instead of placing">◈</button>
           <button class="med-btn" data-act="undo" title="Undo (Ctrl+Z)">↺ Undo</button>
           <button class="med-btn med-lint" data-act="validate" title="What a walk would trip over">⚠</button>
           <button class="med-btn" data-act="view3d" title="Toggle the extruded 3D view">⬒ 3D</button>
@@ -394,6 +398,7 @@ function buildDom(host) {
   window.addEventListener('blur', clearMods);
   window.addEventListener('resize', onResize);
   renderSide();
+  syncBar();   // the toolbar has to open showing what is actually in hand
 }
 function onResize() {
   const scr = document.getElementById('editorScreen');
@@ -453,6 +458,8 @@ function zoomTo(z, px, py) {
 /** Does the chart being drafted have any liquid in it? Cached against the
  *  array's own length + identity, because draw() asks on every hover move. */
 const mapIsWet = () => !!E && !!(E.map.water && E.map.water.length);
+/** Is this exact thing already in hand? (the tap-again-to-drop test) */
+const same = (kind, id) => E.sel.kind === kind && E.sel.id === id;
 /** The wet lookup for the live draft, rebuilt only when the array changes. */
 function wetNow() {
   const arr = E.map.water || [];
@@ -592,11 +599,14 @@ function renderSide() {
       const er = e.target.closest('[data-erase]');
       const vt = e.target.closest('[data-vert]');
       const wa = e.target.closest('[data-water]');
-      if (t) E.sel = { kind: 'tile', id: t.dataset.tile };
-      if (er) E.sel = { kind: 'erase' };
-      if (vt) E.sel = { kind: 'vert', dir: +vt.dataset.vert };
-      if (wa) E.sel = { kind: 'water' };
-      if (t || er || vt || wa) renderSide();
+      // TAPPING WHAT IS ALREADY ARMED PUTS IT DOWN. On a phone there is no
+      // Esc and no right button, so this is the discoverable way to get an
+      // empty hand — and it is the gesture people try first anyway.
+      if (t) E.sel = same('tile', t.dataset.tile) ? { kind: 'none' } : { kind: 'tile', id: t.dataset.tile };
+      if (er) E.sel = E.sel.kind === 'erase' ? { kind: 'none' } : { kind: 'erase' };
+      if (vt) E.sel = (E.sel.kind === 'vert' && E.sel.dir === +vt.dataset.vert) ? { kind: 'none' } : { kind: 'vert', dir: +vt.dataset.vert };
+      if (wa) E.sel = E.sel.kind === 'water' ? { kind: 'none' } : { kind: 'water' };
+      if (t || er || vt || wa) { E.pick = null; syncBar(); renderSide(); draw(); }
     };
   } else if (E.tab === 'props') {
     pal.innerHTML = `<div class="med-hint">Click an object, then click WHERE it stands — quarter-tile precision,
@@ -613,7 +623,8 @@ function renderSide() {
     pal.onclick = (e) => {
       const b = e.target.closest('[data-prop]');
       if (!b) return;
-      E.sel = { kind: 'prop', id: b.dataset.prop };
+      E.sel = same('prop', b.dataset.prop) ? { kind: 'none' } : { kind: 'prop', id: b.dataset.prop };
+      E.pick = null; syncBar(); draw();
       // Repaint the chips in place, for the same caret reason.
       renderProps();
     };
@@ -630,7 +641,10 @@ function renderSide() {
         drafting table) — test combat maps in 1st person, where the fight is real.</div>`;
     pal.onclick = (e) => {
       const b = e.target.closest('[data-flag]');
-      if (b) { E.sel = { kind: 'flag', id: b.dataset.flag }; renderSide(); }
+      if (b) {
+        E.sel = same('flag', b.dataset.flag) ? { kind: 'none' } : { kind: 'flag', id: b.dataset.flag };
+        E.pick = null; syncBar(); renderSide(); draw();
+      }
     };
     pal.querySelector('.med-prey').onchange = (e) => { E.prey = e.target.value; };
   } else if (E.tab === 'paint') {
@@ -652,9 +666,9 @@ function renderSide() {
     pal.onclick = (e) => {
       const t = e.target.closest('[data-paint]');
       const er = e.target.closest('[data-paint-erase]');
-      if (t) E.sel = { kind: 'paint', id: t.dataset.paint };
-      else if (er) E.sel = { kind: 'paintErase' };
-      if (t || er) renderSide();
+      if (t) E.sel = same('paint', t.dataset.paint) ? { kind: 'none' } : { kind: 'paint', id: t.dataset.paint };
+      else if (er) E.sel = E.sel.kind === 'paintErase' ? { kind: 'none' } : { kind: 'paintErase' };
+      if (t || er) { E.pick = null; syncBar(); renderSide(); draw(); }
     };
   } else {
     const themes = Object.keys(THEMES);
@@ -923,6 +937,77 @@ function lint() {
   return out;
 }
 
+/**
+ * PUT THE TOOL DOWN — and pick it back up.
+ *
+ * Every palette chip is a loaded hand: with one armed, there is no such thing
+ * as looking at the map, because every tap is a placement. So `kind: 'none'`
+ * is a real state and not an absence — with an empty hand a tap SELECTS what
+ * is already there and changes nothing.
+ *
+ * Toggling restores what you were holding rather than clearing it, because
+ * putting a tool down to check something and then wanting it back is the whole
+ * gesture. Reaching for a chip picks that up instead, as you would expect.
+ */
+function toggleHand() {
+  if (E.sel.kind === 'none') {
+    E.sel = E.held || { kind: 'tile', id: '.' };
+    E.held = null;
+  } else {
+    E.held = E.sel;
+    E.sel = { kind: 'none' };
+  }
+  E.pick = null;
+  syncBar();
+  renderSide();
+  draw();
+}
+
+/**
+ * What a tap lands on when the hand is empty: the nearest PLACED thing, or
+ * failing that the cell itself. Purely a read — nothing here edits, which is
+ * the point of the mode.
+ */
+function selectAt(c) {
+  const { x, y } = c;
+  if (y < 0 || y >= E.map.grid.length || x < 0 || x >= E.map.grid[0].length) { E.pick = null; return; }
+  const near = (list, fn) => {
+    let best = -1, bd = 0.8;
+    list.forEach((it, i) => { const d = Math.hypot(fn(it)[0] - c.fx, fn(it)[1] - c.fy); if (d < bd) { bd = d; best = i; } });
+    return best;
+  };
+  let i = near(E.map.props, (p) => [p.x, p.y - 0.4]);
+  if (i >= 0) { const p = E.map.props[i]; E.pick = { kind: 'prop', i, x: p.x, y: p.y, label: p.art }; return; }
+  i = near(E.map.spawns, (s) => [s.x + 0.5, s.y + 0.5]);
+  if (i >= 0) { const s = E.map.spawns[i]; E.pick = { kind: 'spawn', i, x: s.x + 0.5, y: s.y + 0.5, label: (PREY[s.prey] && PREY[s.prey].name) || s.prey }; return; }
+  i = near(E.map.portals || [], (p) => [p.x, p.y]);
+  if (i >= 0) { const p = E.map.portals[i]; E.pick = { kind: 'portal', i, x: p.x, y: p.y, label: 'portal → ' + p.to }; return; }
+  const ch = (E.map.grid[y] || '')[x];
+  const t = TILE_BY_CH[ch];
+  E.pick = { kind: 'cell', x: x + 0.5, y: y + 0.5, cx: x, cy: y,
+    label: (wetNow().has(x + ',' + y) ? 'water over ' : '') + (t ? t.name : `'${ch}'`) };
+}
+
+/** Drop the selected thing. The one edit the empty hand can make, because a
+ *  selection you can only look at is half a tool. */
+function deleteSelection() {
+  const p = E.pick;
+  if (!p) return;
+  if (p.kind === 'cell') {
+    if (!wetNow().has(p.cx + ',' + p.cy)) { toast('Nothing placed here — the Eraser clears ground.'); return; }
+    snap();
+    E.map.water = (E.map.water || []).filter(([wx, wy]) => wx !== p.cx || wy !== p.cy);
+    toast('Dried.');
+  } else {
+    snap();
+    const list = p.kind === 'prop' ? E.map.props : p.kind === 'spawn' ? E.map.spawns : E.map.portals;
+    list.splice(p.i, 1);
+    toast('Removed ' + p.label + '.');
+  }
+  E.pick = null;
+  draw();
+}
+
 /** Validate + lint, and say the first thing that is wrong. Shared by the
  *  toolbar's ⚠ and the Map tab's button — one answer, two doors. */
 function runValidate() {
@@ -951,7 +1036,13 @@ function refreshStatus() {
   const host = document.getElementById('editorScreen');
   if (!host) return;
   const out = host.querySelector('.med-readout');
-  if (out) {
+  // A SELECTION OUTRANKS THE HOVER. Once you have picked something up with
+  // your eyes, the readout is about that thing until you drop it — otherwise
+  // moving the cursor a pixel loses the answer you just asked for.
+  if (out && E.pick) {
+    out.textContent = `▣ ${E.pick.label}   ·   ${E.pick.kind}`
+      + (E.sel.kind === 'none' ? '   ·   Del removes it, Esc drops it' : '');
+  } else if (out) {
     const h = E.hover, m = E.map;
     const inMap = h && h.x >= 0 && h.y >= 0 && h.y < m.grid.length && h.x < m.grid[0].length;
     if (!inMap) out.textContent = '';
@@ -1000,6 +1091,7 @@ function onBarClick(e) {
   // also checks for itself, but ending it at the door is cheaper than one more
   // wasted frame and makes the lifetime obvious from here.
   if (act === 'back' || act === 'walk' || act === 'walkFp') stopWater();
+  if (act === 'hand') { toggleHand(); return; }
   if (act === 'back') { walkCtx && walkCtx.back ? walkCtx.back() : history.back(); }
   else if (act === 'view3d') {
     E.view = E.view === 'iso' ? 'plan' : 'iso';
@@ -1082,7 +1174,25 @@ function onKey(e) {
   if (k === 'f') { fitView(true); e.preventDefault(); return; }
   if (k === 'g') { E.view = E.view === 'iso' ? 'plan' : 'iso'; syncBar(); fitView(true); e.preventDefault(); return; }
   if (k === 'b') { E.sel = { kind: 'tile', id: '.' }; renderSide(); e.preventDefault(); return; }
-  if (k === 'delete' || k === 'backspace') { E.sel = { kind: 'erase' }; renderSide(); e.preventDefault(); return; }
+  /**
+   * ESC BACKS OUT, one step at a time, and the last step returns you to work:
+   * put the tool down → drop the selection → pick the tool back up. Without
+   * that third step the key was a one-way door (holding a tool it emptied the
+   * hand, empty-handed it cleared the selection, and then it did nothing at
+   * all), so the keyboard could never get the tool back.
+   */
+  if (k === 'escape') {
+    if (E.sel.kind !== 'none') toggleHand();
+    else if (E.pick) { E.pick = null; refreshStatus(); draw(); }
+    else toggleHand();
+    e.preventDefault(); return;
+  }
+  if (k === 'delete' || k === 'backspace') {
+    // With something selected, Delete means THAT. Otherwise it arms the eraser.
+    if (E.pick) deleteSelection();
+    else { E.sel = { kind: 'erase' }; renderSide(); }
+    e.preventDefault(); return;
+  }
 }
 function onKeyUp(e) {
   if (!E) return;
@@ -1093,6 +1203,17 @@ function onKeyUp(e) {
 function syncBar() {
   const b = document.querySelector('.med-bar [data-act="view3d"]');
   if (b) b.textContent = E.view === 'iso' ? '▦ Plan' : '⬒ 3D';
+  const h = document.querySelector('.med-bar .med-hand');
+  if (h) {
+    const empty = E.sel.kind === 'none';
+    h.classList.toggle('on', empty);
+    h.title = empty
+      ? 'Empty hand — tapping the map selects. Tap again (or Esc) to pick the tool back up.'
+      : 'Put the tool down (Esc) — then tapping the map selects instead of placing';
+  }
+  // The canvas says which mode it is in before you touch it.
+  const cv = document.querySelector('.med-canvas');
+  if (cv) cv.classList.toggle('med-picking', E.sel.kind === 'none');
 }
 
 // ---------------------------------------------------------------------------
@@ -1201,6 +1322,9 @@ function onDown(ev) {
 /** Start whatever the armed tool does at this cell. Split out of onDown so a
  *  deferred touch can run the identical path a moment later. */
 function beginEdit(c, shift) {
+  // AN EMPTY HAND SELECTS. No snapshot, no edit — this branch is the reason
+  // the mode exists.
+  if (E.sel.kind === 'none') { selectAt(c); draw(); return; }
   // The Surfaces tab drags RECTANGLES, not cells: arm the corner here and let
   // onUp commit — one gesture, one undo step.
   if (E.sel.kind === 'paint') { E.paintStart = { x: c.x, y: c.y }; draw(); return; }
@@ -1945,6 +2069,19 @@ function draw() {
     g.strokeStyle = 'rgba(255,215,107,.9)';
     g.lineWidth = 2;
     g.strokeRect(E.hover.x * s + 1, E.hover.y * s + 1, s - 2, s - 2);
+  }
+
+  // WHAT IS SELECTED, ringed. A different colour and shape from the hover
+  // cursor on purpose — one is where the cursor happens to be, the other is a
+  // thing you chose, and they are frequently not the same cell.
+  if (E.pick) {
+    g.strokeStyle = '#6fd3ff';
+    g.lineWidth = 2.5;
+    g.setLineDash([6, 4]);
+    g.beginPath();
+    g.arc(E.pick.x * s, E.pick.y * s, s * 0.46, 0, 7);
+    g.stroke();
+    g.setLineDash([]);
   }
 
   // The live Surfaces drag: the rect that will commit on release.
