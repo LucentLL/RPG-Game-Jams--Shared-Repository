@@ -85,6 +85,9 @@ const TILES = [
   // most of the reading; the terraces need no glyph at all.
   { ch: '2', name: 'Terrace (two steps)', color: '#a8b478', glyph: '' },
   { ch: '3', name: 'Terrace (three steps)', color: '#b6c184', glyph: '' },
+  { ch: '4', name: 'Terrace (four steps)', color: '#c2cc90', glyph: '' },
+  { ch: '5', name: 'Terrace (five steps)', color: '#cdd69c', glyph: '' },
+  { ch: '6', name: 'Terrace (six steps)', color: '#d8e0a8', glyph: '' },
   { ch: ',', name: 'Sunken floor (one down)', color: '#55663f', glyph: '' },
   { ch: 'S', name: 'Steps (climb at a walk)', color: '#8a7a52', glyph: '≡' },
   { ch: 'u', name: 'Tunnel (under-deck)', color: '#6e6250', glyph: '∩' },
@@ -239,8 +242,11 @@ function buildDom(host) {
           <button class="med-btn" data-act="view3d" title="Toggle the extruded 3D view">⬒ 3D</button>
           <button class="med-btn" data-act="rotL" title="Rotate the 3D view left">⟲</button>
           <button class="med-btn" data-act="rotR" title="Rotate the 3D view right">⟳</button>
+          <button class="med-btn" data-act="fit" title="Fit the whole map in view">⌖</button>
           <button class="med-btn" data-act="zoomOut">−</button>
           <button class="med-btn" data-act="zoomIn">+</button>
+          <button class="med-btn" data-act="raise" title="Raise-ground tool">▲</button>
+          <button class="med-btn" data-act="lower" title="Lower-ground tool">▼</button>
           <button class="med-btn med-primary" data-act="walk" title="Save and walk this map top-down">Walk it</button>
           <button class="med-btn med-primary" data-act="walkFp" title="Save and walk it in first person">1st person</button>
         </div>
@@ -267,6 +273,7 @@ function buildDom(host) {
   cv.addEventListener('pointerdown', onDown);
   cv.addEventListener('pointermove', onMove);
   window.addEventListener('pointerup', onUp);
+  window.addEventListener('pointercancel', onUp);
   cv.addEventListener('contextmenu', (e) => e.preventDefault());
   // Wheel zoom aims at the POINTER — the canvas dies with buildDom, so an
   // inline listener here cannot stack the way a window listener would.
@@ -287,13 +294,43 @@ function onResize() {
   if (E && scr && scr.classList.contains('active')) draw();
 }
 
+/**
+ * Centre the map in the canvas — with `rezoom`, size the zoom to fit it too.
+ * Called after anything that moves the ground under the camera (a rotation,
+ * a resize, an import, the view toggle): a camera left panned over nowhere
+ * reads as "the button did nothing" — the second phone playtest saw a black
+ * screen and reasonably reported rotation itself as broken.
+ */
+function fitView(rezoom) {
+  const view = document.querySelector('.med-view');
+  if (!view || !E) return;
+  const W = E.map.grid[0].length, H = E.map.grid.length;
+  const cw = view.clientWidth, chh = view.clientHeight;
+  if (rezoom) {
+    const s1 = E.view === 'iso'
+      ? Math.min(cw / ((W + H) * 1.04), chh / ((W + H) * 0.55 + 4))
+      : Math.min(cw / (W + 1), chh / (H + 1));
+    E.zoom = Math.max(0.15, Math.min(4, s1 / CELL));
+  }
+  const s = CELL * E.zoom;
+  if (E.view === 'iso') {
+    const VW = E.rot % 2 ? H : W, VH = E.rot % 2 ? W : H;
+    const cx = ((VW - VH) / 2) * s + isoOX();
+    const cy = ((VW + VH) / 2) * s * 0.5;
+    E.panX = cw / 2 - cx; E.panY = chh / 2 - cy;
+  } else {
+    E.panX = (cw - W * s) / 2; E.panY = (chh - H * s) / 2;
+  }
+  draw();
+}
+
 /** Zoom keeping the point under the view's CENTRE (or the given screen point)
  *  fixed — zooming about the canvas origin meant you could never zoom INTO
  *  the part of a big map you were working on (playtest). */
 function zoomTo(z, px, py) {
   const view = document.querySelector('.med-view');
   if (!view || !E) return;
-  const z2 = Math.max(0.4, Math.min(4, z));
+  const z2 = Math.max(0.15, Math.min(4, z));
   const ax = px != null ? px : view.clientWidth / 2;
   const ay = py != null ? py : view.clientHeight / 2;
   const k = z2 / E.zoom;
@@ -400,8 +437,8 @@ function renderSide() {
       <div class="med-field"><label>Theme</label><select class="med-theme">
         ${themes.map((t) => `<option ${t === E.map.theme ? 'selected' : ''}>${t}</option>`).join('')}</select></div>
       <div class="med-field"><label>Size</label>
-        <input class="med-w" type="number" min="6" max="96" value="${E.map.grid[0].length}"> ×
-        <input class="med-h" type="number" min="6" max="96" value="${E.map.grid.length}">
+        <input class="med-w" type="number" min="6" max="128" value="${E.map.grid[0].length}"> ×
+        <input class="med-h" type="number" min="6" max="128" value="${E.map.grid.length}">
         <button class="med-btn" data-act="resize">Apply</button></div>
       <div class="med-row">
         <button class="med-btn" data-act="new">New</button>
@@ -438,8 +475,7 @@ function renderSide() {
       // off the shipped one ('classroom' → 'classroom-draft', never the
       // shipped 'classroom2'), so the original stays intact.
       if (SHIPPED.has(id)) E.map.name = (DELVE_MAPS[id].name || id) + ' (draft)';
-      E.panX = E.panY = 0;
-      draw(); renderSide();
+      fitView(true); renderSide();
     };
   }
 }
@@ -448,16 +484,16 @@ function onMapAction(act, pal) {
   if (act === 'resize') {
     // 96 on a side is town scale — the whole campus is 26×46. Past that the
     // top-down bake canvas (48px per cell) is what starts to hurt a phone.
-    const w = Math.max(6, Math.min(96, +pal.querySelector('.med-w').value || 20));
-    const h = Math.max(6, Math.min(96, +pal.querySelector('.med-h').value || 14));
+    const w = Math.max(6, Math.min(128, +pal.querySelector('.med-w').value || 20));
+    const h = Math.max(6, Math.min(128, +pal.querySelector('.med-h').value || 14));
     snap();
     E.map.grid = Array.from({ length: h }, (_, y) => {
       const row = E.map.grid[y] || '';
       return (row + '#'.repeat(Math.max(0, w - row.length))).slice(0, w);
     });
-    draw(); renderSide();
+    fitView(true); renderSide();
   } else if (act === 'new') {
-    snap(); E.map = blank(36, 24); E.panX = E.panY = 0; draw(); renderSide();
+    snap(); E.map = blank(36, 24); fitView(true); renderSide();
   } else if (act === 'save') {
     persist(); renderSide();
   } else if (act === 'validate') {
@@ -474,7 +510,7 @@ function onMapAction(act, pal) {
     try {
       const m = JSON.parse(pal.querySelector('.med-json').value);
       if (!m || !Array.isArray(m.grid) || !m.grid.length) throw new Error('no grid');
-      snap(); E.map = normalize(m); draw(); renderSide(); toast('Imported as ' + E.map.id + '.');
+      snap(); E.map = normalize(m); fitView(true); renderSide(); toast('Imported as ' + E.map.id + '.');
     } catch (err) { toast('Import failed: ' + (err.message || err)); }
   }
 }
@@ -606,6 +642,10 @@ function lint() {
     }
   }
 
+  // Big maps are legal but priced: past ~96 a side the top-down lens's baked
+  // ground canvas (48px a cell) is heavy on a phone. FP doesn't care.
+  if (W > 96 || H > 96) out.push(`${W}×${H} is a big bake — the top-down walk may load slowly on a phone (first person is unaffected)`);
+
   // The moving parts: a latch on nothing, and more locks than keys.
   for (const [lx, ly] of (m.locks || [])) {
     if (at(lx, ly) !== 'D') out.push(`lock at ${lx},${ly} sits on '${at(lx, ly) || 'void'}' — locks belong on doors`);
@@ -659,13 +699,21 @@ function onBarClick(e) {
   else if (act === 'view3d') {
     E.view = E.view === 'iso' ? 'plan' : 'iso';
     b.textContent = E.view === 'iso' ? '▦ Plan' : '⬒ 3D';
-    draw();
+    fitView(true);
   }
   else if (act === 'undo') undo();
   else if (act === 'rotL' || act === 'rotR') {
     E.rot = (E.rot + (act === 'rotL' ? 3 : 1)) % 4;
     if (E.view !== 'iso') toast('Rotation turns the 3D view — press ⬒ 3D to see it.');
-    draw();
+    fitView(false);   // recentre: a turn that leaves you panned off-map reads as nothing
+  }
+  else if (act === 'fit') fitView(true);
+  else if (act === 'raise' || act === 'lower') {
+    E.sel = { kind: 'vert', dir: act === 'raise' ? 1 : -1 };
+    E.tab = 'tiles'; renderSide();
+    toast(act === 'raise'
+      ? 'Raise armed — click ground to lift it, a step at a time, up to six.'
+      : 'Lower armed — click ground to sink it, down to the pit.');
   }
   else if (act === 'zoomIn') zoomTo(E.zoom * 1.25);
   else if (act === 'zoomOut') zoomTo(E.zoom / 1.25);
@@ -734,6 +782,15 @@ function isoOX() {
 }
 
 function onDown(ev) {
+  // TWO FINGERS drive the camera on touch — drag pans, pinch zooms at the
+  // midpoint. Phones have no middle button, and without this the camera was
+  // parked over one corner of the map forever (the second phone playtest).
+  E.pts = E.pts || new Map();
+  E.pts.set(ev.pointerId, { x: ev.clientX, y: ev.clientY });
+  if (E.pts.size === 2) {
+    E.painting = false; E.paintStart = null; E.pan = null;
+    return;
+  }
   if (ev.button === 1) { E.pan = { x: ev.clientX - E.panX, y: ev.clientY - E.panY }; return; }
   const c = cellAt(ev);
   if (c.y < 0 || c.y >= E.map.grid.length || c.x < 0 || c.x >= E.map.grid[0].length) return;
@@ -751,16 +808,32 @@ function onDown(ev) {
   draw();
 }
 function onMove(ev) {
-  if (E && E.pan) { E.panX = ev.clientX - E.pan.x; E.panY = ev.clientY - E.pan.y; draw(); return; }
   if (!E) return;
+  if (E.pts && E.pts.size >= 2 && E.pts.has(ev.pointerId)) {
+    const old = [...E.pts.values()];
+    const oMid = { x: (old[0].x + old[1].x) / 2, y: (old[0].y + old[1].y) / 2 };
+    const oDist = Math.hypot(old[0].x - old[1].x, old[0].y - old[1].y) || 1;
+    E.pts.set(ev.pointerId, { x: ev.clientX, y: ev.clientY });
+    const now = [...E.pts.values()];
+    const nMid = { x: (now[0].x + now[1].x) / 2, y: (now[0].y + now[1].y) / 2 };
+    const nDist = Math.hypot(now[0].x - now[1].x, now[0].y - now[1].y) || 1;
+    E.panX += nMid.x - oMid.x; E.panY += nMid.y - oMid.y;
+    const cv = document.querySelector('.med-canvas');
+    const r = cv.getBoundingClientRect();
+    zoomTo(E.zoom * (nDist / oDist), nMid.x - r.left, nMid.y - r.top);
+    return;
+  }
+  if (E.pts && E.pts.has(ev.pointerId)) E.pts.set(ev.pointerId, { x: ev.clientX, y: ev.clientY });
+  if (E.pan) { E.panX = ev.clientX - E.pan.x; E.panY = ev.clientY - E.pan.y; draw(); return; }
   const c = cellAt(ev);
   const changed = !E.hover || E.hover.x !== c.x || E.hover.y !== c.y;
   E.hover = c;
   if (E.painting && E.sel.kind === 'tile') { apply(c, false); draw(); }
   else if (changed) draw();
 }
-function onUp() {
+function onUp(ev) {
   if (!E) return;
+  if (ev && E.pts) E.pts.delete(ev.pointerId);
   // The armed Surfaces rect commits on release: snap() THEN push, so the
   // whole drag is one undo step.
   if (E.paintStart) {
@@ -825,7 +898,7 @@ function apply(c, rightClick) {
     // Sculpting: one step along the ground ladder per click. Anything that
     // is not GROUND (walls, doors, climbs, decks) refuses rather than being
     // silently overwritten — the verbs shape terrain, tiles place things.
-    const seq = [',', '.', '^', '2', '3'];
+    const seq = [',', '.', '^', '2', '3', '4', '5', '6'];
     const ch = (E.map.grid[y] || '')[x];
     const i = seq.indexOf(ch);
     if (i < 0) { toast('Raise and lower sculpt open ground — floors, ledges, terraces, pits.'); E.undo.pop(); return; }

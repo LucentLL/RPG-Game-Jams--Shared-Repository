@@ -285,7 +285,7 @@ export function oreKindAt(x, y) {
 
 /** Authored floor levels, in whole steps of BLOCK_H/STEP_PX. Every other
  *  walkable char stands at 0. Signed on purpose: the pit is a level too. */
-export const FLOOR_LV = { '^': 1, 2: 2, 3: 3, ',': -1 };
+export const FLOOR_LV = { '^': 1, 2: 2, 3: 3, 4: 4, 5: 5, 6: 6, ',': -1 };
 /** Two-surface cells: a deck runs over the low ground. 'u' dresses the deck as
  *  the terrain it bores through, 'n' as planks. */
 export const DECK_CH = { u: 1, n: 1 };

@@ -25,7 +25,7 @@
  */
 import { TILES_BASE, ART_BASE } from '../config/assets.js';
 import { preyById } from './locales.js';
-import { THEMES, DECALS, ORE_KINDS, oreKindAt, mapForLocale, validateMap, makeLevelModel, CLIMB_CH, DECK_CH } from './delve-maps.js';
+import { THEMES, DECALS, ORE_KINDS, oreKindAt, mapForLocale, validateMap, makeLevelModel, CLIMB_CH, DECK_CH, FLOOR_LV } from './delve-maps.js';
 import { artSprite } from './art.js';
 import { propVolume } from './prop-volume.js';
 import { readPad, padReset, touchPrimary, onTouchPrimary, PAD } from '../platform/input.js';
@@ -156,7 +156,7 @@ const CLIMB = { L: 'ladder', v: 'vine' };
  */
 const bakeChar = (ch, x, y, model) => {
   if (ch === LEDGE) return 'b';
-  if (ch === '2' || ch === '3' || ch === ',') return ch;
+  if (FLOOR_LV[ch] != null) return ch;   // terraces 2-6 and the sunken ','
   // A door or a key cell paints as the ground beneath it: the door itself is
   // live geometry (it has to be able to OPEN), the key a standee.
   if (CLIMB_CH[ch] || DECK_CH[ch] || ch === 'D' || ch === 'K') {
@@ -341,17 +341,17 @@ function cutWallTex(sheets, theme) {
     const top = cut(theme.walls.crown, TILE, TILE);          // crown wood, stretched — the shelf's top
     const [tallE, tallW] = sidePair(tall, H);
     const [lowE, lowW] = sidePair(low, BLOCK_H);
-    // Terraces in a walled theme tile the same wall cut to their own height.
-    const t2 = cut(theme.walls.tall, TILE, 2 * BLOCK_H);
-    const t3 = cut(theme.walls.tall, TILE, 3 * BLOCK_H);
-    const [t2E, t2W] = sidePair(t2, 2 * BLOCK_H);
-    const [t3E, t3W] = sidePair(t3, 3 * BLOCK_H);
+    // Terraces in a walled theme tile the same wall cut to their own height —
+    // six rungs now: a keep is six steps of masonry, not three.
     block = {
       B: { face: tall.toDataURL(), sideE: tallE, sideW: tallW, top: top.toDataURL(), h: H },
       b: { face: low.toDataURL(), sideE: lowE, sideW: lowW, top: top.toDataURL(), h: BLOCK_H },
-      2: { face: t2.toDataURL(), sideE: t2E, sideW: t2W, top: top.toDataURL(), h: 2 * BLOCK_H },
-      3: { face: t3.toDataURL(), sideE: t3E, sideW: t3W, top: top.toDataURL(), h: 3 * BLOCK_H },
     };
+    for (let n = 2; n <= 6; n++) {
+      const tn = cut(theme.walls.tall, TILE, n * BLOCK_H);
+      const [tE, tW] = sidePair(tn, n * BLOCK_H);
+      block[n] = { face: tn.toDataURL(), sideE: tE, sideW: tW, top: top.toDataURL(), h: n * BLOCK_H };
+    }
   } else {
     const bFace = texCv(TILE, BLOCK_H, (cg) => sheetTile(cg, theme.faceTop.m, 0, 0));
     const [bE, bW] = sidePair(bFace, BLOCK_H);
@@ -370,14 +370,12 @@ function cutWallTex(sheets, theme) {
       sheetTile(cg, theme.faceTop.m, 0, 0);
       for (let i = 1; i < n; i++) sheetTile(cg, theme.faceBot.m, 0, i * TILE);
     });
-    const f2 = stack(2), f3 = stack(3);
-    const [f2E, f2W] = sidePair(f2, 2 * BLOCK_H);
-    const [f3E, f3W] = sidePair(f3, 3 * BLOCK_H);
-    block = {
-      B: one, b: one,
-      2: { face: f2.toDataURL(), sideE: f2E, sideW: f2W, top: bTop.toDataURL(), h: 2 * BLOCK_H },
-      3: { face: f3.toDataURL(), sideE: f3E, sideW: f3W, top: bTop.toDataURL(), h: 3 * BLOCK_H },
-    };
+    block = { B: one, b: one };
+    for (let n = 2; n <= 6; n++) {
+      const fn2 = stack(n);
+      const [fE, fW] = sidePair(fn2, n * BLOCK_H);
+      block[n] = { face: fn2.toDataURL(), sideE: fE, sideW: fW, top: bTop.toDataURL(), h: n * BLOCK_H };
+    }
   }
   // The pit floor wears the theme's own ground fill (a step down is still this
   // place); a bridge deck wears planks when the wood sheet rode along, and a
@@ -438,7 +436,7 @@ function extractGeometry(grid, themeNameAt, extras) {
       // A block carries the NAME of the theme whose wall it is, so a room's
       // shelves and the estate's rock can stand on one plane. Terraces ('2',
       // '3') are blocks you STAND on — same geometry, more courses of face.
-      if (ch === 'B' || ch === 'b' || ch === '2' || ch === '3') {
+      if (ch === 'B' || ch === 'b' || '23456'.includes(ch)) {
         blocks.push({ x, y, kind: ch, theme: themeNameAt ? themeNameAt(x, y) : null });
       }
     }
@@ -912,7 +910,7 @@ function mountScene(prep, entry) {
     }
     if (b.h <= TILE) continue;
     const kind = (map.grid[b.y] || '')[b.x];
-    const topLv = kind === '2' ? 2 : kind === '3' ? 3 : 99;
+    const topLv = '23456'.includes(kind) ? +kind : 99;
     D.occluders.push({ els: b.els, x0: b.x, x1: b.x + 1, y: b.y + 1, rows: rowsHidden(b.h), on: 0, topLv });
   }
 
