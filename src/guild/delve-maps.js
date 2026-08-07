@@ -222,8 +222,22 @@ export const THEMES = {
       classroom: room('floors', 16, [[0, 3], [1, 3], [2, 3], [3, 3]], 'stonewall', 216),
       // red damask carpet AND gold damask wall covering, off the mansion sheet
       guildmaster: room('mansion', 48, [[12, 7], [13, 7]], 'mansion', 384),
-      // raked sand under blue-grey ashlar tiers
-      arena: room('floors', 16, [[4, 2], [5, 2], [6, 2], [7, 2]], 'stonewall', 408),
+      /**
+       * SAND under blue-grey ashlar tiers.
+       *
+       * This said "raked sand" for a year and laid the KITCHEN'S limestone —
+       * `floors` [[4,2]…] is byte-identical to what the kitchen uses, which
+       * the editor's Surfaces palette exposed the moment it started grouping
+       * floors by what they actually are rather than by which room owns them.
+       * The description was the only sand in the building.
+       *
+       * `sandramps_3` out of the 2019 bundle carries real sand. The fill is
+       * its two flat tiles, and they are a PAIR by construction: tile (1,2)'s
+       * right edge is byte-identical to (2,2)'s left, so the sheet already
+       * means them to continue each other, and every cross-seam between them
+       * measures at or below the tile's own internal grain. Nothing to blend.
+       */
+      arena: room('sand', 48, [[1, 2], [2, 2]], 'stonewall', 408),
     };
   })(),
 };

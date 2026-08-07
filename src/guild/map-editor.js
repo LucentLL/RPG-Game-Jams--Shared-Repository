@@ -131,7 +131,7 @@ const FLOOR_DESC = {
   meadow: 'grass', mine: 'sandy cave rock', interior: 'parquet',
   guildhall: 'limestone slabs', kitchen: 'scrubbed limestone', forge: 'dark sooty stone',
   apothecary: 'green flagstone', armory: 'brown brick', dormitory: 'wood planks',
-  classroom: 'tan flagstone', guildmaster: 'red damask carpet', arena: 'raked sand',
+  classroom: 'tan flagstone', guildmaster: 'red damask carpet', arena: 'pale arena sand',
 };
 
 /**

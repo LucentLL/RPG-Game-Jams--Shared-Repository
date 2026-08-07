@@ -209,6 +209,9 @@ export const SHEET_URLS = {
   rocks: TILES_BASE + 'rocks.png',
   rails: TILES_BASE + 'rails.png',
   floors: TILES_BASE + 'floors.png',
+  // The Sparring Ring's ground — sandramps_3 out of the shared library, used
+  // for its two flat fill tiles alone (the ramps are autotile bookkeeping).
+  sand: TILES_BASE + 'sand.png',
   stonewall: TILES_BASE + 'stonewall.png',
   woodwall: TILES_BASE + 'woodwall.png',
   shelves: ART_BASE + 'bookshelf_3x.png',
