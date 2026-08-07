@@ -23,10 +23,11 @@
  * a place you look at from above; the delve is a place you are inside.
  */
 import { ART_BASE } from '../config/assets.js';
-import { THEMES, LIGHTS, DECALS, ORE_KINDS, oreKindAt, mapForLocale, validateMap, makeLevelModel, DECK_CH } from './delve-maps.js';
+import { THEMES, LIGHTS, DECALS, ORE_KINDS, oreKindAt, mapForLocale, validateMap, makeLevelModel, DECK_CH, wetCells } from './delve-maps.js';
 import { preyById } from './locales.js';
 import { loadImg, SHEET_URLS, doorTexture, keyTexture } from './delve.js';
-import { ART, artSprite, artCropCss, artTexRect, WORN, wornWeapon, wornShield, wornPick } from './art.js';
+import { ART, artSprite, artCropCss, artTexRect, SWAY, WORN, wornWeapon, wornShield, wornPick } from './art.js';
+import { waterFrames, WADE_SPEED } from './water.js';
 import { propVolume, propCell, footprint, REST_SLOP, PLAYER_H } from './prop-volume.js';
 import { icon } from './icons.js';
 import { createLook, readPad, padReset, touchPrimary, onTouchPrimary, PAD } from '../platform/input.js';
@@ -114,6 +115,12 @@ const PERSP = 500, PERSP_AT = 720;
  * you get unfogged rock hanging at the build edge.
  */
 const COARSE = typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches;
+/** Ambient motion — the water's drift, the wind in the trees — off for anyone
+ *  who asked their OS for less of it. Queried live rather than snapshotted at
+ *  module load: the setting can be changed under a running tab, and the CSS
+ *  half of the wind (delve.css) would react to that while this did not. */
+const REDUCED_MQ = typeof matchMedia === 'function' ? matchMedia('(prefers-reduced-motion: reduce)') : null;
+const reducedMotion = () => !!(REDUCED_MQ && REDUCED_MQ.matches);
 /** Open-air maps see a VISTA, underground ones a lamp's reach — so the cap is
  *  the light's, not one number. The sky tiers are bounded in practice by the
  *  meadow charts themselves (a build radius past the map edge costs nothing),
@@ -1172,7 +1179,14 @@ function wantSet(px, py, yaw, R, near, far) {
   };
   // PAINT swaps the ground fill and nothing else — no walls, no ceiling, no
   // room. (A region is a room; the Surfaces palette writes paint.)
+  //
+  // WATER OUTRANKS PAINT, because paint is a choice of floor tile and water is
+  // not a floor tile — it is what is lying on top of one. Returning it here,
+  // as a texture like any other, is the whole integration: the quadtree still
+  // merges lakes into big blocks (adjacent water shares this texture), the
+  // block/cell split still works, and the fog is unchanged.
   const floorTexAt = (x, y, SC) => {
+    if (F.waterTex && F.wet.has(x + ',' + y)) return F.waterTex;
     const t = F.paintThemeAt && F.paintThemeAt(x, y);
     return (t && F.surfByTheme[t] && F.surfByTheme[t].floor) || SC.floor;
   };
@@ -1632,6 +1646,10 @@ const glOn = () => !!(F && F.gl);
 const toGlQuad = (w) => ({
   src: w.tex, w: w.w, h: w.h, x: w.tx, y: w.ty, z: w.tz, rot: w.rot,
   repX: w.nx, repY: w.ny,
+  // Flowing is a property of the TEXTURE here, not of the quad — there is one
+  // water texture per chart (@see prep), so identity is the whole test and no
+  // quad has to carry a flag through twelve positional arguments.
+  flow: F.waterTex && w.tex === F.waterTex ? 1 : 0,
 });
 
 function buildGeometry() {
@@ -1780,10 +1798,29 @@ function decalBillboard(sheets, decalName, x, y, worldH) {
 
 /** Decor turns to the walker every frame for the same reason a creature does:
  *  a billboard is a flat plane, and a flat plane seen edge-on is nothing. */
-function standDecor(el, x, y, rest) {
+function standDecor(el, x, y, rest, sway) {
   // `rest` is what it is STANDING ON — 0 for the floor, a taller prop's height
   // for the ledgers on the desk. Up is negative.
-  F.decor.push({ el, x, y, lift: -heightAt(Math.floor(x), Math.floor(y)) * STEP_PX - (rest || 0) });
+  F.decor.push({ el, x, y, sway: sway || 0, lift: -heightAt(Math.floor(x), Math.floor(y)) * STEP_PX - (rest || 0) });
+}
+
+/**
+ * THE WIND, as a world-px displacement of a standee's crown.
+ *
+ * One direction for the whole map (a breeze is not per-tree), two frequencies
+ * so it is a gust rather than a metronome, and a phase taken from the thing's
+ * own position so a grove never moves in unison — which is the single tell
+ * that separates "wind" from "everything is on the same motor". Amplitude is
+ * a fraction of the thing's own HEIGHT (art.js SWAY), so a sapling and an oak
+ * bend by the same angle rather than by the same distance.
+ */
+const WIND = [0.86, 0.51];
+function swayOf(rec, h, t) {
+  if (!rec.sway) return null;
+  const ph = rec.x * 0.7 + rec.y * 1.3;
+  const s = Math.sin(t * 1.55 + ph) * 0.72 + Math.sin(t * 2.7 + ph * 1.9) * 0.28;
+  const a = rec.sway * h * s;
+  return [WIND[0] * a, WIND[1] * a];
 }
 
 /**
@@ -2277,7 +2314,14 @@ function buildProps(props) {
  *  follows from the crop's own proportions, which is what keeps it a thing and
  *  not a stretched picture of one. */
 function artBillboard(name, x, y, worldW, title, rest) {
-  const html = artSprite(name, '', 'width:100%;height:100%');
+  // Foliage stirs. On the COMPOSITED path that is a CSS keyframe on the art
+  // itself, phase-shifted per standee by a negative delay — one declaration at
+  // build time, owned by the compositor thereafter, and no per-frame style
+  // write on any of them (the rule the whole billboard loop is built around).
+  // The rasterised path ignores the class and shears the quad instead.
+  const sway = SWAY[name] || 0;
+  const html = artSprite(name, sway ? 'fp-sway' : '',
+    'width:100%;height:100%' + (sway ? `;animation-delay:${(-(x * 0.7 + y * 1.3) % 5).toFixed(2)}s` : ''));
   if (!html) return;
   const a = ART[name];
   const el = addBillboard('fp-decor', html, worldW, worldW * (a.h / a.w));
@@ -2285,7 +2329,7 @@ function artBillboard(name, x, y, worldW, title, rest) {
   // same rectangle as a texture and four UVs. One table, two spellings.
   el._glTex = artTexRect(name);
   if (title) el.title = title;
-  standDecor(el, x, y, rest);
+  standDecor(el, x, y, rest, sway);
 }
 /** The same, given a HEIGHT — which is how everything with an authored volume
  *  is sized (@see prop-volume.js), and the one thing that was ever wrong. */
@@ -2653,17 +2697,29 @@ async function prep(mapId) {
     try { spawns.push({ prey, s, img: await loadImg(ART_BASE + prey.art + '.png') }); }
     catch (e) { console.warn('delve-fp: creature sheet missing for', s.prey, e); }
   }
-  return { map, theme, surf, surfByTheme, props, spawns };
+  // ONE water texture for the whole chart, not one per surface set: water is
+  // water, whatever ground it lies on. Being a single identity is also what
+  // lets `toGlQuad` recognise a flowing quad without a per-quad flag.
+  let waterTex = null;
+  if (wetCells(map).size) {
+    // A 48px tile — the data URI is a few hundred bytes, so it costs less than
+    // the blob handle and revoke bookkeeping the big bakes need.
+    try { waterTex = (await waterFrames())[0].toDataURL(); }
+    catch (e) { console.warn('delve-fp: water sheet missing — fords stay dry ground', e); }
+  }
+  return { map, theme, surf, surfByTheme, props, spawns, waterTex };
 }
 
 function mount(prep, entry) {
-  const { map, theme, surf, surfByTheme, props, spawns } = prep;
+  const { map, theme, surf, surfByTheme, props, spawns, waterTex } = prep;
   // The outgoing map's textures are blob URLs; the incoming set replaces every
   // reference to them in the same task, so they can be revoked here.
   for (const old of [F.surf, ...Object.values(F.surfByTheme || {})]) {
     if (old && old._urls && old !== surf) old._urls.forEach((u) => URL.revokeObjectURL(u));
   }
   F.map = map; F.theme = theme; F.surf = surf; F.surfByTheme = surfByTheme || {};
+  F.waterTex = waterTex || null;
+  F.wet = wetCells(map);
   // Region lookup for the texture pick — a handful of rects, checked per cell
   // only while geometry is being (re)built.
   F.regions = map.regions || [];
@@ -2839,6 +2895,10 @@ export async function openDelveFp(localeId, member, hooks, carry) {
 
     F = {
       map: null, theme: null, surf: null, hooks, member, host, world: null,
+      // The session's zero for ambient motion (water, wind). Session-relative,
+      // not page-relative: a shader's mediump float loses a sine's worth of
+      // precision by the time page uptime reaches a few hours.
+      t0: performance.now(),
       grid: null, cols: 0, rows: 0,
       px: 0, py: 0, dir: 2, yaw: 180, turning: null, stepping: null,
       keys: {}, latched: {}, padKeys: {}, padAxes: null, look: null,
@@ -3266,8 +3326,12 @@ function steer(dt) {
   const L = Math.hypot(dx, dy);
   if (L > 1) { dx /= L; dy /= L; }
   const cx = Math.floor(F.px), cy = Math.floor(F.py);
-  // Rungs cost time; stairs are the climb taken at a walk.
-  const sp = WALK_SPEED * (onClimb(cx, cy) ? CLIMB_RATE : 1);
+  // Rungs cost time; stairs are the climb taken at a walk. Water costs time
+  // too — the SAME multiplier the top-down charges (water.js), because a ford
+  // that is a decision in one lens and a straight line in the other is two
+  // different fords.
+  const sp = WALK_SPEED * (onClimb(cx, cy) ? CLIMB_RATE : 1)
+    * (F.wet.has(cx + ',' + cy) ? WADE_SPEED : 1);
   const ox = F.px, oy = F.py;
   const e = { x: F.px, y: F.py, lv: F.lv };
   const hit = slide(e, dx * sp * dt, dy * sp * dt);
@@ -3942,6 +4006,13 @@ function render() {
   // OVER THE SHOULDER: third person is the same camera pulled back along the
   // facing and lifted — the world, the controls and the combat don't move.
   const pov3 = F.pov === 3;
+  // The world's clock, in seconds, for the things that move on their own —
+  // the water's drift and the wind in the trees. Taken from the session's own
+  // start rather than page load, so it is small enough to keep float precision
+  // in a shader for a very long delve. Frozen at zero for anyone who asked
+  // their OS for less motion; the CSS half of the wind honours the same query
+  // in delve.css, so the two paths agree.
+  const windT = reducedMotion() ? 0 : (performance.now() - F.t0) / 1000;
   // The pull-back hangs off the LIVE yaw, not the settled facing. F.dir snaps
   // to the new heading the instant a turn begins while the view lerps after
   // it, so a pull-back along DIRV jumped 45° ahead of the camera's own
@@ -4072,6 +4143,7 @@ function render() {
       back: st && st.clientHeight ? perspectiveFor(st.clientHeight) / F.lens : 0,
     });
     F.gl.setFog(L.rgb, L.near * T, L.far * T);
+    F.gl.setTime(windT);
     /**
      * THE SCENERY GOES IN THE BUFFER TOO — and this is the fix for the first
      * rasterised build coming back with the flicker, the dropped HUD and the
@@ -4114,7 +4186,12 @@ function render() {
         g = el._glSrc = cv ? { src: cv, uv: null } : (el._glTex ? { src: el._glTex.url, uv: el._glTex.uv } : null);
       }
       if (!g) return;
-      sprites.push({ src: g.src, uv: g.uv, w, h, x: rec.x * T, y: rec.lift || 0, z: rec.y * T, alpha: 1 });
+      sprites.push({
+        src: g.src, uv: g.uv, w, h, x: rec.x * T, y: rec.lift || 0, z: rec.y * T, alpha: 1,
+        // The buffer is rebuilt every frame anyway, so the wind costs a sine
+        // per tree and no shader at all (@see gl-world writeSprite).
+        sway: swayOf(rec, h, windT),
+      });
     };
     for (const d of F.decor) if (!d.el.classList.contains('fp-marker')) add(d);
     for (const s of F.shots) add(s);

@@ -223,6 +223,32 @@ export const ART = {
   statue:        { sheet: 'statues_3x',   x: 342, y: 3,   w: 135, h: 225 },
 };
 
+/**
+ * WHAT THE WIND MOVES — art whose crown stirs, and how far, as a fraction of
+ * the thing's own height.
+ *
+ * This is a property of the ART, not of any lens, which is why it lives in the
+ * registry beside the crops: a tree that sways in first person and stands
+ * rigid in the top-down would be two different trees (ONE WORLD). What each
+ * lens is free to differ on is the MECHANISM — first person shears the
+ * billboard's top vertices in the buffer it rebuilds every frame anyway, the
+ * top-down hands the standee a CSS keyframe and lets the compositor own it.
+ *
+ * NOT a violation of the "never fake a pose" law (CLAUDE.md). That law is
+ * about POSES — a fall, a swing, volume — where a synthetic transform stands
+ * in for a frame the sheet actually carries and you can always tell. Wind is
+ * not a pose the sheet has; no cell of the tree sheet is "leaning". This is
+ * ambient motion applied to the ONE cell that IS the tree, which is the same
+ * thing the sheet's own water frames do to water.
+ *
+ * Deliberately short. Only things that genuinely bend belong here: a barrel
+ * that swayed would read as an earthquake.
+ */
+export const SWAY = {
+  tree: 0.055, treeTall: 0.055, treeSmall: 0.05,
+  treeFillCanopy: 0.045, treeFillDark: 0.04,
+};
+
 // ─── Item art: one cell off an Elements weapon sheet ─────────────────────────
 // Armory items have never had a picture — only a KIND_GLYPH emoji. But the
 // compositor's weapon overlays are real art, and one cell of them is a real

@@ -34,6 +34,16 @@ import { buildCampusMap } from './campus.js';
  *   ,  SUNKEN floor — one step DOWN (a trench, a creek bed, the pit the vine
  *      hangs into). You may always walk off the edge and drop; climbing back
  *      out is what the vine is for.
+ *
+ * WATER IS NOT A GRID CHAR. It is a `water` array of [x, y] cells on the chart
+ * (below), because a liquid is not a KIND of ground — it is something lying on
+ * top of whatever ground is already there. Spelling it as a char would force
+ * the two facts into one slot and lose the second: a creek bed is ',' (one
+ * step down, with a vine to climb out) and it is also full of water, and a
+ * '~' that had to mean both would have to pick. Overlaid, water composes with
+ * every height in the vocabulary — a flooded terrace, a pond at grade, a
+ * drowned trench you climb out of — and adds exactly one rule of its own:
+ * crossing it costs time (WADE_SPEED).
  *   L  ladder · v  vine — the climb link. Ground you walk onto, dressed with
  *      the thing you climb, and the ONLY cell a change of level is legal across.
  *      Put one directly south of the ledge it serves so it leans on its face.
@@ -60,6 +70,10 @@ import { buildCampusMap } from './campus.js';
  *
  * Interiors may also carry:
  *   name    the room's title, shown in the HUD (and on arrival)
+ *   water   [[x, y], …] the cells under water — see wetCells(). Composes with
+ *           whatever the grid says that cell already is: put it in a ',' bed
+ *           and you get a creek you wade and climb out of; put it on '.' and
+ *           you get a ford. It never changes a height or a passability.
  *   props   [{art, x, y, w}] upright art.js standees (x centre, y base, px wide)
  *           `w` is the ONE SIZE FACT every lens draws from — and it is NOT
  *           free-authored: w = h × (art.w/art.h) × 48, where h is the prop's
@@ -292,6 +306,25 @@ export const DECK_CH = { u: 1, n: 1 };
 /** Climb links — the only cells a step UP is legal across. 'S' walks at full
  *  speed; rungs cost time. */
 export const CLIMB_CH = { L: 'ladder', v: 'vine', S: 'stairs' };
+/**
+ * A chart's wet cells, as the lookup every lens actually wants.
+ *
+ * Deliberately NOT part of the level model below — water is not a height and
+ * not a blocker, so nothing about the step law, the flood or the deck rule
+ * changes because a cell is under water. What it changes is the dressing and
+ * the price of the crossing, and those are the only two things any caller asks.
+ *
+ * One function rather than three inlined `.some()` loops, so a second liquid
+ * (lava, a tar pit) is a change here and not a grep across three renderers.
+ * @param {{water?: [number,number][]}} map
+ */
+export function wetCells(map) {
+  const s = new Set();
+  for (const c of (map && map.water) || []) {
+    if (Array.isArray(c) && Number.isFinite(c[0]) && Number.isFinite(c[1])) s.add(c[0] + ',' + c[1]);
+  }
+  return s;
+}
 /** Steps of headroom a body needs to pass beneath a deck. The player is ~1.77
  *  steps tall (760/900 tiles against a 430/900 step), so two is the least
  *  honest clearance — a deck any lower is a lid, not a bridge. */
@@ -512,6 +545,18 @@ export const DELVE_MAPS = {
       '########################', // 15
     ],
     entry: [4.5, 12.5],
+    // THE CREEK HAS WATER IN IT. Every ',' of the bed, and nothing else — the
+    // grid above is untouched, so the bed is still a step down, the vines
+    // still serve it, and the bridge still hangs at grade over it. That is the
+    // whole argument for water being an overlay: this needed no new char, no
+    // change to a shipped layout, and no climb went stale.
+    // The 'v' cells (7,18 and 8,10) stay dry: a vine you haul out on is the
+    // one foothold in a creek that should not be under water.
+    water: [
+      [10, 7], [11, 7], [12, 7], [13, 7], [14, 7], [15, 7], [19, 7], [20, 7], [21, 7],
+      [11, 8], [12, 8], [13, 8], [14, 8], [15, 8], [18, 8], [19, 8], [20, 8], [21, 8],
+      [10, 9], [11, 9], [12, 9], [13, 9], [14, 9], [15, 9], [18, 9], [19, 9], [20, 9], [21, 9],
+    ],
     spawns: [
       { prey: 'squirrel', x: 5, y: 4 }, { prey: 'squirrel', x: 14, y: 5 }, { prey: 'squirrel', x: 18, y: 11 },
       { prey: 'opossum', x: 10, y: 3 }, { prey: 'opossum', x: 7, y: 12 },

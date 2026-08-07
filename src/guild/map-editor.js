@@ -16,9 +16,10 @@
  * Drafts persist in localStorage ('crucible.editorMaps') and export as JSON;
  * promoting one to a shipped chart is pasting that JSON into delve-maps.js.
  */
-import { DELVE_MAPS, THEMES, validateMap, makeLevelModel, CLIMB_CH, DECK_CH } from './delve-maps.js';
+import { DELVE_MAPS, THEMES, validateMap, makeLevelModel, CLIMB_CH, DECK_CH, wetCells } from './delve-maps.js';
 import { invalidateBake } from './delve.js';
 import { ART, artSprite, artTexRect } from './art.js';
+import { waterFrames, waterFrameAt, WATER_TINT } from './water.js';
 import { PROP_VOL, PLAYER_H } from './prop-volume.js';
 import { PREY } from './locales.js';
 
@@ -53,7 +54,20 @@ function normalize(m) {
   if (!Array.isArray(m.grid) || !m.grid.length) m.grid = blank(36, 24).grid;
   m.grid = m.grid.map(String);
   if (!Array.isArray(m.entry) || m.entry.length !== 2) m.entry = [2.5, 2.5];
-  for (const k of ['props', 'spawns', 'portals', 'paint', 'regions', 'locks']) if (!Array.isArray(m[k])) m[k] = [];
+  for (const k of ['props', 'spawns', 'portals', 'paint', 'regions', 'locks', 'water']) if (!Array.isArray(m[k])) m[k] = [];
+  // A wet cell is an [x, y] pair on the grid or it is nothing — and it is only
+  // ever there once, so an import (or a drag that outran its own guard) can
+  // never leave the same cell stacked and un-dryable.
+  {
+    const seen = new Set();
+    m.water = m.water.filter((c) => {
+      if (!Array.isArray(c) || !Number.isFinite(c[0]) || !Number.isFinite(c[1])) return false;
+      const k = c[0] + ',' + c[1];
+      if (seen.has(k)) return false;
+      seen.add(k);
+      return true;
+    });
+  }
   // A paint rect is four finite numbers or it is nothing — a NaN rect would
   // draw nowhere on the plan and still ride along in the export.
   m.paint = m.paint.filter((r) => r && [r.x, r.y, r.w, r.h].every(Number.isFinite) && r.w > 0 && r.h > 0);
@@ -213,12 +227,13 @@ export function openMapEditor(ctx) {
       sel: { kind: 'tile', id: '.' }, prey: Object.keys(PREY)[0],
       tab: 'tiles', tool: 'paint', zoom: 1.4, panX: 0, panY: 0,
       undo: [], sheets: {}, painting: false, hover: null, paintStart: null,
-      view: 'plan', rot: 0,
+      view: 'plan', rot: 0, mods: {}, rectStart: null, rectMode: null,
     };
   }
   buildDom(host);
   showScreen('editorScreen');
   draw();
+  startWater();     // a no-op until the frames are in and the chart is wet
 }
 
 /** hall.js routes a test-walk's onEnd back here. */
@@ -228,6 +243,7 @@ export function resumeEditor() {
   buildDom(host);
   showScreen('editorScreen');
   draw();
+  startWater();     // a no-op until the frames are in and the chart is wet
 }
 
 function showScreen(id) {
@@ -247,6 +263,7 @@ function buildDom(host) {
           <span class="med-title"></span>
           <span class="med-spacer"></span>
           <button class="med-btn" data-act="undo" title="Undo (Ctrl+Z)">↺ Undo</button>
+          <button class="med-btn med-lint" data-act="validate" title="What a walk would trip over">⚠</button>
           <button class="med-btn" data-act="view3d" title="Toggle the extruded 3D view">⬒ 3D</button>
           <button class="med-btn" data-act="rotL" title="Rotate the 3D view left">⟲</button>
           <button class="med-btn" data-act="rotR" title="Rotate the 3D view right">⟳</button>
@@ -258,7 +275,11 @@ function buildDom(host) {
           <button class="med-btn med-primary" data-act="walk" title="Save and walk this map top-down">Walk it</button>
           <button class="med-btn med-primary" data-act="walkFp" title="Save and walk it in first person">1st person</button>
         </div>
-        <div class="med-view"><canvas class="med-canvas"></canvas></div>
+        <div class="med-view"><canvas class="med-canvas"></canvas>
+          <div class="med-readout"></div>
+          <div class="med-help">L-click paint · R-click pick · Shift+click erase
+            · X+drag room · V+drag fill · 1-5 tabs · Q/E turn · G 3D · F fit</div>
+        </div>
         <div class="med-status"></div>
       </div>
       <div class="med-side">
@@ -294,6 +315,10 @@ function buildDom(host) {
   // test walk, and addEventListener dedupes identical references — an arrow
   // here would stack one live listener per walk, forever.
   window.addEventListener('keydown', onKey);
+  window.addEventListener('keyup', onKeyUp);
+  // A held modifier that never sees its keyup (alt-tab away mid-drag) would
+  // leave the next click drawing a room nobody asked for.
+  window.addEventListener('blur', clearMods);
   window.addEventListener('resize', onResize);
   renderSide();
 }
@@ -348,6 +373,65 @@ function zoomTo(z, px, py) {
   draw();
 }
 
+// ---------------------------------------------------------------------------
+// The water, on the drafting table
+// ---------------------------------------------------------------------------
+
+/** Does the chart being drafted have any liquid in it? Cached against the
+ *  array's own length + identity, because draw() asks on every hover move. */
+const mapIsWet = () => !!E && !!(E.map.water && E.map.water.length);
+/** The wet lookup for the live draft, rebuilt only when the array changes. */
+function wetNow() {
+  const arr = E.map.water || [];
+  if (E._wetArr !== arr || E._wetN !== arr.length) {
+    E._wetArr = arr; E._wetN = arr.length; E._wetSet = wetCells(E.map);
+  }
+  return E._wetSet;
+}
+const editorActive = () => {
+  const s = document.getElementById('editorScreen');
+  return !!s && s.classList.contains('active');
+};
+const lessMotion = () => !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+
+/**
+ * Fetch the water frames the first time the draft needs them, and start the
+ * table's heartbeat.
+ *
+ * The editor is otherwise entirely event-driven — it redraws on a hover, a
+ * click, a zoom, and never otherwise — and that is worth keeping. So this loop
+ * exists on exactly two conditions (the chart is wet, the screen is up) and
+ * ends itself the moment either stops holding. It also redraws only when the
+ * authored FRAME actually changes, which is five times a second, not sixty.
+ */
+function ensureWater() {
+  if (!E || E.wtiles || E._wload || !mapIsWet()) return;
+  E._wload = true;
+  waterFrames().then((f) => {
+    if (!E) return;
+    E.wtiles = f;
+    draw();
+    startWater();
+  }).catch((err) => console.warn('editor: water sheet missing — water draws as flat tint', err));
+}
+function startWater() {
+  if (!E || E._wraf || !E.wtiles || lessMotion()) return;
+  const step = () => {
+    E._wraf = 0;
+    if (!E || !E.wtiles || !editorActive() || !mapIsWet()) return;
+    const f = waterFrameAt(performance.now());
+    if (f !== E._wframe) { E._wframe = f; draw(); }
+    E._wraf = requestAnimationFrame(step);
+  };
+  E._wraf = requestAnimationFrame(step);
+}
+function stopWater() {
+  if (E && E._wraf) { cancelAnimationFrame(E._wraf); E._wraf = 0; }
+}
+function clearMods() { if (E) E.mods = {}; }
+/** The frame the table is showing — held at 0 under reduced motion. */
+const waterTile = () => (E.wtiles ? E.wtiles[lessMotion() ? 0 : (E._wframe || 0)] : null);
+
 function toast(msg) {
   const el = document.querySelector('.med-status');
   if (el) { el.textContent = msg; el.classList.add('on'); setTimeout(() => el.classList.remove('on'), 2500); }
@@ -361,7 +445,9 @@ function renderSide() {
   const pal = host.querySelector('.med-palette');
 
   if (E.tab === 'tiles') {
-    pal.innerHTML = `<div class="med-hint">Click a tile, then paint the map. Right-click paints floor.</div>`
+    pal.innerHTML = `<div class="med-hint">Click a tile, then paint. <b>Right-click</b> picks up whatever is
+        under the cursor, <b>Shift+click</b> erases, <b>X+drag</b> draws a room and <b>V+drag</b> fills a
+        rectangle. Keys 1-5 change tab, Q/E turn the 3D view, G toggles it, F fits.</div>`
       // The vertical VERBS, ahead of the tiles: sculpt the ground a step at a
       // time (pit , → floor . → ledge ^ → terraces 2 → 3) instead of hunting
       // the height chars — the answer to "how do I add vertically."
@@ -371,6 +457,14 @@ function renderSide() {
         <button class="med-chip ${E.sel.kind === 'vert' && E.sel.dir === -1 ? 'on' : ''}" data-vert="-1">
           <span class="med-swatch" style="background:#3c4457">▼</span>Lower ground
           <span class="med-ch">−1</span></button>`
+      // WATER IS NOT A TILE, and it sits here anyway — because painting is how
+      // you author it, and the Tiles tab is where painting lives. It flows OVER
+      // whatever the cell already is (a wet ',' is a creek you wade AND climb
+      // out of), so it can never overwrite a floor the way a tile would.
+      // Right-click / eraser dries a cell.
+      + `<button class="med-chip ${E.sel.kind === 'water' ? 'on' : ''}" data-water="1">
+          <span class="med-swatch" style="background:${WATER_TINT}">≈</span>Water (wade)
+          <span class="med-ch">over</span></button>`
       + TILES.map((t) => `
         <button class="med-chip ${E.sel.kind === 'tile' && E.sel.id === t.ch ? 'on' : ''}" data-tile="${t.ch}">
           <span class="med-swatch" style="background:${t.color}">${t.glyph}</span>${t.name}
@@ -383,10 +477,12 @@ function renderSide() {
       const t = e.target.closest('[data-tile]');
       const er = e.target.closest('[data-erase]');
       const vt = e.target.closest('[data-vert]');
+      const wa = e.target.closest('[data-water]');
       if (t) E.sel = { kind: 'tile', id: t.dataset.tile };
       if (er) E.sel = { kind: 'erase' };
       if (vt) E.sel = { kind: 'vert', dir: +vt.dataset.vert };
-      if (t || er || vt) renderSide();
+      if (wa) E.sel = { kind: 'water' };
+      if (t || er || vt || wa) renderSide();
     };
   } else if (E.tab === 'props') {
     pal.innerHTML = `<div class="med-hint">Click an object, then click WHERE it stands — quarter-tile precision,
@@ -508,12 +604,7 @@ function onMapAction(act, pal) {
   } else if (act === 'save') {
     persist(); renderSide();
   } else if (act === 'validate') {
-    try {
-      validateMap(E.map);
-      const issues = lint();
-      toast(issues.length ? issues[0] + (issues.length > 1 ? ` (+${issues.length - 1} more — see console)` : '') : 'Clean: rows even, entry on floor.');
-      issues.forEach((i) => console.warn('editor lint:', i));
-    } catch (err) { toast(String(err.message || err)); }
+    runValidate();
   } else if (act === 'export') {
     pal.querySelector('.med-json').value = JSON.stringify(exportShape(E.map), null, 2);
     toast('JSON in the box below — copy it, or hand it to Claude to ship into delve-maps.js.');
@@ -691,21 +782,103 @@ function lint() {
 
   for (const r of m.paint) if (!THEMES[r.theme]) out.push(`paint rect at ${r.x},${r.y} names unknown theme '${r.theme}'`);
 
+  // Water over the void has no bed to sit in — the painter keeps no pixels
+  // there and the walk has no floor, so the cell is silently dropped at bake
+  // time. Say so here instead, where the author can move it.
+  for (const [wx, wy] of (m.water || [])) {
+    if (!inside(wx, wy)) continue;                 // the off-map sweep below has it
+    if (at(wx, wy) === '#') out.push(`water at ${wx},${wy} lies over the void — cut floor under it, or dry the cell`);
+  }
+
   const gone = (r) => [r.x, r.y, r.w, r.h].every(Number.isFinite)
     && (r.x >= W || r.y >= H || r.x + r.w <= 0 || r.y + r.h <= 0);
   const off = [...m.props.filter((p) => !inside(p.x, p.y - 0.5)).map((p) => p.art),
     ...m.spawns.filter((s) => !inside(s.x, s.y)).map((s) => s.prey),
     ...(m.portals || []).filter((p) => !inside(p.x, p.y)).map(() => 'portal'),
     ...m.paint.filter(gone).map(() => 'paint'),
+    ...(m.water || []).filter(([wx, wy]) => !inside(wx, wy)).map(() => 'water'),
     ...(m.regions || []).filter((r) => r && gone(r)).map(() => 'region')];
   if (off.length) out.push(`off the map after a resize: ${off.join(', ')} — erase or move them`);
   return out;
+}
+
+/** Validate + lint, and say the first thing that is wrong. Shared by the
+ *  toolbar's ⚠ and the Map tab's button — one answer, two doors. */
+function runValidate() {
+  try {
+    validateMap(E.map);
+    const issues = lint();
+    toast(issues.length
+      ? issues[0] + (issues.length > 1 ? ` (+${issues.length - 1} more — see console)` : '')
+      : 'Clean: rows even, entry on floor.');
+    issues.forEach((i) => console.warn('editor lint:', i));
+  } catch (err) { toast(String(err.message || err)); }
+}
+
+/**
+ * The bottom-left readout and the ⚠ badge.
+ *
+ * A cell's LEVEL is the thing an author most needs and could least see: the
+ * plan shades it, but "a bit lighter than the last one" is not a number, and
+ * the whole height vocabulary is about which rung a cell is on. Reading it off
+ * the model (never off the char) means it agrees with the walk by construction.
+ *
+ * Lint is counted here rather than only on demand, because a lint you have to
+ * ask for is a lint you find out about after the walk (@see the ⚠ in the bar).
+ */
+function refreshStatus() {
+  const host = document.getElementById('editorScreen');
+  if (!host) return;
+  const out = host.querySelector('.med-readout');
+  if (out) {
+    const h = E.hover, m = E.map;
+    const inMap = h && h.x >= 0 && h.y >= 0 && h.y < m.grid.length && h.x < m.grid[0].length;
+    if (!inMap) out.textContent = '';
+    else {
+      const ch = m.grid[h.y][h.x];
+      const t = TILE_BY_CH[ch];
+      const model = levelModel();
+      const lv = model.floorAt(h.x, h.y), dk = model.deckAt(h.x, h.y);
+      const wet = wetNow().has(h.x + ',' + h.y);
+      const prop = m.props.find((p) => Math.abs(p.x - h.fx) < 0.5 && Math.abs(p.y - 0.4 - h.fy) < 0.5);
+      out.textContent = [
+        `${h.x},${h.y}`,
+        `'${ch}' ${t ? t.name : '?'}`,
+        lv == null ? 'no floor' : `level ${lv}`,
+        dk != null ? `deck ${dk}` : '',
+        wet ? 'water' : '',
+        prop ? prop.art : '',
+      ].filter(Boolean).join('  ·  ');
+    }
+  }
+  const badge = host.querySelector('.med-lint');
+  if (badge) {
+    // CACHED against the chart itself. draw() runs on every hover move and
+    // lint() floods the grid several times over; recomputing it per mouse
+    // pixel on a town-scale plan is how a drafting table starts to stutter.
+    const m = E.map;
+    const key = m.grid.join('\n') + '|' + [m.props, m.spawns, m.portals, m.paint, m.locks, m.water]
+      .map((a) => (a || []).length).join(',') + '|' + JSON.stringify(m.entry);
+    if (E._lintKey !== key) {
+      E._lintKey = key;
+      try { validateMap(m); E._lintN = lint().length; } catch (err) { E._lintN = -1; }
+    }
+    const n = E._lintN;
+    badge.textContent = n < 0 ? '⚠ !' : n ? `⚠ ${n}` : '⚠';
+    badge.classList.toggle('on', n !== 0);
+    badge.title = n < 0 ? 'The chart is malformed — click for the reason'
+      : n ? `${n} thing${n > 1 ? 's' : ''} a walk would trip over — click to read` : 'Nothing to report';
+  }
 }
 
 function onBarClick(e) {
   const b = e.target.closest('[data-act]');
   if (!b) return;
   const act = b.dataset.act;
+  // Anything that takes the screen away stops the table's heartbeat; the loop
+  // also checks for itself, but ending it at the door is cheaper than one more
+  // wasted frame and makes the lifetime obvious from here.
+  if (act === 'back' || act === 'walk' || act === 'walkFp') stopWater();
   if (act === 'back') { walkCtx && walkCtx.back ? walkCtx.back() : history.back(); }
   else if (act === 'view3d') {
     E.view = E.view === 'iso' ? 'plan' : 'iso';
@@ -755,10 +928,50 @@ function walkStoppers() {
   return out;
 }
 
+/**
+ * THE KEYBOARD. Until now this file bound exactly one chord (undo) and every
+ * other verb cost a trip to the sidebar — which is most of the difference in
+ * feel between this and a level editor somebody builds levels in.
+ *
+ * The scheme is Wizordum's, because it is a good one and because a person who
+ * has used one tile editor should not have to learn a second grammar: the
+ * number row picks the MODE, held letters modify the drag, and Shift is
+ * always "the destructive version of what this button already does".
+ *
+ * Held modifiers (X, V, C) are read at pointer-down out of `E.mods`, not
+ * bound to actions here — a chord that fires on keydown cannot express "hold
+ * this while you drag".
+ */
+const HOT_TABS = { 1: 'tiles', 2: 'props', 3: 'flags', 4: 'paint', 5: 'map' };
 function onKey(e) {
-  if (!E || !document.getElementById('editorScreen') ||
-      !document.getElementById('editorScreen').classList.contains('active')) return;
-  if ((e.ctrlKey || e.metaKey) && e.key === 'z') { e.preventDefault(); undo(); }
+  if (!E || !editorActive()) return;
+  // Never eat a keystroke aimed at a field — the Map tab is full of them.
+  const t = e.target;
+  if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT')) return;
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') { e.preventDefault(); undo(); return; }
+  if (e.ctrlKey || e.metaKey || e.altKey) return;
+  const k = e.key.toLowerCase();
+  if (HOT_TABS[k]) { E.tab = HOT_TABS[k]; renderSide(); e.preventDefault(); return; }
+  if (k === 'x' || k === 'v') { E.mods[k] = true; return; }   // held, read at drag time
+  if (k === 'q' || k === 'e') {
+    E.rot = (E.rot + (k === 'q' ? 3 : 1)) % 4;
+    if (E.view !== 'iso') toast('Rotation turns the 3D view — press ⬒ 3D to see it.');
+    fitView(false); e.preventDefault(); return;
+  }
+  if (k === 'f') { fitView(true); e.preventDefault(); return; }
+  if (k === 'g') { E.view = E.view === 'iso' ? 'plan' : 'iso'; syncBar(); fitView(true); e.preventDefault(); return; }
+  if (k === 'b') { E.sel = { kind: 'tile', id: '.' }; renderSide(); e.preventDefault(); return; }
+  if (k === 'delete' || k === 'backspace') { E.sel = { kind: 'erase' }; renderSide(); e.preventDefault(); return; }
+}
+function onKeyUp(e) {
+  if (!E) return;
+  const k = e.key.toLowerCase();
+  if (k === 'x' || k === 'v') E.mods[k] = false;
+}
+/** Anything the toolbar shows that a HOTKEY can also change has to be told. */
+function syncBar() {
+  const b = document.querySelector('.med-bar [data-act="view3d"]');
+  if (b) b.textContent = E.view === 'iso' ? '▦ Plan' : '⬒ 3D';
 }
 
 // ---------------------------------------------------------------------------
@@ -830,9 +1043,37 @@ function onDown(ev) {
     return;
   }
   if (E.sel.kind === 'paintErase' && ev.button === 2) return;
+  /**
+   * RIGHT-CLICK IS THE EYEDROPPER now, not a floor shortcut.
+   *
+   * "Right-click paints floor" spent a whole mouse button on a tile that is
+   * one click away in the palette; picking up what is already under the
+   * cursor is the thing you actually want twenty times a minute, and it is
+   * what every tile editor in the world binds here. Deleting moves to
+   * Shift+click, which is where Wizordum has it and where the same gesture
+   * already meant "the destructive version" everywhere else.
+   */
+  if (ev.button === 2) { pick(c); draw(); return; }
+  if (ev.shiftKey) {
+    snap();
+    E.painting = true; E.dragRight = true;
+    apply(c, true);
+    draw();
+    return;
+  }
+  // A held X or V arms a RECTANGLE instead of a stroke: X draws a room (walls
+  // around floor), V fills. Both commit on release as one undo step, the same
+  // contract the Surfaces drag has always had.
+  if (E.mods.x || E.mods.v) {
+    E.rectMode = E.mods.x ? 'room' : 'fill';
+    E.rectStart = { x: c.x, y: c.y };
+    draw();
+    return;
+  }
   snap();
   E.painting = true;
-  apply(c, ev.button === 2);
+  E.dragRight = false;
+  apply(c, false);
   draw();
 }
 function onMove(ev) {
@@ -856,7 +1097,9 @@ function onMove(ev) {
   const c = cellAt(ev);
   const changed = !E.hover || E.hover.x !== c.x || E.hover.y !== c.y;
   E.hover = c;
-  if (E.painting && E.sel.kind === 'tile') { apply(c, false); draw(); }
+  // Tiles and water both DRAG — they are the two brushes. Erasing drags too:
+  // drying a creek one click at a time is nobody's idea.
+  if (E.painting && (E.sel.kind === 'tile' || E.sel.kind === 'water')) { apply(c, E.dragRight); draw(); }
   else if (changed) draw();
 }
 function onUp(ev) {
@@ -870,27 +1113,114 @@ function onUp(ev) {
     E.paintStart = null;
     draw();
   }
-  E.painting = false; E.pan = null;
+  // The armed rectangle commits here, as ONE undo step for the whole gesture.
+  if (E.rectStart) {
+    const r = dragRect(E.rectStart);
+    if (r) {
+      snap();
+      if (!fillRect(r, E.rectMode)) E.undo.pop();
+    }
+    E.rectStart = null; E.rectMode = null;
+    draw();
+  }
+  E.painting = false; E.pan = null; E.dragRight = false;
 }
 
 /** The live Surfaces drag as a grid rect — normalized and clamped, min 1×1
  *  (the anchor cell is always on the map, so the clamp can never empty it). */
-function dragRect() {
-  if (!E.paintStart) return null;
-  const b = E.hover || E.paintStart;
+function dragRect(from) {
+  const a = from || E.paintStart;
+  if (!a) return null;
+  const b = E.hover || a;
   const W = E.map.grid[0].length, H = E.map.grid.length;
-  const x0 = Math.max(0, Math.min(E.paintStart.x, b.x)), y0 = Math.max(0, Math.min(E.paintStart.y, b.y));
-  const x1 = Math.min(W - 1, Math.max(E.paintStart.x, b.x)), y1 = Math.min(H - 1, Math.max(E.paintStart.y, b.y));
+  const x0 = Math.max(0, Math.min(a.x, b.x)), y0 = Math.max(0, Math.min(a.y, b.y));
+  const x1 = Math.min(W - 1, Math.max(a.x, b.x)), y1 = Math.min(H - 1, Math.max(a.y, b.y));
   if (x1 < x0 || y1 < y0) return null;
   return { x: x0, y: y0, w: x1 - x0 + 1, h: y1 - y0 + 1 };
 }
 
-/** One edit, routed by what is armed. Right-click paints floor — except on
- *  the Surfaces tab, whose right-clicks onDown never routes here. */
-function apply(c, rightClick) {
+/**
+ * THE EYEDROPPER. Arms whatever is already under the cursor — the thing on
+ * the cell first (a prop, a spawn, a portal are what you are usually reaching
+ * for), then the water, then the ground char itself. Never edits anything, so
+ * it takes no undo step.
+ */
+function pick(c) {
   const { x, y } = c;
   if (y < 0 || y >= E.map.grid.length || x < 0 || x >= E.map.grid[0].length) return;
-  if (rightClick) { setCell(x, y, '.'); return; }
+  const near = (list, fn) => {
+    let best = -1, bd = 0.8;
+    list.forEach((it, i) => { const d = Math.hypot(fn(it)[0] - c.fx, fn(it)[1] - c.fy); if (d < bd) { bd = d; best = i; } });
+    return best;
+  };
+  let i = near(E.map.props, (p) => [p.x, p.y - 0.4]);
+  if (i >= 0) { E.sel = { kind: 'prop', id: E.map.props[i].art }; E.tab = 'props'; renderSide(); return; }
+  i = near(E.map.spawns, (s) => [s.x + 0.5, s.y + 0.5]);
+  if (i >= 0) { E.prey = E.map.spawns[i].prey; E.sel = { kind: 'flag', id: 'spawn' }; E.tab = 'flags'; renderSide(); return; }
+  if ((E.map.water || []).some(([wx, wy]) => wx === x && wy === y)) {
+    E.sel = { kind: 'water' }; E.tab = 'tiles'; renderSide(); return;
+  }
+  const ch = (E.map.grid[y] || '')[x];
+  if (TILE_BY_CH[ch]) { E.sel = { kind: 'tile', id: ch }; E.tab = 'tiles'; renderSide(); }
+}
+
+/**
+ * The armed tile laid over a whole rectangle.
+ *
+ * `room` is the gesture the drafting table was most obviously missing: a wall
+ * ring with floor inside it, in one drag, which is how a building actually
+ * gets drawn. It uses the ARMED tile as the wall so the same gesture builds a
+ * bookshelf room, a rock chamber or a waist-high pen depending on what is in
+ * your hand — and it refuses to make a room out of something that is not a
+ * wall, because a ring of ladders is not a room.
+ */
+function fillRect(r, mode) {
+  const wallCh = E.sel.kind === 'tile' ? E.sel.id : 'B';
+  if (mode === 'room' && !'Bbo'.includes(wallCh)) {
+    toast('A room is drawn with a WALL — arm B, b or an ore vein, then X+drag.');
+    return false;
+  }
+  for (let y = r.y; y < r.y + r.h; y++) {
+    for (let x = r.x; x < r.x + r.w; x++) {
+      if (mode === 'fill') { paintOne(x, y); continue; }
+      const edge = x === r.x || y === r.y || x === r.x + r.w - 1 || y === r.y + r.h - 1;
+      setCell(x, y, edge ? wallCh : '.');
+    }
+  }
+  return true;
+}
+/** One cell of a filled rect, routed by what is armed (water is not a tile). */
+function paintOne(x, y) {
+  if (E.sel.kind === 'water') {
+    E.map.water = E.map.water || [];
+    if ((E.map.grid[y] || '')[x] === '#') return;
+    if (!E.map.water.some(([wx, wy]) => wx === x && wy === y)) E.map.water.push([x, y]);
+    return;
+  }
+  if (E.sel.kind === 'tile') setCell(x, y, E.sel.id);
+}
+
+/**
+ * One edit, routed by what is armed.
+ *
+ * `erase` is Shift+click (or a shift-drag) — the RIGHT button is the
+ * eyedropper now and never routes here. What erasing means is the armed
+ * tool's business: with Water armed it dries the cell, otherwise it takes the
+ * ground back to plain floor.
+ */
+function apply(c, erase) {
+  const { x, y } = c;
+  if (y < 0 || y >= E.map.grid.length || x < 0 || x >= E.map.grid[0].length) return;
+  if (erase) {
+    if (E.sel.kind === 'water') {
+      const before = (E.map.water || []).length;
+      E.map.water = (E.map.water || []).filter(([wx, wy]) => wx !== x || wy !== y);
+      if (E.map.water.length === before) E.undo.pop();
+      return;
+    }
+    setCell(x, y, '.');
+    return;
+  }
 
   if (E.sel.kind === 'tile') {
     const was = (E.map.grid[y] || '')[x];
@@ -919,6 +1249,22 @@ function apply(c, rightClick) {
       if (was === '#') toast('The abyss has no bottom to climb to — this cell is floor now. For a pit you can hang into, paint a sunken floor \',\' and set the vine on its rim.');
       else if (!stepBeside) toast('A climb links two heights: put a ▲ ledge beside it, or it is just dressed floor.');
     }
+    return;
+  }
+
+  if (E.sel.kind === 'water') {
+    // Painted, not toggled: dragging across a creek must FLOOD it, and a
+    // toggle would leave every second cell dry when the drag re-enters one it
+    // already crossed. Right-click dries, which is the same grammar the tile
+    // tools use for their eraser.
+    E.map.water = E.map.water || [];
+    const i = E.map.water.findIndex(([wx, wy]) => wx === x && wy === y);
+    if (i >= 0) { E.undo.pop(); return; }        // already wet — nothing changed
+    if ((E.map.grid[y] || '')[x] === '#') {
+      toast('The void has no bed to hold water — cut floor there first.');
+      E.undo.pop(); return;
+    }
+    E.map.water.push([x, y]);
     return;
   }
 
@@ -973,6 +1319,12 @@ function apply(c, rightClick) {
     if (i >= 0) { E.map.spawns.splice(i, 1); return; }
     i = near(E.map.portals || [], (p) => [p.x, p.y]);
     if (i >= 0) { E.map.portals.splice(i, 1); return; }
+    // Water lies OVER the cell, so it is the last thing on it and the first
+    // thing off it: the eraser dries before it razes the ground underneath.
+    if ((E.map.water || []).some(([wx, wy]) => wx === x && wy === y)) {
+      E.map.water = E.map.water.filter(([wx, wy]) => wx !== x || wy !== y);
+      return;
+    }
     setCell(x, y, '.');
     return;
   }
@@ -1080,8 +1432,26 @@ function shade(col, f) {
  * Props and flags come in a second pass ON TOP by design: an author must
  * never lose sight of a thing they placed behind a wall.
  */
-function drawIso(g, s, m, model, themeFloor) {
+function drawIso(g, s, m, model, themeFloor, wtile, wet) {
   const W = m.grid[0].length, H = m.grid.length;
+  /**
+   * The water's fill, as a repeating pattern scaled to the current zoom.
+   *
+   * A pattern is laid in CANVAS space, so on the dimetric diamonds it is not
+   * projected — the waves run flat across the screen rather than with the
+   * ground. For water that is the right trade and not a compromise: the
+   * texture is amorphous, there is no grid in it to look wrong, and the
+   * alternative (a per-cell transformed drawImage inside a clipped diamond)
+   * costs a clip per tile for a difference nobody can name. The FACES still
+   * take a flat colour, because `shade()` needs one.
+   */
+  let waterPat = null;
+  if (wtile) {
+    try {
+      waterPat = g.createPattern(wtile, 'repeat');
+      if (waterPat && waterPat.setTransform) waterPat.setTransform(new DOMMatrix().scale(s / 48));
+    } catch (e) { waterPat = null; }   // no DOMMatrix here — the tint still reads
+  }
   const ox = isoOX(), ZH = s * 0.5;
   const P = (x, y, z) => [(x - y) * s + ox, (x + y) * s * 0.5 - (z || 0) * ZH];
   const quad = (a, b2, c, d, fill) => {
@@ -1133,11 +1503,15 @@ function drawIso(g, s, m, model, themeFloor) {
       let fill = paintAt(x, y) || (ch === '.' || ch === 'f' || lv != null ? themeFloor : (t ? t.color : '#a03a72'));
       // Height keeps the plan's reading: brighter per step up, darker sunken.
       if (lv != null && lv !== 0) fill = shade(paintAt(x, y) || themeFloor, 1 + 0.14 * lv);
+      // Water outranks paint and the level wash alike — it is not a floor tile
+      // and not a height, it is what is lying on top of one.
+      const isWet = wet.has(x + ',' + y);
+      if (isWet) fill = WATER_TINT;
       // The view-south and view-east neighbours — whatever they are in world.
       const [sx2, sy2] = wcell(u, v + 1), [ex2, ey2] = wcell(u + 1, v);
       // The ground itself (walls stand on plane 0 and skip it).
       if (!WALL_LV[ch] || ch === 'D' || ch === 'o') {
-        top(u, v, base, fill);
+        top(u, v, base, isWet && waterPat ? waterPat : fill);
         const sf = floorOf(sx2, sy2), ef = floorOf(ex2, ey2);
         const sDrop = chAt(sx2, sy2) === '#' ? base - 1 : sf;
         const eDrop = chAt(ex2, ey2) === '#' ? base - 1 : ef;
@@ -1281,8 +1655,12 @@ function draw() {
   const m = E.map;
   const model = levelModel();
   const themeFloor = themeTint(m.theme);
+  ensureWater();
+  refreshStatus();
+  const wtile = waterTile();
+  const wet = wetNow();
 
-  if (E.view === 'iso') { drawIso(g, s, m, model, themeFloor); return; }
+  if (E.view === 'iso') { drawIso(g, s, m, model, themeFloor, wtile, wet); return; }
 
   for (let y = 0; y < m.grid.length; y++) {
     for (let x = 0; x < m.grid[y].length; x++) {
@@ -1290,6 +1668,15 @@ function draw() {
       const t = TILE_BY_CH[ch];
       g.fillStyle = ch === '.' || ch === 'f' ? themeFloor : (t ? t.color : '#a03a72');
       g.fillRect(x * s, y * s, s, s);
+      // Water draws as WATER, at the frame the table is showing — the plan is
+      // where a lake's shape is actually authored, and a flat blue rectangle
+      // tells you nothing about whether it reads as water in the walk. It goes
+      // OVER the tile's own swatch because that is what it does in the world:
+      // a wet ',' is still a creek bed, with water in it.
+      if (wet.has(x + ',' + y)) {
+        if (wtile) g.drawImage(wtile, x * s, y * s, s, s);
+        else { g.fillStyle = WATER_TINT; g.fillRect(x * s, y * s, s, s); }
+      }
       // Level shading from the MODEL, not the chars: a terrace lightens per
       // step, a pit darkens, and a climb shades at the ground it DERIVED —
       // so the plan reads height exactly the way the lenses will walk it.
@@ -1402,5 +1789,27 @@ function draw() {
     g.setLineDash([5, 4]);
     g.strokeRect(pr.x * s + 1, pr.y * s + 1, pr.w * s - 2, pr.h * s - 2);
     g.setLineDash([]);
+  }
+  // The live X/V rectangle. Drawn as what it will BECOME — a room shows its
+  // wall ring, a fill shows its body — so the gesture is legible before you
+  // let go of it rather than after.
+  const rr = E.rectStart ? dragRect(E.rectStart) : null;
+  if (rr) {
+    const tint = E.sel.kind === 'water' ? WATER_TINT
+      : (E.sel.kind === 'tile' && TILE_BY_CH[E.sel.id] ? TILE_BY_CH[E.sel.id].color : '#ffd76b');
+    g.globalAlpha = 0.45;
+    g.fillStyle = tint;
+    if (E.rectMode === 'room') {
+      g.fillRect(rr.x * s, rr.y * s, rr.w * s, s);
+      g.fillRect(rr.x * s, (rr.y + rr.h - 1) * s, rr.w * s, s);
+      g.fillRect(rr.x * s, rr.y * s, s, rr.h * s);
+      g.fillRect((rr.x + rr.w - 1) * s, rr.y * s, s, rr.h * s);
+    } else {
+      g.fillRect(rr.x * s, rr.y * s, rr.w * s, rr.h * s);
+    }
+    g.globalAlpha = 1;
+    g.strokeStyle = '#ffd76b';
+    g.lineWidth = 2;
+    g.strokeRect(rr.x * s + 1, rr.y * s + 1, rr.w * s - 2, rr.h * s - 2);
   }
 }

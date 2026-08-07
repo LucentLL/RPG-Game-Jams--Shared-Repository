@@ -39,6 +39,30 @@
 }
 .med-status.on { opacity: 1; }
 
+/* The always-on readout: which cell the cursor is over, what it is, and what
+   LEVEL it stands at. The plan shades height, but "a bit lighter than the last
+   one" is not a number, and the whole height vocabulary is about rungs. Sits
+   over the canvas rather than under it so it costs the plan no room. */
+.med-readout, .med-help {
+  position: absolute; left: 8px; pointer-events: none;
+  font-size: 12px; font-variant-numeric: tabular-nums;
+  background: rgba(10, 12, 18, 0.72); border-radius: 4px; padding: 3px 7px;
+}
+.med-readout { bottom: 8px; color: #cfd6e6; }
+/* The verb legend — dim, because it is for the first ten minutes and then it
+   is furniture. Hidden on a narrow pane, where the canvas needs the room. */
+.med-help {
+  top: 8px; right: 8px; left: auto;
+  color: #737d93; max-width: 46%; text-align: right; line-height: 1.5;
+}
+@media (max-width: 760px) { .med-help { display: none; } }
+
+/* The lint badge. Quiet when the chart is clean, and never RED — everything
+   lint knows is advice (only two faults actually stop a walk), so it warns in
+   the same amber the rest of the editor uses to mean "look at this". */
+.med-lint { min-width: 34px; text-align: center; opacity: 0.45; }
+.med-lint.on { opacity: 1; background: #3d3423; border-color: #6b5a33; color: #ffd76b; }
+
 /* ── Sidebar ─────────────────────────────────────────────────────────── */
 .med-side {
   flex: 0 0 280px; display: flex; flex-direction: column; min-height: 0;

@@ -534,6 +534,67 @@
   pointer-events: none;
 }
 .fp-bb canvas { display: block; image-rendering: pixelated; }
+
+/* --- Water, top-down ------------------------------------------------------ */
+/* One quad per wet cell (delve.js mountWater), wearing the three authored
+   frames as a horizontal strip. `steps(3, jump-none)` is what makes it play
+   them and not tween between them: jump-none puts a stop AT both ends, so the
+   three positions visited are exactly 0% / 50% / 100% — which, against a 300%
+   background-size, are exactly frames 0, 1 and 2. Plain `steps(3)` would visit
+   0 / 33 / 67 and slice every frame in thirds.
+
+   No transform animation here, deliberately: this stays a cheap repaint the
+   browser schedules itself rather than a promoted compositor layer, which is
+   what lets a lake be hundreds of cells (reference-css3d-mobile-budget). */
+.dv-wet {
+  position: absolute;
+  width: 48px; height: 48px;
+  pointer-events: none;
+  image-rendering: pixelated;
+  background-size: 300% 100%;
+  background-position-x: 0%;
+  animation: dvWater 0.6s steps(3, jump-none) infinite;
+}
+@keyframes dvWater { from { background-position-x: 0%; } to { background-position-x: 100%; } }
+
+/* --- The wind ------------------------------------------------------------ */
+/* Foliage stirs (art.js SWAY says which art). This is the COMPOSITED path's
+   copy of it; the rasteriser shears the same crown in its vertex buffer and
+   hides these elements entirely (.fp-gl-on above), so only one is ever live.
+
+   skewX about the BOTTOM edge, not a translate: a tree that slid would be a
+   tree on wheels. The trunk stays planted and the crown leans, which is the
+   whole readable part of wind on a billboard.
+
+   It is a keyframe rather than a per-frame style write on purpose. Animating
+   `transform` keeps this on the compositor — the renderer's standing rule
+   (reference-css3d-mobile-budget) is that a billboard must not be written to
+   every frame, and a declaration set once at build time never is. Each standee
+   gets a NEGATIVE animation-delay for its phase (delve-fp.js artBillboard,
+   delve.js addProp), so a grove does not sway in unison.
+
+   Two nested-looking stops rather than a plain alternate: a pure sine reads as
+   a metronome, and holding slightly longer at the extremes reads as a gust. */
+@keyframes dvSway {
+  0%   { transform: skewX(1.6deg); }
+  28%  { transform: skewX(-0.9deg); }
+  55%  { transform: skewX(-1.9deg); }
+  78%  { transform: skewX(0.6deg); }
+  100% { transform: skewX(1.6deg); }
+}
+.fp-sway, .dv-sway {
+  transform-origin: 50% 100%;
+  animation: dvSway 5s ease-in-out infinite;
+  will-change: transform;
+}
+/* Somebody who has asked the OS for less motion gets a world that holds still.
+   The water's drift is driven from the render loop and honours this too. */
+@media (prefers-reduced-motion: reduce) {
+  .fp-sway, .dv-sway { animation: none; }
+  /* The water still SHOWS — it just stops moving. A lake that vanished would
+     be a worse answer to "less motion" than a lake that holds still. */
+  .dv-wet { animation: none; }
+}
 /* Depth cueing. A crawler lives or dies on not being able to see the far end of
    the corridor, and a vignette is the cheapest honest dark. */
 .fp-vignette {

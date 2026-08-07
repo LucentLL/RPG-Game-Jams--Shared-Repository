@@ -68,6 +68,21 @@ void main() {
  * this needs no back-to-front sort: pixel art has hard edges, so an alpha test
  * is exact, and the depth buffer then does all the occlusion for free.
  */
+/**
+ * `uFlow` is the one animated surface in the world, and it animates in the
+ * SAMPLER rather than in the geometry, on purpose. A water quad that bobbed
+ * would open and close a crack against the bank it meets — the neighbouring
+ * ground is a separate, still quad — and it would have to be re-uploaded every
+ * frame, which is the whole cost this renderer exists to avoid. Scrolling the
+ * texture read costs nothing, never moves a vertex, and is exactly how a Doom
+ * flat has always flowed.
+ *
+ * Two scrolls at different rates crossed with two slow shears: a single linear
+ * scroll reads as a conveyor belt, and the shear is what bends the crests as
+ * they pass so it reads as swell. The world position drives the shear's phase,
+ * so a lake does not pulse in unison — the far side is always half a beat
+ * behind the near one.
+ */
 const FRAG_SRC = `#version 300 es
 precision mediump float;
 in vec2 vUV;
@@ -78,9 +93,16 @@ uniform vec2 uFogRange;
 uniform vec2 uEyeXZ;
 uniform float uAlpha;
 uniform float uCutout;
+uniform float uFlow;
+uniform float uTime;
 out vec4 outColor;
 void main() {
-  vec4 c = texture(uTex, vUV);
+  vec2 uv = vUV;
+  if (uFlow > 0.0) {
+    uv.x += uTime * 0.030 + sin(uTime * 0.85 + vWorld.z * 0.0042) * 0.045;
+    uv.y += uTime * 0.019 + sin(uTime * 1.10 + vWorld.x * 0.0037) * 0.038;
+  }
+  vec4 c = texture(uTex, uv);
   if (c.a < uCutout) discard;
   float d = distance(vWorld.xz, uEyeXZ);
   float f = clamp((d - uFogRange.x) / max(uFogRange.y - uFogRange.x, 1.0), 0.0, 1.0);
@@ -212,7 +234,13 @@ function writeQuad(buf, at, q) {
 
 /** A camera-facing sprite, built the same way but with its width laid along the
  *  camera's right vector. Sprites never pitch with the lens — a standee leans
- *  only in yaw, exactly as the DOM billboards' counter-rotation did. */
+ *  only in yaw, exactly as the DOM billboards' counter-rotation did.
+ *
+ *  `s.sway` is a world-px displacement applied to the TOP two vertices only,
+ *  so a tree bends at the trunk instead of sliding across the ground. It lives
+ *  here rather than in a shader because sprites are the one buffer this
+ *  renderer already rebuilds every frame — a vertex attribute and a uniform
+ *  would buy nothing and cost a float on every sprite in the scene. */
 function writeSprite(buf, at, s, rx, rz) {
   const hw = s.w / 2;
   const cx = s.x, cy = -s.y, cz = s.z;
@@ -239,13 +267,14 @@ function writeSprite(buf, at, s, rx, rz) {
   }
   const wx = rx * hw, wz = rz * hw;
   const top = cy + s.h;             // sprites stand ON their anchor point
+  const sx = s.sway ? s.sway[0] : 0, sz = s.sway ? s.sway[1] : 0;
   // `uv` is a sub-rectangle of a SHEET (@see artTexRect) — most of this game's
   // scenery is one crop out of a shared atlas, which the DOM says with a
   // background-position and this says with four numbers.
   const u = s.uv || UV_FULL;
   const P = [
-    [cx - wx, top, cz - wz, u[0], u[1]],
-    [cx + wx, top, cz + wz, u[2], u[1]],
+    [cx - wx + sx, top, cz - wz + sz, u[0], u[1]],
+    [cx + wx + sx, top, cz + wz + sz, u[2], u[1]],
     [cx + wx, cy, cz + wz, u[2], u[3]],
     [cx - wx, cy, cz - wz, u[0], u[3]],
   ];
@@ -283,6 +312,8 @@ export function createGlWorld(canvas) {
     eye: gl.getUniformLocation(prog, 'uEyeXZ'),
     alpha: gl.getUniformLocation(prog, 'uAlpha'),
     cutout: gl.getUniformLocation(prog, 'uCutout'),
+    flow: gl.getUniformLocation(prog, 'uFlow'),
+    time: gl.getUniformLocation(prog, 'uTime'),
   };
 
   const vao = gl.createVertexArray();
@@ -389,6 +420,7 @@ export function createGlWorld(canvas) {
   let sprRuns = [];
   let sprUsed = 0;
   let W = 1, H = 1, dprNow = 1;
+  let timeS = 0;
 
   return {
     get gl() { return gl; },
@@ -408,24 +440,34 @@ export function createGlWorld(canvas) {
      *  `L.rgb` / `L.near` / `L.far` scaled by the tile, nothing reinterpreted. */
     setFog(rgb, near, far) { fog = { rgb, near, far }; },
 
+    /** Seconds of world time, for the flowing surfaces. The caller owns the
+     *  clock — a paused game must not have a river that keeps running. */
+    setTime(t) { timeS = t; },
+
     /**
      * The static world. `quads` is the caller's own want-set: each entry
-     * `{ src, w, h, x, y, z, rot, repX, repY }` in CSS coordinates. Sorted by
-     * texture and packed into one buffer, so the whole chart is a handful of
-     * draw calls however many surfaces it has.
+     * `{ src, w, h, x, y, z, rot, repX, repY, flow }` in CSS coordinates.
+     * Sorted by texture and packed into one buffer, so the whole chart is a
+     * handful of draw calls however many surfaces it has.
+     *
+     * `flow` batches SEPARATELY from the same texture rather than riding a
+     * vertex attribute: it is one uniform per run, so a lake costs one extra
+     * draw call and not one extra float on every vertex in the chart.
      */
     setGeometry(quads) {
       const byTex = new Map();
       for (const q of quads) {
-        let a = byTex.get(q.src);
-        if (!a) byTex.set(q.src, (a = []));
+        const key = q.flow ? q.src + ' flow' : q.src;
+        let a = byTex.get(key);
+        if (!a) byTex.set(key, (a = []));
         a.push(q);
       }
       const total = quads.length * VERTS_PER_QUAD * FLOATS_PER_VERT;
       if (geoBuf.length < total) geoBuf = new Float32Array(total);
       let at = 0;
       geoRuns = [];
-      for (const [src, list] of byTex) {
+      for (const list of byTex.values()) {
+        const src = list[0].src;
         // Start the decode HERE rather than at the first draw. A blob URL still
         // has to be fetched and decoded, and until it is, its quads draw
         // nothing — so a fresh map opens on a frame or two of bare sky. Warming
@@ -433,7 +475,7 @@ export function createGlWorld(canvas) {
         texFor(src, true);
         const start = at / FLOATS_PER_VERT;
         for (const q of list) at = writeQuad(geoBuf, at, q);
-        geoRuns.push({ src, start, count: at / FLOATS_PER_VERT - start });
+        geoRuns.push({ src, start, count: at / FLOATS_PER_VERT - start, flow: list[0].flow ? 1 : 0 });
       }
       geoUsed = at;
       geoDirty = true;
@@ -492,6 +534,7 @@ export function createGlWorld(canvas) {
       gl.uniform2f(loc.fogRange, fog.near, fog.far);
       gl.uniform2f(loc.eye, cam.x, cam.z);
       gl.uniform1i(loc.tex, 0);
+      gl.uniform1f(loc.time, timeS);
       gl.activeTexture(gl.TEXTURE0);
 
       gl.bindVertexArray(vao);
@@ -507,9 +550,11 @@ export function createGlWorld(canvas) {
       // saw the floor through the target dummy. Pixel art is solid or air;
       // the world's opaque bakes never notice the difference.
       gl.uniform1f(loc.cutout, 0.5);
+      let flowNow = -1;
       for (const run of geoRuns) {
         const t = texFor(run.src, true);
         if (!t) continue;                 // still decoding — it lands next frame
+        if (run.flow !== flowNow) { flowNow = run.flow; gl.uniform1f(loc.flow, flowNow); }
         gl.bindTexture(gl.TEXTURE_2D, t);
         gl.drawArrays(gl.TRIANGLES, run.start, run.count);
       }
@@ -519,8 +564,10 @@ export function createGlWorld(canvas) {
         gl.bindBuffer(gl.ARRAY_BUFFER, spriteVbo);
         gl.bufferData(gl.ARRAY_BUFFER, sprBuf.subarray(0, sprUsed), gl.DYNAMIC_DRAW);
         // A hard cutout, so the depth buffer does the occluding and no sprite
-        // ever has to be sorted against another.
+        // ever has to be sorted against another. Sprites never flow — a tree
+        // that scrolled its own bark is not a thing.
         gl.uniform1f(loc.cutout, 0.35);
+        gl.uniform1f(loc.flow, 0);
         for (const run of sprRuns) {
           const t = texFor(run.src, false);
           if (!t) continue;

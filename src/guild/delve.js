@@ -25,7 +25,8 @@
  */
 import { TILES_BASE, ART_BASE } from '../config/assets.js';
 import { preyById } from './locales.js';
-import { THEMES, DECALS, ORE_KINDS, oreKindAt, mapForLocale, validateMap, makeLevelModel, CLIMB_CH, DECK_CH, FLOOR_LV } from './delve-maps.js';
+import { THEMES, DECALS, ORE_KINDS, oreKindAt, mapForLocale, validateMap, makeLevelModel, CLIMB_CH, DECK_CH, FLOOR_LV, wetCells } from './delve-maps.js';
+import { waterFrames, waterStripUrl, WADE_SPEED } from './water.js';
 import { artSprite } from './art.js';
 import { propVolume } from './prop-volume.js';
 import { readPad, padReset, touchPrimary, onTouchPrimary, PAD } from '../platform/input.js';
@@ -173,6 +174,26 @@ const CLIMB_LIFT = 0.5;
  *  the shallow floor slice their art actually rests on (SOLID_DEPTH), so you can
  *  step in behind one and have it sort in front of you. */
 const FOOTED = { r: 1, t: 1, m: 1, f: 1 };
+/**
+ * How many swaying standees a map may have before the wind drops. Each one is a
+ * compositor animation and therefore its own GPU layer for as long as the map
+ * is up — the exact currency the renderer rewrite went looking for
+ * (reference-css3d-mobile-budget). The shipped meadow has six trees; forty is
+ * comfortably clear of it and comfortably short of a forest.
+ */
+const SWAY_CAP = 40;
+/**
+ * How many rippling water cells a map may have. Each is an element, though a
+ * far cheaper one than a swaying standee (no transform animation, so no layer
+ * promotion — just a small repaint the browser schedules itself). Ferncreek's
+ * creek is 28; four hundred is a generous lake and still an order of magnitude
+ * under the counts that hurt.
+ */
+const WATER_CELL_CAP = 400;
+/** Has the player asked their OS for less motion? Read live rather than cached:
+ *  the setting can change under a running tab. The water's own animation is a
+ *  CSS keyframe and honours the query itself (delve.css). */
+const reducedMotion = () => !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
 // Well-mixed 2D hash — naive xor-of-primes checkerboards on % 2 variant picks.
 const hash2 = (x, y) => {
   let h = (x * 374761393 + y * 668265263) | 0;
@@ -248,8 +269,14 @@ function sampleVoidColor(cliffs, theme) {
  * is real geometry (attachTerrain), so void cells stay TRANSPARENT. The fill
  * may come from a different sheet than the rim (interiors lay 16px parquet
  * on a 48px rock foundation — theme.src scales the fill source).
+ *
+ * `water` is the liquid channel: a `{ at(x,y), tile }` pair, where `tile` is
+ * one 48px water frame. It paints INSTEAD of the theme fill, so the still bake
+ * already shows a lake — the animator on top of it (mountScene's overlay) is
+ * then a luxury rather than a load-bearing part, and a frame it never gets to
+ * draw costs nothing but the motion.
  */
-function paintGround(g, grid, theme, sheets, themeAt) {
+function paintGround(g, grid, theme, sheets, themeAt, water) {
   const { rows, cols, at, isFloor: isFloorRaw, isVoid: isVoidRaw } = gridFns(grid);
   // A SUNKEN cell (',') is a hole in the painted plane: its floor is real but
   // lives a step down, drawn by the pit geometry — so the painter treats it
@@ -268,10 +295,14 @@ function paintGround(g, grid, theme, sheets, themeAt) {
       if (!isFloor(x, y)) continue;
       // The FILL is per cell, so one plane can carry a meadow and the parquet of
       // nine rooms standing in it (see `regions`).
-      const t = themeAt ? themeAt(x, y) : theme;
-      const fillImg = sheets[t.sheet || 'cliffs'], src = t.src || TILE;
-      const f = t.fill[hash2(x, y) % t.fill.length];
-      g.drawImage(fillImg, f[0] * src, f[1] * src, src, src, x * TILE, y * TILE, TILE, TILE);
+      if (water && water.at(x, y)) {
+        g.drawImage(water.tile, x * TILE, y * TILE);
+      } else {
+        const t = themeAt ? themeAt(x, y) : theme;
+        const fillImg = sheets[t.sheet || 'cliffs'], src = t.src || TILE;
+        const f = t.fill[hash2(x, y) % t.fill.length];
+        g.drawImage(fillImg, f[0] * src, f[1] * src, src, src, x * TILE, y * TILE, TILE, TILE);
+      }
       const vN = isVoid(x, y - 1), vS = isVoid(x, y + 1), vW = isVoid(x - 1, y), vE = isVoid(x + 1, y);
       if (vN) part(theme.rim.n, 0, 0, TILE, 24, x, y);
       if (vS) part(theme.rim.s, 0, 24, TILE, 24, x, y);
@@ -531,11 +562,31 @@ async function bakeMap(map, theme) {
     return null;
   };
   const themeAt = (x, y) => THEMES[paintNameAt(x, y)] || THEMES[themeNameAt(x, y)] || theme;
+  // The liquid channel — an overlay on the chart, not a grid char (@see
+  // wetCells), so it is asked separately from everything the rgrid answers.
+  // A dry map never loads the sheet.
+  const wetSet = wetCells(map);
+  const wet = [];
+  for (let y = 0; y < rows; y++) {
+    for (let x = 0; x < cols; x++) {
+      // Water over the void is water over nothing: the painter keeps no pixels
+      // there and the walk has no floor, so a stray cell is dropped rather
+      // than drawn hanging in the chasm.
+      if (wetSet.has(x + ',' + y) && at(x, y) !== '#') wet.push([x, y]);
+    }
+  }
+  let wframes = null;
+  if (wet.length) {
+    try { wframes = await waterFrames(); }
+    catch (e) { console.warn('delve: water sheet missing — fords stay dry ground', e); }
+  }
+  const drawn = new Set(wet.map(([x, y]) => x + ',' + y));
+  const water = wframes ? { at: (x, y) => drawn.has(x + ',' + y), tile: wframes[0] } : null;
   const cv = document.createElement('canvas');
   cv.width = cols * TILE; cv.height = rows * TILE;
   const g = cv.getContext('2d');
   g.imageSmoothingEnabled = false;
-  paintGround(g, rgrid, theme, sheets, (regions.length || paints.length) ? themeAt : null);
+  paintGround(g, rgrid, theme, sheets, (regions.length || paints.length) ? themeAt : null, water);
 
   // Flat floor decals that belong ON the plane (holes and track). Boulders,
   // stalagmites and the cart are upright standees — see openDelve.
@@ -614,7 +665,7 @@ async function bakeMap(map, theme) {
   return {
     url: cv.toDataURL('image/png'), pass, tall, solids, model, cols, rows, sheets,
     voidColor: sampleVoidColor(sheets.cliffs, theme),
-    tex,
+    tex, wet, wframes,
     ...extractGeometry(rgrid, regions.length ? themeNameAt : null, { model, agrid: map.grid }),
   };
 }
@@ -864,6 +915,9 @@ function mountScene(prep, entry) {
   }
 
   D.map = map; D.theme = theme; D.field = field;
+  // Only the cells the bake actually accepted as wet (water over the void is
+  // dropped there) — so what slows a walker is exactly what they can see.
+  D.wet = new Set((baked.wet || []).map(([x, y]) => x + ',' + y));
   D.pass = baked.pass; D.tall = baked.tall; D.cols = baked.cols; D.rows = baked.rows;
   D.model = baked.model; // the height law — levels, climbs, decks (ONE RULES FACT)
   // Fresh per scene: prop footprints are rebaked with the map, and the props
@@ -933,6 +987,17 @@ function mountScene(prep, entry) {
   // above would otherwise never fire movePlayer's stop branch.
   D.gfx.setAnim(actor, 'idle');
 
+  mountWater(field, baked, map);
+
+  // Does the wind blow HERE? A composited sway promotes its standee to its own
+  // GPU layer, so it is a budget, not a free effect — counted once, before the
+  // loop, so the whole grove agrees. Half a stand swaying reads far worse than
+  // none of it, which is why this is a map-wide yes or no and never a per-tree
+  // cutoff. (The rasterised first-person path has no such limit: it shears the
+  // crowns in a buffer it rebuilds anyway.)
+  const treeCount = map.theme === 'meadow' ? (map.grid.join('').match(/t/g) || []).length : 0;
+  const windy = treeCount > 0 && treeCount <= SWAY_CAP && !reducedMotion();
+
   // --- exits, portals and interactables from the grid ---
   for (let y = 0; y < D.rows; y++) {
     for (let x = 0; x < D.cols; x++) {
@@ -946,7 +1011,16 @@ function mountScene(prep, entry) {
         D.keyCells.push({ x, y, el, key: map.id + ':' + x + ',' + y, taken: false });
       }
       if (ch === 'w') addProp(artSprite('wagon', 'dv-wagon'), x + 0.5, y + 1, 82);
-      else if (ch === 't' && map.theme === 'meadow') addProp(artSprite('treeTall', 'dv-tree'), x + 0.5, y + 1, 96);
+      else if (ch === 't' && map.theme === 'meadow') {
+        // The crown stirs — see delve.css dvSway. The negative delay is this
+        // tree's own phase, so a stand of them never sways in unison; `windy`
+        // is the budget gate (a compositor animation promotes its element to a
+        // layer, and a forest of them is the failure this renderer was rebuilt
+        // to avoid — reference-css3d-mobile-budget).
+        const cls = windy ? 'dv-tree dv-sway' : 'dv-tree';
+        const style = windy ? `animation-delay:${(-(x * 0.7 + y * 1.3) % 5).toFixed(2)}s` : '';
+        addProp(artSprite('treeTall', cls, style), x + 0.5, y + 1, 96);
+      }
       else if (ch === 't') addPropCanvas('stalag', baked.sheets, x + 0.5, y + 0.97);
       else if (ch === 'r') addPropCanvas(theme.grayProps ? 'boulderGray' : 'boulder', baked.sheets, x + 0.5, y + 0.97);
       else if (ch === 'm') addPropCanvas('cart', baked.sheets, x + 0.5, y + 1);
@@ -1718,6 +1792,9 @@ const groundAt = (x, y) => {
 /** Is this point on a climb link (ladder, vine, or stairs)? */
 const onClimb = (x, y) => D.model.climbAt(Math.floor(x), Math.floor(y));
 const onStairs = (x, y) => D.model.stairAt(Math.floor(x), Math.floor(y));
+/** Standing in a liquid. Water is an overlay on the chart, not a grid char, so
+ *  this is a set lookup and not a character test (@see wetCells). */
+const inWater = (x, y) => D.wet.has(Math.floor(x) + ',' + Math.floor(y));
 /**
  * How far off the plane a STATIC standee here rides, in plane px — the ground
  * surface, or halfway between levels on a ladder's rungs. (Stairs are walked,
@@ -1803,7 +1880,12 @@ function movePlayer(dt) {
   if (m > 0.01) {
     ux /= Math.max(1, m); uy /= Math.max(1, m);
     // Rungs cost time; STAIRS are the climb you take at a walk — full speed.
-    const speed = PLAYER_SPEED * (onClimb(p.x, p.y) && !onStairs(p.x, p.y) ? CLIMB_SPEED : 1);
+    // Water costs time too, and for the same reason: a crossing you can make
+    // at a stroll is not a crossing. (Multiplied, not branched — a ladder that
+    // stands in a flooded shaft is honestly both.)
+    const speed = PLAYER_SPEED
+      * (onClimb(p.x, p.y) && !onStairs(p.x, p.y) ? CLIMB_SPEED : 1)
+      * (inWater(p.x, p.y) ? WADE_SPEED : 1);
     tryMove(p, ux * speed * dt, uy * speed * dt);
     p.actor.facing = Math.atan2(ux, -uy);
     if (!p.moving) { D.gfx.setAnim(p.actor, 'move'); p.moving = true; }
@@ -2289,6 +2371,66 @@ function place(el, e) {
   if (dk != null && e.lv != null && e.lv >= dk) z = 10 + (Math.floor(y) + 1) * TILE + 10;
   el.style.zIndex = z;
   el.style.setProperty('--dvlift', liftFor(e).toFixed(1) + 'px');
+}
+
+/**
+ * THE WATER MOVES — one quad per wet cell, playing the sheet's three authored
+ * frames off a strip.
+ *
+ * Overhead is the one angle where those frames ARE the animation: you are
+ * looking straight down at the surface, so a swap reads exactly as it was
+ * drawn to. (The first-person lens sees the same plane nearly edge-on, where
+ * a swap is invisible and a scroll is everything — hence its shader. Same
+ * fact, two cameras, @see water.js.)
+ *
+ * Per CELL rather than one clipped canvas over the plane, because water is not
+ * always ON the plane: a creek bed is a quad a step down, and its top already
+ * sorts per row against everything standing near it (@see the pit pass in
+ * attachTerrain). A single flat overlay could never land inside that ordering
+ * — it would have to be above every pit top and below every standee at once,
+ * and those two ranges overlap. A quad at the cell's own level and the pit's
+ * own z-index simply IS in the right place.
+ *
+ * It also costs nothing per frame. `background-position` on a steps() keyframe
+ * is a small repaint the browser schedules itself; the render loop never
+ * learns that this map has water in it at all.
+ */
+function mountWater(field, baked, map) {
+  const wet = baked.wet || [];
+  if (!wet.length) return;
+  /**
+   * BUDGETED. Each cell is an element, and a lake is not a puddle. Past the
+   * cap the still water already baked into the ground plane (@see paintGround)
+   * is what the map wears — a lake that does not ripple, rather than a
+   * thousand elements on a phone. Sunken cells keep their quads regardless:
+   * the bake has no pixels for them, so without one there is no water at all.
+   */
+  const still = wet.length > WATER_CELL_CAP;
+  if (still) console.info(`delve: ${wet.length} water cells — over the ${WATER_CELL_CAP} cap, so only sunken water animates`);
+  waterStripUrl().then((url) => {
+    if (!D || D.field !== field) return;          // a portal beat us here
+    for (const [x, y] of wet) {
+      const lv = baked.model.floorAt(x, y) || 0;
+      if (still && lv >= 0) continue;
+      const d = document.createElement('div');
+      d.className = 'dv-wet';
+      // A cell at grade sorts just over the plane; a sunken one just over its
+      // own pit top (which is `base - 8`), and both stay well under standZ.
+      const z = lv < 0 ? 10 + (y + 1) * TILE - 7 : 2;
+      /**
+       * A HAIR ABOVE the bed, not level with it. `.delve-field` is a
+       * `preserve-3d` context, so two coplanar quads at the same depth are
+       * decided by z-index and then by luck — and a sunken water cell sits on
+       * exactly the plane its pit top does. Three quarters of a pixel out
+       * along the ground's own normal makes the ordering strict instead of
+       * lucky, and at this scale it is invisible. (It is also honest: water
+       * does lie on top of the bed.)
+       */
+      d.style.cssText = `left:${x * TILE}px;top:${y * TILE}px;z-index:${z};`
+        + `background-image:url(${url});transform:translateZ(${lv * BLOCK_H + 0.75}px);`;
+      field.appendChild(d);
+    }
+  }).catch((e) => console.warn('delve: water strip failed — the still bake stands', e));
 }
 
 function render(now) {
