@@ -23,11 +23,11 @@
  * a place you look at from above; the delve is a place you are inside.
  */
 import { ART_BASE } from '../config/assets.js';
-import { THEMES, LIGHTS, DECALS, ORE_KINDS, oreKindAt, mapForLocale, validateMap, makeLevelModel, DECK_CH, wetCells } from './delve-maps.js';
+import { THEMES, LIGHTS, DECALS, ORE_KINDS, oreKindAt, mapForLocale, validateMap, makeLevelModel, DECK_CH, wetCells, waterDepths } from './delve-maps.js';
 import { preyById } from './locales.js';
 import { loadImg, SHEET_URLS, doorTexture, keyTexture } from './delve.js';
 import { ART, artSprite, artCropCss, artTexRect, SWAY, WORN, wornWeapon, wornShield, wornPick } from './art.js';
-import { waterFrames, WADE_SPEED } from './water.js';
+import { waterFrames, WADE_SPEED, submergeFor, isSwimming } from './water.js';
 import { propVolume, propCell, footprint, REST_SLOP, PLAYER_H } from './prop-volume.js';
 import { icon } from './icons.js';
 import { createLook, readPad, padReset, touchPrimary, onTouchPrimary, PAD } from '../platform/input.js';
@@ -1818,6 +1818,10 @@ const WIND = [0.86, 0.51];
 
 /** Is this spot under water? Floors, not fractions — the chart is per cell. */
 const wetAt = (x, y) => !!(F.wet && F.wet.has(Math.floor(x) + ',' + Math.floor(y)));
+/** Steps of water here, 0 on dry land. */
+const depthAt = (x, y) => (F.depths && F.depths.get(Math.floor(x) + ',' + Math.floor(y))) || 0;
+/** How far up the body the water comes here, 0..MAX_SUBMERGE. */
+const sinkAt = (x, y) => (wetAt(x, y) ? submergeFor(depthAt(x, y)) : 0);
 /** How much of a body stays ABOVE the surface — the same 0.72 the top-down
  *  clips to (delve.css .dv-wading), so a walker steps between the two lenses
  *  without changing depth. */
@@ -1835,8 +1839,8 @@ const SELF_FOOT = 0.3125;
  * does to legs. `foot` discounts any transparent footroom the sheet leaves,
  * so the line lands at the same height up the leg whatever is standing there.
  */
-function submerge(s, foot) {
-  const keep = (1 - foot) * WADE_KEEP;
+function submerge(s, foot, sink) {
+  const keep = (1 - foot) * (1 - (sink == null ? 1 - WADE_KEEP : sink));
   const u = s.uv || [0, 0, 1, 1];
   s.uv = [u[0], u[1], u[2], u[1] + (u[3] - u[1]) * keep];
   s.h *= keep;
@@ -2755,6 +2759,7 @@ function mount(prep, entry) {
   F.map = map; F.theme = theme; F.surf = surf; F.surfByTheme = surfByTheme || {};
   F.waterTex = waterTex || null;
   F.wet = wetCells(map);
+  F.depths = new Map();   // filled once the level model exists, below
   // Region lookup for the texture pick — a handful of rects, checked per cell
   // only while geometry is being (re)built.
   F.regions = map.regions || [];
@@ -2796,6 +2801,9 @@ function mount(prep, entry) {
   // The height law (ONE RULES FACT). Built from the AUTHORED grid — a mined
   // seam opens at the level the model already knew ('o' is ground to it).
   F.model = makeLevelModel(map.grid);
+  // Water finds its own level: each body brims at the highest ground it
+  // touches, so depth is a per-BODY flood and not a per-cell guess.
+  F.depths = waterDepths(F.model, F.wet);
   // The chart's vertical extremes, asked once: the GL skirt sinks below the
   // deepest floor, and wall tops are only built once anything can look down
   // on them (a walker on a lv-2 surface stands eye-above every wall).
@@ -4098,7 +4106,24 @@ function render() {
   // ledge drop is a hop down rather than a mid-step teleport.
   // Smoothed every frame in steer() now, instead of eased across a stride.
   const lev = F.lev;
-  let ey = -EYE - lev * STEP_PX - back * Math.sin(orb);
+  /**
+   * THE EYE GOES DOWN WITH THE BODY.
+   *
+   * The third-person standee was already sinking to the waterline while the
+   * camera stayed at full standing height — so the member dropped into the
+   * creek and the view did not, which reads as the world lowering rather than
+   * you entering it (playtest 2026-08-07). The eye is part of the body: sink
+   * the body by a fraction of its height and the eye sinks by the same
+   * fraction of ITS height above the floor.
+   *
+   * Eased rather than snapped, and on the same easing the level ride uses, or
+   * stepping off a bank would jolt the horizon by a third of the screen in one
+   * frame. Wading out is the same move played backwards.
+   */
+  const sinkWant = sinkAt(F.px, F.py);
+  F.sink = F.sink == null ? sinkWant : F.sink + (sinkWant - F.sink) * Math.min(1, 9 * (F.dt || 0.016));
+  if (Math.abs(F.sink - sinkWant) < 0.002) F.sink = sinkWant;
+  let ey = -EYE * (1 - F.sink) - lev * STEP_PX - back * Math.sin(orb);
   // Under a deck the chase camera's rise would put the lens inside (or above)
   // the planks, photographing the deck top instead of the subject — clamp it
   // just beneath the underside, the same instinct backOff has at rock.
@@ -4250,7 +4275,7 @@ function render() {
       };
       // Creature billboards are cropped to the art's own tight box (@see
       // frameBox), so there is no empty footroom band to discount.
-      if (wetAt(c.x, c.y)) submerge(s, 0);
+      if (wetAt(c.x, c.y)) submerge(s, 0, sinkAt(c.x, c.y));
       sprites.push(s);
     }
     if (F.self && F.pov === 3) {
@@ -4265,7 +4290,7 @@ function render() {
         };
         // In water the FOOTROOM offset goes: the feet are under the surface,
         // so the anchor is the waterline itself rather than the soles.
-        if (wetAt(F.px, F.py)) { s.y = -lev * STEP_PX; submerge(s, SELF_FOOT); }
+        if (wetAt(F.px, F.py)) { s.y = -lev * STEP_PX; submerge(s, SELF_FOOT, sinkAt(F.px, F.py)); }
         sprites.push(s);
       }
     }
@@ -4376,9 +4401,13 @@ function render() {
         // water looks like. Only while actually moving: standing in a creek is
         // standing, not an endless mime (the same rule the deck already has).
         const walking = Math.hypot(F.vx, F.vy) > 0.05;
-        const wading = walking && F.wet.has(cellX + ',' + cellY);
+        // Out of your depth the pose runs whether you are travelling or not —
+        // treading water is something a body does, not a thing it stops doing.
+        // In a shallow ford it only runs while you are actually crossing.
+        const swimming = isSwimming(depthAt(cellX, cellY)) && wetAt(cellX, cellY);
+        const wading = walking && wetAt(cellX, cellY);
         const desired = guarding() ? 'hold'
-          : (climbing || wading) ? 'climb'
+          : (climbing || swimming || wading) ? 'climb'
             : walking ? 'move' : 'idle';
         if (F.self.actor.anim.name !== desired) F.self.gfx.setAnim(F.self.actor, desired);
       }
@@ -4445,6 +4474,9 @@ function drawMap() {
 
 function stepSim(now) {
   const dt = Math.min(0.08, (now - (F.last || now)) / 1000);
+  // Published for render(), which eases the waterline's eye drop and must not
+  // invent a second clock to do it.
+  F.dt = dt;
   /**
    * Re-asked between every stage, not once at the top. Any stage can end the
    * session or start a door: a strike can drop the last creature and a stride
@@ -4647,6 +4679,9 @@ if (typeof window !== 'undefined') {
   window.__fpDebug = () => F && ({
     map: F.map && F.map.id, x: +F.px.toFixed(2), y: +F.py.toFixed(2),
     lv: F.lv, lev: +F.lev.toFixed(3),   // committed surface · the eased eye
+    // How far the water has taken the eye down, 0..MAX_SUBMERGE, and how deep
+    // the cell under the walker actually is.
+    sink: +(F.sink || 0).toFixed(3), depth: +depthAt(F.px, F.py).toFixed(2),
     dir: COMPASS[((Math.round(F.yaw / (Math.PI / 4)) % 8) + 8) % 8],
     yawDeg: +(F.yaw * 180 / Math.PI).toFixed(1),
     speed: +Math.hypot(F.vx, F.vy).toFixed(3),

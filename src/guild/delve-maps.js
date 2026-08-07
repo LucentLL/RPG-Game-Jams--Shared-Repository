@@ -1,4 +1,6 @@
 import { buildCampusMap } from './campus.js';
+import { PROP_VOL } from './prop-volume.js';
+import { ART } from './art.js';
 /**
  * @file Delve maps — authored 2.5D explorable locales (data only; delve.js runs them).
  *
@@ -339,6 +341,67 @@ export function wetCells(map) {
   }
   return s;
 }
+
+/** Steps of water a body can stand in and still keep its head up. Past this a
+ *  walker is swimming, not wading — the pose stops being a stride. */
+export const SWIM_DEPTH = 1;
+/** How far a shallow ford still comes up the leg, in steps. Water lying on
+ *  ground with no basin under it is not zero deep; it is ankle-to-shin. */
+export const FORD_DEPTH = 0.35;
+
+/**
+ * HOW DEEP THE WATER LIES, per wet cell, in steps.
+ *
+ * Water finds its own level, so a body of it stands at the BRIM of the basin
+ * that holds it — the highest ground it touches — and every cell of that body
+ * shares one surface. A creek cut one step into the meadow is therefore a step
+ * deep along its whole length, including the middle cells that touch no bank
+ * at all; a puddle on flat ground is a ford, and the walker's shins get wet.
+ *
+ * Flooded per connected body rather than read per cell for exactly that
+ * reason: asking a cell about its own neighbours gives the right answer at the
+ * edge of a lake and zero in the middle of it, which would leave a walker
+ * wading at the bank and strolling across the deep end.
+ *
+ * @returns {Map<string, number>} cell key → depth in steps (>= FORD_DEPTH)
+ */
+export function waterDepths(model, wet) {
+  const out = new Map();
+  if (!wet || !wet.size) return out;
+  const ORTH = [[0, -1], [0, 1], [-1, 0], [1, 0]];
+  const seen = new Set();
+  for (const key of wet) {
+    if (seen.has(key)) continue;
+    // Flood this body, collecting its cells and the highest ground on its rim.
+    const body = [];
+    const stack = [key];
+    seen.add(key);
+    let brim = null;
+    while (stack.length) {
+      const k = stack.pop();
+      const [x, y] = k.split(',').map(Number);
+      body.push([x, y, k]);
+      const f = model.floorAt(x, y);
+      if (f != null && (brim == null || f > brim)) brim = f;   // a fully enclosed pool brims at its own deepest rim
+      for (const [dx, dy] of ORTH) {
+        const nk = (x + dx) + ',' + (y + dy);
+        if (wet.has(nk)) {
+          if (!seen.has(nk)) { seen.add(nk); stack.push(nk); }
+        } else {
+          // Dry ground beside the water is the bank that holds it in.
+          const nf = model.floorAt(x + dx, y + dy);
+          if (nf != null && (brim == null || nf > brim)) brim = nf;
+        }
+      }
+    }
+    for (const [x, y, k] of body) {
+      const f = model.floorAt(x, y);
+      const d = (f == null || brim == null) ? 0 : brim - f;
+      out.set(k, Math.max(FORD_DEPTH, d));
+    }
+  }
+  return out;
+}
 /** Steps of headroom a body needs to pass beneath a deck. The player is ~1.77
  *  steps tall (760/900 tiles against a 430/900 step), so two is the least
  *  honest clearance — a deck any lower is a lid, not a bridge. */
@@ -487,8 +550,83 @@ export function makeLevelModel(grid) {
  * @property {{prey:string,x:number,y:number}[]} spawns
  */
 
+/**
+ * THE PROP BENCH — one of everything, each on its own tile, GENERATED.
+ *
+ * A review map, and deliberately not a hand-written chart: the whole point is
+ * to see every placeable object at once, and a list typed out by hand goes
+ * stale the first time somebody adds a prop and forgets. Built from PROP_VOL
+ * instead, so the bench always holds exactly what the game can place.
+ *
+ * Laid out for LOOKING at things. Three tiles of pitch, so you can walk right
+ * round any piece and see its back, its sides and — the thing this exists for
+ * — whether its drawn top folds into a real top or stands up as a face (@see
+ * prop-volume `fold`). Open sky and meadow grass, because a dark room hides
+ * exactly the silhouette being judged. The six wall-hung pieces get their own
+ * masonry run along the north, since a hung thing with no wall is a bug rather
+ * than a review.
+ *
+ * Reading order is PROP_VOL's own, eight to a row, left to right and top to
+ * bottom — and the editor names whatever the cursor is over in its readout, so
+ * identifying a piece is hovering it rather than counting.
+ *
+ * Widths come from the ladder by the same derivation everything else uses
+ * (w = h × art aspect × 48). dev/check-volumes.mjs audits every chart in this
+ * file, so a drift here fails the build rather than shipping a wrong size.
+ */
+function buildPropBench() {
+  const free = [], hung = [];
+  for (const art of Object.keys(PROP_VOL)) {
+    if (!ART[art]) continue;
+    (PROP_VOL[art].form === 'wall' ? hung : free).push(art);
+  }
+  const width = (art) => {
+    const v = PROP_VOL[art], a = ART[art];
+    return Math.round((v.form === 'lie' ? v.d : v.h) * (a.w / a.h) * 48);
+  };
+  const COLS = 8, PITCH = 3, X0 = 2, Y0 = 4;
+  const W = X0 + COLS * PITCH;
+  const rows = Math.ceil(free.length / COLS);
+  const H = Y0 + rows * PITCH + 3;
+  const props = [];
+  const fCells = new Set();
+  free.forEach((art, i) => {
+    const x = X0 + (i % COLS) * PITCH, y = Y0 + Math.floor(i / COLS) * PITCH;
+    // Integer y IS a foot line (propCell's reading), so the piece stands on
+    // the bottom edge of row y — which is the cell it blocks.
+    props.push({ art, x: x + 0.5, y: y + 1, w: width(art) });
+    fCells.add(x + ',' + y);
+  });
+  // The hung row: a wall along row 2, its pieces a hair proud of row 3's north
+  // edge — the charts' own convention for anything that hangs.
+  const gap = Math.floor((W - 2) / hung.length);
+  hung.forEach((art, i) => {
+    props.push({ art, x: 1 + gap * i + gap / 2, y: 3.02, w: width(art) });
+  });
+  const grid = [];
+  for (let y = 0; y < H; y++) {
+    if (y === 0 || y === H - 1) { grid.push('#'.repeat(W)); continue; }
+    if (y === 2) { grid.push('#' + 'B'.repeat(W - 2) + '#'); continue; }
+    let row = '';
+    for (let x = 0; x < W; x++) {
+      row += (x === 0 || x === W - 1) ? '#'
+        : fCells.has(x + ',' + y) ? 'f'
+          : (x === 2 && y === H - 3) ? 'w'      // the way home
+            : '.';
+    }
+    grid.push(row);
+  }
+  return {
+    id: 'propbench', theme: 'meadow', name: 'The Prop Bench',
+    grid, entry: [W / 2, H - 2.5], spawns: [], props, portals: [], paint: [], locks: [],
+  };
+}
+
 /** @type {Object.<string,DelveMap>} */
 export const DELVE_MAPS = {
+  // Every placeable object, one per tile — a bench for judging silhouettes and
+  // folded tops, never reachable from play (nothing routes here but the editor).
+  propbench: buildPropBench(),
   //                       1111111111222222
   //             01234567890123456789012345
   hollowvein: {

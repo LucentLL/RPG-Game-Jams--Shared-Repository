@@ -25,8 +25,8 @@
  */
 import { TILES_BASE, ART_BASE } from '../config/assets.js';
 import { preyById } from './locales.js';
-import { THEMES, DECALS, ORE_KINDS, oreKindAt, mapForLocale, validateMap, makeLevelModel, CLIMB_CH, DECK_CH, FLOOR_LV, wetCells } from './delve-maps.js';
-import { waterFrames, waterStripUrl, WADE_SPEED } from './water.js';
+import { THEMES, DECALS, ORE_KINDS, oreKindAt, mapForLocale, validateMap, makeLevelModel, CLIMB_CH, DECK_CH, FLOOR_LV, wetCells, waterDepths } from './delve-maps.js';
+import { waterFrames, waterStripUrl, WADE_SPEED, submergeFor, isSwimming } from './water.js';
 import { artSprite } from './art.js';
 import { propVolume } from './prop-volume.js';
 import { readPad, padReset, touchPrimary, onTouchPrimary, PAD } from '../platform/input.js';
@@ -921,6 +921,8 @@ function mountScene(prep, entry) {
   // Only the cells the bake actually accepted as wet (water over the void is
   // dropped there) — so what slows a walker is exactly what they can see.
   D.wet = new Set((baked.wet || []).map(([x, y]) => x + ',' + y));
+  // How deep each wet cell is, flooded once per map (@see waterDepths).
+  D.depths = waterDepths(baked.model, D.wet);
   D.pass = baked.pass; D.tall = baked.tall; D.cols = baked.cols; D.rows = baked.rows;
   D.model = baked.model; // the height law — levels, climbs, decks (ONE RULES FACT)
   // Fresh per scene: prop footprints are rebaked with the map, and the props
@@ -1798,6 +1800,10 @@ const onStairs = (x, y) => D.model.stairAt(Math.floor(x), Math.floor(y));
 /** Standing in a liquid. Water is an overlay on the chart, not a grid char, so
  *  this is a set lookup and not a character test (@see wetCells). */
 const inWater = (x, y) => D.wet.has(Math.floor(x) + ',' + Math.floor(y));
+/** How deep, in steps — 0 on dry land (@see waterDepths). */
+const depthAt = (x, y) => D.depths.get(Math.floor(x) + ',' + Math.floor(y)) || 0;
+/** Out of your depth here? Then the pose runs whether you are moving or not. */
+const swimmingAt = (x, y) => isSwimming(depthAt(x, y));
 /**
  * How far off the plane a STATIC standee here rides, in plane px — the ground
  * surface, or halfway between levels on a ladder's rungs. (Stairs are walked,
@@ -1906,8 +1912,16 @@ function movePlayer(dt) {
     const desired = inWater(p.x, p.y) ? 'climb' : 'move';
     if (p.actor.anim.name !== desired) D.gfx.setAnim(p.actor, desired);
     p.moving = true;
-  } else if (p.moving) {
-    D.gfx.setAnim(p.actor, 'idle'); p.moving = false;
+  } else {
+    /**
+     * OUT OF YOUR DEPTH, THE POSE KEEPS GOING. Treading water is something a
+     * body DOES; the moment it stops it sinks. So past chest depth the cycle
+     * runs whether or not you are travelling — and shallower than that it does
+     * not, because standing on the bottom of a ford looks like standing.
+     */
+    const still = swimmingAt(p.x, p.y) ? 'climb' : 'idle';
+    if (p.actor.anim.name !== still) D.gfx.setAnim(p.actor, still);
+    p.moving = false;
   }
 }
 
@@ -2405,6 +2419,15 @@ function place(el, e) {
    */
   const wet = !!(D.wet && D.wet.size && inWater(x, y));
   if (wet !== e._wet) { e._wet = wet; el.classList.toggle('dv-wading', wet); }
+  if (wet) {
+    // How far under depends on the BASIN, not on the fact of being wet: a
+    // creek cut a step into the meadow takes a body to the chest, a puddle to
+    // the shin. Quantised to twentieths and compared before writing — the
+    // same discipline the fog dimming keeps, so crossing a ford is a handful
+    // of style writes rather than one per frame.
+    const keep = Math.round((1 - submergeFor(depthAt(x, y))) * 20) / 20;
+    if (keep !== e._keep) { e._keep = keep; el.style.setProperty('--wade-keep', keep); }
+  }
 }
 
 /**

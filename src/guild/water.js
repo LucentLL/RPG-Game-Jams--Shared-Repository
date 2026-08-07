@@ -38,6 +38,40 @@ export const WATER_FRAME_MS = 200;
  *  cost, which is the only thing that makes a ford a decision. */
 export const WADE_SPEED = 0.62;
 
+/**
+ * One level step, as a fraction of the walker's own height.
+ *
+ * STEP is 430/900 of a tile and the player is 760/900 (prop-volume.js
+ * PLAYER_H), so a single step of ground comes up to a bit over half a person.
+ * That ratio is what turns a DEPTH IN STEPS — which is all the level model
+ * knows — into how far up a body the water actually reaches, and it is the
+ * one number both lenses have to share or a walker would sink to the chest in
+ * one camera and the knee in the other.
+ */
+export const STEP_PER_BODY = 430 / 760;
+/** Never sink a body further than this. Past the neck there is nothing left
+ *  to read — a sprite clipped to the eyebrows is an empty tile with a hat. */
+const MAX_SUBMERGE = 0.78;
+
+/**
+ * How far up a body water of `depth` steps comes, as a fraction of its height.
+ * @param {number} depth steps of water (@see delve-maps waterDepths)
+ */
+export const submergeFor = (depth) => Math.min(MAX_SUBMERGE, Math.max(0, depth) * STEP_PER_BODY);
+
+/**
+ * Is a walker at this depth SWIMMING rather than wading?
+ *
+ * The distinction is whether the feet still do the work. Chest-deep is where
+ * a stride stops carrying you and your arms take over — so at a step or more
+ * the pose runs continuously, standing still included, because treading water
+ * is something you do rather than a thing you stop doing. Shallower than that
+ * the walker is standing on the bottom, and standing still looks like
+ * standing still.
+ */
+export const SWIM_SUBMERGE = 0.5;
+export const isSwimming = (depth) => submergeFor(depth) >= SWIM_SUBMERGE;
+
 let _frames = null;   // Promise<HTMLCanvasElement[]>, one per session
 
 /**
