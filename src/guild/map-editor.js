@@ -202,6 +202,7 @@ export function openMapEditor(ctx) {
       sel: { kind: 'tile', id: '.' }, prey: Object.keys(PREY)[0],
       tab: 'tiles', tool: 'paint', zoom: 1.4, panX: 0, panY: 0,
       undo: [], sheets: {}, painting: false, hover: null, paintStart: null,
+      view: 'plan', rot: 0,
     };
   }
   buildDom(host);
@@ -236,6 +237,8 @@ function buildDom(host) {
           <span class="med-spacer"></span>
           <button class="med-btn" data-act="undo" title="Undo (Ctrl+Z)">↺ Undo</button>
           <button class="med-btn" data-act="view3d" title="Toggle the extruded 3D view">⬒ 3D</button>
+          <button class="med-btn" data-act="rotL" title="Rotate the 3D view left">⟲</button>
+          <button class="med-btn" data-act="rotR" title="Rotate the 3D view right">⟳</button>
           <button class="med-btn" data-act="zoomOut">−</button>
           <button class="med-btn" data-act="zoomIn">+</button>
           <button class="med-btn med-primary" data-act="walk" title="Save and walk this map top-down">Walk it</button>
@@ -265,6 +268,13 @@ function buildDom(host) {
   cv.addEventListener('pointermove', onMove);
   window.addEventListener('pointerup', onUp);
   cv.addEventListener('contextmenu', (e) => e.preventDefault());
+  // Wheel zoom aims at the POINTER — the canvas dies with buildDom, so an
+  // inline listener here cannot stack the way a window listener would.
+  cv.addEventListener('wheel', (e) => {
+    e.preventDefault();
+    const r = cv.getBoundingClientRect();
+    zoomTo(E.zoom * (e.deltaY < 0 ? 1.15 : 1 / 1.15), e.clientX - r.left, e.clientY - r.top);
+  }, { passive: false });
   // Named module functions on purpose: buildDom re-runs on every return from a
   // test walk, and addEventListener dedupes identical references — an arrow
   // here would stack one live listener per walk, forever.
@@ -275,6 +285,22 @@ function buildDom(host) {
 function onResize() {
   const scr = document.getElementById('editorScreen');
   if (E && scr && scr.classList.contains('active')) draw();
+}
+
+/** Zoom keeping the point under the view's CENTRE (or the given screen point)
+ *  fixed — zooming about the canvas origin meant you could never zoom INTO
+ *  the part of a big map you were working on (playtest). */
+function zoomTo(z, px, py) {
+  const view = document.querySelector('.med-view');
+  if (!view || !E) return;
+  const z2 = Math.max(0.4, Math.min(4, z));
+  const ax = px != null ? px : view.clientWidth / 2;
+  const ay = py != null ? py : view.clientHeight / 2;
+  const k = z2 / E.zoom;
+  E.panX = ax - (ax - E.panX) * k;
+  E.panY = ay - (ay - E.panY) * k;
+  E.zoom = z2;
+  draw();
 }
 
 function toast(msg) {
@@ -291,6 +317,15 @@ function renderSide() {
 
   if (E.tab === 'tiles') {
     pal.innerHTML = `<div class="med-hint">Click a tile, then paint the map. Right-click paints floor.</div>`
+      // The vertical VERBS, ahead of the tiles: sculpt the ground a step at a
+      // time (pit , → floor . → ledge ^ → terraces 2 → 3) instead of hunting
+      // the height chars — the answer to "how do I add vertically."
+      + `<button class="med-chip ${E.sel.kind === 'vert' && E.sel.dir === 1 ? 'on' : ''}" data-vert="1">
+          <span class="med-swatch" style="background:#3c4457">▲</span>Raise ground
+          <span class="med-ch">+1</span></button>
+        <button class="med-chip ${E.sel.kind === 'vert' && E.sel.dir === -1 ? 'on' : ''}" data-vert="-1">
+          <span class="med-swatch" style="background:#3c4457">▼</span>Lower ground
+          <span class="med-ch">−1</span></button>`
       + TILES.map((t) => `
         <button class="med-chip ${E.sel.kind === 'tile' && E.sel.id === t.ch ? 'on' : ''}" data-tile="${t.ch}">
           <span class="med-swatch" style="background:${t.color}">${t.glyph}</span>${t.name}
@@ -302,9 +337,11 @@ function renderSide() {
     pal.onclick = (e) => {
       const t = e.target.closest('[data-tile]');
       const er = e.target.closest('[data-erase]');
+      const vt = e.target.closest('[data-vert]');
       if (t) E.sel = { kind: 'tile', id: t.dataset.tile };
       if (er) E.sel = { kind: 'erase' };
-      if (t || er) renderSide();
+      if (vt) E.sel = { kind: 'vert', dir: +vt.dataset.vert };
+      if (t || er || vt) renderSide();
     };
   } else if (E.tab === 'props') {
     pal.innerHTML = `<div class="med-hint">Click an object, then click WHERE it stands — quarter-tile precision,
@@ -625,8 +662,13 @@ function onBarClick(e) {
     draw();
   }
   else if (act === 'undo') undo();
-  else if (act === 'zoomIn') { E.zoom = Math.min(3, E.zoom * 1.25); draw(); }
-  else if (act === 'zoomOut') { E.zoom = Math.max(0.4, E.zoom / 1.25); draw(); }
+  else if (act === 'rotL' || act === 'rotR') {
+    E.rot = (E.rot + (act === 'rotL' ? 3 : 1)) % 4;
+    if (E.view !== 'iso') toast('Rotation turns the 3D view — press ⬒ 3D to see it.');
+    draw();
+  }
+  else if (act === 'zoomIn') zoomTo(E.zoom * 1.25);
+  else if (act === 'zoomOut') zoomTo(E.zoom / 1.25);
   else if (act === 'walk' || act === 'walkFp') {
     try { validateMap(E.map); } catch (err) { toast(String(err.message || err)); return; }
     const issues = lint();
@@ -666,15 +708,30 @@ function cellAt(ev) {
     // level 0, which is where painting happens — the plan view stays the
     // precision instrument, the 3D view is where you SEE what you built.
     const u = (px - isoOX()) / s, v = py / (s * 0.5);
-    const fx = (v + u) / 2, fy = (v - u) / 2;
+    const vu = (v + u) / 2, vv = (v - u) / 2;
+    const [fx, fy] = unrot(vu, vv);
     return { x: Math.floor(fx), y: Math.floor(fy), fx, fy };
   }
   return { x: Math.floor(px / s), y: Math.floor(py / s), fx: px / s, fy: py / s };
 }
 
-/** The 3D view's x-offset: cell (0, rows) is the leftmost point the dimetric
- *  projection produces, so shift by rows·s to keep the whole map on-canvas. */
-function isoOX() { return E.map.grid.length * CELL * E.zoom; }
+/** The four bearings of the 3D view: continuous world→view, view→world, and
+ *  a direction transform, all of one fact (E.rot, quarter turns clockwise). */
+function vrot(x, y) {
+  const W = E.map.grid[0].length, H = E.map.grid.length;
+  return E.rot === 0 ? [x, y] : E.rot === 1 ? [H - y, x] : E.rot === 2 ? [W - x, H - y] : [y, W - x];
+}
+function unrot(u, v) {
+  const W = E.map.grid[0].length, H = E.map.grid.length;
+  return E.rot === 0 ? [u, v] : E.rot === 1 ? [v, H - u] : E.rot === 2 ? [W - u, H - v] : [W - v, u];
+}
+const vdir = (dx, dy) => (E.rot === 0 ? [dx, dy] : E.rot === 1 ? [-dy, dx] : E.rot === 2 ? [-dx, -dy] : [dy, -dx]);
+
+/** The 3D view's x-offset: the view-space rows set the leftmost point the
+ *  dimetric projection produces, so shift by that to stay on-canvas. */
+function isoOX() {
+  return (E.rot % 2 ? E.map.grid[0].length : E.map.grid.length) * CELL * E.zoom;
+}
 
 function onDown(ev) {
   if (ev.button === 1) { E.pan = { x: ev.clientX - E.panX, y: ev.clientY - E.panY }; return; }
@@ -761,6 +818,20 @@ function apply(c, rightClick) {
       if (was === '#') toast('The abyss has no bottom to climb to — this cell is floor now. For a pit you can hang into, paint a sunken floor \',\' and set the vine on its rim.');
       else if (!stepBeside) toast('A climb links two heights: put a ▲ ledge beside it, or it is just dressed floor.');
     }
+    return;
+  }
+
+  if (E.sel.kind === 'vert') {
+    // Sculpting: one step along the ground ladder per click. Anything that
+    // is not GROUND (walls, doors, climbs, decks) refuses rather than being
+    // silently overwritten — the verbs shape terrain, tiles place things.
+    const seq = [',', '.', '^', '2', '3'];
+    const ch = (E.map.grid[y] || '')[x];
+    const i = seq.indexOf(ch);
+    if (i < 0) { toast('Raise and lower sculpt open ground — floors, ledges, terraces, pits.'); E.undo.pop(); return; }
+    const ni = Math.max(0, Math.min(seq.length - 1, i + E.sel.dir));
+    if (ni === i) { E.undo.pop(); return; }
+    setCell(x, y, seq[ni]);
     return;
   }
 
@@ -939,11 +1010,20 @@ function drawIso(g, s, m, model, themeFloor) {
     return f == null ? null : f;
   };
 
-  // ── Terrain, back to front along the diagonals ───────────────────────────
-  for (let d = 0; d <= W + H - 2; d++) {
-    for (let y = Math.max(0, d - W + 1); y <= Math.min(H - 1, d); y++) {
-      const x = d - y;
-      if (x < 0 || x >= W) continue;
+  // ── Terrain, back to front along the VIEW's diagonals ────────────────────
+  // The camera turns by quarter steps (E.rot): the loop walks VIEW cells so
+  // the painter's order is always toward the eye, and each view cell asks the
+  // WORLD (grid + model) through the rotation. Faces still shade by which way
+  // they look in the view, so a turned map lights like a turned model.
+  const VW = E.rot % 2 ? H : W, VH = E.rot % 2 ? W : H;
+  const wcell = (u, v) => E.rot === 0 ? [u, v] : E.rot === 1 ? [v, H - 1 - u]
+    : E.rot === 2 ? [W - 1 - u, H - 1 - v] : [W - 1 - v, u];
+  const chAt = (x2, y2) => (x2 < 0 || y2 < 0 || x2 >= W || y2 >= H) ? '#' : m.grid[y2][x2];
+  for (let d = 0; d <= VW + VH - 2; d++) {
+    for (let v = Math.max(0, d - VW + 1); v <= Math.min(VH - 1, d); v++) {
+      const u = d - v;
+      if (u < 0 || u >= VW) continue;
+      const [x, y] = wcell(u, v);
       const ch = m.grid[y][x];
       if (ch === '#') continue;                       // the void draws nothing
       const t = TILE_BY_CH[ch];
@@ -952,26 +1032,27 @@ function drawIso(g, s, m, model, themeFloor) {
       let fill = paintAt(x, y) || (ch === '.' || ch === 'f' || lv != null ? themeFloor : (t ? t.color : '#a03a72'));
       // Height keeps the plan's reading: brighter per step up, darker sunken.
       if (lv != null && lv !== 0) fill = shade(paintAt(x, y) || themeFloor, 1 + 0.14 * lv);
+      // The view-south and view-east neighbours — whatever they are in world.
+      const [sx2, sy2] = wcell(u, v + 1), [ex2, ey2] = wcell(u + 1, v);
       // The ground itself (walls stand on plane 0 and skip it).
       if (!WALL_LV[ch] || ch === 'D' || ch === 'o') {
-        top(x, y, base, fill);
-        // Risers where the ground falls away toward the camera.
-        const sf = floorOf(x, y + 1), ef = floorOf(x + 1, y);
-        const sDrop = m.grid[y + 1] && m.grid[y + 1][x] === '#' ? base - 1 : sf;
-        const eDrop = (m.grid[y] || '')[x + 1] === '#' ? base - 1 : ef;
-        if (sDrop != null && sDrop < base) faceSW(x, y, base, sDrop, shade(fill, 0.62));
-        if (eDrop != null && eDrop < base) faceSE(x, y, base, eDrop, shade(fill, 0.5));
+        top(u, v, base, fill);
+        const sf = floorOf(sx2, sy2), ef = floorOf(ex2, ey2);
+        const sDrop = chAt(sx2, sy2) === '#' ? base - 1 : sf;
+        const eDrop = chAt(ex2, ey2) === '#' ? base - 1 : ef;
+        if (sDrop != null && sDrop < base) faceSW(u, v, base, sDrop, shade(fill, 0.62));
+        if (eDrop != null && eDrop < base) faceSE(u, v, base, eDrop, shade(fill, 0.5));
       }
       // Standing masonry: walls, veins, doors, waist blocks — real prisms.
       if (WALL_LV[ch]) {
         const b0 = (ch === 'D' || ch === 'o') ? base : 0;
         const zTop = b0 + WALL_LV[ch];
         const wf = ch === 'D' ? '#6a4a2a' : (t ? t.color : '#888');
-        top(x, y, zTop, shade(wf, 1.12));
-        faceSW(x, y, zTop, b0, shade(wf, 0.72));
-        faceSE(x, y, zTop, b0, shade(wf, 0.55));
+        top(u, v, zTop, shade(wf, 1.12));
+        faceSW(u, v, zTop, b0, shade(wf, 0.72));
+        faceSE(u, v, zTop, b0, shade(wf, 0.55));
         if (ch === 'D' && lockAt(x, y)) {              // the keyhole plate
-          const [kx, ky] = P(x + 0.55, y + 1, b0 + 1);
+          const [kx, ky] = P(u + 0.55, v + 1, b0 + 1);
           g.fillStyle = '#d8a83c'; g.fillRect(kx - s * 0.08, ky - s * 0.12, s * 0.16, s * 0.22);
           g.fillStyle = '#1c202a'; g.beginPath(); g.arc(kx, ky - s * 0.04, s * 0.035, 0, 7); g.fill();
         }
@@ -980,23 +1061,23 @@ function drawIso(g, s, m, model, themeFloor) {
       if (model.stairAt(x, y)) {
         const dir = [[0, -1], [0, 1], [-1, 0], [1, 0]].find(([dx2, dy2]) =>
           model.surfacesAt(x + dx2, y + dy2).includes(base + 1));
+        const dv2 = dir ? vdir(dir[0], dir[1]) : [0, 0];
         for (let i = 0; i < 4; i++) {
           const f2 = (i + 0.5) / 4 - 0.5;
-          const cx2 = x + (dir ? dir[0] * f2 : 0), cy2 = y + (dir ? dir[1] * f2 : 0);
-          top(cx2 + 0.125, cy2 + 0.125, base + (i + 1) / 4, shade(themeFloor, 1.05 + i * 0.06));
+          top(u + dv2[0] * f2 + 0.125, v + dv2[1] * f2 + 0.125, base + (i + 1) / 4, shade(themeFloor, 1.05 + i * 0.06));
         }
       }
       // A deck hovers at its own level, its slab faces hanging beneath.
       const dk = model.deckAt(x, y);
       if (dk != null) {
         const dfill = ch === 'n' ? '#8a6a42' : shade(themeFloor, 1.2);
-        top(x, y, dk, dfill);
-        faceSW(x, y, dk, dk - 0.3, shade(dfill, 0.62));
-        faceSE(x, y, dk, dk - 0.3, shade(dfill, 0.5));
+        top(u, v, dk, dfill);
+        faceSW(u, v, dk, dk - 0.3, shade(dfill, 0.62));
+        faceSE(u, v, dk, dk - 0.3, shade(dfill, 0.5));
       }
       // Climbs keep their glyph, planted on the ground they derive.
       if (t && t.glyph && !WALL_LV[ch]) {
-        const [gx2, gy2] = P(x + 0.5, y + 0.5, base);
+        const [gx2, gy2] = P(u + 0.5, v + 0.5, base);
         g.fillStyle = 'rgba(255,255,255,.8)';
         g.font = `${Math.round(s * 0.42)}px serif`;
         g.textAlign = 'center'; g.textBaseline = 'middle';
@@ -1007,7 +1088,8 @@ function drawIso(g, s, m, model, themeFloor) {
 
   // ── Props: the real art, standing up — wall pieces at hanging height ─────
   const redraw = () => E && draw();
-  for (const p of [...m.props].sort((a, b) => (a.x + a.y) - (b.x + b.y))) {
+  const vsum = (p) => { const [u2, v2] = vrot(p.x, Number.isInteger(p.y) ? p.y - 0.5 : p.y); return u2 + v2; };
+  for (const p of [...m.props].sort((a, b) => vsum(a) - vsum(b))) {
     const a = ART[p.art];
     const got = a && sheetFor(p.art, redraw);
     const vol = PROP_VOL[p.art];
@@ -1017,7 +1099,7 @@ function drawIso(g, s, m, model, themeFloor) {
     const hPx = a ? wPx * (a.h / a.w) : wPx;
     // A hung piece rises to the height it hangs at, with a stem to its wall.
     const hang = vol && vol.form === 'wall' ? (vol.mid || 1) * s : 0;
-    const [fx2, fy2] = P(p.x, cy, lvP);
+    const [fx2, fy2] = P(...vrot(p.x, cy), lvP);
     const x0 = fx2 - wPx / 2, y0 = fy2 - hPx - hang;
     if (hang) {
       g.strokeStyle = 'rgba(255,255,255,.35)';
@@ -1038,30 +1120,31 @@ function drawIso(g, s, m, model, themeFloor) {
   g.font = `${Math.round(s * 0.55)}px serif`;
   g.textAlign = 'center'; g.textBaseline = 'middle';
   for (const sp of m.spawns || []) {
-    const [cx2, cy2] = P(sp.x + 0.5, sp.y + 0.5, floorOf(sp.x, sp.y) || 0);
+    const [cx2, cy2] = P(...vrot(sp.x + 0.5, sp.y + 0.5), floorOf(sp.x, sp.y) || 0);
     g.fillStyle = 'rgba(200,60,60,.85)';
     g.beginPath(); g.arc(cx2, cy2, s * 0.26, 0, 7); g.fill();
     g.fillStyle = '#fff';
     g.fillText((PREY[sp.prey] && PREY[sp.prey].name ? PREY[sp.prey].name : sp.prey)[0].toUpperCase(), cx2, cy2);
   }
   for (const p of m.portals || []) {
-    const [cx2, cy2] = P(p.x, p.y, 0);
+    const [cx2, cy2] = P(...vrot(p.x, p.y), 0);
     g.fillStyle = 'rgba(90,140,255,.9)';
     g.fillText('◈', cx2, cy2);
   }
   {
-    const [ex2, ey2] = P(m.entry[0], m.entry[1], 0);
+    const [ex2, ey2] = P(...vrot(m.entry[0], m.entry[1]), 0);
     g.fillStyle = '#ffd76b';
     g.fillText('⚑', ex2, ey2);
   }
 
-  // Hover: the picked ground diamond.
+  // Hover: the picked ground diamond, turned with the view.
   if (E.hover && E.hover.x >= 0 && E.hover.y >= 0 && E.hover.y < H && E.hover.x < W) {
     const hb = floorOf(E.hover.x, E.hover.y) || 0;
     g.strokeStyle = 'rgba(255,215,107,.9)';
     g.lineWidth = 2;
-    const pts = [P(E.hover.x, E.hover.y, hb), P(E.hover.x + 1, E.hover.y, hb),
-      P(E.hover.x + 1, E.hover.y + 1, hb), P(E.hover.x, E.hover.y + 1, hb)];
+    const c00 = vrot(E.hover.x, E.hover.y), c10 = vrot(E.hover.x + 1, E.hover.y),
+      c11 = vrot(E.hover.x + 1, E.hover.y + 1), c01 = vrot(E.hover.x, E.hover.y + 1);
+    const pts = [P(...c00, hb), P(...c10, hb), P(...c11, hb), P(...c01, hb)];
     g.beginPath();
     g.moveTo(pts[0][0], pts[0][1]);
     for (const pt of pts.slice(1)) g.lineTo(pt[0], pt[1]);

@@ -10,8 +10,10 @@
 .med-main { flex: 1 1 auto; display: flex; flex-direction: column; min-width: 0; }
 
 .med-bar {
-  display: flex; align-items: center; gap: 8px; padding: 8px 10px;
+  display: flex; align-items: center; gap: 6px; padding: 6px 8px;
   background: #151823; border-bottom: 1px solid #262b38; flex: 0 0 auto;
+  /* Wrap, never clip: on a phone the Walk buttons were falling off the end. */
+  flex-wrap: wrap; row-gap: 4px;
 }
 .med-title { font-variant: small-caps; letter-spacing: .06em; opacity: .85; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .med-spacer { flex: 1; }
