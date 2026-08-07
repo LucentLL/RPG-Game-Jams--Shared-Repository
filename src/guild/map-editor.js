@@ -111,6 +111,14 @@ const TILE_BY_CH = Object.fromEntries(TILES.map((t) => [t.ch, t]));
  *  it paints. Rooms not named here share the generic-interior brown. */
 const THEME_TINT = { meadow: '#5d8544', mine: '#8f7c58', interior: '#7a6a55', arena: '#c2b283' };
 const themeTint = (t) => THEME_TINT[t] || '#6f5d49';
+/** What each theme's floor actually LOOKS like — the Surfaces tab names the
+ *  texture, or "forge" reads as designating function (playtest confusion). */
+const FLOOR_DESC = {
+  meadow: 'grass', mine: 'sandy cave rock', interior: 'parquet',
+  guildhall: 'limestone slabs', kitchen: 'scrubbed limestone', forge: 'dark sooty stone',
+  apothecary: 'green flagstone', armory: 'brown brick', dormitory: 'wood planks',
+  classroom: 'tan flagstone', guildmaster: 'red damask carpet', arena: 'raked sand',
+};
 
 /**
  * THE SIZE LAW, applied at placement: the chart width every lens will draw,
@@ -413,10 +421,13 @@ function renderSide() {
     // Ground-fill dressing (the charts' `paint` array) — NOT regions: a
     // region is a room with walls and a ceiling, and the drafting table does
     // not author rooms. This tab only re-skins ground the grid already has.
-    pal.innerHTML = `<div class="med-hint">Paint the ground fill only — walls, rims and the sky stay the map's own. Drag a rectangle.</div>`
+    pal.innerHTML = `<div class="med-hint">FLOOR TEXTURE, nothing more: drag a rectangle to re-tile the ground
+        there (grass, stone, planks…). It does NOT make the area a forge or change any rule —
+        the names below are just which room's floor tiles get borrowed.</div>`
       + Object.keys(THEMES).map((t) => `
         <button class="med-chip ${E.sel.kind === 'paint' && E.sel.id === t ? 'on' : ''}" data-paint="${t}">
           <span class="med-swatch" style="background:${themeTint(t)}"></span>${t}
+          <span class="med-ch">${FLOOR_DESC[t] || 'floor tiles'}</span>
         </button>`).join('')
       + `<button class="med-chip ${E.sel.kind === 'paintErase' ? 'on' : ''}" data-paint-erase="1">
           <span class="med-swatch" style="background:#2b2f38">✕</span>Eraser
@@ -719,12 +730,29 @@ function onBarClick(e) {
   else if (act === 'zoomOut') zoomTo(E.zoom / 1.25);
   else if (act === 'walk' || act === 'walkFp') {
     try { validateMap(E.map); } catch (err) { toast(String(err.message || err)); return; }
-    const issues = lint();
-    if (issues.length) { toast(issues[0]); return; }
+    // Only what makes a walk IMPOSSIBLE stops the button: a drowned entry or
+    // no way out. Everything else lint knows is ADVICE — a stray ladder must
+    // not lock the author out of their own map (it did, one playtest long).
+    const stop = walkStoppers();
+    if (stop.length) { toast(stop[0]); return; }
+    const notes = lint();
+    if (notes.length) toast(notes[0] + ' — walking anyway (Validate lists all)');
     persist();
     if (walkCtx && walkCtx.walk) walkCtx.walk(E.map.id, act === 'walkFp');
     else toast('No walker attached — open the editor from the Grounds.');
   }
+}
+
+/** The two faults a walk cannot survive; lint()'s everything-else is advice. */
+function walkStoppers() {
+  const m = E.map;
+  const at = (x, y) => (m.grid[Math.floor(y)] || '')[Math.floor(x)];
+  const out = [];
+  const e = at(m.entry[0], m.entry[1]);
+  if (!e || '#BbFrtmo'.includes(e)) out.push(`entry at ${m.entry} stands in '${e || 'void'}' — move the ⚑ flag to open floor`);
+  const exits = m.grid.join('').match(/[sdw]/g) || [];
+  if (!exits.length && !(m.portals || []).length) out.push('no exit cell (s/d/w) — the walk could never end; paint a Wagon or Doorway');
+  return out;
 }
 
 function onKey(e) {
@@ -1177,6 +1205,15 @@ function drawIso(g, s, m, model, themeFloor) {
     if (hang) {
       g.strokeStyle = 'rgba(255,255,255,.35)';
       g.beginPath(); g.moveTo(fx2, fy2); g.lineTo(fx2, y0 + hPx); g.stroke();
+    } else {
+      // A CONTACT SHADOW pins the sprite to its tile. The art is a billboard
+      // — in every lens it faces the camera, Hexen's own grammar — so over
+      // the diagonal ground it read as "placed at an angle" until the ground
+      // itself said where it stands.
+      g.fillStyle = 'rgba(0,0,0,.38)';
+      g.beginPath();
+      g.ellipse(fx2, fy2 - s * 0.02, Math.max(s * 0.2, wPx * 0.42), s * 0.15, 0, 0, 7);
+      g.fill();
     }
     if (got) {
       const { img, rec } = got;
@@ -1300,7 +1337,7 @@ function draw() {
     g.fillStyle = 'rgba(255,255,255,.75)';
     g.font = `${Math.max(9, Math.round(s * 0.32))}px serif`;
     g.textAlign = 'left'; g.textBaseline = 'top';
-    g.fillText(r.theme, r.x * s + 3, r.y * s + 3);
+    g.fillText(FLOOR_DESC[r.theme] || r.theme + ' floor', r.x * s + 3, r.y * s + 3);
   }
 
   // Props: the real crops, drawn at their chart width against the 48px tile —
