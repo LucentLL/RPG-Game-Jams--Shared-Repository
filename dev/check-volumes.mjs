@@ -161,6 +161,14 @@ console.log('  ' + String(centred).padStart(3) + ' now stand at a tile centre');
 console.log('  ' + String(kept).padStart(3) + ' left as authored (wall-hugging + tabletop nudges)');
 if (stillOff.length) console.log('  ** moved but not centred: ' + stillOff.join(', '));
 
+// THE FOLD is read off the art, so it can only be wrong two ways: outside the
+// crop, or claimed by a form that has no front to fold (@see extrudeFold).
+for (const [art, v] of Object.entries(PROP_VOL)) {
+  if (v.fold == null) continue;
+  if (v.form !== 'stand') bad.push(`${art}: fold on a '${v.form}' prop — only a standing elevation folds`);
+  if (!(v.fold > 0.05 && v.fold < 0.9)) bad.push(`${art}: fold ${v.fold} is outside the crop's usable band (0.05–0.9)`);
+}
+
 if (bad.length) {
   console.log('\n** THE SIZE LAW IS BROKEN:');
   for (const b of bad) console.log('   ' + b);

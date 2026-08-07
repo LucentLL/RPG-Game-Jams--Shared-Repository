@@ -104,6 +104,98 @@ export function extrudePlan(cv, o) {
 }
 
 /**
+ * THE FOLD — for art that already drew its own top.
+ *
+ * A kit's desk, table, counter or chest is not a pure elevation: the artist
+ * drew the FRONT and, above it in perspective, the TOP SURFACE. Extruding
+ * that whole picture straight back stands the drawn top UP as part of the
+ * front and caps the volume with a slab at the sprite's top edge — the
+ * player's own diagnosis, and their fix: fold the picture at the line where
+ * the top meets the front, and lay that upper slice FLAT as the real top.
+ *
+ * So the crop splits at `fold` (the fraction of the crop's height that is
+ * drawn top): the lower slice stands as the front elevation (rim walked from
+ * its own alpha, back face mirrored), and the upper slice is laid horizontal
+ * at the front's top edge, running back through the footprint. Nothing is
+ * invented — both faces are the artist's own pixels, each in the plane it
+ * was drawn for. The pixel scales differ between slices on purpose: a top
+ * drawn in perspective is foreshortened, which is exactly why it is shorter
+ * on the sheet than the depth it represents.
+ *
+ * @param {HTMLCanvasElement} cv  the crop, pixel-readable
+ * @param {object} o  { x, z: world centre; y: the FOOT line (negative-up);
+ *                      h: TOTAL drawn height; d: footprint depth; w: width;
+ *                      fold: 0..1 of the crop's height that is the top }
+ */
+export function extrudeFold(cv, o) {
+  const W = cv.width, H = cv.height;
+  let data;
+  try {
+    data = cv.getContext('2d', { willReadFrequently: true }).getImageData(0, 0, W, H).data;
+  } catch (e) { return []; }
+  const solid = (x, y) => x >= 0 && y >= 0 && x < W && y < H && data[(y * W + x) * 4 + 3] >= SOLID;
+
+  const fold = Math.max(0.05, Math.min(0.9, o.fold));
+  const cut = Math.round(H * fold);            // first row of the FRONT slice
+  const w = o.w || o.h * (W / H), d = o.d;
+  const hF = o.h * (1 - fold);                 // the front's world height
+  const foot = o.y, zF = o.z + d / 2;          // the front plane
+  const sx = w / W, sy = hF / Math.max(1, H - cut);
+  const px = (x) => o.x - w / 2 + x * sx;
+  const py = (y) => foot - hF + (y - cut) * sy;
+  const quads = [];
+
+  // The TOP, laid flat where the front ends: the artist's own drawn surface,
+  // finally horizontal, running back across the footprint.
+  quads.push({
+    src: cv, w, h: d, x: o.x, y: foot - hF, z: o.z,
+    rot: 'rotateX(90deg)', uv: [0, 0, 1, fold],
+  });
+  // The FRONT, and its mirror at the back of the footprint.
+  quads.push({ src: cv, w, h: hF, x: o.x, y: foot - hF / 2, z: zF, rot: '', uv: [0, fold, 1, 1] });
+  quads.push({ src: cv, w, h: hF, x: o.x, y: foot - hF / 2, z: o.z - d / 2, rot: 'rotateY(180deg)', uv: [1, fold, 0, 1] });
+
+  // Vertical rims of the FRONT slice only — the sides of the standing part.
+  for (let x = 0; x <= W; x++) {
+    for (let y = cut; y < H; y++) {
+      const westFace = solid(x, y) && !solid(x - 1, y);
+      const eastFace = solid(x - 1, y) && !solid(x, y);
+      if (!westFace && !eastFace) continue;
+      const test = westFace
+        ? (yy) => solid(x, yy) && !solid(x - 1, yy)
+        : (yy) => solid(x - 1, yy) && !solid(x, yy);
+      let y1 = y;
+      while (y1 + 1 < H && test(y1 + 1)) y1++;
+      const runH = (y1 - y + 1) * sy;
+      const u = westFace ? (x + 0.5) / W : (x - 0.5) / W;
+      quads.push({
+        src: cv, w: d, h: runH,
+        x: px(x), y: py(y) + runH / 2, z: o.z,
+        rot: westFace ? 'rotateY(-90deg)' : 'rotateY(90deg)',
+        uv: [u, y / H, u, (y1 + 1) / H],
+      });
+      y = y1;
+    }
+  }
+  // The UNDERSIDE only: the front slice's top edge is covered by the folded
+  // top, so a rim there would be a second lid inside the first.
+  for (let x = 0; x < W; x++) {
+    if (!solid(x, H - 1)) continue;
+    let x1 = x;
+    while (x1 + 1 < W && solid(x1 + 1, H - 1)) x1++;
+    const runW = (x1 - x + 1) * sx;
+    quads.push({
+      src: cv, w: runW, h: d,
+      x: px(x) + runW / 2, y: foot, z: o.z,
+      rot: 'rotateX(-90deg)',
+      uv: [x / W, (H - 0.5) / H, (x1 + 1) / W, (H - 0.5) / H],
+    });
+    x = x1;
+  }
+  return quads;
+}
+
+/**
  * Extrude one sprite crop into a quad list.
  * @param {HTMLCanvasElement} cv  the crop, drawn 1:1 and pixel-readable
  * @param {object} o  { x, z: world centre; y: the FOOT line (negative-up);

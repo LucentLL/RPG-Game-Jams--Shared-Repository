@@ -32,7 +32,7 @@ import { icon } from './icons.js';
 import { createLook, readPad, padReset, touchPrimary, onTouchPrimary, PAD } from '../platform/input.js';
 import { claimPad } from '../platform/ui-pad.js';
 import { perspectiveFor, camLean, onView, view, vpStatus } from '../platform/view-prefs.js';
-import { extrudeSprite, extrudePlan } from '../platform/voxel-sprite.js';
+import { extrudeSprite, extrudePlan, extrudeFold } from '../platform/voxel-sprite.js';
 import { createGlWorld } from '../platform/gl-world.js';
 
 /**
@@ -2163,7 +2163,11 @@ function voxelProp(art, tx, ty, vol, lift) {
     // Depth never beats the art's own width — a barrel deeper than it is
     // wide is a crate wearing a barrel's face (playtest: "too thick").
     const d = Math.min(Math.min(0.6, vol.d || 0.3) * T, w * 0.8);
-    const q = extrudeSprite(cv, { x: tx * T, y: -lift, z: ty * T, h, d });
+    // A prop whose art DREW its own top folds instead of extruding whole —
+    // the drawn top becomes the real top (@see extrudeFold).
+    const q = vol.fold
+      ? extrudeFold(cv, { x: tx * T, y: -lift, z: ty * T, h, w, d, fold: vol.fold })
+      : extrudeSprite(cv, { x: tx * T, y: -lift, z: ty * T, h, d });
     if (!q.length) return;
     F.propQuads.push(...q);
     buildGeometry();   // fold them into the live buffer now, not next stride

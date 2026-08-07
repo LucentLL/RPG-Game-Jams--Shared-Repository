@@ -127,17 +127,28 @@ export const LADDER = [0.125, 0.25, 0.5, 0.75, 1, 1.25, 1.5, 2, 3];
  * top-down view's pixel width — which is the sizing this file exists to
  * replace, so an absent name is a gap and not a default.
  *
- * @typedef {{form:'stand'|'lie'|'wall', h:number, d?:number, mid?:number}} Volume
+ * @typedef {{form:'stand'|'lie'|'wall', h:number, d?:number, mid?:number,
+ *            fold?:number, flat?:boolean}} Volume
  * `h` height in tiles · `d` depth in tiles (lie, and the resting test) ·
  * `mid` centre height (wall)
+ *
+ * `fold` — THE ART ALREADY DREW ITS TOP. A kit desk, counter, chest or stove
+ * is a front elevation with the top surface drawn above it in perspective;
+ * `fold` is the fraction of the crop's HEIGHT that is that top. First person
+ * folds there: the upper slice lies flat as the real top of the volume, the
+ * lower slice stands as the front (@see voxel-sprite.js extrudeFold). Read
+ * off the art itself, never guessed — a fold that misses the line puts a
+ * stripe of drawer on the tabletop. Props without it extrude whole, which is
+ * right for anything with no drawn top (a barrel, a statue, a bookshelf seen
+ * face-on).
  */
 export const PROP_VOL = /** @type {Record<string, Volume>} */ ({
   // ── Desks, benches, counters ──────────────────────────────────────────────
-  teacherDesk:  { form: 'stand', h: 0.50 * PLAYER_H, d: 0.30 },
+  teacherDesk:  { form: 'stand', h: 0.50 * PLAYER_H, d: 0.30, fold: 0.45 },
   gmDesk:       { form: 'stand', h: 0.75 * PLAYER_H, d: 0.38 },   // a raised bench-desk, not a table
-  classDesk:    { form: 'stand', h: 0.50 * PLAYER_H, d: 0.30 },
+  classDesk:    { form: 'stand', h: 0.50 * PLAYER_H, d: 0.30, fold: 0.55 },
   lectern:      { form: 'stand', h: 0.75 * PLAYER_H, d: 0.35 },
-  potionCounter:{ form: 'stand', h: 0.50 * PLAYER_H, d: 0.30 },
+  potionCounter:{ form: 'stand', h: 0.50 * PLAYER_H, d: 0.30, fold: 0.30 },
   abacus:       { form: 'stand', h: 0.25 * PLAYER_H, d: 0.14 },
   gmLedgers:    { form: 'stand', h: 0.125 * PLAYER_H, d: 0.16 },
   breadPile:    { form: 'stand', h: 0.125 * PLAYER_H, d: 0.22 },
@@ -147,13 +158,13 @@ export const PROP_VOL = /** @type {Record<string, Volume>} */ ({
   jarCabinet:   { form: 'stand', h: 1.00 * PLAYER_H, d: 0.30 },
   gearCubbies:  { form: 'stand', h: 1.00 * PLAYER_H, d: 0.28 },
   wardrobe:     { form: 'stand', h: 1.00 * PLAYER_H, d: 0.30 },
-  footlocker:   { form: 'stand', h: 0.25 * PLAYER_H, d: 0.24 },
+  footlocker:   { form: 'stand', h: 0.25 * PLAYER_H, d: 0.24, fold: 0.28 },
   gmThrone:     { form: 'stand', h: 0.75 * PLAYER_H, d: 0.30 },
 
   // ── Fire and iron ─────────────────────────────────────────────────────────
   forgeFurnace: { form: 'stand', h: 1.25 * PLAYER_H, d: 0.55 },
   stoneOven:    { form: 'stand', h: 1.00 * PLAYER_H, d: 0.42 },
-  kitchenStove: { form: 'stand', h: 1.00 * PLAYER_H, d: 0.40 },
+  kitchenStove: { form: 'stand', h: 1.00 * PLAYER_H, d: 0.40, fold: 0.20 },
   anvilBare:    { form: 'stand', h: 0.50 * PLAYER_H, d: 0.28 },
 
   // ── Beds: drawn in plan, so they lie down ─────────────────────────────────
