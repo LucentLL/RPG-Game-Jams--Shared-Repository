@@ -1891,7 +1891,21 @@ function movePlayer(dt) {
       * (inWater(p.x, p.y) ? WADE_SPEED : 1);
     tryMove(p, ux * speed * dt, uy * speed * dt);
     p.actor.facing = Math.atan2(ux, -uy);
-    if (!p.moving) { D.gfx.setAnim(p.actor, 'move'); p.moving = true; }
+    /**
+     * WADING WEARS THE CLIMB. The sheet has no swim cells, but it has a real
+     * CLIMB cycle (sprite-tables ELEMENTS_ANIMS.climb, cols 20/21/20/19) — a
+     * body hauling itself along with its arms — and that is much closer to
+     * pushing through water than the walk cycle is. Reusing an authored pose
+     * is not the same as faking one: no transform invents a frame here, the
+     * sheet is simply asked for the cells it already draws.
+     *
+     * Compared by NAME rather than latched on a boolean, because the swap now
+     * happens mid-stride — you walk into the creek without stopping, and a
+     * `moving` flag that was already true would never fire the change.
+     */
+    const desired = inWater(p.x, p.y) ? 'climb' : 'move';
+    if (p.actor.anim.name !== desired) D.gfx.setAnim(p.actor, desired);
+    p.moving = true;
   } else if (p.moving) {
     D.gfx.setAnim(p.actor, 'idle'); p.moving = false;
   }
@@ -1964,10 +1978,15 @@ function moveCompanions(dt) {
     const dx = c.tx - c.x, dy = c.ty - c.y;
     const d = Math.hypot(dx, dy);
     if (d < 0.12) { c.mode = 'idle'; c.t = 1.5 + Math.random() * 4; continue; }
-    const step = Math.min(d, 1.15 * dt);
+    // Water costs a creature the same as it costs the walker — a ford nothing
+    // else has to slow for is scenery, not terrain (ONE RULES FACT).
+    const wading = inWater(c.x, c.y);
+    const step = Math.min(d, 1.15 * dt * (wading ? WADE_SPEED : 1));
     if (!tryMove(c, dx / d * step, dy / d * step)) { c.mode = 'idle'; c.t = 1 + Math.random() * 2; continue; }
     c.actor.facing = Math.atan2(dx / d, -dy / d);
-    if (!c.moving) { D.gfx.setAnim(c.actor, 'move'); c.moving = true; }
+    const want = wading ? 'climb' : 'move';
+    if (c.actor.anim.name !== want) D.gfx.setAnim(c.actor, want);
+    c.moving = true;
   }
 }
 
@@ -2374,6 +2393,18 @@ function place(el, e) {
   if (dk != null && e.lv != null && e.lv >= dk) z = 10 + (Math.floor(y) + 1) * TILE + 10;
   el.style.zIndex = z;
   el.style.setProperty('--dvlift', liftFor(e).toFixed(1) + 'px');
+  /**
+   * IN the water, not on it. A standee sorts above the water quad — it has to,
+   * or a walker crossing a ford would disappear under it — so the only honest
+   * way to sink a body is to stop drawing the part that is under the surface.
+   * That is occlusion, which is what water actually does to legs; nothing here
+   * moves or invents a pixel.
+   *
+   * Guarded on the value like every other write in this loop: standing still
+   * in a creek must not re-write a class sixty times a second.
+   */
+  const wet = !!(D.wet && D.wet.size && inWater(x, y));
+  if (wet !== e._wet) { e._wet = wet; el.classList.toggle('dv-wading', wet); }
 }
 
 /**

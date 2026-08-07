@@ -1815,6 +1815,34 @@ function standDecor(el, x, y, rest, sway) {
  * bend by the same angle rather than by the same distance.
  */
 const WIND = [0.86, 0.51];
+
+/** Is this spot under water? Floors, not fractions — the chart is per cell. */
+const wetAt = (x, y) => !!(F.wet && F.wet.has(Math.floor(x) + ',' + Math.floor(y)));
+/** How much of a body stays ABOVE the surface — the same 0.72 the top-down
+ *  clips to (delve.css .dv-wading), so a walker steps between the two lenses
+ *  without changing depth. */
+const WADE_KEEP = 0.72;
+/** The empty band the compositor leaves under the member's soles, as a
+ *  fraction of the cell — the same 0.3125 the anchor offset above uses. */
+const SELF_FOOT = 0.3125;
+/**
+ * SINK A SPRITE TO THE WATERLINE.
+ *
+ * A billboard stands ON its anchor, so cropping the bottom of the texture and
+ * shortening the quad by the same factor leaves the CUT LINE exactly at the
+ * anchor — which, for a body in water, is the surface. Nothing is moved or
+ * invented: the submerged pixels are simply not drawn, which is what water
+ * does to legs. `foot` discounts any transparent footroom the sheet leaves,
+ * so the line lands at the same height up the leg whatever is standing there.
+ */
+function submerge(s, foot) {
+  const keep = (1 - foot) * WADE_KEEP;
+  const u = s.uv || [0, 0, 1, 1];
+  s.uv = [u[0], u[1], u[2], u[1] + (u[3] - u[1]) * keep];
+  s.h *= keep;
+  return s;
+}
+
 function swayOf(rec, h, t) {
   if (!rec.sway) return null;
   const ph = rec.x * 0.7 + rec.y * 1.3;
@@ -1832,11 +1860,18 @@ function swayOf(rec, h, t) {
  * filter change re-rasterises the layer, and paying that per sprite per frame
  * for a difference nobody can see is most of what a fog costs.
  */
-function place(b, x, y, lift) {
+function place(b, x, y, lift, wades) {
   const fog = Math.min(1, fogAt(x, y) / L.sprite);
   const hidden = fog >= 0.995;
   if (hidden !== b._hidden) { b.el.style.display = (b._hidden = hidden) ? 'none' : ''; }
   if (hidden) return;
+  // The composited path's half of the waterline (the rasteriser crops the quad
+  // instead — @see submerge). Opt-in per caller rather than derived from the
+  // cell, because an arrow flying over a creek is not wading in it.
+  if (wades) {
+    const wet = wetAt(x, y);
+    if (wet !== b._wet) { b._wet = wet; b.el.classList.toggle('fp-wading', wet); }
+  }
   const tf = `translate3d(${(x * T).toFixed(1)}px,${(+lift).toFixed(1)}px,${(y * T).toFixed(1)}px)`
     + ` rotateY(${(-F.yaw * 180 / Math.PI).toFixed(1)}deg)`
     + (b.death ? ` rotateZ(${(b.death * -74).toFixed(1)}deg) scale(${(1 - b.death * 0.34).toFixed(3)},${(1 - b.death * 0.66).toFixed(3)})` : '');
@@ -4209,20 +4244,30 @@ function render() {
       if (c._hidden || !c.el || c.el.style.display === 'none') continue;
       const w = parseFloat(c.el.style.width), h = parseFloat(c.el.style.height);
       if (!(w > 0) || !(h > 0)) continue;
-      sprites.push({
+      const s = {
         src: c.cv, uv: null, w, h,
         x: c.x * T, y: -(c.lv != null ? c.lv : heightAt(Math.floor(c.x), Math.floor(c.y))) * STEP_PX, z: c.y * T, alpha: 1,
-      });
+      };
+      // Creature billboards are cropped to the art's own tight box (@see
+      // frameBox), so there is no empty footroom band to discount.
+      if (wetAt(c.x, c.y)) submerge(s, 0);
+      sprites.push(s);
     }
     if (F.self && F.pov === 3) {
       const sh = parseFloat(F.self.el.style.height) || 0;
       // The compositor cell keeps ~31% of itself empty under the feet; a
       // buffer sprite stands ON its anchor, so the anchor drops by that band
       // or the member floats their own footroom above the floor.
-      if (sh > 0) sprites.push({
-        src: F.self.cv, uv: null, w: sh, h: sh,
-        x: F.px * T, y: -lev * STEP_PX + sh * 0.3125, z: F.py * T, alpha: 1,
-      });
+      if (sh > 0) {
+        const s = {
+          src: F.self.cv, uv: null, w: sh, h: sh,
+          x: F.px * T, y: -lev * STEP_PX + sh * 0.3125, z: F.py * T, alpha: 1,
+        };
+        // In water the FOOTROOM offset goes: the feet are under the surface,
+        // so the anchor is the waterline itself rather than the soles.
+        if (wetAt(F.px, F.py)) { s.y = -lev * STEP_PX; submerge(s, SELF_FOOT); }
+        sprites.push(s);
+      }
     }
     F.gl.setSprites(sprites);
     F.gl.draw();
@@ -4231,7 +4276,7 @@ function render() {
   // write is guarded by the value it would write: standing still, this loop
   // touches no style at all, which is the difference between a scene that
   // re-rasterises 30 layers a frame and one that does nothing.
-  for (const c of F.creatures) place(c, c.x, c.y, -(c.lv != null ? c.lv : heightAt(Math.floor(c.x), Math.floor(c.y))) * STEP_PX);
+  for (const c of F.creatures) place(c, c.x, c.y, -(c.lv != null ? c.lv : heightAt(Math.floor(c.x), Math.floor(c.y))) * STEP_PX, true);
   for (const d of F.decor) place(d, d.x, d.y, d.lift);
   // The solids do NOT move. They were placed once in world space, standing on
   // their own ground (@see buildProps) — all a frame owes them is the dark.
@@ -4287,6 +4332,11 @@ function render() {
       const tf = `translate3d(${(F.px * T).toFixed(1)}px,${lift.toFixed(1)}px,${(F.py * T).toFixed(1)}px)`
         + ` rotateY(${(-F.yaw * 180 / Math.PI).toFixed(1)}deg)`;
       if (tf !== F.self._tf) F.self.el.style.transform = (F.self._tf = tf);
+      // The composited path's waterline for the member's own back. The buffer
+      // path crops the quad instead (@see submerge) and `.fp-gl-on` hides this
+      // element outright, so only one of the two is ever drawing.
+      const wet = wetAt(F.px, F.py);
+      if (wet !== F.self._wet) { F.self._wet = wet; F.self.el.classList.toggle('fp-wading', wet); }
       /**
        * The pose is CAMERA-relative, like every rotation in this view
        * (tactical-fp's drawActor does the identical subtraction). The chase
@@ -4321,9 +4371,15 @@ function render() {
         // never pose the climb either: they are walked (onClimb is L/v only).
         const climbing = Math.abs((F.lv || 0) - F.lev) > 0.05
           || (onClimb(cellX, cellY) && centred);
+        // Wading wears the climb too — the sheet has no swim cells, but its
+        // climb cycle is a body hauling itself along, which is what crossing
+        // water looks like. Only while actually moving: standing in a creek is
+        // standing, not an endless mime (the same rule the deck already has).
+        const walking = Math.hypot(F.vx, F.vy) > 0.05;
+        const wading = walking && F.wet.has(cellX + ',' + cellY);
         const desired = guarding() ? 'hold'
-          : climbing ? 'climb'
-            : Math.hypot(F.vx, F.vy) > 0.05 ? 'move' : 'idle';
+          : (climbing || wading) ? 'climb'
+            : walking ? 'move' : 'idle';
         if (F.self.actor.anim.name !== desired) F.self.gfx.setAnim(F.self.actor, desired);
       }
       // Tick, THEN draw: the anim frames advance on the compositor's own

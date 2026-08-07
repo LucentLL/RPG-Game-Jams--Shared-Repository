@@ -557,6 +557,49 @@
 }
 @keyframes dvWater { from { background-position-x: 0%; } to { background-position-x: 100%; } }
 
+/* --- Wading --------------------------------------------------------------- */
+/* A body in water is CUT OFF at the surface, because a standee always sorts
+   over the water quad (it must, or crossing a ford would hide you) and the
+   only honest way to sink one is to stop drawing what is beneath the line.
+
+   The cut is measured off the sprite's own FEET, not the canvas: `--footpct`
+   is the transparent band the compositor leaves below the soles (delve.js
+   groundHeroSprite measures it per sheet), so the visible body runs from the
+   canvas top down to `100% - footpct`. Keeping `--wade-keep` of THAT is what
+   puts the waterline at a consistent height up the leg whatever sheet — or
+   whatever creature — is standing in it. A fixed percentage of the canvas
+   would submerge a tall sprite to the knee and a short one to the chest.
+
+   No transition: the line must track the body frame by frame, and easing it
+   would leave the legs visible for a beat after you step in.
+
+   The DEFAULT is the hero sheet's own band, not zero. Every other standee sets
+   `--footpct` explicitly (creatures at spawn, companions once measured), so
+   this fallback only ever reaches a walker whose first composited frame has
+   not landed yet — and for that walker 31.25% is the right number. A 0%
+   default would compute a cut ABOVE the art entirely and submerge nothing,
+   which is a failure that looks exactly like the feature not being there. */
+.dv-wading .dv-up canvas {
+  --wade-keep: 0.72;
+  clip-path: inset(0 0 calc(100% - (100% - var(--footpct, 31.25%)) * var(--wade-keep)) 0);
+}
+/* The shadow belongs to a body standing ON ground. In water there is no
+   ground to cast onto — the ripple is the water's job, not the sprite's. */
+.dv-wading .dv-shadow { opacity: 0; }
+
+/* The composited first-person path's copy of the waterline. The rasteriser
+   crops the quad's UV instead (delve-fp.js submerge), so only one is ever
+   live; `.fp-gl-on` hides these elements entirely when the canvas is up.
+
+   A creature's billboard is cropped to its art's own tight box (frameBox), so
+   28% of the canvas IS 28% of the body. */
+.fp-wading canvas { clip-path: inset(0 0 28% 0); }
+/* The member's own standee is the exception: it keeps the compositor's ~31%
+   empty band under the soles (the same 0.3125 the buffer path discounts as
+   SELF_FOOT), so the same 28% of BODY is a deeper cut into the canvas —
+   100% − (100% − 31.25%) × 0.72. */
+.fp-self.fp-wading canvas { clip-path: inset(0 0 50.5% 0); }
+
 /* --- The wind ------------------------------------------------------------ */
 /* Foliage stirs (art.js SWAY says which art). This is the COMPOSITED path's
    copy of it; the rasteriser shears the same crown in its vertex buffer and
