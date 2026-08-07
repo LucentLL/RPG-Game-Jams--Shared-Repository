@@ -135,6 +135,37 @@ const FLOOR_DESC = {
 };
 
 /**
+ * THE DISTINCT FLOORS, once each.
+ *
+ * A theme is a ROOM — a floor, a wall palette, a light — and the Surfaces tab
+ * only ever borrows the floor. Listing one chip per theme therefore listed the
+ * same picture more than once under different room names (guildhall and
+ * classroom lay identical slabs; so do kitchen and arena), and named all of
+ * them after rooms the palette does not build. An author looking for a stone
+ * floor had to know which room happens to own the stone they want.
+ *
+ * So: group by what the ground ACTUALLY is — the sheet, its tile size, and the
+ * fill cells — and keep the first theme in each group as the id the chart will
+ * store. The chip then leads with the texture's own name and mentions the
+ * theme only as the id it exports under.
+ *
+ * (Two FLOOR_DESC entries lie as a result of this: 'tan flagstone' and 'raked
+ * sand' name tiles that are byte-identical to 'limestone slabs' and 'scrubbed
+ * limestone'. Deduping here hides the symptom; the descriptions are a chart
+ * question and are left alone.)
+ */
+const SURFACES = (() => {
+  const seen = new Map();
+  for (const id of Object.keys(THEMES)) {
+    const t = THEMES[id];
+    const sig = `${t.sheet || 'cliffs'}|${t.src || 48}|${JSON.stringify(t.fill)}`;
+    if (seen.has(sig)) { seen.get(sig).also.push(id); continue; }
+    seen.set(sig, { id, name: FLOOR_DESC[id] || id + ' floor', also: [] });
+  }
+  return [...seen.values()];
+})();
+
+/**
  * THE SIZE LAW, applied at placement: the chart width every lens will draw,
  * derived from the ladder height exactly as dev/check-volumes.mjs verifies it.
  */
@@ -227,7 +258,7 @@ export function openMapEditor(ctx) {
       sel: { kind: 'tile', id: '.' }, prey: Object.keys(PREY)[0],
       tab: 'tiles', tool: 'paint', zoom: 1.4, panX: 0, panY: 0,
       undo: [], sheets: {}, painting: false, hover: null, paintStart: null,
-      view: 'plan', rot: 0, mods: {}, rectStart: null, rectMode: null,
+      view: 'plan', rot: 0, mods: {}, rectStart: null, rectMode: null, pending: null,
     };
   }
   buildDom(host);
@@ -445,12 +476,20 @@ function renderSide() {
   const pal = host.querySelector('.med-palette');
 
   if (E.tab === 'tiles') {
+    // GROUPED, because this palette holds three different KINDS of thing and
+    // used to run them together as one undifferentiated column: two sculpting
+    // verbs, one overlay, then thirty tiles. Water in particular was
+    // unfindable — sitting third in a flat list it read as another ground
+    // verb, and an author looking for it went to Surfaces (where it is not,
+    // because it is not a floor) and gave up. A heading costs one line.
+    const group = (t) => `<div class="med-group">${t}</div>`;
     pal.innerHTML = `<div class="med-hint">Click a tile, then paint. <b>Right-click</b> picks up whatever is
         under the cursor, <b>Shift+click</b> erases, <b>X+drag</b> draws a room and <b>V+drag</b> fills a
         rectangle. Keys 1-5 change tab, Q/E turn the 3D view, G toggles it, F fits.</div>`
       // The vertical VERBS, ahead of the tiles: sculpt the ground a step at a
       // time (pit , → floor . → ledge ^ → terraces 2 → 3) instead of hunting
       // the height chars — the answer to "how do I add vertically."
+      + group('Sculpt the ground')
       + `<button class="med-chip ${E.sel.kind === 'vert' && E.sel.dir === 1 ? 'on' : ''}" data-vert="1">
           <span class="med-swatch" style="background:#3c4457">▲</span>Raise ground
           <span class="med-ch">+1</span></button>
@@ -461,10 +500,13 @@ function renderSide() {
       // you author it, and the Tiles tab is where painting lives. It flows OVER
       // whatever the cell already is (a wet ',' is a creek you wade AND climb
       // out of), so it can never overwrite a floor the way a tile would.
-      // Right-click / eraser dries a cell.
-      + `<button class="med-chip ${E.sel.kind === 'water' ? 'on' : ''}" data-water="1">
-          <span class="med-swatch" style="background:${WATER_TINT}">≈</span>Water (wade)
-          <span class="med-ch">over</span></button>`
+      // Shift+click (or the Eraser) dries a cell.
+      + group('Water — lies OVER any floor')
+      + `<button class="med-chip med-wet ${E.sel.kind === 'water' ? 'on' : ''}" data-water="1"
+          title="Paint water onto any walkable cell. It keeps the cell's own height, so a flooded creek bed is still a bed you climb out of. Shift+click to dry.">
+          <span class="med-swatch" style="background:${WATER_TINT}">≈</span>Water (wade across)
+          <span class="med-ch">drag</span></button>`
+      + group('Tiles')
       + TILES.map((t) => `
         <button class="med-chip ${E.sel.kind === 'tile' && E.sel.id === t.ch ? 'on' : ''}" data-tile="${t.ch}">
           <span class="med-swatch" style="background:${t.color}">${t.glyph}</span>${t.name}
@@ -518,12 +560,13 @@ function renderSide() {
     // region is a room with walls and a ceiling, and the drafting table does
     // not author rooms. This tab only re-skins ground the grid already has.
     pal.innerHTML = `<div class="med-hint">FLOOR TEXTURE, nothing more: drag a rectangle to re-tile the ground
-        there (grass, stone, planks…). It does NOT make the area a forge or change any rule —
-        the names below are just which room's floor tiles get borrowed.</div>`
-      + Object.keys(THEMES).map((t) => `
-        <button class="med-chip ${E.sel.kind === 'paint' && E.sel.id === t ? 'on' : ''}" data-paint="${t}">
-          <span class="med-swatch" style="background:${themeTint(t)}"></span>${t}
-          <span class="med-ch">${FLOOR_DESC[t] || 'floor tiles'}</span>
+        there. It does NOT make the area a forge or change any rule. Each floor is listed once, by
+        what it looks like — <b>water is not here</b>, it lies on TOP of a floor: find it in Tiles.</div>`
+      + SURFACES.map((s) => `
+        <button class="med-chip ${E.sel.kind === 'paint' && E.sel.id === s.id ? 'on' : ''}" data-paint="${s.id}"
+          title="${s.also.length ? `exports as '${s.id}' — ${s.also.join(', ')} lay the same tiles` : `exports as '${s.id}'`}">
+          <span class="med-swatch" style="background:${themeTint(s.id)}"></span>${s.name}
+          <span class="med-ch">${s.id}</span>
         </button>`).join('')
       + `<button class="med-chip ${E.sel.kind === 'paintErase' ? 'on' : ''}" data-paint-erase="1">
           <span class="med-swatch" style="background:#2b2f38">✕</span>Eraser
@@ -1022,27 +1065,41 @@ function isoOX() {
   return (E.rot % 2 ? E.map.grid[0].length : E.map.grid.length) * CELL * E.zoom;
 }
 
+/**
+ * How long a TOUCH gesture must live before it is allowed to edit anything.
+ *
+ * A pinch lands its second finger 50-80ms after its first. The old code
+ * committed the first finger's edit on pointerdown, so by the time the second
+ * arrived the tile — or worse, the object — was already placed, and every
+ * zoom left litter behind it (playtest 2026-08-07). Deferring costs nothing
+ * anyone can feel: a TAP still commits on release, and a deliberate drag
+ * commits a tenth of a second in, before the finger has crossed a cell.
+ */
+const TOUCH_HOLD = 110;
+
+/** A gesture that turned out to be the camera's. Anything the first finger
+ *  armed is dropped UNAPPLIED — which is the whole reason touch defers. */
+function cancelGesture() {
+  if (!E) return;
+  E.pending = null;
+  E.painting = false; E.paintStart = null;
+  E.rectStart = null; E.rectMode = null;
+  E.pan = null; E.dragRight = false;
+  draw();
+}
+
 function onDown(ev) {
   // TWO FINGERS drive the camera on touch — drag pans, pinch zooms at the
   // midpoint. Phones have no middle button, and without this the camera was
   // parked over one corner of the map forever (the second phone playtest).
   E.pts = E.pts || new Map();
   E.pts.set(ev.pointerId, { x: ev.clientX, y: ev.clientY });
-  if (E.pts.size === 2) {
-    E.painting = false; E.paintStart = null; E.pan = null;
-    return;
-  }
+  // `>= 2`, not `=== 2`: a third finger used to fall straight through this
+  // guard and paint.
+  if (E.pts.size >= 2) { cancelGesture(); return; }
   if (ev.button === 1) { E.pan = { x: ev.clientX - E.panX, y: ev.clientY - E.panY }; return; }
   const c = cellAt(ev);
   if (c.y < 0 || c.y >= E.map.grid.length || c.x < 0 || c.x >= E.map.grid[0].length) return;
-  // The Surfaces tab drags RECTANGLES, not cells: arm the corner here and let
-  // onUp commit — one gesture, one undo step. Right-click stays out of the
-  // grid entirely while it is armed; the floor shortcut is the tile tools'.
-  if (E.sel.kind === 'paint') {
-    if (ev.button === 0) { E.paintStart = { x: c.x, y: c.y }; draw(); }
-    return;
-  }
-  if (E.sel.kind === 'paintErase' && ev.button === 2) return;
   /**
    * RIGHT-CLICK IS THE EYEDROPPER now, not a floor shortcut.
    *
@@ -1054,7 +1111,22 @@ function onDown(ev) {
    * already meant "the destructive version" everywhere else.
    */
   if (ev.button === 2) { pick(c); draw(); return; }
-  if (ev.shiftKey) {
+  // A FINGER PROVES ITSELF FIRST. A mouse cannot grow a second cursor, so it
+  // edits immediately and nothing about the desktop feel changes.
+  if (ev.pointerType === 'touch') {
+    E.pending = { c, shift: ev.shiftKey, t: performance.now() };
+    return;
+  }
+  beginEdit(c, ev.shiftKey);
+}
+
+/** Start whatever the armed tool does at this cell. Split out of onDown so a
+ *  deferred touch can run the identical path a moment later. */
+function beginEdit(c, shift) {
+  // The Surfaces tab drags RECTANGLES, not cells: arm the corner here and let
+  // onUp commit — one gesture, one undo step.
+  if (E.sel.kind === 'paint') { E.paintStart = { x: c.x, y: c.y }; draw(); return; }
+  if (shift) {
     snap();
     E.painting = true; E.dragRight = true;
     apply(c, true);
@@ -1097,6 +1169,14 @@ function onMove(ev) {
   const c = cellAt(ev);
   const changed = !E.hover || E.hover.x !== c.x || E.hover.y !== c.y;
   E.hover = c;
+  // The deferred touch edit lands here, once the gesture has stayed one finger
+  // long enough to prove it is not a pinch. It starts at the cell the finger
+  // went DOWN on, not this one, so a stroke begins where you touched.
+  if (E.pending && performance.now() - E.pending.t > TOUCH_HOLD) {
+    const p = E.pending;
+    E.pending = null;
+    beginEdit(p.c, p.shift);
+  }
   // Tiles and water both DRAG — they are the two brushes. Erasing drags too:
   // drying a creek one click at a time is nobody's idea.
   if (E.painting && (E.sel.kind === 'tile' || E.sel.kind === 'water')) { apply(c, E.dragRight); draw(); }
@@ -1105,6 +1185,14 @@ function onMove(ev) {
 function onUp(ev) {
   if (!E) return;
   if (ev && E.pts) E.pts.delete(ev.pointerId);
+  // A TAP. The finger lifted alone and never stayed long enough to commit on
+  // the move — so it was an edit after all, and it runs now. (A pinch never
+  // reaches this: its second finger cleared `pending` on the way down.)
+  if (E.pending) {
+    const p = E.pending;
+    E.pending = null;
+    beginEdit(p.c, p.shift);
+  }
   // The armed Surfaces rect commits on release: snap() THEN push, so the
   // whole drag is one undo step.
   if (E.paintStart) {

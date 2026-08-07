@@ -60,6 +60,19 @@
 /* The lint badge. Quiet when the chart is clean, and never RED — everything
    lint knows is advice (only two faults actually stop a walk), so it warns in
    the same amber the rest of the editor uses to mean "look at this". */
+/* Palette section headings. The Tiles column holds three different KINDS of
+   thing — sculpting verbs, the water overlay, the tiles themselves — and run
+   together they read as one long list in which the overlay is invisible. */
+.med-group {
+  padding: 10px 10px 4px; font-size: 11px; letter-spacing: .06em;
+  text-transform: uppercase; color: #7f8aa3;
+  border-top: 1px solid #262b38; margin-top: 6px;
+}
+.med-group:first-of-type { border-top: 0; margin-top: 0; }
+/* Water earns a tint of its own so the eye finds it in a column of grey. */
+.med-wet { border-color: #2f4a63; }
+.med-wet.on { background: #1d3346; border-color: #4d7ea8; }
+
 .med-lint { min-width: 34px; text-align: center; opacity: 0.45; }
 .med-lint.on { opacity: 1; background: #3d3423; border-color: #6b5a33; color: #ffd76b; }
 
