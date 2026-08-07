@@ -69,6 +69,16 @@
   border-top: 1px solid #262b38; margin-top: 6px;
 }
 .med-group:first-of-type { border-top: 0; margin-top: 0; }
+/* The Objects filter. Sticky, so it stays reachable while you scroll a group
+   open — the point of a search is that you never have to leave it. */
+.med-search {
+  position: sticky; top: 0; z-index: 2;
+  display: block; width: calc(100% - 20px); margin: 6px 10px 2px;
+  background: #0d1017; color: inherit; border: 1px solid #323a4e;
+  border-radius: 6px; padding: 6px 8px; font: inherit; font-size: 13px;
+}
+.med-search:focus { outline: none; border-color: #4d7ea8; }
+
 /* Water earns a tint of its own so the eye finds it in a column of grey. */
 .med-wet { border-color: #2f4a63; }
 .med-wet.on { background: #1d3346; border-color: #4d7ea8; }

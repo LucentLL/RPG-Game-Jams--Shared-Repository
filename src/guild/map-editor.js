@@ -182,6 +182,48 @@ const PROPS = Object.keys(PROP_VOL).filter((n) => ART[n]).map((n) => ({
   rung: (PROP_VOL[n].h / PLAYER_H).toFixed(2).replace(/\.?0+$/, ''),
 }));
 
+/**
+ * THE OBJECTS PALETTE, grouped by what a thing is FOR.
+ *
+ * Forty-three chips in one column is a list you scroll rather than a palette
+ * you pick from, and the id is the only label — so finding the barrel you
+ * wanted meant reading every name. Grouping is by PURPOSE and not by the
+ * `form` field (stand / lie / wall), because form is a placement rule and
+ * nobody browses furniture by whether it hangs.
+ *
+ * Hand-authored, so it will drift as props are added — which is exactly why
+ * `propGroups()` sweeps the leftovers into a real group at the end instead of
+ * trusting this list to stay complete. A new prop shows up unfiled; it never
+ * disappears.
+ */
+const PROP_GROUPS = [
+  ['Desks & tables', ['teacherDesk', 'gmDesk', 'classDesk', 'lectern', 'potionCounter']],
+  ['Seating & beds', ['gmThrone', 'bed', 'bunkIron', 'bunkPosted']],
+  ['Storage', ['gmBookshelf', 'jarCabinet', 'gearCubbies', 'wardrobe', 'footlocker',
+    'provisionBarrel', 'quenchBarrel', 'storeBarrel']],
+  ['Workstations', ['forgeFurnace', 'stoneOven', 'kitchenStove', 'anvilBare', 'cauldronBoil']],
+  ['Tabletop & dressing', ['abacus', 'gmLedgers', 'breadPile', 'herbBasket', 'potionGreen',
+    'bedCandle', 'globe', 'gmBust']],
+  ['Wall-hung', ['gmPortrait', 'lessonBoard', 'recipeBanner', 'gmBanner', 'hangingHerbs', 'tools']],
+  ['Training & display', ['armorKnight', 'armorSteel', 'trainDummy', 'statue']],
+  ['Outdoors', ['well', 'stall', 'lampPost']],
+];
+
+/** The groups as they will actually render: known ids in authored order, then
+ *  whatever PROP_GROUPS forgot. Computed once — PROPS never changes. */
+const propGroups = (() => {
+  const byId = new Map(PROPS.map((p) => [p.id, p]));
+  const filed = new Set();
+  const out = [];
+  for (const [name, ids] of PROP_GROUPS) {
+    const items = ids.filter((id) => byId.has(id)).map((id) => { filed.add(id); return byId.get(id); });
+    if (items.length) out.push({ name, items });
+  }
+  const rest = PROPS.filter((p) => !filed.has(p.id));
+  if (rest.length) out.push({ name: 'Unfiled', items: rest });
+  return out;
+})();
+
 const FLAGS = [
   { id: 'entry', name: 'Entry point', hint: 'Where the walker arrives. One per map.' },
   { id: 'spawn', name: 'Creature spawn', hint: 'Pick a creature, then click a floor cell.' },
@@ -468,6 +510,36 @@ function toast(msg) {
   if (el) { el.textContent = msg; el.classList.add('on'); setTimeout(() => el.classList.remove('on'), 2500); }
 }
 
+/**
+ * The Objects chips, grouped and filtered. Split out of renderSide because the
+ * search box has to survive its own keystrokes.
+ *
+ * A query matches the id OR the group's name, so "barrel" finds the three
+ * barrels wherever they are filed and "wall" brings up everything that hangs.
+ * With a query the headings stay: knowing a match came from Storage rather
+ * than Outdoors is most of what makes a result readable.
+ */
+function renderProps() {
+  const host = document.getElementById('editorScreen');
+  const box = host && host.querySelector('.med-proplist');
+  if (!box) return;
+  const q = (E.propQ || '').trim().toLowerCase();
+  let shown = 0;
+  const html = propGroups.map((g) => {
+    const hit = q && g.name.toLowerCase().includes(q);
+    const items = q && !hit ? g.items.filter((p) => p.id.toLowerCase().includes(q)) : g.items;
+    if (!items.length) return '';
+    shown += items.length;
+    return `<div class="med-group">${g.name}</div>` + items.map((p) => `
+      <button class="med-chip med-prop ${E.sel.kind === 'prop' && E.sel.id === p.id ? 'on' : ''}" data-prop="${p.id}"
+        title="${p.id} — ${p.rung}× the player's height, ${p.form === 'wall' ? 'hangs on a wall' : p.form === 'lie' ? 'lies flat' : 'stands on the floor'}">
+        <span class="med-thumb">${artSprite(p.id, '', 'width:100%')}</span>
+        ${p.id}<span class="med-ch">${p.rung}×</span>
+      </button>`).join('');
+  }).join('');
+  box.innerHTML = html || `<div class="med-hint">Nothing matches “${esc(q)}”.</div>`;
+}
+
 function renderSide() {
   const host = document.getElementById('editorScreen');
   if (!host) return;
@@ -529,15 +601,21 @@ function renderSide() {
   } else if (E.tab === 'props') {
     pal.innerHTML = `<div class="med-hint">Click an object, then click WHERE it stands — quarter-tile precision,
         and a small piece dropped on a bigger one rests on top of it. Size follows the ladder
-        automatically (×player rung shown). Eraser removes it.</div>`
-      + PROPS.map((p) => `
-        <button class="med-chip med-prop ${E.sel.kind === 'prop' && E.sel.id === p.id ? 'on' : ''}" data-prop="${p.id}">
-          <span class="med-thumb">${artSprite(p.id, '', 'width:100%')}</span>
-          ${p.id}<span class="med-ch">${p.rung}×</span>
-        </button>`).join('');
+        automatically (×player rung shown). Shift+click the map removes it.</div>
+      <input class="med-search" type="search" placeholder="Search objects…" value="${esc(E.propQ || '')}">
+      <div class="med-proplist"></div>`;
+    renderProps();
+    // The list redraws ALONE on every keystroke. A full renderSide() would
+    // rebuild the input too and take the caret with it — you would get one
+    // letter per click into the box.
+    const box = pal.querySelector('.med-search');
+    box.oninput = (e) => { E.propQ = e.target.value; renderProps(); };
     pal.onclick = (e) => {
       const b = e.target.closest('[data-prop]');
-      if (b) { E.sel = { kind: 'prop', id: b.dataset.prop }; renderSide(); }
+      if (!b) return;
+      E.sel = { kind: 'prop', id: b.dataset.prop };
+      // Repaint the chips in place, for the same caret reason.
+      renderProps();
     };
   } else if (E.tab === 'flags') {
     pal.innerHTML = `<div class="med-hint">Entry, creatures and portals. Click the map to place the armed flag.</div>`
