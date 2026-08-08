@@ -225,35 +225,74 @@ export function cloudsPanel() {
  *  ring whose far end nobody can see and every phone had to allocate. */
 const APRON_T = 3, RING_H = 2400 * K;
 /**
+ * Is this a device that will run out of texture and layer memory?
+ *
+ * NOT just `(pointer: coarse)`. That is the test the rest of the engine uses
+ * and it is the right question for INPUT — is the primary pointer a finger —
+ * but it is the wrong one for GPU budget, and it answers false on real phones:
+ * a device with a stylus, a connected mouse, or a browser that reports a hybrid
+ * pointer says "fine" and then falls over exactly like every other phone. A
+ * playtest reported no improvement at all from a coarse-gated fix, which is
+ * what that looks like from the outside.
+ *
+ * So: coarse pointer, OR no hover, OR real touch points, OR a small screen in
+ * its long axis. Any one of those is enough — the cost of being wrong is a
+ * slightly plainer picture on a desktop, against a phone that cannot draw the
+ * floor.
+ */
+export const LOW_POWER = (() => {
+  try {
+    const mq = (q) => typeof matchMedia === 'function' && matchMedia(q).matches;
+    if (mq('(pointer: coarse)') || mq('(hover: none)')) return true;
+    if (typeof navigator !== 'undefined' && (navigator.maxTouchPoints || 0) > 0) return true;
+    // A ZERO IS NOT A SMALL SCREEN. Embedded/headless browsers report screen
+    // 0x0, and `Math.max(0, 0) <= 1024` says "phone" — which turned this true on
+    // a desktop with every other signal false. Only judge a size we actually got.
+    const long = typeof screen !== 'undefined' ? Math.max(screen.width || 0, screen.height || 0) : 0;
+    if (long > 0 && long <= 1024) return true;
+    return false;
+  } catch (e) { return false; }
+})();
+
+/**
  * No layout box may run longer than this many tiles. A slab wider than the
  * GPU's maximum texture is not clipped or downscaled — it is dropped, whole.
  * Whole tiles, so the repeating apron and stands textures never seam.
  *
- * TWO TILES ON A PHONE, and the choice is a squeeze between two failures.
+ * @see LOW_POWER for how a device is judged small.
  *
  * Three was chosen against the AUTHORED size — 3 × T is 900 CSS px, inside any
- * texture limit — but the authored size is not what the compositor allocates:
- * `.tfp-world` carries `scale3d(3,3,3)` outermost (the K-scale), so a 900px
- * panel presents at 2700 CSS px, ~7000 device px at a phone's pixel ratio, past
- * the 4096 mobile GL commonly caps at. Past it a surface is not drawn small; it
- * is not drawn. That is "tiles flicker in and out while moving" — each panel
- * winks as its on-screen size crosses the line.
+ * texture limit — but the authored size is not what the compositor allocates.
+ * `.tfp-world` carries `scale3d(3,3,3)` outermost (the K-scale), and on top of
+ * that a quad NEAR THE CAMERA is magnified by the perspective, so what gets
+ * rasterised is its ON-SCREEN size. Past the ~4096 px mobile GL commonly caps
+ * at, a surface is not drawn small — it is not drawn.
  *
- * The obvious answer is one tile, and it is wrong. Cutting to 1 triples every
- * strip and takes the arena from ~90 quads to ~250, and dev/check-drawdist.mjs
- * records a phone capture that lost whole surfaces — the HUD among them — at a
- * censused ~227. That is trading a slab failure for a measured layer failure.
+ * WHICH IS WHY IT IS THE GROUND THAT GOES. A playtest screenshot showed the
+ * colosseum tiers drawn perfectly and the field under the player's feet simply
+ * black: the stands are far away and rasterise small, while the panel you are
+ * standing on is the most magnified surface in the scene. Cutting SEG_T alone
+ * was the wrong lever — it shrinks the distant walls, which were never the
+ * problem, and pays for it in layers everywhere.
  *
- * Two halves the slab (2700 → 1800 CSS px, 44% of the area) and lands the
- * arena around 110-170 quads, clear of both walls. It is a squeeze rather than
- * a cure: at dpr 3 an 1800px panel is still 5400 device px. The cure is the
- * GL rasteriser, which has no texture-per-quad problem at all (gl-world.js took
- * the delve from 1182 layers to 11) and does not yet read the arena's geometry.
- * dev/rasterscale.html is the purpose-built, still-unrun probe that would say
- * exactly where the line is instead of inferring it. @see HANDOFF-RENDERER.md.
+ * So the walls keep 3 and the GROUND gets its own, finer number. @see SEG_GROUND.
  */
-const COARSE = typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches;
-export const SEG_T = COARSE ? 2 : 3;
+export const SEG_T = 3;
+/**
+ * The ground is the one surface you are always standing on, so it is always the
+ * most magnified — and on a phone it is the one that vanishes. One tile a panel
+ * there costs 72 extra quads (9 → 81) and takes the arena to about 130, still
+ * clear of the ~227 at which dev/check-drawdist.mjs recorded a phone losing
+ * whole surfaces, the HUD among them.
+ *
+ * This is a squeeze rather than a cure — perspective magnification near the eye
+ * has no bound, so a small enough panel is not guaranteed by any constant. The
+ * cure is the GL rasteriser, which has no per-quad texture problem at all
+ * (gl-world.js took the delve from 1182 layers to 11) and does not yet read the
+ * arena's geometry. dev/rasterscale.html is the purpose-built, still-unrun
+ * probe that would say where the line actually is. @see HANDOFF-RENDERER.md.
+ */
+export const SEG_GROUND = LOW_POWER ? 1 : 3;
 
 // ---------------------------------------------------------------------------
 // Geometry — rebuilt only when the BOARD changes, never per frame

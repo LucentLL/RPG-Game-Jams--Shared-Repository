@@ -42,7 +42,7 @@
  * shoulder camera CLAMPS at impassable rock, because a boulder standing
  * between the eye and your own fighter reads as standing on a wall.
  */
-import { facePanel, apronPanel, standsPanel, cloudsPanel, WALL_DIM, SEG_T } from './tactical-fp.js';
+import { facePanel, apronPanel, standsPanel, cloudsPanel, WALL_DIM, SEG_T, SEG_GROUND, LOW_POWER } from './tactical-fp.js';
 import { createFpHands, fighterHandsSpec } from './fp-hands.js';
 import { createLook, touchPrimary } from '../platform/input.js';
 import { ladderArt } from './arena-terrain.js';
@@ -221,7 +221,9 @@ function buildBoard() {
   // stripped — see tactical-fp.js's field(). Same reason: 9 tiles square is
   // past a phone's texture ceiling on the one quad you stand on.
   const ground = groundURI() || facePanel('afpFieldFallback', '#3f5a2e', '#27381c');
-  const gn = Math.max(1, Math.ceil(Math.max(span, rows * T) / (SEG_T * T)));
+  // SEG_GROUND, not SEG_T: the field under your feet is the most magnified
+  // surface in the scene and the one a phone drops. @see tactical-fp.js.
+  const gn = Math.max(1, Math.ceil(Math.max(span, rows * T) / (SEG_GROUND * T)));
   const gw = span / gn, gh = (rows * T) / gn, gp = 100 / (gn - 1 || 1);
   for (let r = 0; r < gn; r++) {
     for (let c = 0; c < gn; c++) {
@@ -808,9 +810,7 @@ export function actFpToggle(kind, bridge) {
     //
     // Keyed to the DEVICE, not the session, and never removed — the same rule
     // the delve settled on.
-    if (typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches) {
-      document.body.classList.add('fp-lite');
-    }
+    if (LOW_POWER) document.body.classList.add('fp-lite');
     // The mouse becomes the head. Taken on the host (which fills the stage),
     // never on the HUD around it, and never on a touch device — where the
     // stick IS the control and a pointer lock is a cursor thrown away.
