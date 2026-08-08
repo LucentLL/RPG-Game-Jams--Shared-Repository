@@ -1,0 +1,71 @@
+/* ═══ THE FIELD SHEET (src/platform/field-sheet.js) ═══════════════════════════
+   What you are, what you are carrying, and how the game is set up — over the
+   world, from inside it. One panel for the delve, the estate crawl and the
+   arena; the lens describes itself and this draws it.
+
+   Sized for a THUMB and a phone first: this is the one panel in the game that
+   is only ever opened while standing in a 3D view, which on this project means
+   a phone in one hand. */
+.fs-veil{position:fixed;inset:0;z-index:120;display:flex;align-items:center;justify-content:center;
+  padding:16px;background:rgba(6,7,11,0.66);
+  /* NO backdrop-filter. Behind this is a 3D scene that moves, and blurring it
+     is the dearest thing that can be asked of a phone here — the same rule the
+     arena's HUD lives by. @see action-arena.css. */
+  -webkit-tap-highlight-color:transparent}
+.fs-card{width:min(440px,100%);max-height:min(86dvh,660px);display:flex;flex-direction:column;
+  background:linear-gradient(160deg,rgba(22,19,14,0.98),rgba(11,10,8,0.98));
+  border:2px solid var(--gold);border-radius:14px;box-shadow:0 18px 56px rgba(0,0,0,0.72);
+  padding:12px 12px 10px}
+.fs-head{text-align:center;margin-bottom:8px}
+.fs-head b{display:block;font-family:'Cinzel',serif;font-size:1.05em;letter-spacing:0.12em;color:var(--gold)}
+.fs-head i{display:block;font-style:normal;font-size:0.72em;letter-spacing:0.08em;color:var(--muted);margin-top:2px}
+
+.fs-tabs{display:flex;gap:4px;margin-bottom:8px}
+.fs-tab{flex:1;padding:7px 4px;border-radius:8px;border:1px solid var(--border);background:transparent;
+  font-family:'Cinzel',serif;font-size:0.7em;letter-spacing:0.08em;color:var(--muted);cursor:pointer}
+.fs-tab:not(.on):hover{border-color:#7a6a45;color:#fff}
+.fs-tab.on{border-color:var(--gold);color:var(--gold);background:rgba(212,168,67,0.12)}
+
+/* The one scrolling region. The card itself never scrolls, so the tabs and the
+   Close button stay reachable with a thumb however long the gear list is. */
+.fs-body{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;min-height:0}
+
+.fs-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(128px,1fr));gap:4px 14px;margin-bottom:8px}
+.fs-row{display:flex;justify-content:space-between;align-items:baseline;gap:8px;
+  padding:2px 0;border-bottom:1px solid rgba(255,255,255,0.05)}
+.fs-k{font-size:0.78em;color:var(--muted)}
+.fs-v{font-size:0.85em;font-weight:600;color:#e8e0d0}
+.fs-v .fs-sub{font-style:normal;font-weight:400;font-size:0.82em;color:var(--dim);margin-left:5px}
+
+.fs-chips{display:flex;flex-wrap:wrap;gap:4px;margin-top:6px}
+.fs-chip{padding:2px 9px;border:1px solid var(--border);border-radius:11px;
+  font-size:0.7em;color:#e8e0d0;background:rgba(255,255,255,0.02)}
+
+.fs-gear{display:flex;gap:9px;align-items:center;padding:7px 8px;margin-bottom:5px;
+  background:var(--card);border:1px solid var(--border);border-radius:9px}
+.fs-gear.empty{opacity:0.5}
+.fs-slot{flex:0 0 74px;font-family:'Cinzel',serif;font-size:0.64em;letter-spacing:0.07em;color:var(--muted)}
+.fs-gbody{flex:1;min-width:0}
+.fs-gname{display:block;font-size:0.82em;font-weight:600;color:#e8e0d0}
+.fs-gsub{display:block;font-size:0.68em;color:var(--muted)}
+/* A lens may hand in its own card markup rather than a name — the arena's gear
+   cards carry sockets and materia orbs, and redrawing them here would be a
+   second way to say the same thing. */
+.fs-gbody .gc-row{display:flex;gap:8px;align-items:center}
+.fs-gbody .gc-name{font-size:0.82em;font-weight:600;color:#e8e0d0}
+.fs-gbody .gc-pos{font-size:0.66em;color:var(--muted)}
+.fs-gbody .gc-sockets{display:flex;align-items:center;gap:2px;margin-top:3px;flex-wrap:wrap}
+
+.fs-none{font-size:0.78em;color:var(--dim);padding:8px 2px;font-style:italic}
+.fs-act{display:block;width:100%;margin-top:6px;padding:9px 12px;border-radius:9px;
+  border:1px solid rgba(212,168,67,0.5);background:transparent;color:var(--gold);
+  font-family:'Cinzel',serif;font-size:0.74em;letter-spacing:0.08em;cursor:pointer;text-align:left}
+.fs-act:hover{background:rgba(212,168,67,0.12)}
+
+.fs-close{margin-top:9px;padding:9px;border-radius:9px;border:1px solid var(--border);
+  background:transparent;color:var(--muted);font-family:'Cinzel',serif;font-size:0.74em;
+  letter-spacing:0.1em;cursor:pointer}
+.fs-close:hover{border-color:var(--dim);color:#e8e0d0}
+
+/* The button that opens it, on every lens's own HUD rail. */
+.fs-open{font-family:'Cinzel',serif;letter-spacing:0.04em}

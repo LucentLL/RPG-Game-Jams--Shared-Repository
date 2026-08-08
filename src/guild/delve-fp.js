@@ -36,6 +36,7 @@ import { claimPad } from '../platform/ui-pad.js';
 import { perspectiveFor, camLean, onView, view, vpStatus } from '../platform/view-prefs.js';
 import { extrudeSprite, extrudePlan, extrudeFold } from '../platform/voxel-sprite.js';
 import { createGlWorld } from '../platform/gl-world.js';
+import { openFieldSheet } from '../platform/field-sheet.js';
 
 /**
  * World scale. These look arbitrary and are not: what a surface MEASURES on
@@ -2753,6 +2754,7 @@ export async function openDelveFp(localeId, member, hooks, carry) {
         <span class="fp-compass"></span>
         <span class="dv-haul fp-haul"></span>
         <button class="fp-help fp-povbtn" title="Change view" onclick="__delveFp.pov()">3rd person</button>
+        <button class="fp-help fs-open" title="Stats, gear and settings" onclick="__delveFp.sheet()">Sheet</button>
         <button class="fp-help" title="Camera settings" onclick="__viewPanel()">${icon('eye')}</button>
         <button class="fp-help" title="Controls" onclick="__delveFp.help()">?</button>
       </div>
@@ -4534,7 +4536,20 @@ function close() {
   hooks.onEnd(summary);
 }
 
-window.__delveFp = { leave, close, help: () => helpUntil(9000), pov: togglePov };
+/**
+ * The sheet, from inside the walk. The GUILD describes the member (hooks.sheet);
+ * this only says where the description is shown and what "Controls" means here.
+ * It does not pause — @see field-sheet.js, and the things that roam.
+ */
+function openWalkSheet() {
+  if (!F || !F.hooks || typeof F.hooks.sheet !== 'function') return;
+  const s = F.hooks.sheet();
+  if (!s) return;
+  s.onHelp = () => helpUntil(9000);
+  openFieldSheet(s);
+}
+
+window.__delveFp = { leave, close, help: () => helpUntil(9000), pov: togglePov, sheet: openWalkSheet };
 
 // Dev probe — the headless pane runs no rAF, so the sim is stepped by hand.
 if (typeof window !== 'undefined') {

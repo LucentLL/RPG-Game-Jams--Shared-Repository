@@ -593,6 +593,45 @@ function gearOf(h) {
   return out;
 }
 
+/** How the five slots read to a person, in the order a paperdoll runs. */
+const SHEET_SLOT = { weapon: 'Weapon', offhand: 'Off Hand', head: 'Head', body: 'Body', lower: 'Legs' };
+
+/**
+ * THE GUILD'S DESCRIPTION OF ONE MEMBER, for the shared field sheet.
+ *
+ * Handed to the walking views as `hooks.sheet` rather than reached for by them:
+ * the delve knows how to walk a person, not what a guild Person IS, and it must
+ * stay that way — it already takes `gear`, `power` and `fatigue` the same way
+ * and for the same reason. @see src/platform/field-sheet.js.
+ *
+ * Every number here is the one the rest of the guild uses — `combatPower` is
+ * what the hunt card rolls against, `itemLabel` is what the armory prints — so
+ * the sheet cannot quietly disagree with the screen it was opened from.
+ */
+function memberSheetSpec(h) {
+  if (!h) return null;
+  const cond = h.condition || {};
+  const vitals = [
+    { label: 'Power', value: '↯' + combatPower(h) },
+    { label: 'Stamina', value: Math.max(0, 100 - (cond.fatigue || 0)) + '%' },
+  ];
+  if (cond.injury) vitals.push({ label: 'Injury', value: String(cond.injury) });
+  return {
+    name: h.name,
+    sub: [h.archetype, h.career].filter(Boolean).join(' · '),
+    vitals,
+    stats: HERO_STATS.map((s) => ({ label: STAT_LABEL[s] || s, value: (h.stats && h.stats[s]) || 0 })),
+    gear: EQUIP_SLOTS.map((slot) => {
+      const it = h.equipped && h.equipped[slot] ? findItem(guild.inventory, h.equipped[slot]) : null;
+      if (!it) return { slot: SHEET_SLOT[slot], empty: true };
+      const bits = [it.material, it.kind].filter(Boolean).join(' ');
+      const dur = it.durability ? ' · ' + Math.round((it.durability.current / (it.durability.max || 100)) * 100) + '%' : '';
+      return { slot: SHEET_SLOT[slot], name: itemLabel(it), sub: bits + dur };
+    }),
+    notes: (h.traits || []).map((t) => ({ label: t, title: (TRAITS[t] || {}).desc || '' })),
+  };
+}
+
 /**
  * Let either walker view hand its session to the other, mid-walk. The carry is
  * the session itself — map, position, doors behind you, worked veins, haul —
@@ -701,6 +740,7 @@ async function exploreLocale(localeId, fp) {
       onEnd: () => { showScreen('guildScreen'); save(); render({ top: true }); },
     };
     hooks.swapView = makeSwapView(localeId, h, hooks);
+    hooks.sheet = () => memberSheetSpec(h);   // stats + gear from inside the walk
     opened = await (fp ? openDelveFp : openDelve)(localeId, h, hooks);
   } catch (e) {
     console.warn('delve: failed to open', e);
@@ -797,6 +837,7 @@ async function walkGuild() {
       onEnd: () => { showScreen('guildScreen'); render({ top: true }); },
     };
     hooks.swapView = makeSwapView('campus', m, hooks);
+    hooks.sheet = () => memberSheetSpec(m);   // stats + gear from inside the walk
     await openDelve('campus', m, hooks);
   } catch (e) {
     console.warn('walk: failed to open', e);
@@ -1009,6 +1050,7 @@ async function strollRoom(mapId) {
       onEnd: () => { showScreen('guildScreen'); render({ top: true }); },
     };
     hooks.swapView = makeSwapView(mapId, h, hooks);
+    hooks.sheet = () => memberSheetSpec(h);   // stats + gear from inside the walk
     await openDelve(mapId, h, hooks);
   } catch (e) {
     console.warn('stroll: failed to open', e);
@@ -1046,6 +1088,7 @@ async function editorWalk(mapId, fp) {
       onEnd: () => resumeEditor(),
     };
     hooks.swapView = makeSwapView(mapId, h, hooks);
+    hooks.sheet = () => memberSheetSpec(h);   // stats + gear from inside the walk
     showScreen('guildScreen');
     const ok = await (fp ? openDelveFp(mapId, h, hooks) : openDelve(mapId, h, hooks));
     // The openers' guards return false without throwing (gfx missing, a race

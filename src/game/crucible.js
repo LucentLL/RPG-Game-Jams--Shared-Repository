@@ -61,6 +61,8 @@ import { readPad, padReset, touchPrimary, onTouchPrimary, PAD } from '../platfor
 import { claimPad } from '../platform/ui-pad.js';
 // Small persisted preferences (namespaced localStorage behind a swappable seam).
 import { saveGame, loadGame } from '../platform/storage.js';
+// What you are and what you are carrying, from inside the world. @see field-sheet.js.
+import { openFieldSheet } from '../platform/field-sheet.js';
 // While the arena's loop runs, the controller is steering a fighter and must
 // not also be walking the menu cursor. The loop self-stops the moment
 // #actionScreen goes inactive, so this is exactly the window that matters.
@@ -4331,6 +4333,55 @@ function actionVictoryBeat(then){
   setTimeout(function(){ el.classList.add('on'); }, 20);
   setTimeout(function(){ var b = el.querySelector('#avGo'); if (b) b.focus(); }, 60);
 }
+
+/**
+ * THE ARENA'S DESCRIPTION OF ITSELF, for the shared field sheet.
+ *
+ * The sheet knows nothing about a crucible fighter and must not: it is the one
+ * panel the delve and the arena share, and the two disagree about what a
+ * fighter IS. So each lens says what it has, in rows. @see field-sheet.js.
+ *
+ * Everything here is READ from the live fighter — the same `getMateriaBonus`
+ * and `getFighterAC` the engine resolves a swing with, never a second sum — so
+ * the sheet cannot tell the player a number the fight will not honour.
+ */
+function openArenaSheet(){
+  if (!p1) return;
+  var bonus = getMateriaBonus(p1, { range: 0 });
+  var d = run ? deriveStats(run.stats) : null;
+  var dom = (run && run.dominantHand) || 'R';
+  var slotName = function(pos){
+    if (pos === 'Body') return 'Body';
+    if (pos === 'Head') return 'Head';
+    if (pos === 'Lower') return 'Legs';
+    return (pos.charAt(0) === dom ? 'Main' : 'Off') + ' Hand';
+  };
+  var gear = EQUIP_SLOTS.map(function(pos){
+    var g = (p1.gear && p1.gear[pos]) || (run && run.equipped && run.equipped[pos]);
+    return g ? { slot: slotName(pos), art: gearCardHTML(g) } : { slot: slotName(pos), empty: true };
+  });
+  var stats = [];
+  if (d) ['STR','DEX','CON','INT','WIS','CHA'].forEach(function(s){
+    if (run.stats && run.stats[s] != null) stats.push({ label: s, value: run.stats[s] });
+  });
+  openFieldSheet({
+    name: p1.name || 'Alchemist',
+    sub: run ? ((ROUND_METALS[run.round - 1] || {}).name || '') + ' · Round ' + run.round : '',
+    vitals: [
+      { label: 'HP', value: Math.max(0, Math.ceil(p1.hp)) + '/' + p1.maxHp },
+      { label: 'AC', value: getFighterAC(p1) },
+      { label: 'Speed', value: d ? d.speed : (p1.speed || 0) },
+      { label: 'To-Hit', value: (bonus.toHit >= 0 ? '+' : '') + (bonus.toHit | 0) },
+      { label: 'Bonus Dmg', value: (bonus.bonusDmg >= 0 ? '+' : '') + (bonus.bonusDmg | 0) },
+      { label: 'Crit On', value: (bonus.critRange | 0 || 20) + '-20' },
+    ],
+    stats: stats,
+    gear: gear,
+    notes: (p1.attacks || []).slice(),
+    onHelp: function(){ actionLog('Move: stick or WASD · Attack: the wheel, 1-6, or A/RT · V changes camera'); },
+  });
+}
+window.openArenaSheet = openArenaSheet;
 
 function forfeitAction(){
   // Guild battle: forfeiting counts as a loss — but a battle already decided by a KO is

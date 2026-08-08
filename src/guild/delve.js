@@ -31,6 +31,7 @@ import { artSprite } from './art.js';
 import { propVolume } from './prop-volume.js';
 import { readPad, padReset, touchPrimary, onTouchPrimary, PAD } from '../platform/input.js';
 import { claimPad } from '../platform/ui-pad.js';
+import { openFieldSheet } from '../platform/field-sheet.js';
 
 const TILE = 48;
 const TILT = 52;               // plane tilt in degrees — matches the ranch's diorama
@@ -1148,6 +1149,7 @@ export async function openDelve(localeId, member, hooks, carry) {
       <span class="dv-title"></span>
       <span class="dv-haul"></span>
       <button class="dv-leave dv-view" title="See it through their eyes" onclick="__delve.view()">1st person</button>
+      <button class="dv-leave fs-open" title="Stats, gear and settings" onclick="__delve.sheet()">Sheet</button>
       <button class="dv-leave" title="Camera settings" onclick="__viewPanel()">Camera</button>
     </div>
     <div class="delve-toasts"></div>
@@ -2699,7 +2701,16 @@ export function closeDelveSilent() {
   D = null;
 }
 
-window.__delve = { leave, close, use: beginUse, view: swapToFp };
+/** The same sheet the first-person walk shows, from the same `hooks.sheet`
+ *  description — one panel, and the swap between the two cameras cannot make
+ *  the member read differently. @see field-sheet.js. */
+function openWalkSheet() {
+  if (!D || !D.hooks || typeof D.hooks.sheet !== 'function') return;
+  const s = D.hooks.sheet();
+  if (s) openFieldSheet(s);
+}
+
+window.__delve = { leave, close, use: beginUse, view: swapToFp, sheet: openWalkSheet };
 
 // Dev probe (headless verification: a hidden window never fires rAF — step the
 // sim by hand). Mirrors rooms.js __roomDebug/__roomStep.
