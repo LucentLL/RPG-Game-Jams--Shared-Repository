@@ -280,6 +280,10 @@ const DEATH_MS = 520, CORPSE_CAP = 14;
  */
 const FOE_DMG = DMG_BASE * ((FOE_SWING_MS + WINDUP_MS) / SWING_MS) * 0.7;
 const BLOCK_CUT = 0.55, BLOCK_EVADE = 0.22; // a raised shield: less damage, more misses
+/** The same guard with nothing in the off-hand — a shoulder turned into the
+ *  blow. Real, and nowhere near a board: ~15% off the damage against 45%, and a
+ *  twitch of extra miss against a fifth. What the shield is FOR. */
+const BARE_BLOCK_CUT = 0.85, BARE_BLOCK_EVADE = 0.06;
 /** Things that fly: how fast, how far a bow carries, how near counts as a hit,
  *  and how close a thing that fights at range is willing to be dragged. */
 const SHOT_SPEED = 10, BOW_RANGE = 7.5, SHOT_HIT_R = 0.5;
@@ -3062,6 +3066,10 @@ function readDevices() {
  *  `took`, because a guard is a state and not a press. */
 function guarding() { return !!(F.keys.block || (F.padKeys && F.padKeys.block)); }
 
+/** Is there actually a shield in the off-hand? The block's numbers ask this
+ *  now, not just the picture. @see foeHit. */
+function hasShield() { return !!(F.hooks.gear && F.hooks.gear.offhand); }
+
 /** Show the control strip — ONLY when asked (the ? button or the ? key; the
  *  entry auto-show died by playtest verdict). A tap anywhere on the strip
  *  dismisses it early, because "skippable" is most of what was asked for. */
@@ -3631,7 +3639,17 @@ function advanceShots(dt) {
  *  same roll and the same numbers — only the delivery differs. */
 function foeHit(prey, guarding) {
   F.contactAt = performance.now();
-  const guard = guarding ? 1 - BLOCK_EVADE : 1;
+  // THE BLOCK IS THE SHIELD'S. It used to be free: BLOCK_CUT and BLOCK_EVADE
+  // applied in full to a delver holding nothing, and the only thing gear
+  // decided was whether you saw a picture — so a bare hand and a mithril shield
+  // stopped exactly as much, and the piece you had gone and forged bought you
+  // nothing. Bare-handed still does SOMETHING, because turning your shoulder
+  // into a blow is a real thing a body does, but it is a fraction of a board
+  // between you and the edge.
+  const shielded = hasShield();
+  const cut = shielded ? BLOCK_CUT : BARE_BLOCK_CUT;
+  const evade = shielded ? BLOCK_EVADE : BARE_BLOCK_EVADE;
+  const guard = guarding ? 1 - evade : 1;
   if (!rollHit((1 / oddsVs(prey)) * guard, 0)) {
     F.haul.dodged = (F.haul.dodged || 0) + 1;
     // Whose whiff it was has to be legible, or the fight is two identical words.
@@ -3643,7 +3661,7 @@ function foeHit(prey, guarding) {
   }
   F.haul.taken = (F.haul.taken || 0) + 1;
   let dmg = spread(FOE_DMG / Math.min(2, Math.max(0.5, oddsVs(prey))));
-  if (guarding) { dmg = Math.max(1, Math.round(dmg * BLOCK_CUT)); if (F.hands) F.hands.brace(); }
+  if (guarding) { dmg = Math.max(1, Math.round(dmg * cut)); if (F.hands) F.hands.brace(); }
   F.hp -= dmg;
   F.hurtUntil = performance.now() + 260;
   // In third person the blow lands on someone you can SEE — recoil them.
@@ -4142,6 +4160,34 @@ function render() {
   // A raised shield has to LOOK raised, or the only feedback for a key you are
   // holding down is that you cannot attack.
   if (F.hands) F.hands.guard(guarding());
+  // WHAT THE BODY IS DOING, asked once for both lenses.
+  //
+  // These three used to be computed inside the third-person branch, purely to
+  // choose a standee anim — so first person, which is the lens you are actually
+  // in, had no idea it was climbing or swimming. That is a ONE WORLD problem:
+  // the same body cannot be hauling itself up a ladder for the camera behind it
+  // and strolling for the camera inside it. Hoisted here, the standee still
+  // reads them below and the viewmodel gets them too.
+  //
+  // Climb: the LEVEL easing IS the climb in motion; standing in the middle
+  // third of a rung cell counts as well, because a ladder you are stood on is a
+  // ladder you are on. Swim: out of your depth you tread whether you travel or
+  // not. Wade: only while actually crossing — standing in a creek is standing.
+  const cellX = Math.floor(F.px), cellY = Math.floor(F.py);
+  const centred = Math.abs(F.px - cellX - 0.5) < 0.3 && Math.abs(F.py - cellY - 0.5) < 0.3;
+  const walking = Math.hypot(F.vx, F.vy) > 0.05;
+  const climbing = Math.abs((F.lv || 0) - F.lev) > 0.05 || (onClimb(cellX, cellY) && centred);
+  const swimming = isSwimming(depthAt(cellX, cellY)) && wetAt(cellX, cellY);
+  const wading = walking && wetAt(cellX, cellY);
+  // BOTH HANDS COME UP FOR A LADDER OR A CROSSING. At rest the viewmodel hangs
+  // most of itself off the bottom corner and you see the steel, not the arm —
+  // but a body climbing or swimming is a body USING its arms, and hiding them
+  // there reads as floating. Class on the HOST, the `fp-duel` pattern, so one
+  // flag reaches both hands and the shield.
+  if (F.hands) {
+    const hauling = climbing || swimming;
+    if (hauling !== !!F._hauling) { F._hauling = hauling; F.host.classList.toggle('fp-hauling', hauling); }
+  }
   // DUEL STANCE. A rank-1 creature stands 320 world px — knee height — and the
   // tile in front of you is exactly where the viewmodel lives, so the thing
   // you were fighting was hidden behind your own sword. When anything alive is
@@ -4213,28 +4259,11 @@ function render() {
       // One-shots (a swing, a bow draw, a hit taken) own the sprite while
       // they play; the stance logic reasserts itself the moment they lapse.
       if (now >= (F.self.busyUntil || 0)) {
-        // Climb pose only while the LEVEL is actually easing, or standing in
-        // the middle third of the rungs' own cell — floor(px) alone flipped
-        // the pose a half-tile early and the member mimed the climb from the
-        // approach (playtest). F.lev eases toward heightAt in steer(), so
-        // "easing" IS the climb in motion.
-        const cellX = Math.floor(F.px), cellY = Math.floor(F.py);
-        const centred = Math.abs(F.px - cellX - 0.5) < 0.3 && Math.abs(F.py - cellY - 0.5) < 0.3;
-        // Against the COMMITTED surface, not the cell's ground — standing on a
-        // bridge deck is standing, not an endless mime of climbing. Stairs
-        // never pose the climb either: they are walked (onClimb is L/v only).
-        const climbing = Math.abs((F.lv || 0) - F.lev) > 0.05
-          || (onClimb(cellX, cellY) && centred);
-        // Wading wears the climb too — the sheet has no swim cells, but its
-        // climb cycle is a body hauling itself along, which is what crossing
-        // water looks like. Only while actually moving: standing in a creek is
-        // standing, not an endless mime (the same rule the deck already has).
-        const walking = Math.hypot(F.vx, F.vy) > 0.05;
-        // Out of your depth the pose runs whether you are travelling or not —
-        // treading water is something a body does, not a thing it stops doing.
-        // In a shallow ford it only runs while you are actually crossing.
-        const swimming = isSwimming(depthAt(cellX, cellY)) && wetAt(cellX, cellY);
-        const wading = walking && wetAt(cellX, cellY);
+        // climbing / swimming / wading / walking are the ones hoisted above, so
+        // the standee and the viewmodel cannot disagree about what this body is
+        // doing. Wading wears the climb cycle too — the sheet has no swim
+        // cells, but that cycle is a body hauling itself along, which is what
+        // crossing water looks like.
         const desired = guarding() ? 'hold'
           : (climbing || swimming || wading) ? 'climb'
             : walking ? 'move' : 'idle';

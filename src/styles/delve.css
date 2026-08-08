@@ -704,9 +704,16 @@
   22%  { transform: translate(-50%, -30%) scale(1.1); opacity: 1; }
   100% { transform: translate(-50%, -150%) scale(1); opacity: 0; }
 }
-/* Shield up: pulled in front of you, and you cannot swing from behind it. */
+/* Shield up: brought in front of you, and you cannot swing from behind it.
+   A SMALL MOVE. The first cut threw it 24% inward, 16% up and 12% bigger, which
+   at the size this element is grown to swung the whole board across the corner
+   of the screen and read as a zoom rather than a guard. What a raised shield
+   actually does is come up a hand's width and square to the threat: enough that
+   you can see the key is down, little enough that the world behind it doesn't
+   vanish. It reads as a lift because the shield rests half off the bottom edge
+   — a small rise brings a visibly larger face into frame. */
 .fp-hand-shield.fp-guarding {
-  transform: rotate(-2deg) translate(24%, -16%) scale(1.12);
+  transform: rotate(-3deg) translate(11%, -13%) scale(1.04);
   transition: transform 120ms ease-out;
 }
 /* Your own condition. Top-left under the bar: the bottom corners are hands and
@@ -872,6 +879,37 @@
 /* The hand that isn't leading drops out of frame rather than vanishing — you
    put the pick away, you don't teleport it. */
 .fp-hand.fp-stowed { transform: translateY(112%); transition: transform 180ms ease-in; }
+
+/* ── HAULING: a ladder, or out of your depth ──────────────────────────────
+   At rest the viewmodel hangs about half of itself off the bottom corner, so
+   what you see is the steel and not the arm — which is right for walking, and
+   wrong for climbing. A body on rungs or in deep water is a body USING its
+   arms, and keeping them below the fold there reads as floating up the wall.
+   So both hands come UP and turn slightly inward, as if taking hold.
+
+   Ranked below the fight, like the duel duck and for the same reason: an
+   animation outranks a plain transform anyway, and the :not()s keep the swing,
+   the brace and the guard authoritative if you fight your way up a ladder.
+   (Those guards only work because the rig now REMOVES fp-swinging when the
+   animation ends — it never used to, which made every :not(.fp-swinging) rule
+   dead from a member's first swing. @see fp-hands.js's animationend listener.)
+
+   The lift is SMALL — 14% of an element that stands about twice the screen's
+   height, so ~100px on a 720p frame. That is all it takes: the hands rest a
+   hand's breadth below the fold, and 14% brings the forearms in and the blade
+   fully up. -34% was the first cut and it put the entire viewmodel on screen
+   with the weapon brandished across the middle of the view, which is a pose for
+   a hero shot and not for hauling yourself up a wall. */
+.fp-hauling .fp-hand-weapon:not(.fp-swinging):not(.fp-stowed),
+.fp-hauling .fp-hand-pick:not(.fp-swinging):not(.fp-stowed),
+.fp-hauling .fp-hand-offhand:not(.fp-swinging):not(.fp-stowed) {
+  transform: translate(-7%, -14%) rotate(-9deg);
+}
+.fp-hauling .fp-hand-shield:not(.fp-bracing):not(.fp-guarding) {
+  transform: translate(7%, -14%) rotate(9deg);
+}
+/* Slower than the guard's 120ms: hands come up to climb, they don't snap up. */
+.fp-hauling .fp-hand { transition: transform 260ms ease-out; }
 
 /* NO BLUR ON A THING MID-SWING. `.fp-hand`'s drop-shadow is a private render
    surface, and a surface has to be re-rastered whenever its own transform chain

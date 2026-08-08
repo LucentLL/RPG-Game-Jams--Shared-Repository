@@ -59,23 +59,20 @@ import { ELEMENTS_SKIN_SOURCE, ELEMENTS_SKIN_TONES } from './data/sprite-tables.
  */
 const REST_H = 0.62, SHIELD_H = 0.5;
 /**
- * WHERE THE GRIP SITS IN THE FRAME, as a fraction of the view.
+ * Fraction of the WEAPON's rest pose hidden past the bottom edge, and past the
+ * side. About half of what you carry is out of frame, which is what makes it
+ * read as carried rather than displayed.
  *
- * This replaces a pair of "hang the rest pose off the edges by this much"
- * fractions (OFF_BOTTOM 0.46 / OFF_SIDE 0.24). Those were measured against the
- * WEAPON, and they hid its bottom 46% — which, once the arm existed, turned out
- * to be exactly where the hand is: sword1's rest cell is rows 9-18 and the
- * hand is rows 15-18, so the old framing cut the view at row 14.4 and the hand
- * never made it on screen. Adding an arm nobody could see is not a feature.
- *
- * Anchoring on the GRIP instead fixes it at the source and says the thing we
- * actually mean: your hand is down in the near corner and what it holds rises
- * out of it. It is also per-weapon correct for free — a sword, a mace and a
- * pick have their grips in different places inside their cells, and pinning the
- * grip puts all three hands in the same spot instead of three different ones.
- * Sizes are untouched, so a blade is the size it has always been.
+ * THE ARM DOES NOT GET A VOTE HERE. There was a version that anchored on the
+ * GRIP instead, so the whole hand would land in the near corner — and it put
+ * the entire arm on screen, which is wrong twice over: a viewmodel with a
+ * forearm parked in frame reads as a mannequin, and the arm's cut end (where
+ * the mask stops following the limb toward a torso that is not in the shot) sat
+ * right there in the middle of the picture with daylight through it. Framing is
+ * the WEAPON's business. The arm hangs off the bottom behind it and is seen
+ * when the swing brings it up, which is when you have an arm at all.
  */
-const GRIP_Y = 0.78, GRIP_X = 0.80;
+const OFF_BOTTOM = 0.46, OFF_SIDE = 0.24;
 
 /**
  * What a crucible FIGHTER is holding, translated into the guild kit vocabulary
@@ -432,6 +429,18 @@ export function createFpHands(layer, spec) {
   // and the swing-time shield brace, and must hold even if the pick sheet fails.
   const H = { layer, weapon: null, offhand: null, shield: null, pick: null,
     dead: false, bow: false, delver: !!(spec && spec.pick) };
+  // TAKE THE CLASS OFF WHEN THE ANIMATION ENDS. `fire()` only ever put it on,
+  // and nothing anywhere took it off again, so `fp-swinging` was permanent from
+  // a member's first swing. Two things went quietly wrong for the rest of the
+  // delve: `.fp-hand.fp-swinging { filter: none }` killed that hand's drop
+  // shadow for good, and every `:not(.fp-swinging)` guard — the duel duck, and
+  // now the climb and swim poses — stopped matching, so those states could
+  // never move a hand again. One delegated listener covers both hands, the
+  // pick and the slash SVG.
+  layer.addEventListener('animationend', (e) => {
+    if (e.target === e.currentTarget) return;
+    e.target.classList.remove('fp-swinging', 'fp-bracing');
+  });
   const arms = (spec && spec.arms) || null;
   const armsUrls = wornArms(arms && arms.file).urls;
   const skinTone = (arms && arms.skinTone) | 0;
@@ -505,22 +514,26 @@ export function createFpHands(layer, spec) {
       const restH = (h.kind === 'shield' ? SHIELD_H : REST_H) * base;
       const elH = Math.round(restH / share);
       const elW = Math.round(elH * (b.w / b.h));
+      const restW = elW * (r.w / b.w);
       h.el.style.height = elH + 'px';
       h.el.style.width = elW + 'px';
-      // Where the GRIP sits inside the crop, as fractions of the crop.
+      // Where the rest pose sits inside the crop, as fractions of the crop.
+      const right = (r.x + r.w - b.x) / b.w, left = (r.x - b.x) / b.w;
+      const bottom = (r.y + r.h - b.y) / b.h;
+      // Hang it off the edge: the rest pose's own bottom goes BELOW the frame
+      // by OFF_BOTTOM of its height, and its outer edge past the side by
+      // OFF_SIDE of its width. Everything is measured from the rest pose, so a
+      // sword and a buckler hang by the same amount of themselves.
+      h.el.style.top = 'auto';
+      h.el.style.bottom = Math.round(-OFF_BOTTOM * restH - (1 - bottom) * elH) + 'px';
+      const push = Math.round(-OFF_SIDE * restW);
+      if (h.side === 'left') { h.el.style.left = Math.round(push - left * elW) + 'px'; h.el.style.right = 'auto'; }
+      else { h.el.style.right = Math.round(push - (1 - right) * elW) + 'px'; h.el.style.left = 'auto'; }
+      // The PIVOT is the GRIP — measured, not guessed at the box's bottom-centre
+      // — so the CSS swing's rotation reads as a wrist. About the box centre,
+      // hundreds of px from the visible weapon once the element has been grown
+      // to near screen height, the same keyframes carried it around the viewport.
       const gx = (h.grip.x - b.x) / b.w, gy = (h.grip.y - b.y) / b.h;
-      // Pin that point to the near corner. Everything else — how much blade
-      // rises out of frame, how far the forearm runs off the bottom — follows
-      // from the art, which is the only thing that knows.
-      const wantX = (h.side === 'left' ? 1 - GRIP_X : GRIP_X) * W;
-      h.el.style.left = Math.round(wantX - gx * elW) + 'px';
-      h.el.style.top = Math.round(GRIP_Y * Hh - gy * elH) + 'px';
-      h.el.style.right = 'auto';
-      h.el.style.bottom = 'auto';
-      // The PIVOT is the same point, so the CSS swing's rotation reads as a
-      // wrist. About the box centre — hundreds of px away once the element has
-      // been grown to near screen height — the same keyframes carried the
-      // weapon around the whole viewport.
       h.el.style.transformOrigin = (gx * 100).toFixed(1) + '% ' + (gy * 100).toFixed(1) + '%';
     }
   };
