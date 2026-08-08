@@ -7440,6 +7440,43 @@ window.CharGen = {
     elementsRegisterRedraw(canvas, function(){ self.render(canvas, ropts); });
     return appearance;
   },
+  // The `top` sheet this character's body — and therefore their ARMS — is drawn
+  // from, with Body gear folded in exactly as the compositor folds it, plus the
+  // skin tone that sheet gets painted with.
+  //
+  // The first-person viewmodel needs this and nothing else out of the layer
+  // resolution: its hands are cropped from the same body sheet the third-person
+  // standee wears, so a member's own sleeves and skin follow them into first
+  // person. Without this seam fp-hands.js would have to duplicate
+  // GEAR_BODY_LADDER, the appearance roll AND the tone index, and the copies
+  // would drift. `file` is null for a bare top — a real answer, not a failure;
+  // the caller draws bare arms. @see src/game/fp-hands.js
+  bodyLayer: function(subject){
+    if (!subject) return null;
+    var prime = subject.prime || subject.bodyType || GUILD_ARCH_PRIME[subject.archetype] || 'salt';
+    // Resolved by the engine's OWN two steps, in the engine's order — the same
+    // pair renderGuildSprite runs before it draws. Rolling our own here is how
+    // an apprentice ends up with guild-issue sleeves on their standee and a
+    // cape on their first-person arm.
+    if (subject.plainLook && subject.appearance == null && subject.appearanceSeed != null){
+      subject.appearance = generatePlainAppearance(subject.appearanceSeed | 0, prime);
+    }
+    var appearance = ensureAppearance(subject, prime);
+    if (!appearance) return null;
+    var eff = subject.gear ? effectiveAppearance(appearance, subject.gear) : appearance;
+    var t = eff && eff.top;
+    var name = null;
+    if (t){
+      // Saved appearances still carry the legacy `{n: 5}` form; getElementsPart
+      // migrates it the same way.
+      name = typeof t === 'number' ? (t > 0 ? 'top' + t : null)
+        : (typeof t.name === 'number' ? (t.name > 0 ? 'top' + t.name : null) : t.name);
+    }
+    return {
+      file: name ? name + (t.c ? '_c' + t.c : '') : null,
+      skinTone: appearance.skinTone | 0,
+    };
+  },
 };
 
 
@@ -7453,6 +7490,13 @@ function tacViewToggle(){
   // Labels say where tapping TAKES you, not where you are — 'Board' read as
   // a board widget and nobody found the first-person view behind it.
   if(b){b.classList.toggle('on',on);b.textContent=on?'♟ Board':'1st Person';}
+  // The camera RAIL carries the same control, and on a phone it is the only
+  // reachable one (the panel holding the button above is collapsed until the FF
+  // View box is opened). It was never relabelled, so once you were inside the
+  // fight the rail still read '1st' and offered no way to read your own state.
+  var cb=document.getElementById('tacCamFp');
+  if(cb){cb.classList.toggle('on',on);cb.textContent=on?'♟':'1st';
+    cb.title=on?'Back to the board':'First person — stand in the fighter';}
   var pv=document.getElementById('tacPovBtn'),wh=document.getElementById('tacWhoBtn');
   if(pv)pv.style.display=on?'':'none';
   if(wh)wh.style.display=on?'':'none';

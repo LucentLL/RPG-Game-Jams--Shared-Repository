@@ -1,0 +1,103 @@
+<!doctype html>
+<!--
+  Dev probe for the first-person viewmodel (src/game/fp-hands.js).
+
+  The rig only ever appears deep inside a delve or an arena camera, which is a
+  long walk to look at a hand. This mounts the REAL module — same sheets, same
+  arm compositing, same fit() — for a spread of weapons and body tops at once,
+  so a change to the arm rule can be judged in one glance.
+
+  Served by `npm run dev` at /dev/fp-hands-probe.html.
+-->
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>FP hands probe</title>
+  <link rel="stylesheet" href="/src/styles/delve.css">
+  <style>
+    body { margin: 0; background: #0d0d14; color: #cfd3e0;
+           font: 13px/1.5 ui-monospace, Consolas, monospace; }
+    h1 { font-size: 15px; margin: 14px 16px 4px; font-weight: 600; }
+    p.note { margin: 0 16px 12px; color: #8a90a6; }
+    .grid { display: flex; flex-wrap: wrap; gap: 12px; padding: 0 16px 24px; }
+    .cell { width: 300px; }
+    .frame { position: relative; width: 300px; height: 190px; overflow: hidden;
+             background: linear-gradient(#1b2230, #0e1119); border: 1px solid #2a3145;
+             border-radius: 4px; }
+    .cap { padding: 4px 2px; color: #9aa2bb; }
+    .cap b { color: #e6e9f5; font-weight: 600; }
+    button { font: inherit; background: #2a3145; color: #e6e9f5; border: 1px solid #3d4761;
+             border-radius: 4px; padding: 5px 10px; cursor: pointer; margin: 0 16px 12px; }
+  </style>
+</head>
+<body>
+  <h1>First-person viewmodel — arms cropped from the body sheet</h1>
+  <p class="note">
+    Each frame mounts the real <code>createFpHands</code>. Left column of each
+    caption is the weapon sheet, right is the body <code>top</code> the arm is
+    taken from. Click to swing them all.
+  </p>
+  <button id="swing">swing / brace all</button>
+  <div class="grid" id="grid"></div>
+
+  <script type="module">
+    import { createFpHands } from '/src/game/fp-hands.js';
+
+    // (label, spec) — the spread that matters: one-handers, a caster, a shield,
+    // a bow, the delver's pick, and the same weapon across different sleeves.
+    const bare = (skinTone = 0) => ({ file: null, skinTone });
+    const wearing = (file, skinTone = 0) => ({ file, skinTone });
+    const CASES = [
+      ['sword · bare arms',      { weapon: { kind: 'sword',  material: 'iron' },   arms: bare() }],
+      ['sword · top1 sleeve',    { weapon: { kind: 'sword',  material: 'steel' },  arms: wearing('top1') }],
+      ['sword · top10 armour',   { weapon: { kind: 'sword',  material: 'mithril' },arms: wearing('top10') }],
+      ['mace · bare',            { weapon: { kind: 'mace',   material: 'iron' },   arms: bare() }],
+      ['staff · top1',           { weapon: { kind: 'staff',  material: 'iron' },   arms: wearing('top1') }],
+      ['wand · top10',           { weapon: { kind: 'wand',   material: 'steel' },  arms: wearing('top10') }],
+      ['sword + shield · top1',  { weapon: { kind: 'sword',  material: 'iron' },
+                                   shield: { material: 'iron', name: 'Buckler' },  arms: wearing('top1') }],
+      ['bow (two-handed)',       { weapon: { kind: 'bow',    material: 'iron' },   arms: wearing('top1') }],
+      ['dual wield · top1',      { weapon: { kind: 'sword',  material: 'iron' },
+                                   offhand: { kind: 'dagger', material: 'iron' },  arms: wearing('top1') }],
+      ['delver: pick only',      { arms: wearing('top1'), pick: true }],
+      ['delver: sword + pick',   { weapon: { kind: 'sword', material: 'iron' },    arms: wearing('top1'), pick: true }],
+      ['no weapon, no pick',     { arms: wearing('top1') }],
+      // Skin tone: the same bare arm on the same blade, repainted by the same
+      // table the third-person standee uses. Tone 0 is the identity.
+      ['bare · tone 3 (dark)',   { weapon: { kind: 'sword', material: 'iron' },    arms: bare(3) }],
+      ['bare · tone 4 (green)',  { weapon: { kind: 'sword', material: 'iron' },    arms: bare(4) }],
+      ['bare · tone 6 (bone)',   { weapon: { kind: 'sword', material: 'iron' },    arms: bare(6) }],
+    ];
+
+    const grid = document.getElementById('grid');
+    const rigs = [];
+    for (const [label, spec] of CASES) {
+      const cell = document.createElement('div');
+      cell.className = 'cell';
+      cell.innerHTML = '<div class="frame"><div class="fp-hands"></div></div>'
+        + '<div class="cap"><b>' + label + '</b></div>';
+      grid.appendChild(cell);
+      const rig = createFpHands(cell.querySelector('.fp-hands'), spec);
+      rigs.push(rig);
+      rig.ready.then(() => {
+        const got = ['weapon', 'offhand', 'shield', 'pick'].filter((k) => rig[k]);
+        cell.querySelector('.cap').insertAdjacentHTML('beforeend',
+          ' <span style="color:#7f8aa6">— ' + (got.join(', ') || 'nothing mounted') + '</span>');
+      });
+    }
+
+    document.getElementById('swing').onclick = () => {
+      for (const r of rigs) { r.swing(); r.brace(); }
+    };
+    // Report to the console in a form the harness can read back.
+    Promise.all(rigs.map((r) => r.ready)).then(() => {
+      console.log('PROBE-READY ' + JSON.stringify(rigs.map((r, i) => ({
+        case: CASES[i][0],
+        weapon: !!r.weapon, offhand: !!r.offhand, shield: !!r.shield, pick: !!r.pick,
+        box: r.weapon ? r.weapon.box : (r.pick ? r.pick.box : null),
+      }))));
+    });
+  </script>
+</body>
+</html>

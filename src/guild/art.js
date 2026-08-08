@@ -252,12 +252,17 @@ export const SWAY = {
 // ─── Item art: one cell off an Elements weapon sheet ─────────────────────────
 // Armory items have never had a picture — only a KIND_GLYPH emoji. But the
 // compositor's weapon overlays are real art, and one cell of them is a real
-// weapon on transparency. Column 11 is the mid-swing frame, where the weapon is
-// fully extended and clear of the (absent) body; row 2 is the east facing, so
-// the blade lies up-and-right with its hilt at the lower left. That single cell
-// is a weapon lying on its side — which is exactly a piece waiting on an anvil.
+// weapon on transparency: row 2 is the east facing, so the piece stands clear
+// of the (absent) body with its haft toward the viewer.
+//
+// COLUMN 1, THE STAND FRAME — not column 11. Column 11 is the middle of the
+// SLASH (ELEMENTS_ANIMS.slash is 10-14) and the sheet paints the swing's ARC
+// into it: sword1 measures 24×19 there against 8×11 at rest, and nearly all of
+// that is the white crescent. Every weapon in the armory was therefore drawn as
+// a swoosh with a bit of metal in the corner — legible enough at ten items to
+// go unnoticed, not at forty. The stand frame is the weapon and nothing else.
 const WEAPON_SHEET = { w: 1104, h: 192, cell: 48, cols: 23, rows: 4 };
-const LAID_COL = 11, LAID_ROW = 2;
+const LAID_COL = 1, LAID_ROW = 2;
 
 /** Item kind → the weapon sheet that stands in for it. `pack` indexes
  *  SPRITE_BASES (0 core · 1 ce1 · 2 ce2), matching where each PNG really is. */
@@ -265,7 +270,12 @@ const ITEM_WEAPON = {
   sword:  { pack: 0, stem: 'sword1',  maxC: 3 },
   dagger: { pack: 2, stem: 'daggerR', maxC: 3 },
   axe:    { pack: 1, stem: 'axe1',    maxC: 3 },
-  bow:    { pack: 0, stem: 'bow1',    maxC: 0 },
+  // A BOW HAS NO SLASH BLOCK EITHER, and this one shipped blank for as long as
+  // the Hunter's Bow has existed: bow1 paints ONLY at cols 15-18 (nock, draw,
+  // loose) and the laid cell below is empty on every row, so the armory card
+  // for a bow was an empty square nobody noticed. Row 2 col 15 is the limb seen
+  // side-on, 8×17 — a bow shape rather than a foreshortened one.
+  bow:    { sheet: bowSheet, laidCol: 15, laidRow: 2 },
   mace:   { pack: 0, stem: 'mace1',   maxC: 5 },
   hammer: { pack: 2, stem: 'hammer',  maxC: 3 },
   // A caster held nothing at all in first person — not because the kit has no
@@ -273,10 +283,72 @@ const ITEM_WEAPON = {
   // core/weapon/staff1*.png were sitting there the whole time.
   wand:   { pack: 1, stem: 'wand1',   maxC: 8 },
   staff:  { pack: 0, stem: 'staff1',  maxC: 3 },
+  // A SHIELD IS NOT A WEAPON AND ITS SHEET KNOWS IT. The laid-item cell below
+  // (row 2, col 11 — the east mid-swing) is EMPTY on every shield sheet and on
+  // every row: a shield has no slash block. Its face is on cols 15-18, and the
+  // one that shows it square-on is the same cell the viewmodel rests at. Sized
+  // 11×10 there against a sword's 8×11, so it reads at the same weight.
+  // `sheet` overrides the material→stem rule for kinds where one stem cannot
+  // cover the ladder — see shieldSheet.
+  shield: { sheet: shieldSheet, laidCol: 16, laidRow: 3 },
+  // ── Worn armour: not the weapon folder at all ────────────────────────────
+  // A breastplate, a helm and a pair of greaves are BODY LAYERS — they live in
+  // top/, hat/ and bottom/, and they are drawn on a person rather than lying on
+  // a bench. There is no laid pose to crop, so these take the SOUTH STAND cell
+  // (row 0, col 1): the piece worn, face on, which is the clearest read of what
+  // the thing is. Each climbs its own stems with the material, mirroring the
+  // ladders the compositor dresses a fighter from (orb-tables GEAR_*_LADDER),
+  // so the card shows the piece the wearer will actually be wearing.
+  armor:   { sheet: layerSheet('top', { leather: ['top1', 4], iron: ['top9', 4], steel: ['top12', 5], mithril: ['top17', 13, 1] }), laidCol: 1, laidRow: 0 },
+  helm:    { sheet: layerSheet('hat', { leather: ['hat4', 3], iron: ['hat1', 4], steel: ['hat2', 4], mithril: ['hat5', 6] }), laidCol: 1, laidRow: 0 },
+  greaves: { sheet: layerSheet('bottom', { leather: ['bottom1', 4], iron: ['bottom2', 4], steel: ['bottom6', 4], mithril: ['bottom9', 6, 1] }), laidCol: 1, laidRow: 0 },
 };
 /** Material → colour variant, so a mithril blade reads finer than an iron one.
  *  Mirrors crucible.js weaponTierToColor: variant 0 is the base file. */
 const MAT_COLOR = { leather: 0, iron: 0, steel: 2, mithril: 3 };
+
+/**
+ * The shield sheet for a material — ONE answer, wherever a shield is drawn.
+ *
+ * Shields are the one kind whose ladder crosses two packs: core ships the plain
+ * shield1 pair and ce1 ships shield2 with its colour variants, so no single
+ * stem covers iron through mithril. That split lived inside wornShield, which
+ * meant the armory card and the hand holding it could have disagreed the moment
+ * a second caller appeared. Now there is one function and they cannot.
+ */
+function shieldSheet(material) {
+  const tier = MAT_COLOR[material] || 0;
+  return tier >= 2
+    ? { pack: 1, stem: 'shield2L', c: Math.min(tier, 6) }   // ce1 carries shield2 + variants
+    : { pack: 0, stem: 'shield1L', c: 0 };                  // core carries the plain pair
+}
+
+/** Hide-and-horn, then a steel-limbed bow. Same two-stem problem as the shield. */
+function bowSheet(material) {
+  const tier = MAT_COLOR[material] || 0;
+  return tier >= 2
+    ? { pack: 0, stem: 'bow2', c: Math.min(tier, 4) }
+    : { pack: 0, stem: 'bow1', c: 0 };
+}
+
+/**
+ * A resolver for kinds drawn from a BODY LAYER folder rather than weapon/.
+ * `stems` maps material → [stem, maxC, pack]; the colour variant is the usual
+ * material tier clamped to what that stem actually ships.
+ *
+ * THE PACK IS PER-STEM, not per-kind. core carries most of the layer art but
+ * the fanciest stems live in ce1 (top17, bottom9) — hardcoding pack 0 here
+ * pointed the two mithril pieces at files that do not exist, which the armory
+ * would have shown as blank squares. dev/check-item-art.mjs now fails on that.
+ * @param {string} folder 'top' | 'hat' | 'bottom'
+ * @param {Object.<string,[string,number,number?]>} stems
+ */
+function layerSheet(folder, stems) {
+  return (material) => {
+    const [stem, maxC, pack] = stems[material] || stems.iron || Object.values(stems)[0];
+    return { pack: pack || 0, folder, stem, c: Math.min(MAT_COLOR[material] || 0, maxC) };
+  };
+}
 
 /**
  * The item as a laid-down weapon sprite, or '' when the kind has no sheet
@@ -287,13 +359,22 @@ const MAT_COLOR = { leather: 0, iron: 0, steel: 2, mithril: 3 };
 export function itemSprite(item, cls = '', style = '') {
   const w = item && ITEM_WEAPON[item.kind];
   if (!w) return '';
-  const c = Math.min(MAT_COLOR[item.material] || 0, w.maxC);
-  const file = w.stem + (c ? '_c' + c : '');
+  // Kinds whose ladder spans two stems resolve their own sheet; the rest take
+  // the one stem plus a colour variant.
+  const s = w.sheet ? w.sheet(item.material)
+    : { pack: w.pack, stem: w.stem, c: Math.min(MAT_COLOR[item.material] || 0, w.maxC) };
+  const file = s.stem + (s.c ? '_c' + s.c : '');
+  const col = w.laidCol == null ? LAID_COL : w.laidCol;
+  const row = w.laidRow == null ? LAID_ROW : w.laidRow;
+  // Every Elements layer folder is the same 1104×192 grid, so only the folder
+  // name changes — a helm crops out of hat/ exactly the way a sword crops out
+  // of weapon/.
+  const folder = s.folder || 'weapon';
   const S = WEAPON_SHEET;
   return `<span class="px-art ${cls}" style="aspect-ratio:1;` +
-    `background-image:url(${SPRITE_BASES[w.pack]}weapon/${file}.png);` +
+    `background-image:url(${SPRITE_BASES[s.pack]}${folder}/${file}.png);` +
     `background-size:${(S.w / S.cell * 100).toFixed(4)}% ${(S.h / S.cell * 100).toFixed(4)}%;` +
-    `background-position:${(LAID_COL / (S.cols - 1) * 100).toFixed(4)}% ${(LAID_ROW / (S.rows - 1) * 100).toFixed(4)}%;${style}"></span>`;
+    `background-position:${(col / (S.cols - 1) * 100).toFixed(4)}% ${(row / (S.rows - 1) * 100).toFixed(4)}%;${style}"></span>`;
 }
 
 /** Does this item have laid-weapon art? (armor and unknown kinds do not) */
@@ -330,7 +411,38 @@ export const WORN = {
   // idle and no slash, which is why a bow drawn from the ordinary frames came
   // out an empty canvas and the delver appeared to be carrying nothing.
   bowDraw: [15, 16, 17, 18],
+  // ── THE ARM THAT HOLDS IT ────────────────────────────────────────────────
+  // How far, in pixels ALONG THE LIMB, the viewmodel follows the body out from
+  // the weapon. The weapon sheet is the weapon ALONE — every cell above is a
+  // blade on transparency with no hand in it, which is why first person used to
+  // show a sword floating in the dark. The hand is on the BODY sheet, in the
+  // same cell of the same frame, because the artist drew the pair together.
+  //
+  // 4 is not a taste knob, it is the forearm. Grown from the body pixels that
+  // touch the weapon (the grip is where the hand is, by construction), a
+  // geodesic walk of 4 steps reaches the wrist and the base of the forearm and
+  // stops before the shoulder. Euclidean distance cannot do this job: the torso
+  // sits 2px from a sword's grip in a straight line but a dozen steps away
+  // along the arm. Measured over every top × every weapon × every played frame:
+  // 4 keeps 33-76% of the body cell for the one-handers and reads as a hand;
+  // 7 reaches the shoulder and 11 is the whole torso again.
+  armReach: 4,
 };
+
+/**
+ * The body sheet a fighter's ARMS are drawn from.
+ *
+ * `file` is a top-layer stem the compositor resolved (`top3_c2`) — which pack
+ * holds it is not knowable from the name, so this returns every candidate and
+ * the loader takes the first that answers, exactly as the compositor's own
+ * `_tryLoadFromBases` does. `top0` is the fallback and it is a real answer, not
+ * a placeholder: a member wearing nothing on the body has bare arms.
+ * @param {?string} file top-layer stem, or null for bare
+ */
+export function wornArms(file) {
+  const stem = file || 'top0';
+  return { urls: SPRITE_BASES.map(b => b + 'top/' + stem + '.png') };
+}
 
 /** The sheet URL for a weapon stem + colour variant. */
 const weaponUrl = (pack, stem, c) => SPRITE_BASES[pack] + 'weapon/' + stem + (c ? '_c' + c : '') + '.png';
@@ -347,10 +459,8 @@ export function wornWeapon(kind, material) {
 }
 /** The off-hand shield. `slotSuffix` sheets ship an L and an R; the off hand is L. */
 export function wornShield(material) {
-  const tier = MAT_COLOR[material] || 0;
-  return tier >= 2
-    ? { url: weaponUrl(1, 'shield2L', Math.min(tier, 6)) }   // ce1 carries shield2 + variants
-    : { url: weaponUrl(0, 'shield1L', 0) };                  // core carries the plain pair
+  const s = shieldSheet(material);
+  return { url: weaponUrl(s.pack, s.stem, s.c) };
 }
 /** The delver's pick — a Club in the compositor's ladder, and the one sheet in
  *  the kit drawn large enough to read held up close (16×24 against a sword's 8×11). */

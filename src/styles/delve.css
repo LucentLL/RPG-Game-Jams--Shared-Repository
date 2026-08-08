@@ -819,9 +819,11 @@
    transform-origin fitHands() sets at the grip of the rest pose. Rotating a
    near-screen-sized box about its default centre — a point hundreds of px from
    the visible weapon — was what sent the weapon orbiting the whole screen. */
-/* Size and position are written by fitHands() in delve-fp.js, from the measured
-   REST frame — no sheet's art sits in the same place inside its cell, so this
-   cannot be a static rule. See the note there. */
+/* Size and position are written by H.fit() in src/game/fp-hands.js, from the
+   measured REST frame — no sheet's art sits in the same place inside its cell,
+   so this cannot be a static rule. See the note there. (It used to say
+   delve-fp.js, which carried a private fork of the whole rig; the fork is gone
+   and all three first-person lenses share the one module.) */
 .fp-hand {
   position: absolute;
   image-rendering: pixelated;
@@ -836,7 +838,10 @@
    the hands are when you are looking at someone's back. Flipping it would put
    the sword in the wrong hand. (The 32px item icons this replaced were drawn
    hilt-at-lower-left and DID need the flip; the rule is art-specific, not a
-   general truth about viewmodels.) */
+   general truth about viewmodels.)
+   The same row is why the ARM composites for free: fp-hands.js takes the hand
+   out of the BODY sheet's matching cell, and the two line up because the artist
+   drew the arm and the weapon as one pose. Mirroring either would break that. */
 /* NO TILT. fitHands() owns size, left/right and bottom; the ORIENTATION is the
    sheet's own, which is the same north-facing pose the third-person standee
    draws — hold the two side by side and the weapon sits at the same angle in

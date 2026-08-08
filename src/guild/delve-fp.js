@@ -26,7 +26,8 @@ import { ART_BASE } from '../config/assets.js';
 import { THEMES, LIGHTS, DECALS, ORE_KINDS, oreKindAt, mapForLocale, validateMap, makeLevelModel, DECK_CH, wetCells, waterDepths } from './delve-maps.js';
 import { preyById } from './locales.js';
 import { loadImg, SHEET_URLS, doorTexture, keyTexture } from './delve.js';
-import { ART, artSprite, artCropCss, artTexRect, SWAY, WORN, wornWeapon, wornShield, wornPick } from './art.js';
+import { ART, artSprite, artCropCss, artTexRect, SWAY } from './art.js';
+import { createFpHands, armsOf } from '../game/fp-hands.js';
 import { waterFrames, WADE_SPEED, submergeFor, isSwimming } from './water.js';
 import { propVolume, propCell, footprint, REST_SLOP, PLAYER_H } from './prop-volume.js';
 import { icon } from './icons.js';
@@ -2491,204 +2492,44 @@ function spawnCreature(prey, img, x, y) {
  * Build the viewmodel from the member's real kit.
  *
  * `hooks.gear` is what hall.js says is equipped — kind and material, nothing
- * else — and art.js turns that pair into a 32px icon cell. The RIGHT hand is
- * the weapon slot, mirrored so the hilt sits at the near corner and the blade
- * rises into frame; the LEFT is a shield, which is what the body slot looks
- * like from behind your own arm (there is no shield slot to read).
+ * else. The RIGHT hand is the weapon slot and the LEFT is the OFF-HAND.
+ *
+ * That left hand used to read `gear.body`, because the guild had no off-hand
+ * slot and this file said so out loud: "there is no shield slot to read". The
+ * cost was that your breastplate was drawn as your shield — a Leather Jerkin
+ * rendered as shield1L and labelled "Leather Jerkin" when you hovered it. The
+ * forge makes real shields now, so the hand shows the thing that is in it, and
+ * a member carrying none goes in with an empty off-hand, which is the truth.
+ *
+ * THE RIG IS SHARED. This used to be a private fork of the whole viewmodel —
+ * its own mountHands/fitHands/cellUnion/handFrame/playFrames, character for
+ * character the same as the arena lenses' copy but with its own constants, so
+ * the two drifted: the delve kept the discarded corner-inset placement and
+ * never got the portrait-phone sizing fix, while the shared module never got
+ * the pick. One rig now, and the delve's own capabilities (the pick, stow
+ * arbitration, the raised guard) went into it rather than staying here.
  *
  * Nothing is invented: a member with an empty weapon slot shows empty hands,
  * and is told so on the way in, because that is a fact about the delve worth
  * knowing before the first Old Delver.
  */
-async function mountHands() {
+function mountHands() {
   const host = F.host.querySelector('.fp-hands');
   if (!host) return;
-  // `meet`, not `none`: the dash that draws the arc is measured in USER units,
-  // so the viewBox has to scale uniformly or the pattern and the path disagree
-  // about how long the path is. (The first cut stretched it and kept the stroke
-  // width honest with vector-effect — which put the dashes in SCREEN px against
-  // a 122-unit path, and the arc came out as three disconnected chunks.)
-  host.innerHTML = '<svg class="fp-slash" viewBox="0 0 100 100" preserveAspectRatio="xMidYMid meet">'
-    + '<path d="M92 6 C 60 34, 34 60, 8 94" /></svg>';
-  const hands = { el: host, weapon: null, shield: null, pick: null };
-  F.hands = hands;
   const gear = F.hooks.gear || {};
-  // Sheet loads are slow enough to outlive the delve that asked for them, so
-  // every await is followed back into a session that may already be gone.
-  const live = () => !!F && F.hands === hands;
-  const put = async (src, frames, cls, title) => {
-    if (!src) return null;
-    try {
-      const img = await loadImg(src.url);
-      if (!live()) return null;
-      // Cropped to the UNION of the frames it will show, so the art fills the
-      // hand instead of floating in a mostly-empty 48px cell — and so nothing
-      // shifts as the swing steps through.
-      const box = cellUnion(img, WORN.row, frames);
-      if (!box) return null;
-      // ALSO measure the resting frame alone. The union is set by the big slash
-      // cells, so the stand pose is a small part of it — a sword measures 8×11
-      // inside a 19×34 box. Sizing the element by the union therefore drew the
-      // thing you look at 95% of the time at a third of the size it should be.
-      const rest = cellUnion(img, WORN.row, [frames[0]]) || box;
-      const cv = document.createElement('canvas');
-      cv.width = box.w; cv.height = box.h;
-      const el = document.createElement('div');
-      el.className = 'fp-hand ' + cls;
-      el.title = title || '';
-      el.appendChild(cv);
-      host.appendChild(el);
-      const hand = { el, cv, img, box, rest, frames, at: -1, timer: 0, side: cls.indexOf('shield') >= 0 ? 'left' : 'right' };
-      handFrame(hand, frames[0]);
-      return hand;
-    } catch (e) {
-      console.warn('delve-fp: hand art missing', cls, e);
-      return null;
-    }
-  };
-  const w = gear.weapon, b = gear.body;
-  const SW = [WORN.rest].concat(WORN.swing);
-  // A bow animates on its own block of the sheet — see WORN.bowDraw.
-  const wFrames = w && w.kind === 'bow' ? WORN.bowDraw : SW;
-  hands.weapon = await put(w && wornWeapon(w.kind, w.material), wFrames, 'fp-hand-weapon', w && w.name);
-  // A bow is two-handed: nothing braces an off-hand shield behind it.
-  if (live() && !(w && w.kind === 'bow')) {
-    hands.shield = await put(b && wornShield(b.material), WORN.shieldBrace, 'fp-hand-shield', b && b.name);
-  }
-  // The PICK is not equipment — it is what a delver walks in carrying. It comes
-  // out for a seam whatever else is in hand, and when the weapon slot is empty
-  // it is the only thing there, so the hands are never simply blank.
-  if (live()) hands.pick = await put(wornPick(), SW, 'fp-hand-pick' + (hands.weapon ? ' fp-stowed' : ''), 'Delver’s pick');
-  if (live()) { fitHands(); for (const h of [hands.weapon, hands.shield, hands.pick]) if (h) h.el.classList.add('fp-ready'); }
-}
-
-/**
- * Put the hands where an Elder Scrolls viewmodel puts them: the weapon filling
- * the near corner at about REST_H of the screen, its grip running off the
- * bottom edge.
- *
- * Sized and placed from the REST frame, in JS, because every sheet's art sits
- * somewhere different inside its cell — a sword's stand pose is 8×11 low in a
- * 19×34 union, a pick's is 16×24 in a 25×34 — so no single CSS rule can put
- * them all in the same place. The element still carries the whole UNION (that
- * is what keeps the swing registered); we simply scale and offset it so the
- * part you see at rest lands in the corner, and let the swing frames sweep out
- * of the box across the view. #delveFpScreen clips, so the overflow is free.
- */
-const REST_H = 0.44, SHIELD_H = 0.36, HAND_INSET = 0.045;
-function fitHands() {
-  if (!F || !F.hands) return;
-  const stage = F.host.querySelector('.fp-stage');
-  const W = stage ? stage.clientWidth : 1280, H = stage ? stage.clientHeight : 720;
-  for (const h of [F.hands.weapon, F.hands.pick, F.hands.shield]) {
-    if (!h) continue;
-    const b = h.box, r = h.rest;
-    const share = r.h / b.h;                             // how much of the box the rest pose is
-    const elH = Math.round((h.side === 'left' ? SHIELD_H : REST_H) * H / share);
-    const elW = Math.round(elH * (b.w / b.h));
-    h.el.style.height = elH + 'px';
-    h.el.style.width = elW + 'px';
-    // Fractions of the element the rest art's edges fall at.
-    const right = (r.x + r.w - b.x) / b.w, left = (r.x - b.x) / b.w;
-    const bottom = (r.y + r.h - b.y) / b.h;
-    h.el.style.bottom = Math.round(HAND_INSET * H - (1 - bottom) * elH) + 'px';
-    if (h.side === 'left') h.el.style.left = Math.round(HAND_INSET * W - left * elW) + 'px';
-    else h.el.style.right = Math.round(HAND_INSET * W - (1 - right) * elW) + 'px';
-    // The PIVOT is the GRIP — the bottom-centre of the rest pose within the
-    // union box. The swing keyframes only rotate; about this point the rotation
-    // reads as a wrist. About the default origin (the centre of a box fitHands
-    // has just grown to near screen height, ~350px from the visible weapon) the
-    // same keyframes carried the weapon around the entire viewport. Inline for
-    // the same reason the sizing is: it is per-sheet, and re-set on resize.
-    h.el.style.transformOrigin = ((r.x + r.w / 2 - b.x) / b.w * 100).toFixed(1) + '% '
-      + ((r.y + r.h - b.y) / b.h * 100).toFixed(1) + '%';
-  }
-}
-
-/** The tight box a set of frames occupies inside one row of a 48px sheet, in
- *  cell-local coordinates. Union, not per-frame, or the art jumps as it plays. */
-function cellUnion(img, row, cols) {
-  const S = WORN.cell;
-  try {
-    const c = document.createElement('canvas');
-    c.width = img.naturalWidth; c.height = img.naturalHeight;
-    const g = c.getContext('2d', { willReadFrequently: true });
-    g.drawImage(img, 0, 0);
-    const d = g.getImageData(0, 0, c.width, c.height).data;
-    let x0 = S, y0 = S, x1 = -1, y1 = -1;
-    for (const col of cols) {
-      for (let y = 0; y < S; y++) {
-        for (let x = 0; x < S; x++) {
-          const px = col * S + x, py = row * S + y;
-          if (px >= c.width || py >= c.height) continue;
-          if (d[(py * c.width + px) * 4 + 3] < 12) continue;
-          if (x < x0) x0 = x;
-          if (y < y0) y0 = y;
-          if (x > x1) x1 = x;
-          if (y > y1) y1 = y;
-        }
-      }
-    }
-    return x1 < 0 ? null : { x: x0, y: y0, w: x1 - x0 + 1, h: y1 - y0 + 1 };
-  } catch (e) {
-    console.warn('delve-fp: could not measure hand art', e);
-    return null;
-  }
-}
-
-/** Paint one sheet column into a hand's canvas. */
-function handFrame(hand, col) {
-  if (hand.at === col) return;
-  hand.at = col;
-  const S = WORN.cell, b = hand.box;
-  const g = hand.cv.getContext('2d');
-  g.imageSmoothingEnabled = false;
-  g.clearRect(0, 0, b.w, b.h);
-  g.drawImage(hand.img, col * S + b.x, WORN.row * S + b.y, b.w, b.h, 0, 0, b.w, b.h);
-}
-
-/** Step a hand through its frames and settle back on the first. */
-function playFrames(hand, cols) {
-  if (!hand) return;
-  clearInterval(hand.timer);
-  let i = 0;
-  handFrame(hand, cols[0]);
-  hand.timer = setInterval(() => {
-    i++;
-    if (i >= cols.length) { clearInterval(hand.timer); hand.timer = 0; handFrame(hand, hand.frames[0]); return; }
-    handFrame(hand, cols[i]);
-  }, WORN.frameMs);
-}
-
-/**
- * Throw the swing. `mining` brings the pick out and stows the blade for the
- * duration, because you do not open a vein with a sword.
- *
- * Retriggering needs the class off, a reflow, and the class back on, or a
- * second swing inside the first simply doesn't play.
- */
-function playSwing(mining) {
-  const H = F.hands;
-  if (!H) return;
-  const lead = mining ? (H.pick || H.weapon) : (H.weapon || H.pick);
-  // One hand leads and the other stows. The stowed hand must also DROP its
-  // swing class: an animation outranks a plain transform, so a pick left
-  // mid-swing would keep swinging from inside the holster.
-  for (const h of [H.weapon, H.pick]) {
-    if (!h) continue;
-    const off = h !== lead;
-    h.el.classList.toggle('fp-stowed', off);
-    if (off) { h.el.classList.remove('fp-swinging'); clearInterval(h.timer); handFrame(h, h.frames[0]); }
-  }
-  const fire = (el, cls) => {
-    if (!el) return;
-    el.classList.remove(cls);
-    void el.getBoundingClientRect();
-    el.classList.add(cls);
-  };
-  if (lead) { fire(lead.el, 'fp-swinging'); playFrames(lead, lead.frames); }
-  fire(H.el.querySelector('.fp-slash'), 'fp-swinging');
-  if (H.shield) { fire(H.shield.el, 'fp-bracing'); playFrames(H.shield, H.shield.frames); }
+  // ARMS come from the member's own body sheet, so a delver's sleeves and skin
+  // in first person are the ones their standee wears. Body ARMOUR is not folded
+  // in: hall.js speaks guild kinds ('leather') and the layer ladders are keyed
+  // by engine types ('Leather Armor'), and that translation is the gear→engine
+  // bridge this project has deliberately deferred. The rolled top is right for
+  // every member who has not equipped body armour, and is the right silhouette
+  // in any case — it is the arm, not the breastplate, that is in frame.
+  F.hands = createFpHands(host, {
+    arms: armsOf(F.member),
+    weapon: gear.weapon || null,
+    shield: gear.offhand || null,
+    pick: true,
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -2989,7 +2830,7 @@ export async function openDelveFp(localeId, member, hooks, carry) {
       updateHaul();
       showScreen('delveFpScreen');
       fitLens();               // now that the stage has a height to measure
-      fitHands();              // and the hands with it
+      if (F.hands) F.hands.fit();  // and the hands with it
       mountSky();              // and the horizon at the real 50% of it
       startLoop();
     } catch (e) {
@@ -3002,7 +2843,7 @@ export async function openDelveFp(localeId, member, hooks, carry) {
     }
     // The hands come up after the screen does: a missing icon sheet must cost
     // the delve nothing but its viewmodel.
-    mountHands().catch((e) => console.warn('delve-fp: hands', e));
+    mountHands();
     updateVitals();
     updatePotions();
     const first = member.name.split(' ')[0];
@@ -3110,7 +2951,7 @@ function wireInput() {
     ignore: '.delve-hud,.fp-pad,.fp-map,.fp-vitals',
     onChange: (on) => { if (F) F.host.classList.toggle('fp-looking', on); },
   });
-  F.onResize = () => { fitLens(); fitHands(); mountSky(); };
+  F.onResize = () => { fitLens(); if (F.hands) F.hands.fit(); mountSky(); };
   window.addEventListener('resize', F.onResize);
 }
 /**
@@ -3269,7 +3110,7 @@ function trySwing() {
     if (at(rx, ry) === 'o') { ax = rx; ay = ry; break; }
   }
   const seam = at(ax, ay) === 'o';
-  playSwing(seam);
+  if (F.hands) F.hands.swing(seam);
   const w = F.hooks.gear && F.hooks.gear.weapon;
   // The standee swings whatever the hands do — including the pick at a seam.
   selfSwing(!seam && w && w.kind === 'bow');
@@ -3802,7 +3643,7 @@ function foeHit(prey, guarding) {
   }
   F.haul.taken = (F.haul.taken || 0) + 1;
   let dmg = spread(FOE_DMG / Math.min(2, Math.max(0.5, oddsVs(prey))));
-  if (guarding) { dmg = Math.max(1, Math.round(dmg * BLOCK_CUT)); braceShield(); }
+  if (guarding) { dmg = Math.max(1, Math.round(dmg * BLOCK_CUT)); if (F.hands) F.hands.brace(); }
   F.hp -= dmg;
   F.hurtUntil = performance.now() + 260;
   // In third person the blow lands on someone you can SEE — recoil them.
@@ -3965,15 +3806,6 @@ function updatePotions() {
   b.textContent = n;
   const btn = F.host.querySelector('.fp-drink');
   if (btn) btn.classList.toggle('fp-dry', !n);
-}
-
-function braceShield() {
-  const s = F.hands && F.hands.shield;
-  if (!s) return;
-  s.el.classList.remove('fp-bracing');
-  void s.el.getBoundingClientRect();
-  s.el.classList.add('fp-bracing');
-  playFrames(s, WORN.shieldBrace);
 }
 
 /** The one bar that matters, plus the red edge of being hurt. */
@@ -4309,10 +4141,7 @@ function render() {
   for (const s of F.shots) place(s, s.x, s.y, s.lift);
   // A raised shield has to LOOK raised, or the only feedback for a key you are
   // holding down is that you cannot attack.
-  if (F.hands && F.hands.shield) {
-    const up = guarding();
-    if (up !== F.hands._guard) { F.hands._guard = up; F.hands.shield.el.classList.toggle('fp-guarding', up); }
-  }
+  if (F.hands) F.hands.guard(guarding());
   // DUEL STANCE. A rank-1 creature stands 320 world px — knee height — and the
   // tile in front of you is exactly where the viewmodel lives, so the thing
   // you were fighting was hidden behind your own sword. When anything alive is
@@ -4347,7 +4176,7 @@ function render() {
     const q = (v) => (Math.round(v * 2) / 2).toFixed(1);
     const tf = swinging ? F._handTf || 'translate3d(0px,0px,0)'
       : `translate3d(${q(clamp1(F.sway) * -30)}px,${q(Math.sin(F.bobPhase) * 26 * spd)}px,0)`;
-    if (tf !== F._handTf) F.hands.el.style.transform = (F._handTf = tf);
+    if (tf !== F._handTf) F.hands.layer.style.transform = (F._handTf = tf);
   }
   // The walker's own back, when the camera stands behind it.
   if (F.self) {
@@ -4584,6 +4413,7 @@ export function closeDelveFpSilent() {
   if (F.raf) cancelAnimationFrame(F.raf);
   clearTimeout(F.helpTimer);
   unwireInput();
+  if (F.hands) { F.hands.dispose(); F.hands = null; }
   if (F.joyTouchOff) F.joyTouchOff();
   for (const s of [F.surf, ...Object.values(F.surfByTheme || {})]) {
     if (s && s._urls) s._urls.forEach((u) => URL.revokeObjectURL(u));
@@ -4663,6 +4493,9 @@ function close() {
   // = ''` below drops the canvas, and a context left behind is one of the very
   // few things a browser will not reclaim on its own.
   if (F.gl) { F.gl.dispose(); F.gl = null; }
+  // The viewmodel owns frame timers; innerHTML alone would leave them ticking
+  // against detached canvases for the life of the tab.
+  if (F.hands) { F.hands.dispose(); F.hands = null; }
   const hooks = F.hooks, summary = F.haul;
   for (const s of [F.surf, ...Object.values(F.surfByTheme || {})]) {
     if (s && s._urls) s._urls.forEach((u) => URL.revokeObjectURL(u));
