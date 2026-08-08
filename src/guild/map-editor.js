@@ -349,8 +349,7 @@ function buildDom(host) {
           <button class="med-btn" data-act="zoomIn">+</button>
           <button class="med-btn" data-act="raise" title="Raise-ground tool">▲</button>
           <button class="med-btn" data-act="lower" title="Lower-ground tool">▼</button>
-          <button class="med-btn med-primary" data-act="walk" title="Save and walk this map top-down">Walk it</button>
-          <button class="med-btn med-primary" data-act="walkFp" title="Save and walk it in first person">1st person</button>
+          <button class="med-btn med-primary" data-act="walk" title="Save and walk this map — swap the camera from the HUD once you are in">Walk it</button>
         </div>
         <div class="med-view"><canvas class="med-canvas"></canvas>
           <div class="med-readout"></div>
@@ -638,7 +637,7 @@ function renderSide() {
           ${Object.keys(PREY).map((k) => `<option value="${k}" ${k === E.prey ? 'selected' : ''}>${PREY[k].name || k}</option>`).join('')}
         </select></div>
       <div class="med-hint">Spawns end a top-down test walk if they catch you (no arena hooks on the
-        drafting table) — test combat maps in 1st person, where the fight is real.</div>`;
+        drafting table) — swap the camera to first person once you are walking, where the fight is real.</div>`;
     pal.onclick = (e) => {
       const b = e.target.closest('[data-flag]');
       if (b) {
@@ -1090,7 +1089,7 @@ function onBarClick(e) {
   // Anything that takes the screen away stops the table's heartbeat; the loop
   // also checks for itself, but ending it at the door is cheaper than one more
   // wasted frame and makes the lifetime obvious from here.
-  if (act === 'back' || act === 'walk' || act === 'walkFp') stopWater();
+  if (act === 'back' || act === 'walk') stopWater();
   if (act === 'hand') { toggleHand(); return; }
   if (act === 'back') { walkCtx && walkCtx.back ? walkCtx.back() : history.back(); }
   else if (act === 'view3d') {
@@ -1114,7 +1113,7 @@ function onBarClick(e) {
   }
   else if (act === 'zoomIn') zoomTo(E.zoom * 1.25);
   else if (act === 'zoomOut') zoomTo(E.zoom / 1.25);
-  else if (act === 'walk' || act === 'walkFp') {
+  else if (act === 'walk') {
     try { validateMap(E.map); } catch (err) { toast(String(err.message || err)); return; }
     // Only what makes a walk IMPOSSIBLE stops the button: a drowned entry or
     // no way out. Everything else lint knows is ADVICE — a stray ladder must
@@ -1124,7 +1123,10 @@ function onBarClick(e) {
     const notes = lint();
     if (notes.length) toast(notes[0] + ' — walking anyway (Validate lists all)');
     persist();
-    if (walkCtx && walkCtx.walk) walkCtx.walk(E.map.id, act === 'walkFp');
+    // ONE walk button. The camera is chosen inside the walk, not out here —
+    // the editor used to offer 'Walk it' and '1st person' as two doors into the
+    // same map, which made a camera look like a mode. @see hall.js's picker.
+    if (walkCtx && walkCtx.walk) walkCtx.walk(E.map.id, false);
     else toast('No walker attached — open the editor from the Grounds.');
   }
 }

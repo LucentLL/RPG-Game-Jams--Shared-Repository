@@ -205,9 +205,14 @@
     <button class="cam-btn" onclick="tacZoom(0.8)" title="Zoom out">－</button>
     <button class="cam-btn cam-fit" onclick="tacFit()" title="Frame the fighters">⊡</button>
     <!-- The first-person toggle ALSO lives here, always in view: buried at the
-         bottom of the scrollable control panel nobody ever found it. Guild
-         matches show it (startGuildTacticalBattle); roguelike runs hide it. -->
-    <button class="cam-btn" id="tacCamFp" style="display:none" onclick="tacViewToggle()" title="First person — stand in the fighter"></button>
+         bottom of the scrollable control panel nobody ever found it, and on a
+         phone that panel's children are display:none until the FF menu's View
+         box is opened — two taps deep. This rail IS the phone's route to the
+         camera, which matters more now that first person is only ever a camera.
+         It shipped BLANK: the label was a lone 👁, the emoji purge took it, and
+         nothing replaced it — an empty gold-bordered square. Text, not a
+         pictograph, per the icons-not-emoji rule. -->
+    <button class="cam-btn cam-fp" id="tacCamFp" style="display:none" onclick="tacViewToggle()" title="First person — stand in the fighter">1st</button>
   </div>
   <div class="controls" id="ctrlPanel">
     <div class="section-label">MOVEMENT</div>

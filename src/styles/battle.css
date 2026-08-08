@@ -169,6 +169,13 @@
   background:rgba(14,16,22,0.8);backdrop-filter:blur(3px);-webkit-backdrop-filter:blur(3px);color:var(--gold);
   font-size:1.05em;display:flex;align-items:center;justify-content:center;cursor:pointer;-webkit-tap-highlight-color:transparent;line-height:1}
 .cam-btn:active{background:rgba(212,168,67,0.22)}
+/* The camera rail's first-person toggle carries a WORD, not a glyph like its
+   zoom siblings, so it needs the smaller type to sit inside a 38px square (32
+   on a phone). `.on` is the state the rail never used to show — lit while you
+   are standing in the fighter, so the button reads as a switch rather than a
+   one-way door. */
+.cam-btn.cam-fp{font-size:0.72em;font-weight:700;letter-spacing:0.02em}
+.cam-btn.cam-fp.on{background:rgba(212,168,67,0.9);color:#12141c;border-color:var(--gold)}
 /* Bottom overlay — movement + attacks + execute, kept compact so the battlefield
    above stays generous. */
 #battleScreen .controls{position:absolute;left:0;right:0;bottom:0;z-index:20;
