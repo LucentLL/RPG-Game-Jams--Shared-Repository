@@ -199,10 +199,18 @@ const climbAt = (T0, x, y) => {
 /** World-px lift of a standee at a point — negative is UP. */
 const liftAt = (T0, x, y) => -(climbAt(T0, x, y) ? 0.5 : hAt(T0, x, y)) * STEP;
 
-function boardKey() {
-  const T0 = V.bridge.terrain();
-  return (T0 ? T0.name : 'flat') + '|' + ((groundURI() || '').length);
-}
+/**
+ * Has the board changed? IDENTITY, not content.
+ *
+ * This used to be the terrain's name plus the LENGTH of the ground's data URI,
+ * and it ran once a frame. Both halves of that are expensive in a way the line
+ * does not look: reading `el.style.backgroundImage` serialises the whole
+ * declaration — a base64 PNG, hundreds of kilobytes — and the regex in
+ * groundURI() then scans it, sixty times a second, to compute a number that
+ * changes only when the fight moves to a different field. The terrain object is
+ * rebuilt per board, so its reference answers the same question for free.
+ */
+function boardKey() { return V.bridge.terrain() || 'flat'; }
 
 function buildBoard() {
   const T0 = V.bridge.terrain();
@@ -789,6 +797,20 @@ export function actFpToggle(kind, bridge) {
       handsEl: host.querySelector('.fp-hands'), hands: null, handsFor: null, lastAnim: '',
       look: null,
     };
+    // A phone's GPU is not a desktop's. The delve tiers itself this way and so
+    // does the tactical lens; THIS one never did, which is why it was the one
+    // that fell over. Everything the class strips is a live blur on something
+    // that moves every frame: both fighter billboards, every projectile, the
+    // haze, and — biggest by a distance — the held viewmodel, whose drop-shadow
+    // is a private render surface covering ~43% of a landscape phone screen and
+    // re-rastered on every step of the walk. Measured at 844x390: 203k px of
+    // filtered surface against a 329k px viewport, 62% of the screen.
+    //
+    // Keyed to the DEVICE, not the session, and never removed — the same rule
+    // the delve settled on.
+    if (typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches) {
+      document.body.classList.add('fp-lite');
+    }
     // The mouse becomes the head. Taken on the host (which fills the stage),
     // never on the HUD around it, and never on a touch device — where the
     // stick IS the control and a pointer lock is a cursor thrown away.

@@ -125,6 +125,28 @@
 .afp-round canvas{display:block;width:100%;height:100%;image-rendering:pixelated}
 .afp-shot{filter:drop-shadow(0 0 10px rgba(0,0,0,0.45))}
 
+/* ── The lite tier, which this file never had ────────────────────────────────
+   `body.fp-lite` is stamped on a coarse pointer by all three 3D lenses (the
+   action arena was the last to do it, which is why it was the one that fell
+   over on a phone). Everything switched off below is a BLUR ON A MOVING THING,
+   and a filtered element is a private render surface the compositor must
+   re-raster whenever its transform chain changes — which for all of these is
+   every frame of a fight.
+
+   `.afp-shot` needs its own line rather than leaning on `body.fp-lite .tfp-bb`:
+   it re-declares the shadow at the same specificity and later in the cascade
+   (main.css loads action-arena.css after battle.css), so it wins the tie and
+   would have kept its blur even once the class was set. */
+body.fp-lite .afp-shot{filter:none}
+body.fp-lite .at-prop{filter:none}
+body.fp-lite .action-proj-img{filter:none}
+/* backdrop-filter is the dearest thing on this screen: it samples and blurs
+   whatever is BEHIND the element, and behind these is a 3D scene that moves.
+   The panels stay legible on a solid fill. */
+body.fp-lite .cam-btn,
+body.fp-lite #battleScreen .hud-panel{backdrop-filter:none;-webkit-backdrop-filter:none;
+  background:rgba(10,12,17,0.94)}
+
 /* ═══ The mouse as the head (src/platform/input.js) ═══ */
 /* Under a pointer lock the cursor is gone and the stick is hidden, so without
    these two the screen gives no proof the click landed. The hint says how to

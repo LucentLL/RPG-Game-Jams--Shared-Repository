@@ -4090,6 +4090,40 @@ if (typeof window !== 'undefined'){
 }
 
 function actionRender(){
+  // THE HIDDEN LENS DOES NO WORK.
+  //
+  // `.action-arena` is visibility:hidden while the inside camera is up
+  // (action-arena.css), but hidden is not idle: everything below kept running
+  // every frame — both fighters fully re-composited (a clearRect and up to
+  // eleven drawImage each, ~44 a frame), four layout writes per standee, the
+  // charge ring stroked onto a canvas nobody can see, and every projectile
+  // placed twice. The inside camera composites the SAME two fighters again
+  // through its own canvases, so a phone was paying for two arenas and
+  // displaying one. Everything skipped here is redrawn the instant you cut
+  // back out, because that path re-enters this function.
+  //
+  // The HUD below is NOT skipped: the bars and labels live outside the arena
+  // plane and are on screen in both cameras.
+  var fpUp = actFpActive();
+  if (!fpUp) actionRenderFlat();
+  // HUD
+  var hp1 = document.getElementById('actHpFillP1');
+  var hp2 = document.getElementById('actHpFillP2');
+  if (hp1) hp1.style.width = Math.max(0, p1.hp/p1.maxHp*100) + '%';
+  if (hp2) hp2.style.width = Math.max(0, p2.hp/p2.maxHp*100) + '%';
+  document.getElementById('actLblP1').textContent = '⚗ You · HP '+p1.hp+'/'+p1.maxHp;
+  document.getElementById('actLblP2').textContent = '☠ Opponent · HP '+p2.hp+'/'+p2.maxHp;
+  // Cooldown dim on attack buttons.
+  (p1.attacks||[]).slice(0,6).forEach(function(n, i){
+    var btn = document.getElementById('actAtk_'+i);
+    if (btn) btn.classList.toggle('cooling', (p1._atkCD||0) > 0);
+  });
+  // The inside camera, when it is up — placement only, same state, same rules.
+  if (fpUp) actFpFrame();
+}
+
+/** Everything that only exists on the flat, tilted arena plane. */
+function actionRenderFlat(){
   // Position fighter STANDEES. (ax, ay) are tile-centered coordinates; the wrapper
   // sits flat on the tilted plane (owning the ground shadow) and the inner standee
   // counter-rotates upright — same diorama recipe as the Ranch.
@@ -4137,22 +4171,8 @@ function actionRender(){
       cctx.restore();
     }
   }
-  // HUD
-  var hp1 = document.getElementById('actHpFillP1');
-  var hp2 = document.getElementById('actHpFillP2');
-  if (hp1) hp1.style.width = Math.max(0, p1.hp/p1.maxHp*100) + '%';
-  if (hp2) hp2.style.width = Math.max(0, p2.hp/p2.maxHp*100) + '%';
-  document.getElementById('actLblP1').textContent = '⚗ You · HP '+p1.hp+'/'+p1.maxHp;
-  document.getElementById('actLblP2').textContent = '☠ Opponent · HP '+p2.hp+'/'+p2.maxHp;
-  // Cooldown dim on attack buttons.
-  (p1.attacks||[]).slice(0,6).forEach(function(n, i){
-    var btn = document.getElementById('actAtk_'+i);
-    if (btn) btn.classList.toggle('cooling', (p1._atkCD||0) > 0);
-  });
   // Projectiles in flight (ranged attacks) fly across the field this frame.
   renderActionProjectiles(performance.now());
-  // The inside camera, when it is up — placement only, same state, same rules.
-  if (actFpActive()) actFpFrame();
 }
 
 function renderActionFighter(cv, fighter){
