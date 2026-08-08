@@ -118,16 +118,18 @@
    #actionLog is a full-width strip under them to y≈100, and the log takes
    pointer events. 106px puts the rail in the corner without sitting on either. */
 #actionScreen .cam-controls{top:106px;bottom:auto;transform:none;right:8px}
-/* On a short screen the rail has to EARN its height: five stacked 38px buttons
-   is 214px, which on a landscape phone leaves seven pixels between the rail and
-   the attack row — and none at all once that row wraps to a second line. The
-   battle screen already shrinks its rail at this breakpoint; this is the same
-   trade, and it is the difference between the buttons clearing each other and
-   the collision that was reported. */
+/* ON A SHORT SCREEN THE RAIL LIES DOWN.
+   Five stacked buttons is 214px, and a landscape phone does not have 214px to
+   spare below the log: the touch ATTACK WHEEL sits bottom-right (.act-wheel,
+   96px at bottom:104px), so a vertical rail in the top-right corner runs
+   straight down through it. That is the reported "attack button is hidden under
+   camera controls" — and shrinking the buttons did not fix it, because the
+   problem is the column's length, not its width. Laid out as a row it is 32px
+   tall, clears the log above and the wheel below, and is still the corner. */
 @media (max-height:620px), (max-width:560px) {
-  #actionScreen .cam-controls{top:104px;gap:4px}
+  #actionScreen .cam-controls{top:104px;right:8px;flex-direction:row;align-items:center;gap:4px}
   #actionScreen .cam-btn{width:32px;height:32px;font-size:0.9em}
-  #actionScreen #actCamFp{padding:0 8px;font-size:0.56em}
+  #actionScreen .cam-btn.cam-view{width:auto;height:32px;padding:0 8px;font-size:0.56em}
 }
 #actCamFp{width:auto;padding:0 12px;white-space:nowrap;font-family:'Cinzel',serif;
   font-size:0.66em;letter-spacing:0.06em;text-transform:uppercase}
