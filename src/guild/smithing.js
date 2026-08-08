@@ -16,24 +16,96 @@ import { hasMaterials, spendMaterials, addItem } from './inventory.js';
  * @property {string} id @property {string} name @property {string} kind @property {string} slot
  * @property {string} material @property {Object.<string,number>} cost @property {number} base @property {number} staminaCost
  */
-// `base` = unskilled quality; `ceil` = the best this material can reach even at max
-// Practice. Cheaper materials cap lower, so iron can never match steel/mithril quality
-// (the material tier stays meaningful) — quality = clamp(base + practice*0.5, 5, ceil).
-// `reqTheory` = the blacksmithing Theory a smith must have STUDIED to be allowed to
-// make this at all (Theory unlocks recipes; Practice then drives quality). So a
-// fresh smith can only forge iron until they study the metallurgy of steel/mithril.
-export const RECIPES = [
-  { id: 'iron_sword', name: 'Iron Sword', kind: 'sword', slot: 'weapon', material: 'iron', cost: { iron_ore: 2 }, base: 20, ceil: 55, reqTheory: 0, staminaCost: 30 },
-  { id: 'iron_dagger', name: 'Iron Dagger', kind: 'dagger', slot: 'weapon', material: 'iron', cost: { iron_ore: 1 }, base: 18, ceil: 50, reqTheory: 2, staminaCost: 24 },
-  { id: 'iron_axe', name: 'Iron Axe', kind: 'axe', slot: 'weapon', material: 'iron', cost: { iron_ore: 2 }, base: 20, ceil: 55, reqTheory: 6, staminaCost: 30 },
-  { id: 'leather_jerkin', name: 'Leather Jerkin', kind: 'armor', slot: 'body', material: 'leather', cost: { pelt: 3 }, base: 15, ceil: 45, reqTheory: 4, staminaCost: 26 },
-  { id: 'hunters_bow', name: "Hunter's Bow", kind: 'bow', slot: 'weapon', material: 'leather', cost: { pelt: 2, iron_ore: 1 }, base: 18, ceil: 50, reqTheory: 8, staminaCost: 28 },
-  { id: 'iron_armor', name: 'Iron Armor', kind: 'armor', slot: 'body', material: 'iron', cost: { iron_ore: 3 }, base: 20, ceil: 55, reqTheory: 12, staminaCost: 32 },
-  { id: 'steel_sword', name: 'Steel Sword', kind: 'sword', slot: 'weapon', material: 'steel', cost: { steel_ore: 2 }, base: 40, ceil: 80, reqTheory: 30, staminaCost: 30 },
-  { id: 'steel_armor', name: 'Steel Armor', kind: 'armor', slot: 'body', material: 'steel', cost: { steel_ore: 3 }, base: 40, ceil: 80, reqTheory: 40, staminaCost: 34 },
-  { id: 'mithril_sword', name: 'Mithril Sword', kind: 'sword', slot: 'weapon', material: 'mithril', cost: { mithril_ore: 2 }, base: 60, ceil: 100, reqTheory: 60, staminaCost: 34 },
-  { id: 'mithril_armor', name: 'Mithril Armor', kind: 'armor', slot: 'body', material: 'mithril', cost: { mithril_ore: 3 }, base: 60, ceil: 100, reqTheory: 72, staminaCost: 36 },
+
+/**
+ * THE LADDER IS A GRID, NOT A LIST.
+ *
+ * Every piece of gear is forgeable, and the difficulty of any one of them is
+ * two numbers added together: what the METAL demands, and what the SHAPE
+ * demands. That is the whole law — a mithril dagger is hard because mithril is
+ * hard, a bow is hard because a bow is hard, and a mithril bow is both.
+ *
+ * The table below used to be thirteen hand-written rows, which is fine until
+ * you want the other twenty-six: gates drift, one kind gets a cheaper metal
+ * than its neighbour for no reason anybody can name, and nothing tells you a
+ * combination is missing because nothing knows the combinations exist. Written
+ * as a grid it cannot drift, and adding a kind is one line.
+ *
+ * `base`/`ceil` come from the metal alone — the shape does not change how good
+ * steel can get — so quality = clamp(base + practice*0.5, 5, ceil) still reads
+ * the same way, and iron can never match mithril however practiced the smith.
+ */
+const MATERIAL_TIER = {
+  // `floor` is the Theory the metal itself costs. Leather is NEGATIVE on
+  // purpose: hide is the material you learn on, so a fresh smith can already
+  // cut a jerkin and a cap while iron is still teaching them to draw a blade.
+  leather: { floor: -8, base: 15, ceil: 45, ore: 'pelt', name: 'Leather' },
+  iron:    { floor: 0,  base: 20, ceil: 55, ore: 'iron_ore', name: 'Iron' },
+  steel:   { floor: 30, base: 40, ceil: 80, ore: 'steel_ore', name: 'Steel' },
+  mithril: { floor: 60, base: 60, ceil: 100, ore: 'mithril_ore', name: 'Mithril' },
+};
+
+/**
+ * The shapes, in the order the forge lists them: weapons first, then armour,
+ * each run from the simplest thing to the hardest.
+ *
+ * `skill` is added to the metal's floor. `bulk` is how much ore the shape eats.
+ * `mats` is which metals the shape is made of at all — nobody forges a leather
+ * sword, and a bow is hide and horn before it is ever steel.
+ */
+const KINDS = [
+  // ── Weapon ───────────────────────────────────────────────────────────────
+  { kind: 'dagger', slot: 'weapon', noun: 'Dagger', skill: 2,  bulk: 1, stamina: 24, mats: ['iron', 'steel', 'mithril'] },
+  { kind: 'sword',  slot: 'weapon', noun: 'Sword',  skill: 0,  bulk: 2, stamina: 30, mats: ['iron', 'steel', 'mithril'] },
+  { kind: 'mace',   slot: 'weapon', noun: 'Mace',   skill: 4,  bulk: 2, stamina: 28, mats: ['iron', 'steel', 'mithril'] },
+  { kind: 'axe',    slot: 'weapon', noun: 'Axe',    skill: 6,  bulk: 2, stamina: 30, mats: ['iron', 'steel', 'mithril'] },
+  { kind: 'hammer', slot: 'weapon', noun: 'Hammer', skill: 8,  bulk: 3, stamina: 34, mats: ['iron', 'steel', 'mithril'] },
+  { kind: 'staff',  slot: 'weapon', noun: 'Staff',  skill: 14, bulk: 2, stamina: 28, mats: ['iron', 'steel', 'mithril'] },
+  { kind: 'bow',    slot: 'weapon', noun: 'Bow',    skill: 16, bulk: 2, stamina: 28, mats: ['leather', 'steel', 'mithril'] },
+  { kind: 'wand',   slot: 'weapon', noun: 'Wand',   skill: 16, bulk: 1, stamina: 24, mats: ['iron', 'steel', 'mithril'] },
+  // ── Armor ────────────────────────────────────────────────────────────────
+  { kind: 'greaves', slot: 'lower',  noun: 'Greaves', skill: 3,  bulk: 2, stamina: 26, mats: ['leather', 'iron', 'steel', 'mithril'] },
+  { kind: 'helm',    slot: 'head',   noun: 'Helm',    skill: 5,  bulk: 2, stamina: 26, mats: ['leather', 'iron', 'steel', 'mithril'] },
+  { kind: 'shield',  slot: 'offhand', noun: 'Shield', skill: 10, bulk: 2, stamina: 26, mats: ['iron', 'steel', 'mithril'] },
+  { kind: 'armor',   slot: 'body',   noun: 'Armor',   skill: 12, bulk: 3, stamina: 32, mats: ['leather', 'iron', 'steel', 'mithril'] },
 ];
+
+/**
+ * Pieces the guild already knew by name. The grid would have called these
+ * `leather_armor`, `leather_bow` and `iron_shield`; a save holding a smith
+ * mid-week on `hunters_bow` must still find their recipe, and "Leather Jerkin"
+ * is a better name than the grid can generate anyway.
+ */
+const NAMED = {
+  leather_armor: { id: 'leather_jerkin', name: 'Leather Jerkin', cost: { pelt: 3 } },
+  leather_bow:   { id: 'hunters_bow', name: "Hunter's Bow", cost: { pelt: 2, iron_ore: 1 } },
+  iron_shield:   { id: 'iron_buckler', name: 'Iron Buckler' },
+};
+
+/** Weapon or Armor — the two headings the forge groups its list under. */
+export const CATEGORY = { weapon: 'Weapon', offhand: 'Armor', head: 'Armor', body: 'Armor', lower: 'Armor' };
+export const CATEGORY_ORDER = ['Weapon', 'Armor'];
+
+export const RECIPES = KINDS.flatMap((k) => k.mats.map((material) => {
+  const t = MATERIAL_TIER[material];
+  const key = `${material}_${k.kind}`;
+  const named = NAMED[key] || {};
+  return {
+    id: named.id || key,
+    name: named.name || `${t.name} ${k.noun}`,
+    kind: k.kind,
+    slot: k.slot,
+    category: CATEGORY[k.slot],
+    material,
+    cost: named.cost || { [t.ore]: k.bulk },
+    base: t.base, ceil: t.ceil,
+    // The one line the whole grid exists for. Never below 0 — a metal cheap
+    // enough to go negative just means the shape is the only thing standing
+    // between a fresh smith and the piece.
+    reqTheory: Math.max(0, t.floor + k.skill),
+    staminaCost: k.stamina,
+  };
+}));
 
 /** Has this smith studied enough Theory to make this recipe? @returns {boolean} */
 export function recipeUnlocked(hero, recipe) {

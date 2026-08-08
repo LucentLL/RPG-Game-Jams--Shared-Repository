@@ -85,10 +85,22 @@ export function potionCount(inv) { return (inv.potions || []).reduce((s, b) => s
 /** Items currently sitting in the armory (not carried by anyone). */
 export function armoryItems(inv) { return inv.items.filter((it) => it.location === 'armory'); }
 
-/** The equipment slots a hero can fill (one item each). */
-export const EQUIP_SLOTS = ['weapon', 'body'];
-/** How much each slot's quality is worth as combat power. */
-const GEAR_SLOT_WEIGHT = { weapon: 0.6, body: 0.5 };
+/**
+ * The equipment slots a hero can fill (one item each).
+ *
+ * ORDER IS THE QUARTERMASTER'S PRIORITY. armHeroes walks this list issuing the
+ * best of each slot down the roster, so the weapon goes out before the shield.
+ *
+ * `offhand` arrived with forgeable shields. Before it the guild had two slots
+ * and the engine had five, and a shield had nowhere to live — which is why the
+ * first-person delve drew your BODY ARMOUR in the shield hand and its own
+ * comment admitted "there is no shield slot to read". There is now.
+ */
+export const EQUIP_SLOTS = ['weapon', 'offhand', 'head', 'body', 'lower'];
+/** How much each slot's quality is worth as combat power, biggest first: the
+ *  weapon ends fights, the breastplate covers the most of you, a shield guards
+ *  a line, and a helm or greaves cover the least. Mirrors the engine's five. */
+const GEAR_SLOT_WEIGHT = { weapon: 0.6, body: 0.5, offhand: 0.45, head: 0.35, lower: 0.35 };
 /** Flat power each refine level (+1) is worth, by material — RO's per-weapon-level ATK. */
 export const PLUS_POWER = { leather: 2, iron: 2, steel: 3, mithril: 5 };
 

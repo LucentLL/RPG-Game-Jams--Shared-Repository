@@ -22,7 +22,7 @@ import { orbCost, orbReqTheory, orbUnlocked, previewOrbLevel, craftMateria, slot
 import { PLANETS } from '../game/data/progression.js';
 import { advanceWeek, formatDate } from './calendar.js';
 import { weeklyUpkeep, heroWage, addGold, guildIncome } from './economy.js';
-import { RECIPES, getRecipe, previewQuality, forge, study, recipeUnlocked, rework, previewRework, refine, refineChance, recipeForItem, materialOreCost, MATERIAL_META, MAX_PLUS, REFINE_GUARDS, REFINE_STAMINA } from './smithing.js';
+import { RECIPES, CATEGORY_ORDER, getRecipe, previewQuality, forge, study, recipeUnlocked, rework, previewRework, refine, refineChance, recipeForItem, materialOreCost, MATERIAL_META, MAX_PLUS, REFINE_GUARDS, REFINE_STAMINA } from './smithing.js';
 import { POTION_RECIPES, getPotionRecipe, previewPotency, previewBrewYield, brew, potionUnlocked, applyPotion } from './alchemy.js';
 import { MATERIALS, createInventory, armoryItems, findItem, addMaterial, gearBonus, itemPower, EQUIP_SLOTS, findPotion, consumePotion, potionCount, roomMaterialIds, materialCount } from './inventory.js';
 import { BOOK_SUBJECTS, BOOK_SUBJECT_IDS, mintBook, addBook, bestBook, bookStudyMult, bookPrice, writeBook, previewBookTier, learnOnTheJob, WRITE_MIN_THEORY } from './books.js';
@@ -60,7 +60,10 @@ const DRILL_MIGRATE = { drill_pow: 'pow', guard_def: 'def', forms_skl: 'skl', sp
 // Typographic marks only — the dagger sign IS a dagger, the feathered arrow a
 // shot. Nothing here may resolve to a platform emoji.
 const ARCH_GLYPH = { Knight: '⚔', Mage: '✦', Ranger: '➳', Cleric: '☩', Rogue: '†', Berserker: '⚒', Adventurer: '☉' };
-const KIND_GLYPH = { sword: '⚔', armor: '▣', bow: '➳', axe: '⚒', dagger: '†' };
+// `shield` is a DRAWN glyph, not a character: the typographic set has no shield
+// that isn't an emoji, and icons.js has carried one since the emoji purge.
+const KIND_GLYPH = { sword: '⚔', armor: '▣', bow: '➳', axe: '⚒', dagger: '†', shield: icon('shield'),
+  mace: '⌇', hammer: '⚒', staff: '≀', wand: '✧', helm: '⌂', greaves: '⑃' };
 
 let guild = null;
 let selectedId = null;
@@ -184,7 +187,6 @@ function tourneyBoard(t, champ) {
         ${tourneyLadder(t, champ)}
         <button class="lens-btn" data-m="action">⚔ Fight it live <span>real-time arena — stick + tap</span></button>
         <button class="lens-btn" data-m="tactical">♟ Command it <span>simultaneous turn-based tactics</span></button>
-        <button class="lens-btn" data-m="tactical-fp">Fight it from inside <span>the same turn-based duel, first person</span></button>
         <button class="lens-btn" data-m="spectate">Spectate <span>watch it fought turn by turn — take control anytime</span></button>
         <button class="lens-btn sim" data-m="sim">▶ Simulate <span>let the week resolve it</span></button>
         <label class="lens-remember"><input type="checkbox"> don’t ask again — always simulate <span class="dim">(re-enable on the Calendar)</span></label>
@@ -276,9 +278,26 @@ function closeWielder(item) {
   const w = item.history.wielders[item.history.wielders.length - 1];
   if (w && !w.toWeek) w.toWeek = guild.calendar.week;
 }
+/** Kinds that need both hands, so nothing can share the off-hand with them. */
+const TWO_HANDED = new Set(['bow']);
+/** Send an equipped item back to the armory, if there is one in that slot. */
+function returnToArmory(h, slot) {
+  const id = h.equipped[slot];
+  if (!id) return;
+  const prev = findItem(guild.inventory, id);
+  if (prev) { prev.location = 'armory'; closeWielder(prev); }
+  delete h.equipped[slot];
+}
 /** Put `item` on hero `h`, returning any displaced item to the armory. Pure state — no UI. */
 function doEquip(h, item) {
-  if (h.equipped[item.slot]) { const prev = findItem(guild.inventory, h.equipped[item.slot]); if (prev) { prev.location = 'armory'; closeWielder(prev); } }
+  returnToArmory(h, item.slot);
+  // A BOW IS TWO HANDS. Nothing may sit in the off-hand behind one, and picking
+  // up a shield puts a bow down — the same rule the engine keeps and the same
+  // one the viewmodel already drew (fp-hands mounts no off-hand behind a bow),
+  // so without it the armory could hand you a loadout the fight would not show.
+  const cur = h.equipped.weapon ? findItem(guild.inventory, h.equipped.weapon) : null;
+  if (item.slot === 'weapon' && TWO_HANDED.has(item.kind)) returnToArmory(h, 'offhand');
+  else if (item.slot === 'offhand' && cur && TWO_HANDED.has(cur.kind)) returnToArmory(h, 'weapon');
   h.equipped[item.slot] = item.id;
   item.location = h.id;
   item.history.wielders.push({ personId: h.id, fromWeek: guild.calendar.week, toWeek: null });
@@ -303,6 +322,15 @@ function armHeroes(candidates) {
   let issued = 0;
   for (const slot of EQUIP_SLOTS) {
     for (const h of order) {
+      // A BOW HOLDS BOTH HANDS. EQUIP_SLOTS issues the weapon before the
+      // off-hand, so without this the quartermaster handed an archer a bow and
+      // then a shield — and doEquip, obeying the same two-hand rule, put the
+      // bow it had just issued straight back on the shelf. It must not offer
+      // the hand that is already spoken for.
+      if (slot === 'offhand') {
+        const w = h.equipped.weapon ? findItem(inv, h.equipped.weapon) : null;
+        if (w && TWO_HANDED.has(w.kind)) continue;
+      }
       const pool = armoryItems(inv).filter((it) => it.slot === slot && !reserved.has(it.id)).sort((a, b) => itemScore(b) - itemScore(a));
       if (!pool.length) break; // nothing of this slot left to hand out
       const best = pool[0];
@@ -1352,12 +1380,16 @@ async function advanceAll() {
     }
     if (lens && battleEngineReady()) {
       if (armed) guild.playPlan = null; // consume the opt-in (a board pick never armed one)
-      // 'tactical-fp' is a board-picker value only (never armed, never saved):
-      // it travels as mode:'tactical' + fp:true, so every mode whitelist
-      // downstream keeps seeing a string it knows.
-      const fp = lens === 'tactical-fp';
+      // A MODE IS A RULESET; FIRST PERSON IS A CAMERA. The picker used to offer
+      // 'tactical-fp' as a fourth button, which put a camera in a list of
+      // rulesets and implied you were committing to it for the whole match. You
+      // are not: `tacViewToggle()` stands you inside the fight and takes you
+      // back out at any point, and the board keeps running underneath either
+      // way. So the choice here is only ever the two that change the RULES.
+      // `fp` survives as the seam for "open with this camera" and is off — see
+      // crucible.js's startGuildTacticalBattle, which just calls the toggle.
       const played = await playTournamentMatch(lineup[0], t, {
-        mode: fp ? 'tactical' : lens, fp, items: withdrawPotions(),
+        mode: lens, fp: false, items: withdrawPotions(),
         powerFn: combatPower,               // gear counts, same as the simulated bracket
         field: (t.rivalIds || []).map((id) => rivalById(guild, id)), // fight the SAME rivals the board showed
         interstitial: bracketInterstitial(t), // per-round: fight on / simulate the rest
@@ -1855,7 +1887,9 @@ function rosterRow(h) {
 
 function equippedLine(h) {
   const parts = [];
-  ['weapon', 'body'].forEach((slot) => {
+  // EQUIP_SLOTS, not a second hand-written copy of it — the off-hand was added
+  // to the real list and this line kept showing two slots.
+  EQUIP_SLOTS.forEach((slot) => {
     const id = h.equipped[slot];
     if (id) { const it = findItem(guild.inventory, id); if (it) parts.push(`${KIND_GLYPH[it.kind] || '▪'} ${itemLabel(it)} <span class="eq-q">${qualHTML(it)}</span> <button class="eq-x" onclick="__guild.unequipSlot('${slot}')">✕</button>`); }
   });
@@ -2142,17 +2176,30 @@ function forgeBody(h) {
       <div class="intensity-toggle guard-toggle">${guardBtn(REFINE_GUARDS.none)}${guardBtn(REFINE_GUARDS.oil)}${guardBtn(REFINE_GUARDS.blessing)}</div>
       <div class="hint" style="text-align:left;padding:4px 0">Each week is ONE attempt: +1 on success — and ${guardHint}. The Alchemist brews Tempering Oil; the Enchanter crafts Smith's Blessings. A practiced smith rolls up to +10% better.</div>`;
   } else {
-    const forgeList = RECIPES.map((r) => {
+    // GROUPED BY TYPE. Every piece of gear is forgeable now, which is forty-odd
+    // rows — a flat list of them is a wall. Weapon first, then Armor, each run
+    // easiest-first so the next thing worth studying for is the next row down,
+    // and locked rows stay in place rather than vanishing: seeing the Theory a
+    // mithril hammer wants is how you decide to go and read for it.
+    const row = (r) => {
       const cost = Object.keys(r.cost).map((k) => `${MATERIALS[k].name} ×${r.cost[k]}`).join(', ');
       const enough = Object.keys(r.cost).every((k) => (guild.inventory.materials[k] || 0) >= r.cost[k]);
       if (!recipeUnlocked(h, r)) {
-        return `<button class="opt lack" disabled><span><span class="o-name">${r.name}</span> <span class="o-desc">study to unlock</span></span><span class="o-cost">Theory ${r.reqTheory}</span></button>`;
+        return `<button class="opt lack" disabled><span><span class="o-name">${KIND_GLYPH[r.kind] || ''} ${r.name}</span> <span class="o-desc">study to unlock</span></span><span class="o-cost">Theory ${r.reqTheory}</span></button>`;
       }
       return `<button class="opt ${isForge && mode === 'new' && r.id === h.assignment.recipeId ? 'active' : ''} ${enough ? '' : 'lack'}" onclick="__guild.setRecipe('${r.id}')">
         <span><span class="o-name">${KIND_GLYPH[r.kind] || ''} ${r.name}</span> <span class="o-desc">${cost}</span></span>
         <span class="o-cost">~q${previewQuality(r, prof.practice, prof.field)}</span></button>`;
+    };
+    const forgeList = CATEGORY_ORDER.map((cat) => {
+      const inCat = RECIPES.filter((r) => r.category === cat)
+        .sort((a, b) => a.reqTheory - b.reqTheory || a.name.localeCompare(b.name));
+      if (!inCat.length) return '';
+      const open = inCat.filter((r) => recipeUnlocked(h, r)).length;
+      return `<div class="dept-lbl">${cat} <span class="dim">${open}/${inCat.length}</span></div>`
+        + `<div class="opt-list">${inCat.map(row).join('')}</div>`;
     }).join('');
-    body = `<div class="opt-list">${forgeList}</div>`;
+    body = forgeList;
   }
   return `${skillShapeOf(h)}${modeToggle}${body}`;
 }
@@ -2379,8 +2426,15 @@ function quartermasterPanel() {
   const inv = guild.inventory;
   const policy = guild.quartermaster || 'off';
   const shelf = armoryItems(inv);
-  const idleW = shelf.filter((it) => it.slot === 'weapon').length;
-  const idleB = shelf.filter((it) => it.slot === 'body').length;
+  // One tally per slot, read off EQUIP_SLOTS — the pair of hand-counted lines
+  // here would have gone quietly stale the moment the off-hand was added, and a
+  // shelf full of shields would have read as an empty armory.
+  const SLOT_NOUN = { weapon: 'weapon', offhand: 'shield', head: 'helm', body: 'armor', lower: 'greaves' };
+  const idle = EQUIP_SLOTS
+    .map((s) => ({ n: shelf.filter((it) => it.slot === s).length, noun: SLOT_NOUN[s] || s }))
+    .filter((e) => e.n)
+    .map((e) => `${e.n} ${e.noun}${e.n === 1 || e.noun === 'armor' ? '' : 's'}`)
+    .join(', ') || 'nothing';
   const kitted = guild.roster.filter((h) => EQUIP_SLOTS.every((s) => h.equipped[s])).length;
   const POLICIES = [
     { id: 'off', name: 'Manual', desc: 'You equip each hero by hand.' },
@@ -2393,7 +2447,7 @@ function quartermasterPanel() {
       <div class="plan-title">Quartermaster</div>
       <div class="activity-toggle">${toggle}</div>
       <div class="skill-shape"><span class="dim">${desc}</span></div>
-      <div class="rr-sub" style="margin-bottom:10px">${kitted}/${guild.roster.length} fully kitted · armory idle: ${idleW} weapon${idleW === 1 ? '' : 's'}, ${idleB} armor</div>
+      <div class="rr-sub" style="margin-bottom:10px">${kitted}/${guild.roster.length} fully kitted · armory idle: ${idle}</div>
       <button class="advance-btn" style="font-size:0.82em;padding:11px" onclick="__guild.provision()">⚙ Provision from stores now</button>
     </div>`;
 }
@@ -2915,8 +2969,8 @@ function wildsRoom() {
       : `<div class="hint" style="text-align:left;padding:4px 2px">Pick a quarry above to dispatch <b>${subject.name.split(' ')[0]}</b>.</div>`;
     // A charted locale can be WALKED — the Delve (delve.js): live 2.5D exploration.
     const delveRow = hasDelveMap(open.id)
-      ? `<div class="tourney-lens quest-lens"><button class="tourney-play" ${hCanMarch ? '' : 'disabled'} onclick="__guild.exploreLocale('${open.id}')">⚒ ${hCanMarch ? `Walk ${open.name} — take ${subject.name.split(' ')[0]} in on foot` : `${subject.name.split(' ')[0]} can't march right now`}</button>${hCanMarch ? `<button class="tourney-play" onclick="__guild.exploreLocale('${open.id}', true)">Descend in first person</button>` : ''}</div>
-        <div class="hint" style="text-align:left;padding:0 2px 6px">The area is charted, and there are two ways to walk it. <b>From above</b>: move with WASD or the stick, close with a creature to fight it, bump a vein to mine it. <b>First person</b>: WASD steps and sidesteps, ←/→ turn, <b>Space</b> or a click strikes at what is in front of you — a creature within reach, or the seam in the wall. Fights happen <b>there, in the corridor</b>: you aim and time the blow, whether it lands is rolled from ↯ against the creature (tiredness costs you accuracy), <b>Shift</b> guards and <b>R</b> drinks a draught from the Apothecary. Health only comes back part way between fights, so how deep you push is the question. Entering costs ${QUEST_STAMINA} stamina and kills pay real spoils on the spot (repeat marches the same week find thinner pickings) — losing a bout sends ${subject.name.split(' ')[0]} home.</div>`
+      ? `<div class="tourney-lens quest-lens"><button class="tourney-play" ${hCanMarch ? '' : 'disabled'} onclick="__guild.exploreLocale('${open.id}')">⚒ ${hCanMarch ? `Walk ${open.name} — take ${subject.name.split(' ')[0]} in on foot` : `${subject.name.split(' ')[0]} can't march right now`}</button></div>
+        <div class="hint" style="text-align:left;padding:0 2px 6px">The area is charted. There is ONE walk and you choose the camera <b>while you are in it</b> — the view button on the HUD swaps between looking down on ${subject.name.split(' ')[0]} and standing in their boots, and the walk carries over: same position, same facing, same worked veins, same haul. <b>From above</b>: move with WASD or the stick, close with a creature to fight it, bump a vein to mine it. <b>From inside</b>: WASD steps and sidesteps, ←/→ turn, <b>Space</b> or a click strikes at what is in front of you — a creature within reach, or the seam in the wall. Fights happen <b>there, in the corridor</b>: you aim and time the blow, whether it lands is rolled from ↯ against the creature (tiredness costs you accuracy), <b>Shift</b> guards and <b>R</b> drinks a draught from the Apothecary. Health only comes back part way between fights, so how deep you push is the question. Entering costs ${QUEST_STAMINA} stamina and kills pay real spoils on the spot (repeat marches the same week find thinner pickings) — losing a bout sends ${subject.name.split(' ')[0]} home.</div>`
       : '';
     preyPanel = `<div class="plan-title">${open.glyph} ${open.name} <span class="dim" style="font-weight:400;text-transform:none">— ${open.biome}</span></div>
       <div class="opt-list">${rows}</div>${delveRow}${lensBar}`;
@@ -3752,14 +3806,13 @@ async function practiceBout(myId, oppId, mode) {
   const toSpec = (p) => ({ name: p.name, stats: p.stats, archetype: p.archetype, appearance: p.appearance, appearanceSeed: p.appearanceSeed, prime: p.prime });
   advancing = true;
   try {
-    // 'tactical-fp' is a PICKER value, not an engine mode: it reaches the
-    // engine as mode:'tactical' + fp:true, so every whitelist that coerces
-    // unknown mode strings to 'action' never sees a new one.
-    const fp = mode === 'tactical-fp';
+    // Two rulesets and a spectator, and nothing else: first person is a camera
+    // you reach from inside any of them, not a fourth thing to pick. @see the
+    // note in the tournament picker above.
     const result = await window.playGuildBattle({
       player: toSpec(me), opponent: toSpec(opp),
-      mode: fp ? 'tactical' : mode === 'tactical' || mode === 'spectate' ? mode : 'action',
-      fp, label: 'Practice bout',
+      mode: mode === 'tactical' || mode === 'spectate' ? mode : 'action',
+      fp: false, label: 'Practice bout',
     });
     const won = result && result.winner === 'player';
     notice = (result && result.forfeit) ? `${me.name} bowed out of the bout.`
@@ -3775,14 +3828,17 @@ async function practiceBout(myId, oppId, mode) {
 function arenaRoom() {
   const h = heroById(selectedId);
   if (!h) return `<div class="plan-card"><div class="plan-title">⚔ The Arena</div><div class="hint">Recruit a member, then step into the ring.</div></div>`;
-  // Each opponent offers BOTH combat lenses: ⚔ the live arena, ♟ turn-based tactics.
+  // Each opponent offers the two RULESETS — ⚔ the live arena, ♟ turn-based
+  // tactics — plus a spectator seat. There is no first-person button: the
+  // camera is yours once the fight is up, from either of them.
+  // (The Watch button shipped blank for a while: it carried a lone emoji, the
+  // emoji purge took it, and nothing replaced the label.)
   const boutRow = (oppId, name, desc) => `<div class="opt bout-row">
       <span><span class="o-name">${name}</span> <span class="o-desc">${desc}</span></span>
       <span class="bout-btns">
         <button class="bout-btn" title="Real-time — move with the stick, tap to attack" onclick="__guild.practiceBout('${h.id}','${oppId}','action')">⚔ Live</button>
         <button class="bout-btn" title="Turn-based — queue moves; both sides execute at once" onclick="__guild.practiceBout('${h.id}','${oppId}','tactical')">♟ Tactics</button>
-        <button class="bout-btn" title="The same turn-based bout, seen from inside your fighter" onclick="__guild.practiceBout('${h.id}','${oppId}','tactical-fp')">1st</button>
-        <button class="bout-btn" title="Watch it fought turn by turn — take control anytime" onclick="__guild.practiceBout('${h.id}','${oppId}','spectate')"></button>
+        <button class="bout-btn" title="Watch it fought turn by turn — take control anytime" onclick="__guild.practiceBout('${h.id}','${oppId}','spectate')">Watch</button>
       </span></div>`;
   const dummy = boutRow('__dummy', 'Training Dummy', 'a mirror of your own strength');
   const oppList = guild.roster.filter((m) => m.id !== h.id)
