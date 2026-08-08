@@ -67,5 +67,30 @@
   letter-spacing:0.1em;cursor:pointer}
 .fs-close:hover{border-color:var(--dim);color:#e8e0d0}
 
-/* The button that opens it, on every lens's own HUD rail. */
+/* A slot you can change is a BUTTON, and says so. */
+button.fs-gear{width:100%;text-align:left;font:inherit;color:inherit;cursor:pointer}
+.fs-gear.swap:hover{border-color:var(--gold)}
+.fs-swap{flex:0 0 auto;font-family:'Cinzel',serif;font-size:0.62em;letter-spacing:0.08em;
+  color:var(--gold);border:1px solid rgba(212,168,67,0.45);border-radius:7px;padding:3px 8px}
+
+/* The slot picker — a SUB-VIEW of the Gear tab, not a second overlay. An
+   overlay over an overlay on a phone is two things to dismiss, and one of them
+   is always behind the other. */
+.fs-back{display:block;width:100%;margin-bottom:6px;padding:7px 10px;border-radius:8px;
+  border:1px solid var(--border);background:transparent;color:var(--muted);
+  font-family:'Cinzel',serif;font-size:0.7em;letter-spacing:0.08em;cursor:pointer;text-align:left}
+.fs-back:hover{border-color:var(--dim);color:#e8e0d0}
+.fs-opt{display:block;width:100%;margin-bottom:5px;padding:8px 10px;border-radius:9px;
+  border:1px solid var(--border);background:var(--card);cursor:pointer;text-align:left;font:inherit}
+.fs-opt:hover{border-color:var(--gold)}
+.fs-opt-none{border-style:dashed;color:var(--danger)}
+.fs-opt .fs-gname{color:#e8e0d0}
+
+/* The button that opens it, on every lens's own HUD rail.
+   A PILL, NOT A CIRCLE: the delve's `.fp-help` is a 26px round button built for
+   a single glyph, and "Sheet" in it clipped to "SHEE" and ran under the button
+   beside it (playtest). Scoped to the delve's rail so the arena's `.cam-btn`
+   sizing, which is already a pill, is left alone. */
 .fs-open{font-family:'Cinzel',serif;letter-spacing:0.04em}
+.delve-hud .fs-open{width:auto;height:26px;padding:0 10px;border-radius:13px;
+  white-space:nowrap;font-size:0.72em;text-transform:uppercase}

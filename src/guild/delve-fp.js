@@ -2754,8 +2754,11 @@ export async function openDelveFp(localeId, member, hooks, carry) {
         <span class="fp-compass"></span>
         <span class="dv-haul fp-haul"></span>
         <button class="fp-help fp-povbtn" title="Change view" onclick="__delveFp.pov()">3rd person</button>
-        <button class="fp-help fs-open" title="Stats, gear and settings" onclick="__delveFp.sheet()">Sheet</button>
+        <!-- ONE ORDER, EVERY LENS: view · camera · sheet. The arena's rail runs
+             the same three in the same sequence (index.html), so the control you
+             want is in the same place whichever ground you are standing on. -->
         <button class="fp-help" title="Camera settings" onclick="__viewPanel()">${icon('eye')}</button>
+        <button class="fp-help fs-open" title="Stats, gear and settings" onclick="__delveFp.sheet()">Sheet</button>
         <button class="fp-help" title="Controls" onclick="__delveFp.help()">?</button>
       </div>
       <canvas class="fp-map" width="150" height="150"></canvas>

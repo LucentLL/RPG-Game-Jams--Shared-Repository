@@ -9,7 +9,7 @@
 // Consumables/provisioning (an Alchemist's potions a party withdraws) come next.
 
 import { createGuild, FACILITIES, maxRoster, facilityTier, fedCapacity } from './guild.js';
-import { HERO_STATS, heroPower, STAT_CAP, lifeStage, lifeFrac, TRAITS, traitMult } from './hero.js';
+import { HERO_STATS, STAT_LABEL, heroPower, STAT_CAP, lifeStage, lifeFrac, TRAITS, traitMult } from './hero.js';
 import { generateRecruit, hireCost, rollRecruitPool } from './recruiting.js';
 import { makeApprentice, normalizeApprentice, dormCapacity, academyBoard, developApprentice, developmentRate, graduate, potentialStars, LEAN_GLYPH, APPRENTICE_INTAKE } from './apprentices.js';
 import { ensureApplications, tickApplications, offerTuition, closeApplication, reservation, suggestedOffer, wealthBand, academyTuition, BOARD_SIZE, PATIENCE } from './applications.js';
@@ -612,23 +612,65 @@ function memberSheetSpec(h) {
   if (!h) return null;
   const cond = h.condition || {};
   const vitals = [
-    { label: 'Power', value: '↯' + combatPower(h) },
+    // "Rating", not "Power": POW is one of the six trained stats and is right
+    // underneath. Two rows called Power meaning different numbers is worse than
+    // a slightly odd word.
+    { label: 'Rating', value: '↯' + combatPower(h) },
     { label: 'Stamina', value: Math.max(0, 100 - (cond.fatigue || 0)) + '%' },
   ];
   if (cond.injury) vitals.push({ label: 'Injury', value: String(cond.injury) });
+  // `career` is a RECORD (wins/losses/titles…), not a job title — it printed as
+  // [object Object]. The line below it is who they are and how they have done.
+  const rec = h.career || {};
+  const record = (rec.wins || rec.losses || rec.draws)
+    ? (rec.wins | 0) + 'W-' + (rec.losses | 0) + 'L-' + (rec.draws | 0) + 'D' : '';
   return {
     name: h.name,
-    sub: [h.archetype, h.career].filter(Boolean).join(' · '),
+    sub: [h.archetype, h.level ? 'Lv' + h.level : '', record].filter(Boolean).join(' · '),
     vitals,
     stats: HERO_STATS.map((s) => ({ label: STAT_LABEL[s] || s, value: (h.stats && h.stats[s]) || 0 })),
     gear: EQUIP_SLOTS.map((slot) => {
       const it = h.equipped && h.equipped[slot] ? findItem(guild.inventory, h.equipped[slot]) : null;
-      if (!it) return { slot: SHEET_SLOT[slot], empty: true };
+      // `key` is the MODEL's slot, `slot` is the word for it — the sheet shows
+      // one and hands the other back when the player swaps.
+      if (!it) return { key: slot, slot: SHEET_SLOT[slot], empty: true };
       const bits = [it.material, it.kind].filter(Boolean).join(' ');
       const dur = it.durability ? ' · ' + Math.round((it.durability.current / (it.durability.max || 100)) * 100) + '%' : '';
-      return { slot: SHEET_SLOT[slot], name: itemLabel(it), sub: bits + dur };
+      return { key: slot, slot: SHEET_SLOT[slot], name: itemLabel(it), sub: bits + dur };
     }),
     notes: (h.traits || []).map((t) => ({ label: t, title: (TRAITS[t] || {}).desc || '' })),
+    // Re-describe after a change. The sheet holds a DESCRIPTION, not the member,
+    // so the only honest way to show a swap is to ask the guild again.
+    refresh: () => memberSheetSpec(h),
+    /**
+     * SWAPPING GEAR MID-WALK — through the guild's own equip path, never a
+     * second one. `doEquip`/`returnToArmory` are what the armory screen uses:
+     * they return the displaced piece, keep the wielder history, and enforce
+     * the two-handed rule (a bow takes both hands, so picking up a shield puts
+     * it down). A sheet that wrote `h.equipped` itself would be a fourth place
+     * that knows the rules, and they would drift.
+     */
+    equip: {
+      options(slot) {
+        return (guild.inventory.items || [])
+          .filter((it) => it.slot === slot
+            && (it.location === 'armory' || it.location === h.id)
+            && it.id !== (h.equipped && h.equipped[slot]))
+          .sort((a, b) => itemPower(b, h) - itemPower(a, h))
+          .map((it) => ({
+            id: it.id,
+            label: itemLabel(it),
+            sub: [it.material, it.kind, '↯' + Math.round(itemPower(it, h))].filter(Boolean).join(' · '),
+          }));
+      },
+      apply(slot, itemId) {
+        if (!itemId) { returnToArmory(h, slot); save(); return; }
+        const it = findItem(guild.inventory, itemId);
+        if (!it || it.slot !== slot) return;
+        doEquip(h, it);
+        save();
+      },
+    },
   };
 }
 

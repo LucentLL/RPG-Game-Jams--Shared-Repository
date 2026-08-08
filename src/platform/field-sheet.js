@@ -32,6 +32,7 @@ import { showViewPanel } from './view-prefs.js';
 let host = null;      // the live overlay, or null
 let spec = null;      // the description the lens handed us
 let tab = 'stats';
+let picking = null;   // index into spec.gear while its slot picker is open
 
 const esc = (s) => String(s == null ? '' : s)
   .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -58,21 +59,45 @@ function chips(list, cls) {
  * arena has gearCardHTML, the guild has its item rows) — when it is given, this
  * shows it rather than inventing a second way to draw the same item.
  */
-function gearRow(g) {
-  if (!g || g.empty) {
-    return '<div class="fs-gear empty"><span class="fs-slot">' + esc((g && g.slot) || '') + '</span>'
-      + '<span class="fs-gname">— empty —</span></div>';
-  }
-  return '<div class="fs-gear"><span class="fs-slot">' + esc(g.slot) + '</span>'
-    + '<span class="fs-gbody">'
-    + (g.art || ('<span class="fs-gname">' + esc(g.name) + '</span>'
+function gearRow(g, i) {
+  const swap = !!(spec.equip && g && g.slot);
+  const tag = swap ? 'button' : 'div';
+  const body = (g && !g.empty)
+    ? (g.art || ('<span class="fs-gname">' + esc(g.name) + '</span>'
         + (g.sub ? '<span class="fs-gsub">' + esc(g.sub) + '</span>' : '')))
-    + '</span></div>';
+    : '<span class="fs-gname">— empty —</span>';
+  return '<' + tag + ' class="fs-gear' + (g && g.empty ? ' empty' : '') + (swap ? ' swap' : '') + '"'
+    + (swap ? ' data-slot="' + i + '"' : '') + '>'
+    + '<span class="fs-slot">' + esc((g && g.slot) || '') + '</span>'
+    + '<span class="fs-gbody">' + body + '</span>'
+    + (swap ? '<span class="fs-swap">Swap</span>' : '')
+    + '</' + tag + '>';
+}
+
+/** The slot picker — what could go here instead. A sub-view of the Gear tab
+ *  rather than a second overlay: an overlay over an overlay on a phone is two
+ *  things to dismiss and one of them is always behind the other. */
+function pickerHTML(g) {
+  const opts = spec.equip.options(g.key) || [];
+  let h = '<button class="fs-back" data-pick="back">&larr; ' + esc(g.slot) + '</button>';
+  if (!g.empty) h += '<button class="fs-opt fs-opt-none" data-pick="">Take it off</button>';
+  if (!opts.length) {
+    h += '<div class="fs-none">Nothing else in the armory fits this slot.</div>';
+  } else {
+    for (const o of opts) {
+      h += '<button class="fs-opt" data-pick="' + esc(o.id) + '">'
+        + '<span class="fs-gname">' + esc(o.label) + '</span>'
+        + (o.sub ? '<span class="fs-gsub">' + esc(o.sub) + '</span>' : '')
+        + '</button>';
+    }
+  }
+  return h;
 }
 
 function body() {
   if (tab === 'gear') {
     const list = spec.gear || [];
+    if (picking != null && list[picking] && spec.equip) return pickerHTML(list[picking]);
     return list.length
       ? list.map(gearRow).join('')
       : '<div class="fs-none">Nothing worn.</div>';
@@ -114,6 +139,24 @@ function paint() {
       a.run();
     };
   });
+  host.querySelectorAll('.fs-gear.swap').forEach((b) => {
+    b.onclick = () => { picking = +b.getAttribute('data-slot'); paint(); };
+  });
+  host.querySelectorAll('[data-pick]').forEach((b) => {
+    b.onclick = () => {
+      const v = b.getAttribute('data-pick');
+      if (v === 'back') { picking = null; paint(); return; }
+      const g = (spec.gear || [])[picking];
+      if (!g) { picking = null; paint(); return; }
+      spec.equip.apply(g.key, v || null);
+      // Ask the lens again rather than patching the row: the swap may have
+      // displaced something else (a bow gives up both hands), and only the
+      // model knows what the member is wearing now.
+      if (spec.refresh) { const next = spec.refresh(); if (next) spec = next; }
+      picking = null;
+      paint();
+    };
+  });
 }
 
 export function fieldSheetOpen() { return !!host; }
@@ -135,6 +178,7 @@ export function openFieldSheet(s) {
   if (!s) return;
   closeFieldSheet();
   spec = s;
+  picking = null;
   host = document.createElement('div');
   host.className = 'fs-veil';
   host.innerHTML = '<div class="fs-card">'
@@ -149,7 +193,7 @@ export function openFieldSheet(s) {
     + '<button class="fs-close" data-pad-back>Close</button>'
     + '</div>';
   host.querySelectorAll('.fs-tab').forEach((b) => {
-    b.onclick = () => { tab = b.getAttribute('data-tab'); paint(); };
+    b.onclick = () => { tab = b.getAttribute('data-tab'); picking = null; paint(); };
   });
   host.querySelector('.fs-close').onclick = closeFieldSheet;
   // The backdrop closes it, but never a press that began inside the card — a
