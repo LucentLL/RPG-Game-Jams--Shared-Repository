@@ -455,6 +455,18 @@ const weaponUrl = (pack, stem, c) => SPRITE_BASES[pack] + 'weapon/' + stem + (c 
 export function wornWeapon(kind, material) {
   const w = ITEM_WEAPON[kind];
   if (!w) return null;
+  // A `sheet` ENTRY IS A RESOLVER, not a stem. `bow` and `shield` cannot be
+  // written as a fixed pack/stem — the material picks between two different
+  // sheets — so they carry a function instead, and reading w.pack/w.stem/w.maxC
+  // off one of them gave `weaponUrl(undefined, undefined, NaN)`, i.e. the
+  // literal URL 'undefinedweapon/undefined.png'. loadImg rejected it, put()'s
+  // catch swallowed the warning, and every Bow and Crossbow fighter has been
+  // holding nothing in first person for as long as the viewmodel has existed.
+  // wornShield already went through shieldSheet; this is the same call.
+  if (typeof w.sheet === 'function') {
+    const s = w.sheet(material);
+    return { url: weaponUrl(s.pack, s.stem, s.c) };
+  }
   return { url: weaponUrl(w.pack, w.stem, Math.min(MAT_COLOR[material] || 0, w.maxC)) };
 }
 /** The off-hand shield. `slotSuffix` sheets ship an L and an R; the off hand is L. */

@@ -177,7 +177,10 @@
   </div>
   <div class="action-attacks" id="actionAttackBar"></div>
   <div class="action-log" id="actionLog"></div>
-  <button class="reroll-btn" id="actForfeitBtn" style="margin-top:6px" onclick="forfeitAction()">↩ Forfeit Run</button>
+  <!-- No inline margin: action-arena.css positions this absolutely and says
+       margin:0, and an inline margin-top outranks a stylesheet — it pushed the
+       button down into the HP bars it was placed to clear. -->
+  <button class="reroll-btn" id="actForfeitBtn" onclick="forfeitAction()">↩ Forfeit Run</button>
 </div>
 
 <!-- ═══ BATTLE SCREEN ═══ -->
@@ -213,6 +216,10 @@
          nothing replaced it — an empty gold-bordered square. Text, not a
          pictograph, per the icons-not-emoji rule. -->
     <button class="cam-btn cam-fp" id="tacCamFp" style="display:none" onclick="tacViewToggle()" title="First person — stand in the fighter">1st</button>
+    <!-- The command list, on a PC that wants it. A phone is always in list mode
+         so the button is hidden there (battle.css) — a switch with one position
+         is not a switch. -->
+    <button class="cam-btn cam-word" id="tacCmdBtn" onclick="ffToggleList()" title="Command list — one command at a time, and the board uncovered">List</button>
   </div>
   <div class="controls" id="ctrlPanel">
     <div class="section-label">MOVEMENT</div>
@@ -271,12 +278,34 @@
     <div id="labRoundInfo" style="font-size:0.75em;color:var(--gold);margin:2px 0"></div>
     <div class="lab-qs" id="labQs">☿ 0</div>
   </div>
-  <div class="lab-section lab-stats-section" id="labStatsPanel"></div>
-  <div class="lab-section" id="labEquipped"></div>
-  <div class="lab-section" id="labMerchant"></div>
-  <div class="lab-section" id="labStored"></div>
-  <div class="lab-section" id="labLooseMateria"></div>
-  <div class="lab-section" id="labMateriaDust"></div>
+  <!-- Two columns, because the question the lab exists to answer is a
+       COMPARISON: what am I wearing, and is this thing better? Stacked, that
+       question needed a scroll between its two halves. Left is what is on the
+       fighter; right is everything that could go on instead, one source at a
+       time. The stats band spans both and STICKS, so the numbers the swap would
+       change are on screen while you read the thing that would change them. -->
+  <div class="lab-body" id="labBody">
+    <!-- The band is OUTSIDE the two-column grid on purpose. A sticky grid ITEM
+         is bounded by its own grid area, so how far it can travel depends on
+         that row's height and alignment — engines differ, and it is not a thing
+         to depend on. Out here its containing block is simply the whole lab
+         body. @see lab.css. -->
+    <div class="lab-sticky">
+      <div class="lab-section lab-stats-section" id="labStatsPanel"></div>
+      <div class="lab-tabs" id="labTabs"></div>
+    </div>
+    <div class="lab-cols">
+      <div class="lab-col lab-col-worn">
+        <div class="lab-section" id="labEquipped"></div>
+      </div>
+      <div class="lab-col lab-col-offer">
+        <div class="lab-section" id="labStored"></div>
+        <div class="lab-section" id="labMerchant"></div>
+        <div class="lab-section" id="labLooseMateria"></div>
+        <div class="lab-section" id="labMateriaDust"></div>
+      </div>
+    </div>
+  </div>
   <div class="lab-confirm-btn">
     <button class="title-btn" onclick="confirmLoadout()" id="labConfirmBtn">⚔ CONFIRM LOADOUT ⚔</button>
     <div style="margin-top:12px"><button class="title-btn secondary" style="display:inline-block;width:auto;padding:8px 24px;font-size:0.75em" onclick="forfeitRun()">☠ Abandon Run</button></div>

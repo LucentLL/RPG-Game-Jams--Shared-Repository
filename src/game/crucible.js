@@ -59,6 +59,8 @@ import { tacFpToggle, tacFpSetSubject, tacFpSetPov, tacFpPov, tacFpSync, tacFpFr
 import { actFpToggle, actFpPov, actFpActive, actFpFrame, actFpSteer } from './action-fp.js';
 import { readPad, padReset, touchPrimary, onTouchPrimary, PAD } from '../platform/input.js';
 import { claimPad } from '../platform/ui-pad.js';
+// Small persisted preferences (namespaced localStorage behind a swappable seam).
+import { saveGame, loadGame } from '../platform/storage.js';
 // While the arena's loop runs, the controller is steering a fighter and must
 // not also be walking the menu cursor. The loop self-stops the moment
 // #actionScreen goes inactive, so this is exactly the window that matters.
@@ -2957,7 +2959,20 @@ var _actionStage = null;           // the element it is bound to
 var _guildBattle = null;           // { resolve, done } while a guild (non-run) battle is live
 var _koTimer = null;               // pending "battle decided" timeout, so it can be cancelled/tracked
 var _koAt = 0;                     // when the last fighter fell — the death beat's clock
-var KO_HOLD = 1400;                // ms the scene holds on the fall before anything asks you to move on
+var _koDecided = false;            // the fight is over: the controls must stop pretending otherwise
+/**
+ * ms the scene holds on the fall before anything asks you to move on.
+ *
+ * WAS 1400, AND IT WAS HOLDING ON NOTHING. The beat exists so the death
+ * animation can play — but `death` is a ONE-CELL anim with `hold: true`
+ * (data/sprite-tables.js), so _stepFighterAnim returns immediately and the
+ * corpse simply snaps to its final cell on the killing frame. In first person
+ * your own body is not drawn at all, so from that camera the screen was
+ * literally unchanging for a second and a half, with the stick and the wheel
+ * still lit. Long enough to read as a crash on a phone, and the card's own
+ * fade adds to it. Enough to let the blow land, not enough to look broken.
+ */
+var KO_HOLD = 750;
 var _charge = null;                // { name, start } while the player HOLDS an attack (Shining-Soul hold-to-charge)
 var _guildItems = null;            // [{batchId,name,glyph,potency,qty}] withdrawn consumables (guild battles only)
 var _guildItemsUsed = null;        // { batchId: count } drunk this battle — reported in the resolve payload
@@ -3235,6 +3250,11 @@ function tryUseItem(slot){
   _guildItemsUsed[item.batchId] = (_guildItemsUsed[item.batchId] || 0) + 1;
   actionLog('You drink a ' + item.name + ' — +' + heal + ' HP', 'hit');
   var qEl = document.getElementById('actItemQty_' + slot); if (qEl) qEl.textContent = '×' + item.qty;
+  // …and the WHEEL, which is the only one of the two a phone can see: the bar
+  // this line patches is display:none under `act-touch`. Without it a batch
+  // drunk to nothing kept a full-looking petal until the release logged "none
+  // left".
+  var wEl = document.getElementById('actWheel'); if (wEl) buildActionWheel(wEl);
 }
 
 function startActionLoop(){
@@ -3278,6 +3298,9 @@ function startActionLoop(){
   _touchMove.x = 0; _touchMove.y = 0;
   _padAtk = [];
   _koAt = 0;
+  _koDecided = false;
+  var _fb0 = document.getElementById('actForfeitBtn');
+  if (_fb0) _fb0.style.display = '';   // the last fight's KO hid it
   padReset();
   ensureActionJoystick();
   ensureActionWheel();
@@ -3343,6 +3366,7 @@ function stopActionLoop(){
   _padAtk = [];
   padReset();   // a trigger still held as the fight ends is not a fresh press in the next one
   syncActionJoyVis();
+  syncActionWheelVis();   // the stick was taken and the wheel was not — it sat lit under the victory card
 }
 
 // Show or hide the movement stick, and never leave it half-thrown: a stick that
@@ -3350,7 +3374,10 @@ function stopActionLoop(){
 // last held and the fighter walks into a wall for the rest of the match.
 function syncActionJoyVis(){
   var joy = document.getElementById('actionJoystick'); if (!joy) return;
-  var on = touchPrimary() && actionLoopRunning;
+  // `!_koDecided`: the loop keeps turning through the death beat, so
+  // actionLoopRunning alone left the stick lit over a fight that was already
+  // over and answering nothing.
+  var on = touchPrimary() && actionLoopRunning && !_koDecided;
   joy.classList.toggle('active', on);
   if (!on){ _touchMove.x = 0; _touchMove.y = 0; }
 }
@@ -3525,10 +3552,15 @@ function showCrossHotbar(on){
 var _wheelTouchOff = null;
 function syncActionWheelVis(){
   var el = document.getElementById('actWheel'); if (!el) return;
-  var on = touchPrimary() && actionLoopRunning;
+  var touch = touchPrimary();
+  var on = touch && actionLoopRunning && !_koDecided;
   el.classList.toggle('active', on);
   var scr = document.getElementById('actionScreen');
-  if (scr) scr.classList.toggle('act-touch', on);
+  // `act-touch` tracks the DEVICE, not the fight. It is what keeps the desktop
+  // attack BAR off a phone (action-arena.css), so tying it to the wheel's own
+  // visibility meant taking the wheel away put the bar back — one live-looking
+  // control swapped for another over a finished fight.
+  if (scr) scr.classList.toggle('act-touch', touch);
 }
 function ensureActionWheel(){
   var host = document.querySelector('#actionScreen .action-stage') || document.getElementById('actionScreen');
@@ -3555,7 +3587,7 @@ function buildActionWheel(el){
     if (ATTACKS[name]) opts.push({ kind: 'atk', name: name, label: name, key: i + 2 });
   });
   (_guildItems || []).slice(0, 2).forEach(function(item, i){
-    opts.push({ kind: 'item', slot: i, label: item.name, glyph: item.glyph });
+    opts.push({ kind: 'item', slot: i, label: item.name, qty: item.qty });
   });
   var a0 = (p1 && p1.attacks && p1.attacks[0]) || '';
   var html = '<button class="aw-core" type="button"><b>1</b><span>' + a0 + '</span></button>';
@@ -3566,10 +3598,34 @@ function buildActionWheel(el){
     var r = (k % 2 ? 176 : 116);
     var x = Math.cos(th) * r, y = -Math.sin(th) * r;
     opts[k].deg = deg;
-    html += '<div class="aw-petal' + (opts[k].kind === 'item' ? ' aw-item' : '') + '" data-k="' + k + '"'
+    // AN ITEM PETAL CARRIES ITS COUNT, NOT ITS GLYPH. It used to substitute
+    // `item.glyph` where an attack puts its gold key digit — and the glyph is
+    // an EMPTY STRING for Healing Draught and Vigor Tonic (alchemy.js), which
+    // are exactly the two batches the guild hands the arena. The petal came out
+    // as a bare 9px name in a dashed pill with no mark at all, which is the
+    // "completely blank" wheel. The count is the thing worth reading anyway:
+    // the bar used to be the only place it showed, and the bar is display:none
+    // on a phone.
+    var mark = opts[k].kind === 'atk'
+      ? '<b>' + opts[k].key + '</b>'
+      : '<b>×' + (opts[k].qty | 0) + '</b>';
+    html += '<div class="aw-petal' + (opts[k].kind === 'item' ? ' aw-item' : '')
+      + (opts[k].kind === 'item' && !(opts[k].qty | 0) ? ' aw-empty' : '') + '" data-k="' + k + '"'
       + ' style="transform:translate(calc(-50% + ' + x.toFixed(0) + 'px), calc(-50% + ' + y.toFixed(0) + 'px))">'
-      + (opts[k].kind === 'atk' ? '<b>' + opts[k].key + '</b>' : opts[k].glyph)
-      + '<span>' + opts[k].label + '</span></div>';
+      + mark + '<span>' + opts[k].label + '</span></div>';
+  }
+  // AN EMPTY FAN IS NOT AN ANSWER. The petals are `p1.attacks.slice(1,6)` —
+  // the skills MATERIA grants — so a fighter with nothing slotted has none, and
+  // dragging opened a wheel with literally nothing in it. That is the reported
+  // "attack wheel options are completely blank": not a rendering failure, a
+  // loadout the wheel had no way to talk about. It says so now. Deliberately
+  // NOT pushed into `opts`, so setSel can never land on it and the core keeps
+  // the whole arc.
+  if (!n){
+    html += '<div class="aw-petal aw-none" style="transform:translate(calc(-50% + '
+      + Math.round(Math.cos(140 * Math.PI / 180) * 116) + 'px), calc(-50% + '
+      + Math.round(-Math.sin(140 * Math.PI / 180) * 116) + 'px))">'
+      + '<span>No skills yet — slot materia</span></div>';
   }
   el.innerHTML = html;
   el._opts = opts;
@@ -3653,7 +3709,22 @@ function actionTick(dt){
     // then swapped the screen out from under it. Here the loop keeps turning —
     // animations only, no input, no AI, nobody can be hurt — so the fall plays
     // out and the camera holds on it.
-    if (!_koAt) _koAt = performance.now();
+    if (!_koAt){
+      _koAt = performance.now();
+      // THE SCREEN MUST STOP LOOKING PLAYABLE THE INSTANT IT STOPS BEING
+      // PLAYABLE. The hold below runs the loop on for KO_HOLD with input dead —
+      // every attack path returns early on a downed fighter — while the stick,
+      // the attack wheel and Forfeit all stayed lit and tappable. On a phone
+      // already dropping frames, a live-looking screen that answers nothing is
+      // indistinguishable from a hang, which is what "I don't even receive
+      // options after winning" is. Take the controls away first; the card
+      // arrives a beat later.
+      _koDecided = true;
+      syncActionJoyVis();
+      syncActionWheelVis();
+      var fb = document.getElementById('actForfeitBtn');
+      if (fb) fb.style.display = 'none';
+    }
     tickAnimations(performance.now());
     if (performance.now() - _koAt < KO_HOLD) return;
     stopActionLoop();
@@ -4279,6 +4350,14 @@ function forfeitAction(){
     return;
   }
   if (!run) return; // guild/stale context with no live battle — do nothing (no run to abandon)
+  // A DECIDED FIGHT CANNOT BE FORFEITED. The guild branch above has said so
+  // since the KO-window race was found; this one never got the same guard, and
+  // the death beat leaves the button live for the whole hold. Tapping it in
+  // that window after a WIN ran showGameOver() on a run the player had just
+  // won — the loop never reached its own `stopActionLoop`, `_koTimer` was
+  // never armed, and endActionBattle never ran. The button is hidden at the KO
+  // now, but this is the guard that makes it safe rather than merely unlikely.
+  if (p1.hp <= 0 || p2.hp <= 0) return;
   if (!confirm('Abandon this run? All progress will be lost.')) return;
   stopActionLoop();
   showGameOver();
@@ -4367,6 +4446,7 @@ function startGuildTacticalBattle(p1Spec, p2Spec, label, opts){
     showScreen('battleScreen');
     turnNum=1;moveQueue=[];lastMoveType=null;selectedAttack=null;executing=false;
     document.getElementById('battleScreen').classList.remove('bs-executing');
+    ffSyncMode();   // the command list's mode and open line are page-lifetime DOM state
     // Clear per-turn combat flags (same set startBattle clears)
     delete p1._dashing;delete p2._dashing;
     delete p1._disengaging;delete p2._disengaging;
@@ -4772,6 +4852,7 @@ function startBattle(){
   if(run&&run.round===1){var _lg=document.getElementById('log');if(_lg)_lg.innerHTML='';}
   turnNum=1;moveQueue=[];lastMoveType=null;selectedAttack=null;executing=false;
   document.getElementById('battleScreen').classList.remove('bs-executing');
+  ffSyncMode();   // the command list's mode and open line are page-lifetime DOM state
   // Clear per-turn combat flags
   delete p1._dashing;delete p2._dashing;
   delete p1._disengaging;delete p2._disengaging;
@@ -5119,7 +5200,12 @@ function updateStatSheet(){
     var ssHand=function(pos){ return pos.charAt(0)===ssDom ? 'Main' : 'Off'; };
     var slotLabels={};
     EQUIP_SLOTS.forEach(function(pos){
+      // Head and Lower are not hands. ssHand() reads the slot's FIRST LETTER, so
+      // 'Head' and 'Lower' fall through it and a helm read "Off Hand" — the same
+      // slip renderLab carried. Name the fixed slots before asking the question.
       if(pos==='Body'){slotLabels[pos]='Body';return}
+      if(pos==='Head'){slotLabels[pos]='Head';return}
+      if(pos==='Lower'){slotLabels[pos]='Legs';return}
       var g=f.gear[pos];
       if(g&&WEAPON_GEAR_TYPES.indexOf(g.type)>=0)slotLabels[pos]='⚔ Weapon · '+ssHand(pos);
       else if(g&&SHIELD_GEAR_TYPES.indexOf(g.type)>=0)slotLabels[pos]='▣ Shield · '+ssHand(pos);
@@ -5573,7 +5659,18 @@ function executeTurn(){
 function finishTurn(){
   applyTileEffects(p1);applyTileEffects(p2);
   gainMateriaXP(p1,'a',1);gainMateriaXP(p2,'a',1);
-  if(checkWin())return;
+  if(checkWin()){
+    // THE WINNING TURN'S TICK STILL HAS TO REACH THE GEAR. When the killing blow
+    // lands on the FIRST attack, resolveAttacks ends the battle immediately (so
+    // a tile effect cannot steal a won match) — which means handleVictory, and
+    // with it the only p1.materia → run.equipped write-back there is, already
+    // ran a moment ago, before the two lines above granted this turn's xp. Sync
+    // again; syncMateriaToGear is a plain copy and idempotent. Without this the
+    // last turn of a victory silently lost its xp, but only when you struck
+    // first — the same fight won on the second attack kept it.
+    if(gamePhase==='loot')syncMateriaToGear();
+    return;
+  }
   turnNum++;gamePhase='plan';moveQueue=[];lastMoveType=null;selectedAttack=null;executing=false;
   document.getElementById('battleScreen').classList.remove('bs-executing');
   _tacFitPending=true; // re-frame the fighters at their new positions (unless the player re-aims the camera)
@@ -6306,6 +6403,22 @@ function buildLoadoutSummaryHTML(){
 // ═══ WIN/LOSS ═══
 function checkWin(){
   if(p1.hp>0&&p2.hp>0)return false;
+  // THE RESULT IS DEALT ONCE. Five call sites funnel here and two of them fire
+  // for the SAME killing blow. resolveAttacks does
+  //     if(second.hp<=0||first.hp<=0){checkWin();done();return}
+  // — it DISCARDS checkWin's answer and calls `done()` anyway, and `done` is
+  // `function(){finishTurn()}` (executeTurn), whose first act is another
+  // `if(checkWin())return`. The loser is still at 0 hp, so the second call ran
+  // the whole victory again: handleVictory pushes the opponent's entire loadout
+  // onto the lab shelf, adds the purse and increments killCount, so a 5-slot
+  // opponent left ten pieces and paid twice.
+  //
+  // The guild branch below was guarded against exactly this — see its own note
+  // about "late checkWin calls from still-unwinding callback chains" — and the
+  // roguelike branch never got the same protection. startBattle (and
+  // startGuildTacticalBattle) set gamePhase='plan', so this cannot latch from
+  // one battle into the next.
+  if(gamePhase==='loot'||gamePhase==='over')return true;
   // Guild-mode tactical battle: resolve the bridge promise instead of routing into
   // the roguelike loot/game-over flow. This is the single choke point — every
   // checkWin call site (executeTurn ×2, resolveAttacks, shove, finishTurn) funnels
@@ -6385,7 +6498,13 @@ function showLootScreen(qsEarned){
     var gear=opp.equipped[pos];if(!gear)return;
     // Remove hidden flags from materia
     gear.materia.forEach(function(m){delete m.hidden});
-    run.laboratory.push(JSON.parse(JSON.stringify(gear)));
+    // Stamp the round it was taken in. The lab shows this round's spoils on
+    // their own tab — "is the thing I just won better than what I am wearing"
+    // is a different question from "what is on the shelf", and it was being
+    // asked of the same undifferentiated list.
+    var taken=JSON.parse(JSON.stringify(gear));
+    taken._lootRound=run.round;
+    run.laboratory.push(taken);
     var card=document.createElement('div');card.className='loot-card';
     card.innerHTML=gearCardHTML(gear);items.appendChild(card);
   });
@@ -6469,7 +6588,9 @@ function _previewSlotForGear(gear){
 // Format a stat delta number with sign and color class. Returns HTML.
 function _statDeltaHTML(diff, opts){
   opts = opts || {};
-  if (diff === 0) return '';
+  // A non-number is not a change. @see row() — the deltas that used to reach
+  // here as NaN did so because they were subtracted from FORMATTED text.
+  if (!isFinite(diff) || diff === 0) return '';
   var sign = diff > 0 ? '+' : '';
   var cls = diff > 0 ? 'up' : 'down';
   if (opts.invert){ cls = diff > 0 ? 'down' : 'up'; }   // for crit-range, lower is better
@@ -6498,38 +6619,46 @@ function renderLabStatsPanel(){
         + '</div>';
     }
   }
-  function row(label, curVal, prevVal, opts){
+  /**
+   * One stat line — and the only place the delta arithmetic happens.
+   *
+   * THE DELTA IS COMPUTED FROM THE NUMBERS, the display from a formatter. They
+   * used to be the same string, which happens to work for '+3' — JavaScript
+   * reads that as a number — and produced NaN the moment a stat formatted as
+   * anything else: 'Crit On' reads '19-20', so every preview printed a red NaN
+   * beside it. Scrolling used to hide that; the panel is pinned now.
+   */
+  function row(label, curN, prevN, opts){
     opts = opts || {};
-    var diff = (prev && prevVal !== curVal) ? (prevVal - curVal) : 0;
-    var display = curVal;
-    if (opts.formatter) display = opts.formatter(curVal);
+    var fmt = opts.formatter || function(v){ return v; };
+    var diff = (prev && prevN !== null && isFinite(prevN) && isFinite(curN)) ? (prevN - curN) : 0;
     return '<div class="lab-stat-row"><span class="lab-stat-name">' + label + '</span>'
-      + '<span class="lab-stat-val">' + display + _statDeltaHTML(diff, opts) + '</span></div>';
+      + '<span class="lab-stat-val">' + fmt(curN) + _statDeltaHTML(diff, opts) + '</span></div>';
   }
+  /** A stat that is a WORD, not a quantity ('1d4', '—'). There is no arithmetic
+   *  to do, so the change is shown as the value it would become. */
+  function textRow(label, curTxt, prevTxt){
+    var mark = '';
+    if (prev && prevTxt !== null && prevTxt !== curTxt){
+      mark = '<span class="lab-stat-delta ' + (prevTxt === '—' ? 'down' : 'up') + '">→ ' + prevTxt + '</span>';
+    }
+    return '<div class="lab-stat-row"><span class="lab-stat-name">' + label + '</span>'
+      + '<span class="lab-stat-val">' + curTxt + mark + '</span></div>';
+  }
+  var signed = function(v){ return (v >= 0 ? '+' : '') + v; };
   var statsGrid = '<div class="lab-stats-grid">'
-    + row('HP',     cur.hp,         prev?prev.hp:null)
-    + row('AC',     cur.ac,         prev?prev.ac:null)
-    + row('Speed',  cur.speed,      prev?prev.speed:null)
-    + row('To-Hit', '+' + cur.toHit, prev?'+' + prev.toHit:null, {
-        formatter: function(v){ return v; }
-      })
-    + row('Bonus Dmg', '+' + cur.bonusDmg, prev?'+' + prev.bonusDmg:null, {
-        formatter: function(v){ return v; }
-      })
-    + row('Crit On', cur.critRange + '-20', prev?prev.critRange + '-20':null, {
-        invert: true,
-        formatter: function(v){ return v; }
-      })
-    + row('Range', '+' + cur.extraRange, prev?'+' + prev.extraRange:null, {
-        formatter: function(v){ return v; }
-      })
-    + row('Lifesteal', cur.lifesteal ? cur.lifestealDice : '—',
-                       prev?(prev.lifesteal ? prev.lifestealDice : '—'):null, {
-        formatter: function(v){ return v; }
-      })
-    + row('DOT', '+' + cur.dotBonus, prev?'+' + prev.dotBonus:null, {
-        formatter: function(v){ return v; }
-      })
+    + row('HP',        cur.hp,         prev?prev.hp:null)
+    + row('AC',        cur.ac,         prev?prev.ac:null)
+    + row('Speed',     cur.speed,      prev?prev.speed:null)
+    + row('To-Hit',    cur.toHit,      prev?prev.toHit:null,     {formatter: signed})
+    + row('Bonus Dmg', cur.bonusDmg,   prev?prev.bonusDmg:null,  {formatter: signed})
+    // Lower is better here, so the arrow's colour is inverted — 19-20 beats 20-20.
+    + row('Crit On',   cur.critRange,  prev?prev.critRange:null, {invert: true,
+        formatter: function(v){ return v + '-20'; }})
+    + row('Range',     cur.extraRange, prev?prev.extraRange:null,{formatter: signed})
+    + textRow('Lifesteal', cur.lifesteal ? cur.lifestealDice : '—',
+                           prev?(prev.lifesteal ? prev.lifestealDice : '—'):null)
+    + row('DOT',       cur.dotBonus,   prev?prev.dotBonus:null,  {formatter: signed})
     + '</div>';
   // Attack list — annotate adds/removes when previewing.
   var atkHTML = '';
@@ -6575,6 +6704,99 @@ function clearLabPreview(){
   renderLab();
 }
 
+// ── The source switch ────────────────────────────────────────────────────────
+// The right-hand column shows ONE source at a time: this round's spoils, the
+// shelf, the merchant, or loose materia. They were four stacked lists, which is
+// why the merchant sat below three screens of gear and the stats above them all.
+// `worn` is a fifth stop that only exists on a narrow screen — wide, the worn
+// set has its own column and is never behind a tab (lab.css decides that; this
+// only records which stop is chosen).
+var LAB_TABS = ['worn','loot','stored','merchant','materia'];
+
+/** This round's spoils: what showLootScreen stamped on the way in. */
+function isFreshLoot(gear){ return !!gear && gear._lootRound === run.round; }
+
+/** How many items each stop holds. Drives both the badges and which stops
+ *  exist at all — an empty merchant is not a tab. */
+function labTabCounts(){
+  var loot=0;
+  run.laboratory.forEach(function(g){ if(isFreshLoot(g)) loot++; });
+  var stock=(run.merchantStock||[]).filter(function(it){ return !it.sold; }).length;
+  var dust=0;
+  if(run.materiaDust){ for(var i=0;i<PLANETS.length;i++) if((run.materiaDust[i]|0)>0) dust++; }
+  return {
+    worn: EQUIP_SLOTS.filter(function(p){ return !!run.equipped[p]; }).length,
+    loot: loot,
+    stored: run.laboratory.length,
+    merchant: stock,
+    materia: run.looseMateria.length + dust,
+  };
+}
+
+/**
+ * Settle on a stop that actually has something behind it.
+ *
+ * Called on every render because the lists move under it: equipping the last
+ * fresh piece empties the loot tab, buying out the merchant empties theirs. A
+ * tab that vanishes must hand over rather than leave a blank column — and the
+ * default the first time in is the spoils, because that is what the player came
+ * up the stairs holding.
+ */
+function labResolveTab(counts){
+  var want=run._labTab;
+  if(LAB_TABS.indexOf(want)<0) want=null;
+  // `worn` is only a stop on a narrow screen; wide, it would show an empty
+  // offer column beside a worn column that was never hidden. The query is the
+  // twin of lab.css's `@media (max-width:899.98px)` — the .98 is there so a
+  // fractional viewport matches one side or the other and never neither.
+  var narrow=typeof matchMedia==='function'&&matchMedia('(max-width:899.98px)').matches;
+  if(want==='worn'&&!narrow) want=null;
+  if(want&&(counts[want]>0||want==='stored'||want==='worn')) return want;
+  if(counts.loot>0) return 'loot';
+  if(counts.stored>0) return 'stored';
+  if(counts.merchant>0) return 'merchant';
+  if(counts.materia>0) return 'materia';
+  return 'stored';
+}
+
+function renderLabTabs(active,counts){
+  var el=document.getElementById('labTabs');
+  if(!el) return;
+  var defs=[
+    {id:'worn',    label:'Worn'},
+    {id:'loot',    label:'New Loot'},
+    {id:'stored',  label:'Shelf'},
+    {id:'merchant',label:'Merchant'},
+    {id:'materia', label:'Materia'},
+  ];
+  var html='';
+  defs.forEach(function(d){
+    // A stop with nothing behind it is not offered — except the shelf, which is
+    // where sold-off and unequipped gear lands and so must stay reachable even
+    // while empty, and `worn`, which is the narrow screen's way back.
+    if(counts[d.id]<=0&&d.id!=='stored'&&d.id!=='worn') return;
+    var cls='lab-tab'+(active===d.id?' on':'');
+    if(d.id==='loot'&&counts.loot>0) cls+=' fresh';
+    html+='<button class="'+cls+'" data-tab="'+d.id+'" onclick="labTab(\''+d.id+'\')">'
+      +d.label+'<span class="lab-tab-n">'+counts[d.id]+'</span></button>';
+  });
+  el.innerHTML=html;
+}
+
+/** Which tab a previewed item is sitting on — so a preview cannot outlive the
+ *  list it came from. `_labPreview.source` is 'lab' or 'shop'. */
+function labTabForPreview(p){
+  if(!p) return null;
+  if(p.source==='shop') return 'merchant';
+  return isFreshLoot(p.gear) ? 'loot' : 'stored';
+}
+
+function labTab(id){
+  if(LAB_TABS.indexOf(id)<0) return;
+  run._labTab=id;
+  renderLab();   // the preview is reconciled there, for EVERY route into a tab
+}
+
 function renderLab(){
   document.getElementById('labQs').textContent='☿ '+run.quicksilver;
   // Validate the preview pointer; gear may have moved (sold/equipped) since
@@ -6593,20 +6815,63 @@ function renderLab(){
     (nextRm?'Next: <span style="color:'+nextRm.col+'">'+nextRm.sym+' '+nextRm.name+'</span> (Round '+(run.round+1)+')':'Final round complete!');
   var hasLoose=run.looseMateria.length>0;
 
+  // ── The source switch ──
+  // Settled before anything else renders: the headings and the empty-state
+  // copy below both depend on which stop is open.
+  var labCounts=labTabCounts();
+  var labActive=labResolveTab(labCounts);
+  run._labTab=labActive;
+  renderLabTabs(labActive,labCounts);
+  var labBody=document.getElementById('labBody');
+  if(labBody){
+    LAB_TABS.forEach(function(t){ labBody.classList.toggle('tab-'+t,t===labActive); });
+  }
+
+  // ── Preview hygiene ──
+  // Here and not in labTab(), because labTab is only ONE of the ways the open
+  // tab changes: labResolveTab hands over on its own when a tab empties (buy the
+  // merchant's last item and Merchant stops existing mid-render), and that route
+  // would otherwise strand a preview whose card is no longer anywhere.
+  //
+  // Two things can go stale, and both are cheap to simply recompute:
+  //   • WHETHER IT IS READABLE — the card must be on the open tab. Fresh loot is
+  //     also on the shelf, so those two hand off to each other; and the Worn tab
+  //     keeps it, because the whole point of the preview there is the outlined
+  //     slot and the deltas, which are exactly what the worn column shows.
+  //   • WHICH SLOT IT NAMES — _previewSlotForGear answers "main hand if free,
+  //     else off", so equipping ANYTHING moves the answer. Cached at click time
+  //     it went on claiming a slot that Equip would no longer use, and the band,
+  //     the deltas and the dashed outline all repeated the claim.
+  if(run._labPreview){
+    var pHome=labTabForPreview(run._labPreview);
+    var pShown=(labActive===pHome)||(labActive==='stored'&&pHome==='loot')||labActive==='worn';
+    if(!pShown) run._labPreview=null;
+    else run._labPreview.slot=_previewSlotForGear(run._labPreview.gear);
+  }
+
   // ── Stats panel ──
   renderLabStatsPanel();
 
   // ── Equipped gear section ──
   var eqEl=document.getElementById('labEquipped');
-  eqEl.innerHTML='<h3>⚔ EQUIPPED GEAR</h3><div class="lab-gear" id="labEquipGear"></div>';
+  eqEl.innerHTML='<h3>⚔ WORN NOW</h3><div class="lab-gear" id="labEquipGear"></div>';
   var eqGear=document.getElementById('labEquipGear');
   EQUIP_SLOTS.forEach(function(pos){
     var gear=run.equipped[pos];
     var item=document.createElement('div');item.className='lab-gear-item equipped';
+    // The other half of a preview: the slot the offered piece would land in.
+    // With both columns on screen at once this is the card the numbers in the
+    // band are talking about.
+    if(run._labPreview&&run._labPreview.slot===pos) item.classList.add('lab-card-preview-target');
     var label;
     var labDom=(run&&run.dominantHand)||'R';
     var labHand=function(p){ return p.charAt(0)===labDom ? 'Main' : 'Off'; };
+    // Head and Lower are not hands, and labHand() reads the slot's first letter
+    // — so with a right-handed fighter a helm read "Off Hand" and so did a pair
+    // of leggings. Name the fixed slots before asking the hand question.
     if(pos==='Body')label='Body';
+    else if(pos==='Head')label='Head';
+    else if(pos==='Lower')label='Legs';
     else if(gear&&WEAPON_GEAR_TYPES.indexOf(gear.type)>=0)label='⚔ Weapon · '+labHand(pos);
     else if(gear&&SHIELD_GEAR_TYPES.indexOf(gear.type)>=0)label='▣ Shield · '+labHand(pos);
     else label=labHand(pos)+' Hand';
@@ -6663,21 +6928,37 @@ function renderLab(){
   }
 
   // ── Stored gear section ──
+  // One list, two tabs: the spoils of THIS round, or the whole shelf. The index
+  // passed to every handler is the item's real index in run.laboratory — every
+  // one of them (equipFromLab, sellGear, craftRefine, showSlotPicker…) indexes
+  // that array directly, so a filtered view must never renumber.
+  var lootOnly=labActive==='loot';
   var stEl=document.getElementById('labStored');
-  stEl.innerHTML='<h3>STORED GEAR ('+run.laboratory.length+')</h3><div class="lab-gear" id="labStoreGear"></div>';
+  stEl.innerHTML='<h3>'+(lootOnly
+      ?'✦ THIS ROUND’S SPOILS ('+labCounts.loot+')'
+      :'▤ THE SHELF ('+run.laboratory.length+')')
+    +'</h3><div class="lab-gear" id="labStoreGear"></div>';
   var stGear=document.getElementById('labStoreGear');
-  if(run.laboratory.length===0){
-    stGear.innerHTML='<div style="font-size:0.75em;color:#444;padding:8px">No stored gear.</div>';
-  }
+  var shownAny=false;
   run.laboratory.forEach(function(gear,i){
+    if(lootOnly&&!isFreshLoot(gear))return;
+    shownAny=true;
     var item=document.createElement('div');item.className='lab-gear-item';
+    if(!lootOnly&&isFreshLoot(gear))item.classList.add('lab-gear-fresh');
     if(run._labPreview&&run._labPreview.source==='lab'&&run._labPreview.idx===i){
       item.classList.add('lab-card-preview-active');
     }
     var sellPrice=gear.sockets*3+gear.links*2+(gear.refinement||0)*2;
     var matVal=0;gear.materia.forEach(function(m){matVal+=m.level*2});
     var sellWithMat=sellPrice+Math.floor(matVal*0.5);
-    var canEquip=gear.pos==='Hand'?(!run.equipped.LHand||!run.equipped.RHand):!run.equipped[gear.pos];
+    // THE DRAFT'S RULE, not a second copy of it. "A free hand" is not the whole
+    // question: a two-handed weapon needs BOTH hands, and one already equipped
+    // leaves no hand for anything — canEquipGear says so, and the lab's own
+    // `!LHand||!RHand` did not, so a bow could be given an off-hand shield the
+    // draft refuses outright. That was unreachable only because the lab used to
+    // refuse to confirm a bow loadout at all; now that it confirms, the rule has
+    // to be the shared one. @see canEquipGear, and the ONE RULES FACT in CLAUDE.md.
+    var canEquip=canEquipGear(gear);
     var hasEmptySockets=gear.materia.length<gear.sockets;
     var canRefine=(gear.refinement||0)<MAX_REFINEMENT;
     var canDrill=gear.sockets<MAX_SOCKETS;
@@ -6695,6 +6976,10 @@ function renderLab(){
       '<div class="lab-gear-actions">'+actionsHTML+'</div>';
     stGear.appendChild(item);
   });
+  if(!shownAny){
+    stGear.innerHTML='<div style="font-size:0.75em;color:#444;padding:8px">'
+      +(lootOnly?'Nothing new this round — it is all on the shelf.':'No stored gear.')+'</div>';
+  }
 
   // ── Loose materia section ──
   var matEl=document.getElementById('labLooseMateria');
@@ -6758,24 +7043,61 @@ function renderLab(){
     }
   }
 
+  // ── Publish the band's real height ──
+  // Last, because everything above changes it: the tab row wraps to two lines
+  // when all five stops exist, and the preview banner adds another — precisely
+  // when the player is mid-comparison and the pad most needs the clearance. A
+  // constant in the stylesheet was measurably ~12px short there, and a control
+  // scrolled to `nearest` landed under the opaque band with the cursor ring on
+  // it. Measured once per render, which is once per action. @see lab.css.
+  var bandEl=document.querySelector('.lab-sticky');
+  if(bandEl&&labBody){
+    var bandH=Math.ceil(bandEl.getBoundingClientRect().height);
+    if(bandH>0) labBody.style.setProperty('--lab-band',(bandH+10)+'px');
+  }
+
   // ── Confirm button ──
-  var totalS=0;var allFilled=true;var emptySlots=[];
-  EQUIP_SLOTS.forEach(function(pos){
-    var g=run.equipped[pos];
-    if(g)totalS+=g.sockets;
-    else{allFilled=false;emptySlots.push(pos==='LHand'?'Left':pos==='RHand'?'Right':pos)}
+  // THE RULE IS ARMOUR, and it is the DRAFT's rule — DRAFT_REQUIRED, with the
+  // note at renderDraft explaining why: a two-handed weapon fills both hands but
+  // is stored in one, so the off-hand is forever null, and demanding all five of
+  // EQUIP_SLOTS makes a bow unenterable. The draft was fixed; the lab was not,
+  // so a player who drafted a bow could win round 1 and then never leave the
+  // Laboratory — CONFIRM stayed disabled for an empty slot the game itself had
+  // told them to leave empty. Same rule, same warning, both screens.
+  var totalS=0;var emptySlots=[];
+  var confDom=(run&&run.dominantHand)||'R';
+  var slotName=function(pos){
+    if(pos==='Lower')return 'Legs';
+    if(pos==='LHand'||pos==='RHand')return (pos.charAt(0)===confDom?'Main':'Off')+' Hand';
+    return pos;   // Head, Body
+  };
+  EQUIP_SLOTS.forEach(function(pos){ var g=run.equipped[pos]; if(g)totalS+=g.sockets; });
+  DRAFT_REQUIRED.forEach(function(pos){
+    if(!run.equipped[pos]) emptySlots.push(slotName(pos));
   });
+  var allFilled=emptySlots.length===0;
   var btn=document.getElementById('labConfirmBtn');
   var statusEl=document.querySelector('.lab-confirm-btn');
+  // ONE hint, not one per render. `.lab-confirm-btn` is static markup that
+  // renderLab never clears, so appending stacked a fresh line every time the
+  // lab redrew — and the lab redraws after every single action.
+  var oldHint=statusEl.querySelector('.lab-slot-hint');
+  if(oldHint)oldHint.remove();
+  var hint=document.createElement('div');
+  hint.className='lab-slot-hint';
+  hint.style.cssText='font-size:0.72em;color:var(--dim);margin-top:4px;text-align:center';
   if(allFilled){
     btn.disabled=false;btn.style.opacity='1';
     btn.textContent='⚔ CONFIRM & FIGHT ROUND '+(run.round+1)+' ⚔';
+    // Not a gate — a warning, exactly as the draft words it.
+    if(handLoadout().none){
+      hint.textContent='Both hands empty — you will fight bare-handed.';
+      statusEl.appendChild(hint);
+    }
   } else {
     btn.disabled=true;btn.style.opacity='0.4';
     btn.textContent='⚔ CONFIRM LOADOUT ⚔';
-    var hint=document.createElement('div');
-    hint.style.cssText='font-size:0.72em;color:var(--dim);margin-top:4px;text-align:center';
-    hint.textContent='Empty slot'+(emptySlots.length>1?'s':'')+': '+emptySlots.join(', ');
+    hint.textContent='Still need: '+emptySlots.join(' · ');
     statusEl.appendChild(hint);
   }
 }
@@ -6787,10 +7109,14 @@ function unequipGear(pos){
 function equipFromLab(idx){
   var gear=run.laboratory[idx];if(!gear)return;
   if(gear.pos==='Hand'){
-    // Put in first available hand slot, or swap with LHand
-    if(!run.equipped.LHand){run.equipped.LHand=gear}
-    else if(!run.equipped.RHand){run.equipped.RHand=gear}
-    else{run.laboratory.push(run.equipped.LHand);run.equipped.LHand=gear}
+    // THE SAME ANSWER THE PREVIEW GAVE. _previewSlotForGear picks the DOMINANT
+    // hand first and falls back to the off hand; this used to fill LHand first
+    // regardless of handedness, so with the two columns side by side the band
+    // could read 'Preview: … → R Hand' while Equip put it in the left. One
+    // resolution, one promise.
+    var handSlot=_previewSlotForGear(gear);
+    if(run.equipped[handSlot])run.laboratory.push(run.equipped[handSlot]);
+    run.equipped[handSlot]=gear;
   } else {
     if(run.equipped[gear.pos])run.laboratory.push(run.equipped[gear.pos]);
     run.equipped[gear.pos]=gear;
@@ -7199,8 +7525,11 @@ function showEqUnslotPicker(pos){
 
 // ═══ CONFIRM LOADOUT ═══
 function confirmLoadout(){
-  var allFilled = EQUIP_SLOTS.every(function(s){ return !!run.equipped[s]; });
-  if(!allFilled){alert('Fill all three gear slots before proceeding.');return}
+  // The button's own gate says the same thing (renderLab), but this is the one
+  // that can actually stop a run, and it carried the identical all-five check
+  // the draft was fixed for — while its message already said "all three".
+  var allFilled = DRAFT_REQUIRED.every(function(s){ return !!run.equipped[s]; });
+  if(!allFilled){alert('Fill the head, body and lower slots before proceeding.');return}
   run.round++;
   if(run.round>TOTAL_ROUNDS){showVictoryScreen();return}
   if (run.mode === 'action') startActionArena();
@@ -7406,7 +7735,7 @@ Object.assign(window, {
   craftFuseLink, craftLevel, craftRefine, craftSlot, craftUnslot, deleteChampion,
   equipDraftGearTo, equipFromLab, execCraft, executeTurn, forfeitAction, forfeitRun,
   forfeitTactical, toggleTacticalAuto, tacZoom, tacFit, actZoom, actZoomReset,
-  goToDraft, goToLab, openBuilder, openDebug, pickReadyAttack, randomizeBuilder,
+  goToDraft, goToLab, labTab, openBuilder, openDebug, pickReadyAttack, randomizeBuilder,
   randomizeDebug, reformMateria, rerollStats, returnToTitle, rotateDraftFace,
   saveChampion, sellGear, sellMateria, setBuilderFace, setDebugFace, setLabPreview,
   shiftBuilderBody, shiftBuilderColor, shiftBuilderCosmetic, shiftBuilderHand,
@@ -7549,15 +7878,26 @@ window.tacViewToggle=tacViewToggle;
 window.tacViewPov=tacViewPov;
 window.tacViewWho=tacViewWho;
 
-// ─── The command list (narrow screens only) ──────────────────────────────────
+// ─── The command list ────────────────────────────────────────────────────────
 // A phone cannot show the whole control panel at once, and stacking it anyway
 // is what put the movement pad on top of the board and pushed EXECUTE off the
-// bottom edge. So on a narrow screen the panel becomes a Final-Fantasy command
-// list: one class on #battleScreen says which command is open, and CSS shows
-// that command's controls and only those. Nothing about the controls changes —
-// same buttons, same handlers, same rules — so desktop is untouched and this
-// cannot alter a turn.
-var _ffCmd = 'move';
+// bottom edge. So the panel becomes a Final-Fantasy command list: one class on
+// #battleScreen says which command is open, and CSS shows that command's
+// controls and only those. Nothing about the controls changes — same buttons,
+// same handlers, same rules — so this cannot alter a turn.
+//
+// TWO CLASSES, TWO QUESTIONS. `ff-list` says the list is in use at all; the
+// `ff-<cmd>` classes say which line is open. They were one question when the
+// list was phone-only and a media query could answer it — but on a PC the
+// answer is a preference, not a width, and only the player has it. So the mode
+// lives here and the CSS reacts to it. @see battle.css.
+// SEEDED TO MATCH THE DOM, WHICH STARTS CLOSED. This was 'move', but nothing
+// applies an ff-* class at load (index.html carries none, and neither
+// startBattle nor startGuildTacticalBattle sets one), so the variable claimed a
+// command the screen had never opened — and the first tap on Move read
+// `_ffCmd === 'move'` as "tapping the open command", closed it, and appeared to
+// do nothing. Move needed two taps; the other three commands never did.
+var _ffCmd = '';
 function ffPick(cmd){
   var scr = document.getElementById('battleScreen'); if (!scr) return;
   // Tapping the open command closes it, which is how you get the whole board.
@@ -7574,6 +7914,78 @@ function ffPick(cmd){
   }
 }
 window.ffPick = ffPick;
+
+/** The width at which the full panel stops fitting. The twin of battle.css's
+ *  `@media (max-height:620px),(max-width:560px)` — change one, change both. */
+var FF_TIGHT = '(max-height: 620px), (max-width: 560px)';
+function ffScreenIsTight(){
+  return typeof matchMedia === 'function' && matchMedia(FF_TIGHT).matches;
+}
+/** The PC preference. A tight screen has no say — there is no room for the
+ *  panel there, so the list is not optional. */
+var _ffListPref = loadGame('battleCmdList') === true;
+
+/**
+ * Put the battle screen into (or out of) command-list mode.
+ *
+ * Called at the start of every battle and whenever the switch or the viewport
+ * moves, because the ff-* classes are page-lifetime DOM state and nothing else
+ * clears them: without this, a command left open in one match was still open in
+ * the next, and a stale `ff-attack` would survive a run all the way into a
+ * guild tactical battle.
+ */
+function ffSyncMode(){
+  var scr = document.getElementById('battleScreen'); if (!scr) return;
+  var on = ffScreenIsTight() || _ffListPref;
+  scr.classList.toggle('ff-list', on);
+  if (on){
+    // A list with nothing open is a menu beside an empty board. Open the
+    // command a turn starts with — and set it through ffPick so the ▶ marker,
+    // the class and _ffCmd cannot disagree.
+    if (!_ffCmd) ffPick('move');
+  } else {
+    // Leaving list mode must not leave a command behind. The desktop panel
+    // shows everything regardless, so a stray ff-* class is inert TODAY — and
+    // exactly the kind of inert state that becomes a bug the day a rule reads it.
+    _ffCmd = '';
+    ['move','attack','view','sheet'].forEach(function(c){ scr.classList.remove('ff-' + c); });
+    document.querySelectorAll('#ffMenu .ff-cmd').forEach(function(b){ b.classList.remove('on'); });
+  }
+  var btn = document.getElementById('tacCmdBtn');
+  if (btn) btn.classList.toggle('on', on);
+}
+
+/** The camera rail's List switch. Hidden on a tight screen (battle.css), so in
+ *  practice this only ever moves the PC preference. */
+function ffToggleList(){
+  var scr = document.getElementById('battleScreen');
+  var was = !!(scr && scr.classList.contains('ff-list'));
+  _ffListPref = !_ffListPref;
+  saveGame('battleCmdList', _ffListPref);
+  ffSyncMode();
+  // tacFitFighters reserves the panel's REAL height at the bottom of the frame
+  // (it reads `.controls`.offsetHeight), and the whole point of the switch is
+  // that the panel stops being a wall — so re-frame, or the board keeps the
+  // gap it no longer needs.
+  try { tacFit(); } catch (e) { /* no board up yet */ }
+  // Report the MODE, not the preference. On a tight screen the preference moves
+  // and the mode cannot — there is no room for the full panel — so saying "the
+  // full panel is back" would be a lie told over an unchanged screen.
+  var now = !!(scr && scr.classList.contains('ff-list'));
+  if (now === was) return;
+  logMsg(now
+    ? 'Command list on — one command at a time, and the board uncovered.'
+    : 'Command list off — the full panel is back.', 'phase');
+}
+window.ffToggleList = ffToggleList;
+
+// A window that crosses the breakpoint has to re-answer the question; nothing
+// else would, and the classes would be left describing the previous shape.
+if (typeof matchMedia === 'function'){
+  var _ffMq = matchMedia(FF_TIGHT);
+  if (_ffMq.addEventListener) _ffMq.addEventListener('change', ffSyncMode);
+  else if (_ffMq.addListener) _ffMq.addListener(ffSyncMode);
+}
 
 // ─── The arena, seen from inside it (src/game/action-fp.js) ──────────────────
 // View only, exactly like the tactical pair above: the camera moves, the fight

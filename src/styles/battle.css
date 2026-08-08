@@ -192,20 +192,75 @@
 #battleScreen .exec-btn{padding:8px 22px;font-size:0.9em}
 .ff-menu{display:none}
 
-/* ═══ THE COMMAND LIST — narrow screens only ══════════════════════════════════
+/* ═══ THE COMMAND LIST ════════════════════════════════════════════════════════
    The block above floats the whole control panel over the board, which is fine
    on a laptop and hopeless on a phone held sideways: four stacked sections,
    ~260px of content in a 420px viewport, so the movement pad lands on the
    fighters and EXECUTE falls off the bottom edge entirely (the panel scrolls,
    which is why it went unnoticed).
 
-   Below the breakpoint the panel becomes a Final Fantasy command list instead.
-   One command is open at a time; its controls appear in a box beside the list,
-   and everything else is off screen rather than underneath something. Tapping
-   the open command shuts it and gives the board the whole screen.
+   The answer is a Final Fantasy command list: one command open at a time, its
+   controls in a box beside the list, everything else off screen rather than
+   underneath something. Tapping the open command shuts it and gives the board
+   the whole screen. Nothing is rebuilt — the same #dpad, the same #atkBar, the
+   same #execBtn and the same handlers move; only which of them you are looking
+   at changes.
 
-   Nothing is rebuilt: the same #dpad, #atkBar and #execBtn move, and the only
-   JS is ffPick() setting a class. Desktop never enters this block. */
+   IT IS SWITCHED BY ONE CLASS, #battleScreen.ff-list, and not by a media query.
+   It used to be: `.ff-menu{display:none}` above and `.ff-menu{display:flex}`
+   inside the phone block, two rules of identical specificity decided purely by
+   which came later in the file — so splitting this stylesheet or importing
+   another one that mentioned .ff-menu would have silently un-gated it. And a
+   media query could only ever answer "is the screen small", when the real
+   question is "does this player want the list" — which on a PC only the player
+   can answer. ffSyncMode() in crucible.js sets the class: always on a narrow
+   screen, and on any screen where the player has asked for it.
+
+   The phone's own SPACE rules — the 6px HP cards, the 28px d-pad, the crushed
+   log — stay in the media block further down, where they belong. */
+#battleScreen.ff-list .ff-menu{display:flex;flex-direction:column;gap:3px;
+  position:absolute;z-index:25;padding:5px;border-radius:9px;
+  left:12px;bottom:calc(12px + env(safe-area-inset-bottom,0));width:120px;
+  background:linear-gradient(160deg,rgba(18,22,38,0.96),rgba(8,10,18,0.96));
+  border:2px solid rgba(212,168,67,0.55);box-shadow:0 6px 22px rgba(0,0,0,0.65)}
+.ff-cmd{padding:5px 6px 5px 16px;text-align:left;position:relative;
+  background:none;border:none;border-radius:4px;cursor:pointer;
+  font-family:'Cinzel',serif;font-size:0.68em;letter-spacing:0.08em;color:#e8e0d0;
+  -webkit-tap-highlight-color:transparent}
+.ff-cmd:hover{color:#fff}
+/* The pointing finger — an FF menu says which line it is on, and this one has
+   to survive a controller cursor landing on a different line. */
+.ff-cmd.on::before{content:'▶';position:absolute;left:4px;color:var(--gold);font-size:0.85em}
+.ff-cmd.on{color:var(--gold)}
+.ff-cmd:active{background:rgba(212,168,67,0.2)}
+.ff-go{margin-top:3px;border-top:1px solid rgba(212,168,67,0.3);padding-top:6px;color:var(--gold)}
+
+/* — the panel stops being a wall across the bottom and becomes a host — */
+#battleScreen.ff-list .controls{left:152px;right:auto;bottom:12px;width:min(46vw,470px);
+  max-height:none;overflow:visible;padding:0;background:none;z-index:24;pointer-events:none}
+#battleScreen.ff-list .controls > *{display:none}
+#battleScreen.ff-list .controls .section-label,
+#battleScreen.ff-list .controls .move-info{display:none !important}
+
+/* The open command's controls, in one box beside the list. */
+#battleScreen.ff-list.ff-move .move-controls,
+#battleScreen.ff-list.ff-move .move-queue,
+#battleScreen.ff-list.ff-attack .atk-bar,
+#battleScreen.ff-list.ff-attack .atk-detail.show,
+#battleScreen.ff-list.ff-view .exec-bar{display:block;pointer-events:auto;
+  background:rgba(10,12,18,0.94);border:1px solid rgba(212,168,67,0.45);border-radius:8px;
+  padding:6px;margin:0 0 4px;box-shadow:0 6px 20px rgba(0,0,0,0.6)}
+#battleScreen.ff-list.ff-move .move-controls{display:flex}
+#battleScreen.ff-list.ff-attack .atk-bar{display:flex;flex-wrap:wrap;gap:4px;max-height:38dvh;overflow-y:auto}
+#battleScreen.ff-list.ff-view .exec-bar{display:flex;flex-wrap:wrap;gap:4px;justify-content:center}
+/* EXECUTE has its own command; inside VIEW it would be a second copy. */
+#battleScreen.ff-list.ff-view #execBtn{display:none}
+
+/* The camera rail's list switch. PC only — a phone is always in list mode, so
+   the button there would be a switch with one position. */
+.cam-btn.cam-word{font-size:0.72em;font-weight:700;letter-spacing:0.02em}
+.cam-btn.cam-word.on{background:rgba(212,168,67,0.9);color:#12141c;border-color:var(--gold)}
+
 @media (max-height: 620px), (max-width: 560px){
   /* — the top band: HP, and nothing else — */
   #battleScreen .header h1{display:none}
@@ -222,56 +277,27 @@
        command list on the left and the open command's box on the right — */
   #battleScreen .cam-controls{gap:4px;top:104px;bottom:auto;transform:none;right:8px}
   #battleScreen .cam-btn{width:32px;height:32px;font-size:0.92em}
+  #battleScreen .cam-btn.cam-word{display:none}
 
-  /* — the panel stops being a wall across the bottom — */
-  #battleScreen .controls{left:auto;right:52px;bottom:6px;width:min(62vw,340px);
-    max-height:none;overflow:visible;padding:0;background:none;z-index:24;pointer-events:none}
-  #battleScreen .controls > *{display:none}
-  #battleScreen .controls .section-label,
-  #battleScreen .controls .move-info{display:none !important}
-
-  /* The open command's controls, in one box beside the list. */
-  #battleScreen.ff-move .move-controls,
-  #battleScreen.ff-move .move-queue,
-  #battleScreen.ff-attack .atk-bar,
-  #battleScreen.ff-attack .atk-detail,
-  #battleScreen.ff-view .exec-bar{display:block;pointer-events:auto;
-    background:rgba(10,12,18,0.94);border:1px solid rgba(212,168,67,0.45);border-radius:8px;
-    padding:6px;margin:0 0 4px;box-shadow:0 6px 20px rgba(0,0,0,0.6)}
-  #battleScreen.ff-move .move-controls{display:flex}
-  #battleScreen.ff-attack .atk-bar{display:flex;flex-wrap:wrap;gap:4px;max-height:38dvh;overflow-y:auto}
-  #battleScreen.ff-view .exec-bar{display:flex;flex-wrap:wrap;gap:4px;justify-content:center}
-  /* EXECUTE has its own command; inside VIEW it would be a second copy. */
-  #battleScreen.ff-view #execBtn{display:none}
+  /* The phone's own geometry for the list. These insets are calibrated to each
+     other — menu 104px at left:8px, so the box clears at right:52px and the
+     sheet drawer at left:120px — and they are all narrower than the PC set
+     above, which is the only reason this block has to restate them. */
+  #battleScreen.ff-list .ff-menu{left:8px;bottom:calc(6px + env(safe-area-inset-bottom,0));width:104px}
+  #battleScreen.ff-list .controls{left:auto;right:52px;bottom:6px;width:min(62vw,340px)}
   #battleScreen .atk-btn{padding:5px 9px;font-size:0.66em;min-width:56px}
   #battleScreen .dpad{grid-template-columns:repeat(3,28px);grid-template-rows:repeat(3,28px)}
   #battleScreen .auto-btn{padding:2px 6px;font-size:0.58em}
   #battleScreen .move-queue{min-height:0;font-size:0.6em}
 
-  /* — the sheet: a bottom drawer on demand, never a band across the middle — */
+  /* — the sheet: a bottom drawer on demand, never a band across the middle.
+       PC keeps its own always-present sheet band, so this is phone-only. — */
   #battleScreen .stat-sheet{display:none}
   /* Left inset clears the command list, right inset clears the camera rail —
      the sheet is the one panel wide enough to run into both. */
   #battleScreen.ff-sheet .stat-sheet{display:block;top:auto;bottom:6px;left:120px;right:48px;
     z-index:24;max-height:64dvh;border-radius:10px}
   #battleScreen.ff-sheet .stat-sheet-body.open{max-height:calc(64dvh - 34px);overflow-y:auto}
-
-  /* — the list itself — */
-  .ff-menu{display:flex;flex-direction:column;gap:3px;
-    position:absolute;left:8px;bottom:calc(6px + env(safe-area-inset-bottom,0));z-index:25;
-    width:104px;padding:5px;border-radius:9px;
-    background:linear-gradient(160deg,rgba(18,22,38,0.96),rgba(8,10,18,0.96));
-    border:2px solid rgba(212,168,67,0.55);box-shadow:0 6px 22px rgba(0,0,0,0.65)}
-  .ff-cmd{padding:5px 6px 5px 16px;text-align:left;position:relative;
-    background:none;border:none;border-radius:4px;cursor:pointer;
-    font-family:'Cinzel',serif;font-size:0.68em;letter-spacing:0.08em;color:#e8e0d0;
-    -webkit-tap-highlight-color:transparent}
-  /* The pointing finger — an FF menu says which line it is on, and this one has
-     to survive a controller cursor landing on a different line. */
-  .ff-cmd.on::before{content:'▶';position:absolute;left:4px;color:var(--gold);font-size:0.85em}
-  .ff-cmd.on{color:var(--gold)}
-  .ff-cmd:active{background:rgba(212,168,67,0.2)}
-  .ff-go{margin-top:3px;border-top:1px solid rgba(212,168,67,0.3);padding-top:6px;color:var(--gold)}
 }
 
 /* Dice Overlay */

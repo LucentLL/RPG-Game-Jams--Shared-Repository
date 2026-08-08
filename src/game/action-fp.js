@@ -784,7 +784,15 @@ export function actFpToggle(kind, bridge) {
       // the whole time — which is the entire reason the look is a held button.
       + '<div class="afp-look"><b>Right-drag</b> to look &middot; <b>Left-click</b> or <b>1</b>&ndash;<b>6</b> to attack'
       + ' &middot; <b>V</b> changes camera</div>';
-    host.style.background = `url(${cloudsPanel()}) repeat-x 0 6% / auto 30%,`
+    // THE CLOUD BAND HAS TO CLEAR THE CHROME. `0 6%` was authored for the
+    // tactical lens, whose host has nothing over it; this screen carries 136px
+    // of HP cards, log and camera rail across its top, and the band resolved to
+    // y 16–133 in landscape and y 35–289 in portrait — i.e. straight through
+    // all of it. Nothing paints out of order (the host is under the HUD): the
+    // clouds simply showed THROUGH translucent panels, which is why the log
+    // read as smeared. 34% puts the band below the rail at both orientations
+    // and still well above the horizon at 50%.
+    host.style.background = `url(${cloudsPanel()}) repeat-x 0 34% / auto 22%,`
       + 'linear-gradient(rgb(92,132,188) 0%, rgb(128,156,196) 34%, rgb(156,174,196) 50%, rgb(112,120,132) 58%, rgb(74,80,92) 100%)';
     stage.appendChild(host);
     V = {

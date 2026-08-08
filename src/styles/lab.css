@@ -5,8 +5,114 @@
 .lab-header .lab-qs{font-size:0.85em;color:var(--qs-col);margin-top:2px}
 .lab-section{max-width:500px;width:100%;margin-bottom:12px}
 .lab-section h3{font-family:'Cinzel',serif;font-size:0.8em;letter-spacing:0.1em;color:var(--muted);margin-bottom:6px;border-bottom:1px solid var(--border);padding-bottom:3px}
+
+/* ═══ THE COMPARE LAYOUT ══════════════════════════════════════════════════════
+   WORN ON THE LEFT, ON OFFER ON THE RIGHT, and the numbers across the top of
+   both. Stacked in one 500px column the lab asked a comparison question and put
+   its two halves a scroll apart: the stats were at the top, the merchant three
+   screens down, and reading one meant losing sight of the other.
+
+   The band is `position: sticky`, not fixed — a fixed bar would have to be
+   measured out of every screen's padding, and this one only has to outlive the
+   lab body. The document is the scroller here (base.css puts the overflow on
+   the viewport), which is what makes sticky work at all. It is a SIBLING of the
+   column grid rather than a row inside it: a sticky grid item's containing block
+   is its own grid area, so how far it can travel depends on that row's height
+   and alignment — out here it is simply the whole lab body, and there is nothing
+   to get wrong. */
+.lab-body{
+  /* How much of the top the band owns. renderLab MEASURES the band and writes
+     this back every render — a constant could not track it, because the band
+     grows by a whole tab row when five stops are offered and by another line
+     when a preview is open, which is exactly when the player is comparing.
+     The value here is only the pre-measurement fallback. */
+  --lab-band:260px;
+  width:100%;max-width:1120px}
+.lab-cols{display:grid;grid-template-columns:minmax(0,1fr);gap:0 16px;align-items:start}
+.lab-col{min-width:0}
+/* THE BAND IS OPAQUE AND THE CURSOR CANNOT SEE IT. ui-pad.js moves by
+   `scrollIntoView({block:'nearest'})` and clips its candidate list to the raw
+   viewport (ui-pad.js:172-178, 219-224) — it has no idea an overlay is sitting
+   on the top 200px, so a controller could park the ring on a card completely
+   hidden behind this band. `scroll-margin-top` is the one thing scrollIntoView
+   does honour, and it only applies to the element it is called ON — an ancestor
+   is no help. So the list has to match what ui-pad matches, which is `[onclick]`
+   on ANY element: half this screen's controls are divs and spans (the merchant's
+   "Preview Stats", every `.mat-sell`, the materia orbs). Anything sticky on a
+   pad-navigable screen needs this. */
+.lab-cols [onclick],.lab-cols button,
+.lab-cols .lab-gear-item,.lab-cols .shop-item,.lab-cols .lab-mat-item{
+  scroll-margin-top:var(--lab-band)}
+/* Sections inside the grid are sized by their COLUMN, not by the old single-
+   column cap — otherwise both columns stay 500px and the second one floats. */
+.lab-body .lab-section{max-width:none}
+.lab-sticky{position:sticky;top:0;z-index:6;
+  /* Opaque: gear cards scroll UNDER this, and the stats panel's own background
+     is translucent by design. */
+  background:var(--bg);padding:8px 0 4px;margin-bottom:4px;
+  box-shadow:0 8px 16px -10px rgba(0,0,0,0.9)}
+.lab-sticky .lab-section{margin-bottom:0}
+
+/* The source switch. Loot, the shelf and the merchant are three different
+   decisions and were three stacked lists; one at a time is the whole point. */
+.lab-tabs{display:flex;flex-wrap:wrap;gap:4px;margin-top:6px}
+.lab-tab{padding:4px 11px;border-radius:999px;border:1px solid var(--border);background:transparent;
+  font-family:'Cinzel',serif;font-size:0.66em;letter-spacing:0.07em;color:var(--muted);cursor:pointer;
+  -webkit-tap-highlight-color:transparent;transition:color 0.15s,border-color 0.15s,background 0.15s}
+.lab-tab.on{border-color:var(--gold);color:var(--gold);background:rgba(212,168,67,0.1)}
+.lab-tab .lab-tab-n{opacity:0.65;margin-left:4px;font-size:0.9em}
+/* A tab worth looking at first says so. Only the spoils earn it — they are the
+   one list that changed since the player was last here. */
+.lab-tab.fresh:not(.on){border-color:rgba(212,168,67,0.45);color:#cdbd93}
+/* AFTER .fresh, and matching it, or the one tab the player is most likely to
+   reach for would be the only tab with no hover feedback — `.lab-tab.fresh:not(.on)`
+   outranks a bare `:hover` on both specificity and source order. `.on` keeps
+   its own colour on purpose: it is not a target, it is where you are. */
+.lab-tab:not(.on):hover{border-color:#7a6a45;color:#fff}
+
+/* Only the chosen source is on screen. Driven by one class on .lab-body, so
+   nothing here fights an inline style set by the renderer. */
+.lab-body #labStored,.lab-body #labMerchant,
+.lab-body #labLooseMateria,.lab-body #labMateriaDust{display:none}
+.lab-body.tab-loot #labStored,
+.lab-body.tab-stored #labStored,
+.lab-body.tab-merchant #labMerchant,
+.lab-body.tab-materia #labLooseMateria,
+.lab-body.tab-materia #labMateriaDust{display:block}
+
+/* 900 / 899.98, not 900 / 899: a fractional viewport (browser zoom, a device
+   that reports 899.5) would match NEITHER block and the lab would have two
+   columns' worth of rules and none of either. The same pair of numbers is read
+   by labResolveTab() in crucible.js — change one, change both. */
+@media (min-width:900px){
+  .lab-cols{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}
+  /* Wide enough for both: what you wear is never behind a tab. */
+  .lab-tab[data-tab="worn"]{display:none}
+  .lab-body.tab-worn #labStored{display:block}
+  .lab-body{--lab-band:190px}
+}
+@media (max-width:899.98px){
+  /* One column, so the worn set joins the switch rather than sitting under
+     three screens of shelf. */
+  .lab-body #labEquipped{display:none}
+  .lab-body.tab-worn #labEquipped{display:block}
+  /* The band has to leave room for the thing it describes. */
+  .lab-sticky .lab-stats-attacks{max-height:3.4em;overflow-y:auto}
+}
 .lab-stats-section{background:rgba(15,12,8,0.45);border:1px solid var(--border);border-radius:10px;padding:10px 12px;font-size:0.78em}
-.lab-stats-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:6px 14px;margin-top:4px}
+/* Three columns was a 500px column's answer. Spanning both columns of the
+   compare layout it stretched each row to a third of 1100px and left a hand's
+   width between a label and its number. Auto-fit keeps the pairs tight and
+   simply lays more of them per row when there is room. */
+.lab-stats-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:6px 16px;margin-top:4px}
+/* On a phone auto-fit takes the nine stats down to two columns and five rows —
+   a quarter of the screen spent on a band that is meant to be a header. Three
+   narrow columns is the shape this panel was drawn for and its shortest.
+   Placed AFTER the rule it overrides; the compare block above is earlier in the
+   file and would lose. */
+@media (max-width:560px){
+  .lab-stats-grid{grid-template-columns:repeat(3,1fr);gap:5px 9px}
+}
 .lab-stat-row{display:flex;justify-content:space-between;align-items:baseline;gap:6px}
 .lab-stat-row .lab-stat-name{color:var(--muted);font-size:0.85em}
 .lab-stat-row .lab-stat-val{color:#e8e0d0;font-weight:600}
@@ -20,11 +126,17 @@
 .lab-preview-banner{margin-top:8px;padding:6px 10px;border-radius:8px;background:rgba(212,168,67,0.08);border:1px solid rgba(212,168,67,0.4);font-size:0.85em;display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap}
 .lab-preview-banner .lab-preview-clear{cursor:pointer;color:var(--danger);font-size:0.85em;border:1px solid var(--danger);padding:2px 8px;border-radius:6px;background:transparent}
 .lab-preview-banner .lab-preview-clear:hover{background:rgba(220,80,80,0.12)}
-.lab-card-preview-target{outline:1px dashed rgba(212,168,67,0.5)}
+/* The worn slot the previewed piece would land in. Side by side, this is the
+   other half of the comparison — the band says what the numbers do, this says
+   which card it does it to. */
+.lab-card-preview-target{outline:1px dashed rgba(212,168,67,0.5);outline-offset:2px}
 .lab-card-preview-active{outline:2px solid var(--gold);background:rgba(212,168,67,0.06)}
 .lab-gear{display:grid;grid-template-columns:1fr;gap:6px}
 .lab-gear-item{background:var(--card);border:1px solid var(--border);border-radius:8px;padding:8px 10px;display:flex;justify-content:space-between;align-items:center;gap:8px}
 .lab-gear-item.equipped{border-color:var(--gold);border-width:2px}
+/* Taken this round, seen on the shelf — the loot tab is the place to read them,
+   this is only so they are findable again once they have been filed. */
+.lab-gear-item.lab-gear-fresh{border-left:2px solid rgba(212,168,67,0.55)}
 .lab-gear-info{flex:1}
 .lab-gear-info .gc-name{font-size:0.8em;font-weight:600;color:#e8e0d0}
 .lab-gear-info .gc-pos{font-size:0.65em;color:var(--muted)}

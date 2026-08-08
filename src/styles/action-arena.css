@@ -34,9 +34,22 @@
 #actionScreen .action-attacks{position:absolute;left:0;right:0;bottom:0;z-index:20;max-width:none;
   padding:8px 8px calc(10px + env(safe-area-inset-bottom,0));
   background:linear-gradient(0deg,rgba(7,9,13,0.95),rgba(7,9,13,0.6) 74%,rgba(7,9,13,0))}
-#actionScreen .action-log{position:absolute;top:58px;left:6px;right:6px;z-index:16;max-width:none;width:auto;height:42px;
-  background:rgba(7,9,13,0.4);border:none;font-size:0.72em}
-#actionScreen #actForfeitBtn{position:absolute;top:8px;right:56px;z-index:22;margin:0}
+/* BELOW the HP cards, not through them — the same measurement battle.css makes
+   for its own log, and for the same reason. The two HP rows plus the hud's
+   6px/16px padding measure 64px, so 58 put the log's top INSIDE the second bar.
+   And the fill was rgba(…,0.4) over a sky with clouds in it: the log read as
+   half-drawn text with white smears through it, which is what the player
+   photographed. It is a strip of text over a bright moving picture; it has to
+   be opaque enough to be text. */
+#actionScreen .action-log{position:absolute;top:70px;left:6px;right:6px;z-index:16;max-width:none;width:auto;height:42px;
+  background:rgba(7,9,13,0.82);border-radius:6px;border:none;font-size:0.72em}
+/* OUT OF THE HP BAND. `.hp-bar{flex:1}` runs both bars to the hud's right edge,
+   so anything parked top-right sits on top of them — measured at 52% of each
+   bar covered in portrait. Under the log on the LEFT instead: the camera rail
+   owns the top-right, the stick and the attack bar own the bottom, and the HP
+   band owns the top. This corner is the one nothing else wants at any width. */
+#actionScreen #actForfeitBtn{position:absolute;top:118px;left:8px;right:auto;
+  z-index:22;margin:0;font-size:0.7em;padding:5px 10px;opacity:0.72}
 /* Lift the movement stick clear of the bottom attacks overlay */
 #actionScreen .action-joystick{bottom:calc(104px + env(safe-area-inset-bottom,0))}
 
@@ -228,9 +241,13 @@ body.fp-lite #battleScreen .hud-panel{backdrop-filter:none;-webkit-backdrop-filt
    when you choose to rather than when a timer decides. Deliberately not a full
    blackout — a scrim heavy enough to read the card against and light enough to
    keep looking at what you did. */
+/* 0.28s, not 0.5: it lands on the END of the death beat, so the player has
+   already been looking at a screen that answers nothing for KO_HOLD. Half a
+   second of fade on top of that is the difference between "a beat" and "did it
+   crash". */
 .act-victory{position:absolute;inset:0;z-index:40;display:flex;align-items:center;justify-content:center;
   background:radial-gradient(ellipse at 50% 45%,rgba(8,7,5,0.15),rgba(8,7,5,0.72));
-  opacity:0;transition:opacity 0.5s ease}
+  opacity:0;transition:opacity 0.28s ease}
 .act-victory.on{opacity:1}
 .av-card{text-align:center;padding:20px 34px;border-radius:14px;
   background:linear-gradient(160deg,rgba(24,20,14,0.92),rgba(12,10,8,0.92));
@@ -269,6 +286,11 @@ body.fp-lite #battleScreen .hud-panel{backdrop-filter:none;-webkit-backdrop-filt
 .aw-petal span{font-size:0.56em;letter-spacing:0.03em}
 .aw-petal.on{background:rgba(212,168,67,0.32);border-color:var(--gold,#d4a843);color:#fff}
 .aw-petal.aw-item{border-style:dashed}
+/* Drunk dry — still shown, because a slot that vanishes mid-drag moves every
+   petal under the thumb. */
+.aw-petal.aw-empty{opacity:0.4}
+/* The "you have no skills" line. Not selectable — it is not in `_opts`. */
+.aw-petal.aw-none{border-style:dotted;color:var(--muted);max-width:120px}
 .action-joystick{position:absolute;left:14px;bottom:14px;width:112px;height:112px;border-radius:50%;background:radial-gradient(circle,rgba(15,15,22,0.55),rgba(15,15,22,0.3));border:2px solid rgba(212,168,67,0.45);touch-action:none;z-index:30;display:none;align-items:center;justify-content:center}
 .action-joystick.active{display:flex}
 .action-joystick .aj-thumb{width:50px;height:50px;border-radius:50%;background:radial-gradient(circle at 40% 35%,#e0b455,#6b4a1a);border:1px solid rgba(0,0,0,0.45);box-shadow:0 2px 6px rgba(0,0,0,0.45);pointer-events:none}

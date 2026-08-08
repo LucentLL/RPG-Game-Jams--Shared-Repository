@@ -59,6 +59,28 @@ import { ELEMENTS_SKIN_SOURCE, ELEMENTS_SKIN_TONES } from './data/sprite-tables.
  */
 const REST_H = 0.62, SHIELD_H = 0.5;
 /**
+ * The most SCREEN pixels one SOURCE pixel of the art may become.
+ *
+ * REST_H and SHIELD_H say how much of the lens the weapon occupies, and on
+ * their own that is a promise the art cannot keep. These are 48px cells and the
+ * rest poses inside them are tiny: a sword is 10×10 source pixels, a buckler
+ * 11×10, a wand 12×12, a dagger 8×7. Asking a 10px sprite to fill 62% of a
+ * 390px phone axis is a 19–34× nearest-neighbour blow-up (`image-rendering:
+ * pixelated`), and what lands in the corner is not a pose — it is individual
+ * source pixels drawn as 13–35px squares. That is the player's report of "raw
+ * sheet pixels", and it is worst for the SMALLEST weapons, because the rest
+ * pose's share of the crop is the divisor: a dagger resolved to a 1105px-tall
+ * element on an 844px screen.
+ *
+ * 8 is not a taste call: it is roughly what the WORLD is drawn at. A 48px tile
+ * spans T=300 world px in the arena, about 6.25 screen px per source px before
+ * the camera, so a viewmodel held at 8 is a shade crisper than the ground it
+ * stands on and no more. It only ever binds where the art is too small to
+ * honour the fraction — a larger sprite is unaffected and the framing, the
+ * grip pivot and the hang off the corner are all unchanged.
+ */
+const MAX_SRC_PX = 8;
+/**
  * Fraction of the WEAPON's rest pose hidden past the bottom edge, and past the
  * side. About half of what you carry is out of frame, which is what makes it
  * read as carried rather than displayed.
@@ -511,7 +533,10 @@ export function createFpHands(layer, spec) {
     for (const h of all()) {
       const b = h.box, r = h.rest;
       const share = r.h / b.h;                       // how much of the crop the rest pose is
-      const restH = (h.kind === 'shield' ? SHIELD_H : REST_H) * base;
+      // Two ceilings, and the art gets the last word: a fraction of the lens,
+      // AND no more than MAX_SRC_PX screen px per source px. @see MAX_SRC_PX.
+      const restH = Math.min((h.kind === 'shield' ? SHIELD_H : REST_H) * base,
+                             r.h * MAX_SRC_PX);
       const elH = Math.round(restH / share);
       const elW = Math.round(elH * (b.w / b.h));
       const restW = elW * (r.w / b.w);
