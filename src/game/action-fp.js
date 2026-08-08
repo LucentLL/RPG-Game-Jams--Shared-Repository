@@ -46,7 +46,8 @@ import { facePanel, apronPanel, standsPanel, cloudsPanel, WALL_DIM, SEG_T, SEG_G
 import { createFpHands, fighterHandsSpec } from './fp-hands.js';
 import { createLook, touchPrimary } from '../platform/input.js';
 import { ladderArt } from './arena-terrain.js';
-import { perspectiveFor, perspRatio, camLean, onView } from '../platform/view-prefs.js';
+import { perspectiveFor, perspRatio, camLean, onView, view } from '../platform/view-prefs.js';
+import { createGlWorld } from '../platform/gl-world.js';
 
 /** World scale — the delve's, via tactical-fp, so a person is the same size
  *  standing in any of the three grounds, and shrunk by the same K for the same
@@ -100,6 +101,16 @@ const PAD_PITCH_RATE = 90;
 /** @type {?Object} the live view (null when the arena camera is off) */
 let V = null;
 
+/** The canvas buffer, as a fraction of the device's own pixels. The delve's
+ *  rule verbatim: a rasteriser's cost is per PIXEL and pixels fall with the
+ *  square, so half resolution is a quarter of the fill rate — and the upscale
+ *  is NEAREST, so a low setting reads as leaning into the pixel art rather than
+ *  going soft. Phones start at 50. @see view-prefs.js. */
+function glDpr() {
+  const dpr = typeof devicePixelRatio === 'number' ? devicePixelRatio : 1;
+  return Math.min(2, dpr) * (view.res / 100);
+}
+
 export function actFpActive() { return !!V; }
 export function actFpPov() { return V ? V.pov : 'first'; }
 /** Is the right button down, turning the view? */
@@ -152,23 +163,115 @@ function rocksImg(tilesBase) {
   return _rocks;
 }
 
+/**
+ * A SURFACE IS DATA NOW, not an HTML string.
+ *
+ * The world is described once, as a want-set, and a BACKEND draws it — the DOM
+ * compositor as it always did, or gl-world.js on one canvas. This is the delve's
+ * arrangement verbatim (@see delve-fp.js), and the point of it is that the two
+ * cannot disagree about what the world contains: there is one builder and two
+ * renderers, not two worlds.
+ *
+ * The record's shape IS gl-world's `setGeometry` input — `{src,w,h,x,y,z,rot}`
+ * in CSS px, centred on x/y/z, `rot` a CSS rotation string — so the GL path
+ * needs no translation beyond the repeat counts. `cls`, `cut`, `axis` and
+ * `atlas` are the DOM path's business alone: they are the compositor
+ * mitigations, and the canvas has no use for any of them.
+ */
 function quad(tex, w, h, tx, ty, tz, rot, cls) {
-  return `<div class="tfp-q ${cls || ''}" style="width:${w}px;height:${h}px;margin-left:${-w / 2}px;margin-top:${-h / 2}px;`
-    + `background-image:url(${tex});transform:translate3d(${tx}px,${ty}px,${tz}px) ${rot || ''}"></div>`;
+  return { src: tex, w, h, x: tx, y: ty, z: tz, rot: rot || '', cls: cls || '' };
 }
 
-/** The tactical board's slab-cutter, on this board's own quad(). @see
- *  tactical-fp.js's strip() for why a long slab is not merely expensive. */
+/**
+ * A long surface, whole.
+ *
+ * It used to cut itself into SEG_T panels here, at BUILD time, which meant the
+ * segmentation was a fact about the world rather than about the renderer
+ * drawing it. It is a compositor mitigation — one that
+ * `perf-arena-mobile`/HANDOFF record as guarding a limit that stopped binding —
+ * so it belongs to the DOM backend and nowhere else. The canvas takes the run
+ * in one piece, which is the whole reason 87 layers can become a handful of
+ * draw calls. @see domSegments.
+ */
 function strip(out, tex, w, h, cx, cy, cz, axis, rot, cls, cut) {
-  const tall = cut === 'h';
-  const len = tall ? h : w;
-  const n = Math.max(1, Math.round(len / (SEG_T * T))), seg = len / n;
+  const q = quad(tex, w, h, cx, cy, cz, rot, cls);
+  q.axis = axis; q.cut = cut;
+  out.push(q);
+}
+
+/** The stands texture's own proportions — `background-size: auto 100%` on
+ *  `.tfp-ring` (battle.css) scales it to the quad's HEIGHT and repeats across,
+ *  so the repeat count is the quad's aspect over the texture's. @see
+ *  standsPanel, which bakes 128×96. */
+const RING_TEX_AR = 128 / 96;
+
+/** The want-set, as gl-world wants it: the same records with the repeat counts
+ *  the DOM path expresses as `background-size` + `background-repeat` instead. */
+function glQuads(want) {
+  return want.map((q) => {
+    let repX = 1, repY = 1;
+    if (/tfp-apron/.test(q.cls)) { repX = q.w / T; repY = q.h / T; }        // repeat, T×T
+    else if (/tfp-ring/.test(q.cls)) { repX = q.w / (q.h * RING_TEX_AR); }  // repeat-x, auto 100%
+    return { src: q.src, w: q.w, h: q.h, x: q.x, y: q.y, z: q.z, rot: q.rot, repX, repY };
+  });
+}
+
+/**
+ * One record → the panels the COMPOSITOR needs it cut into.
+ *
+ * Two cuts, both DOM-only. `cut` is the slab-cutter the tactical board shares
+ * (@see tactical-fp.js's strip for why a long slab is not merely expensive),
+ * and `atlas` is the field: it is one PICTURE rather than a repeating tile, so
+ * it is panelled by background-position across an n×n grid instead.
+ */
+function domSegments(q) {
+  if (q.atlas) {
+    const n = q.atlas, gw = q.w / n, gh = q.h / n, gp = 100 / (n - 1 || 1), out = [];
+    for (let r = 0; r < n; r++) {
+      for (let c = 0; c < n; c++) {
+        out.push(Object.assign({}, q, {
+          w: gw, h: gh,
+          x: q.x - q.w / 2 + (c + 0.5) * gw,
+          z: q.z - q.h / 2 + (r + 0.5) * gh,
+          bg: `background-size:${n * 100}% ${n * 100}%;`
+            + `background-position:${(c * gp).toFixed(4)}% ${(r * gp).toFixed(4)}%;`,
+        }));
+      }
+    }
+    return out;
+  }
+  if (!q.cut) return [q];
+  const tall = q.cut === 'h';
+  const len = tall ? q.h : q.w;
+  const n = Math.max(1, Math.round(len / (SEG_T * T)));
+  if (n <= 1) return [q];
+  const seg = len / n, out = [];
   for (let i = 0; i < n; i++) {
     const off = -len / 2 + seg * (i + 0.5);
-    out.push(quad(tex, tall ? w : seg, tall ? seg : h,
-      cx + (axis === 'x' ? off : 0), cy + (axis === 'y' ? off : 0), cz + (axis === 'z' ? off : 0),
-      rot, cls));
+    out.push(Object.assign({}, q, {
+      w: tall ? q.w : seg, h: tall ? seg : q.h,
+      x: q.x + (q.axis === 'x' ? off : 0),
+      y: q.y + (q.axis === 'y' ? off : 0),
+      z: q.z + (q.axis === 'z' ? off : 0),
+    }));
   }
+  return out;
+}
+
+/** The DOM backend: the want-set as the pile of composited layers it has always
+ *  been. Unchanged output — every panel, position and class is what buildBoard
+ *  used to emit directly. */
+function domHTML(want) {
+  let html = '';
+  for (const q of want) {
+    for (const s of domSegments(q)) {
+      html += `<div class="tfp-q ${s.cls}" style="width:${s.w}px;height:${s.h}px;`
+        + `margin-left:${-s.w / 2}px;margin-top:${-s.h / 2}px;`
+        + `background-image:url(${s.src});${s.bg || ''}`
+        + `transform:translate3d(${s.x}px,${s.y}px,${s.z}px) ${s.rot}"></div>`;
+    }
+  }
+  return html;
 }
 
 // ---------------------------------------------------------------------------
@@ -221,19 +324,14 @@ function buildBoard() {
   // stripped — see tactical-fp.js's field(). Same reason: 9 tiles square is
   // past a phone's texture ceiling on the one quad you stand on.
   const ground = groundURI() || facePanel('afpFieldFallback', '#3f5a2e', '#27381c');
-  // SEG_GROUND, not SEG_T: the field under your feet is the most magnified
-  // surface in the scene and the one a phone drops. @see tactical-fp.js.
-  const gn = Math.max(1, Math.ceil(Math.max(span, rows * T) / (SEG_GROUND * T)));
-  const gw = span / gn, gh = (rows * T) / gn, gp = 100 / (gn - 1 || 1);
-  for (let r = 0; r < gn; r++) {
-    for (let c = 0; c < gn; c++) {
-      out.push('<div class="tfp-q tfp-floor" style="'
-        + `width:${gw}px;height:${gh}px;margin-left:${-gw / 2}px;margin-top:${-gh / 2}px;`
-        + `background-image:url(${ground});background-size:${gn * 100}% ${gn * 100}%;`
-        + `background-position:${(c * gp).toFixed(4)}% ${(r * gp).toFixed(4)}%;`
-        + `transform:translate3d(${(c + 0.5) * gw}px,0px,${(r + 0.5) * gh}px) rotateX(90deg)"></div>`);
-    }
-  }
+  // ONE FIELD. It is a picture of the whole board, so the DOM backend panels it
+  // by background-position (SEG_GROUND — the field is the most magnified
+  // surface in the scene and the one a phone drops, @see tactical-fp.js); the
+  // canvas takes it whole, because a rasteriser has no per-surface budget to
+  // spend on it.
+  const gq = quad(ground, span, rows * T, span / 2, 0, (rows * T) / 2, 'rotateX(90deg)', 'tfp-floor');
+  gq.atlas = Math.max(1, Math.ceil(Math.max(span, rows * T) / (SEG_GROUND * T)));
+  out.push(gq);
 
   // The shelves. bakeGrid already told the flat view where the raised tops
   // are; here they get real sides and a lid at the height combat already
@@ -280,7 +378,12 @@ function buildBoard() {
   strip(out, stands, rl, RING_H, -A, ry, depth / 2, 'z', 'rotateY(90deg)', 'tfp-wall tfp-ring', 'w');
   strip(out, stands, rl, RING_H, span + A, ry, depth / 2, 'z', 'rotateY(-90deg)', 'tfp-wall tfp-ring', 'w');
 
-  V.world.querySelector('.tfp-geo').innerHTML = out.join('');
+  // ONE WANT-SET, TWO BACKENDS. The canvas gets it whole; the compositor gets
+  // it cut into the panels it needs. Neither can invent geometry the other does
+  // not have, which is the point of building it as data.
+  V.want = out;
+  V.world.querySelector('.tfp-geo').innerHTML = V.gl ? '' : domHTML(out);
+  if (V.gl) V.gl.setGeometry(glQuads(out));
   V.boardKey = boardKey();
   buildDressing(T0);
 }
@@ -690,6 +793,36 @@ export function actFpFrame() {
   const wtf = `scale3d(${sc},${sc},${sc})${lean ? ` rotateX(${lean}deg)` : ''} rotateY(${deg.toFixed(2)}deg) translate3d(${(-ex).toFixed(1)}px,${(-ey).toFixed(1)}px,${(-ez).toFixed(1)}px)`;
   if (wtf !== V.wtf) V.world.style.transform = (V.wtf = wtf);
 
+  // THE CANVAS IS AIMED BY THE SAME NUMBERS THE CSS CHAIN IS AIMED BY — this is
+  // what makes it the same picture rather than a second one. `back` is the
+  // pull-back CSS `perspective` implies and a GL camera at the eye does not:
+  // the world transform lands a point at stage-z = lens·Z with the viewer at
+  // +P, so the distance is P + lens·d, and the two agree only with the GL
+  // camera pulled back P/lens world px. @see HANDOFF-RENDERER.md §-1, and
+  // delve-fp.js's twin of this block. The arena's lens is 1/K, so P/lens = P·K.
+  //
+  // PITCH IS THE SHOULDER LEAN ONLY, exactly as the delve passes it. The free
+  // look is a `perspective-origin` SHEAR on the DOM lens and deliberately not a
+  // rotation (@see aimLens) — billboards, the viewmodel and the HUD all ride
+  // that lens, so putting the free pitch in the GL camera alone would tilt the
+  // world out from under everything drawn over it.
+  if (V.gl) {
+    const st = V.stage;
+    if (st && st.clientHeight) V.gl.resize(st.clientWidth, st.clientHeight, glDpr());
+    V.gl.setCamera({
+      x: ex, y: ey, z: ez, yaw: V.yaw,
+      pitch: lean ? lean * Math.PI / 180 : 0,
+      fovY: view.fov * Math.PI / 180,
+      back: st && st.clientHeight ? perspectiveFor(st.clientHeight) * K : 0,
+    });
+    // No fog in an arena — you can see the far stands, and the sky behind them
+    // is the host's own background. Far enough out that nothing in a 9×9 field
+    // ever reaches it.
+    V.gl.setFog([120, 132, 150], 1e9, 1e9 + 1);
+    V.gl.setTime(now / 1000);
+    V.gl.draw();
+  }
+
   if (boardKey() !== V.boardKey) buildBoard();
   ensureActors();
 
@@ -763,6 +896,7 @@ export function actFpToggle(kind, bridge) {
       if (V.onResize) window.removeEventListener('resize', V.onResize);
       if (V.look) V.look.dispose();     // and hands the cursor back to the HUD
       if (V.hands) V.hands.dispose();
+      if (V.gl) V.gl.dispose();         // the GL context outlives its host otherwise
       V.host.remove();
       V = null;
     }
@@ -774,7 +908,7 @@ export function actFpToggle(kind, bridge) {
     const host = document.createElement('div');
     host.className = 'tfp-host afp-host';
     host.style.setProperty('--tfp-t', T + 'px');   // world px that live in CSS — see tactical-fp
-    host.innerHTML = '<div class="tfp-stage"><div class="tfp-world">'
+    host.innerHTML = '<div class="tfp-stage"><canvas class="afp-gl"></canvas><div class="tfp-world">'
       + '<div class="tfp-geo"></div><div class="tfp-bbs"></div>'
       + '</div></div><div class="tfp-haze"></div>'
       + '<div class="fp-hands"></div>'
@@ -802,7 +936,7 @@ export function actFpToggle(kind, bridge) {
       // pitches. Held rather than re-queried — both are written per frame.
       stage: host.querySelector('.tfp-stage'), po: '',
       pov: 'first', yaw: 0, pitch: 0, wtf: '', last: 0,
-      actors: new Map(), shots: new Map(), dressing: [],
+      actors: new Map(), shots: new Map(), dressing: [], want: [], gl: null,
       boardKey: '', ringCv: host.querySelector('.afp-ring'),
       handsEl: host.querySelector('.fp-hands'), hands: null, handsFor: null, lastAnim: '',
       look: null,
@@ -819,6 +953,20 @@ export function actFpToggle(kind, bridge) {
     // Keyed to the DEVICE, not the session, and never removed — the same rule
     // the delve settled on.
     if (LOW_POWER) document.body.classList.add('fp-lite');
+    // THE SAME ENGINE THE DELVE DRAWS WITH (user decree, 2026-08-08). Every
+    // mitigation this file carried — SEG_T, SEG_GROUND, the K-scale, tiering on
+    // a coarse pointer — was managing the DOM compositor's ceiling, and the
+    // ceiling is still there: 87 surfaces on The Cairns, each rastered at CSS
+    // size × dpr whether it covers the screen or four pixels of horizon, and
+    // dropped without warning when the budget runs out. That is the black world
+    // in every playtest photo. A rasteriser has no per-surface budget at all.
+    //
+    // A BACKEND, not a rewrite: both paths read the one want-set out of
+    // buildBoard, so they cannot drift about what the world contains, and a
+    // device without WebGL2 keeps the composited path. Same switch as the
+    // delve's — `view.gl`, Camera panel → "Draw on a canvas".
+    if (view.gl) V.gl = createGlWorld(host.querySelector('.afp-gl'));
+    host.classList.toggle('afp-gl-on', !!V.gl);
     // The mouse becomes the head. Taken on the host (which fills the stage),
     // never on the HUD around it, and never on a touch device — where the
     // stick IS the control and a pointer lock is a cursor thrown away.
@@ -860,7 +1008,24 @@ if (typeof window !== 'undefined') {
     shots: V.shots.size,
     dressing: V.dressing.length,
     boardKey: V.boardKey,
+    want: V.want.length,
+    gl: !!V.gl,
+    glStats: V.gl ? V.gl.stats() : null,
   });
+  /**
+   * WHAT THE CANVAS ACTUALLY DREW — and the reason the rasteriser is worth
+   * having twice over. A compositor can only be checked by measuring DOM
+   * rectangles and hoping; `probe()` draws and reads the pixels back, so a
+   * headless pane that composites nothing and runs no rAF can still assert that
+   * the sky is empty at the top and the field green at the bottom. Every
+   * CSS-3D change in this file for a year was verified by inference.
+   * @see HANDOFF-RENDERER.md §-1.
+   */
+  window.__actFpProbe = () => {
+    if (!V || !V.gl) return null;
+    actFpFrame();
+    return V.gl.probe();
+  };
   window.__actFpStep = () => { actFpFrame(); return window.__actFpDebug(); };
   // Look, without a mouse: a headless pane can never hold a pointer lock, so
   // the only way to prove the steer's angle path is to hand it the same numbers

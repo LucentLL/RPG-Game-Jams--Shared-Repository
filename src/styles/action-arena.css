@@ -157,6 +157,18 @@
    over the field — drawn by action-fp on the fighter's own canvas.) */
 .afp-ring{position:absolute;left:50%;bottom:132px;transform:translateX(-50%);
   width:72px;height:72px;pointer-events:none;z-index:6}
+/* ── THE CANVAS (src/platform/gl-world.js) ────────────────────────────────
+   One surface for the whole world, under the billboards that still ride the
+   CSS chain. When it is up the composited copy of the geometry must go, and go
+   by DISPLAY — `visibility` would leave every quad holding its layer, which is
+   the entire cost being removed. The delve's arrangement verbatim. */
+.afp-gl{position:absolute;inset:0;z-index:1;width:100%;height:100%;display:none;pointer-events:none}
+.afp-gl-on .afp-gl{display:block}
+.afp-gl-on .tfp-geo{display:none}
+/* The stage has to sit ABOVE the canvas for the billboards to read, and it is
+   the canvas's own parent, so it needs a stacking level of its own. */
+.afp-gl-on .tfp-world{position:relative;z-index:2}
+
 /* Dressing is world geometry now, not billboards — placed once, standing on its
    own ground. A round prop is a CROSS of two quads, so it must be visible from
    both sides (the cull that hides a wall's back would erase half the rock). */
