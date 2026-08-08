@@ -12,8 +12,8 @@
   <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;600;700&family=Cormorant+Garamond:ital,wght@0,400;0,600;1,400&display=swap" rel="stylesheet" />
 
   <!-- Vite entry. Module scripts defer, so this runs after the DOM is parsed. -->
-  <script type="module" crossorigin src="./assets/index-6p71IfLv.js"></script>
-  <link rel="stylesheet" crossorigin href="./assets/index-DlKa9qjx.css">
+  <script type="module" crossorigin src="./assets/index-4RrR-TcC.js"></script>
+  <link rel="stylesheet" crossorigin href="./assets/index-CtBPbt_K.css">
 </head>
 <body>
 
@@ -175,6 +175,10 @@
     <!-- Shoulder angle and field of view, on sliders that apply live — the two
          numbers that can only be judged by looking at them. Also on the O key. -->
     <button class="cam-btn cam-view" onclick="__viewPanel()" title="Camera angle and field of view">Camera</button>
+    <!-- What you are and what you are carrying. There was no way to read either
+         from inside a fight; the character sheet has only ever existed on the
+         tactical board. @see field-sheet.js. -->
+    <button class="cam-btn cam-view fs-open" onclick="openArenaSheet()" title="Stats, gear and settings">Sheet</button>
   </div>
   <div class="action-attacks" id="actionAttackBar"></div>
   <div class="action-log" id="actionLog"></div>
