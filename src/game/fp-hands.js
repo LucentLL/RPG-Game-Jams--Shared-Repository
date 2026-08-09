@@ -72,14 +72,25 @@ const REST_H = 0.62, SHIELD_H = 0.5;
  * pose's share of the crop is the divisor: a dagger resolved to a 1105px-tall
  * element on an 844px screen.
  *
- * 8 is not a taste call: it is roughly what the WORLD is drawn at. A 48px tile
- * spans T=300 world px in the arena, about 6.25 screen px per source px before
- * the camera, so a viewmodel held at 8 is a shade crisper than the ground it
- * stands on and no more. It only ever binds where the art is too small to
- * honour the fraction — a larger sprite is unaffected and the framing, the
- * grip pivot and the hang off the corner are all unchanged.
+ * IT WAS 8, AND 8 MADE THE WEAPON DISAPPEAR (playtest, 2026-08-09: "I can
+ * BARELY see my weapon/shield in 1st person mode now", on PC and on mobile).
+ * The ceiling is ABSOLUTE while the fraction it competes with is not, so it
+ * binds hardest exactly where there is most room to fill: a sword's rest pose
+ * is 10 source px, so `10 × 8` pinned it to 80 screen px whether the lens was a
+ * 390px phone or a 1080px monitor — 9% of the height where 62% was asked for.
+ * The blockiness it was added to cure was real; curing it by shrinking the
+ * subject to invisibility traded one bug for a worse one.
+ *
+ * 26 SITS WHERE THE TWO TERMS CROSS OVER, which is the behaviour actually
+ * wanted: on a small lens the FRACTION binds (0.62 × 390 = 242 < 10 × 26) and
+ * the framing is exactly as designed; on a big one the CEILING binds (260 <
+ * 0.62 × 1080) and holds the blow-up to about four times what the world is
+ * drawn at — which is not a cheat but a fact about a viewmodel, since the thing
+ * in your hand is a half-metre from the eye and the ground is several metres
+ * off. Chunky at that size, and meant to be: this is a pixel-art game whose own
+ * reference for a gear screen is Mega Man X.
  */
-const MAX_SRC_PX = 8;
+const MAX_SRC_PX = 26;
 /**
  * Fraction of the WEAPON's rest pose hidden past the bottom edge, and past the
  * side. About half of what you carry is out of frame, which is what makes it

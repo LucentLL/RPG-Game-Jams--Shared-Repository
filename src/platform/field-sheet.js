@@ -28,6 +28,7 @@
  * so B and Escape mean what they mean everywhere else.
  */
 import { showViewPanel } from './view-prefs.js';
+import { compareHTML } from './compare-panel.js';
 
 let host = null;      // the live overlay, or null
 let spec = null;      // the description the lens handed us
@@ -74,12 +75,37 @@ function gearRow(g, i) {
     + '</' + tag + '>';
 }
 
-/** The slot picker — what could go here instead. A sub-view of the Gear tab
- *  rather than a second overlay: an overlay over an overlay on a phone is two
- *  things to dismiss and one of them is always behind the other. */
+/**
+ * The slot picker — what could go here instead. A sub-view of the Gear tab
+ * rather than a second overlay: an overlay over an overlay on a phone is two
+ * things to dismiss and one of them is always behind the other.
+ *
+ * IT SHOWS WHAT YOU ARE GIVING UP. The list is of things you do NOT have on
+ * (the lens filters the worn piece out, and should — offering to equip what is
+ * already equipped is a no-op with a button), which had the perverse effect
+ * that the one item you needed to measure against was the one item guaranteed
+ * to be absent. The worn piece is pinned at the top and every option carries
+ * its difference from it.
+ *
+ * The rows come from the LENS, never from here — this file cannot know whether
+ * a sword's worth is `quality × slot weight` or a socket count, and inventing a
+ * number would be a view deciding a rule (CLAUDE.md, ONE RULES FACT). An option
+ * with no `rows` simply shows its label, exactly as before.
+ */
 function pickerHTML(g) {
   const opts = spec.equip.options(g.key) || [];
   let h = '<button class="fs-back" data-pick="back">&larr; ' + esc(g.slot) + '</button>';
+  // Pinned: what is on right now. Not a button — tapping it would mean nothing.
+  h += compareHTML({
+    slot: g.slot,
+    cur: {
+      title: 'Worn now',
+      name: g.name,
+      sub: g.sub,
+      art: g.art,
+      empty: !!g.empty,
+    },
+  });
   if (!g.empty) h += '<button class="fs-opt fs-opt-none" data-pick="">Take it off</button>';
   if (!opts.length) {
     h += '<div class="fs-none">Nothing else in the armory fits this slot.</div>';
@@ -88,19 +114,39 @@ function pickerHTML(g) {
       h += '<button class="fs-opt" data-pick="' + esc(o.id) + '">'
         + '<span class="fs-gname">' + esc(o.label) + '</span>'
         + (o.sub ? '<span class="fs-gsub">' + esc(o.sub) + '</span>' : '')
+        + (o.rows || o.note
+          ? compareHTML({
+            cur: { title: 'Worn', name: g.name, sub: g.sub, empty: !!g.empty },
+            cand: { title: 'This one', name: o.label, sub: o.sub },
+            rows: o.rows,
+            tags: o.tags,
+            note: o.note,
+            compact: true,
+          })
+          : '')
         + '</button>';
     }
   }
   return h;
 }
 
+/**
+ * The wearer, wearing it. A lens that can draw its subject supplies a PAINTER
+ * (`spec.doll`); this only makes the canvas and hands it over — the sheet has
+ * no more business knowing what a helm looks like than it has knowing what one
+ * is worth. A lens without one loses nothing but the picture.
+ */
+function dollHTML() {
+  return spec.doll ? '<div class="fs-doll-wrap"><canvas class="fs-doll" width="96" height="96"></canvas></div>' : '';
+}
+
 function body() {
   if (tab === 'gear') {
     const list = spec.gear || [];
-    if (picking != null && list[picking] && spec.equip) return pickerHTML(list[picking]);
-    return list.length
+    if (picking != null && list[picking] && spec.equip) return dollHTML() + pickerHTML(list[picking]);
+    return dollHTML() + (list.length
       ? list.map(gearRow).join('')
-      : '<div class="fs-none">Nothing worn.</div>';
+      : '<div class="fs-none">Nothing worn.</div>');
   }
   if (tab === 'settings') {
     // LAUNCHERS, NOT A SECOND COPY. The camera dials already live in one place
@@ -139,6 +185,23 @@ function paint() {
       a.run();
     };
   });
+  // Paint the doll, then let the picker TRY THINGS ON: pointing at an option
+  // (or tabbing to it with the controller cursor) dresses the figure in it, and
+  // leaving puts it back. Nothing is committed — the equip still happens on the
+  // click — so this is a fitting room, not a state change.
+  const doll = host.querySelector('.fs-doll');
+  if (doll && spec.doll) {
+    const showDoll = (id) => { try { spec.doll(doll, id || null); } catch (_e) {} };
+    showDoll(null);
+    host.querySelectorAll('.fs-opt[data-pick]').forEach((b) => {
+      const id = b.getAttribute('data-pick');
+      if (!id) return;   // "Take it off" has no item to wear
+      b.addEventListener('pointerenter', () => showDoll(id));
+      b.addEventListener('focus', () => showDoll(id));
+      b.addEventListener('pointerleave', () => showDoll(null));
+      b.addEventListener('blur', () => showDoll(null));
+    });
+  }
   host.querySelectorAll('.fs-gear.swap').forEach((b) => {
     b.onclick = () => { picking = +b.getAttribute('data-slot'); paint(); };
   });

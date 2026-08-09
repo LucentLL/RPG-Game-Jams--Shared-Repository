@@ -380,6 +380,47 @@ export function itemSprite(item, cls = '', style = '') {
 /** Does this item have laid-weapon art? (armor and unknown kinds do not) */
 export function hasItemSprite(item) { return !!(item && ITEM_WEAPON[item.kind]); }
 
+/**
+ * A guild item as a LAYER THE COMPOSITOR CAN WEAR — {layer, name, c} for the
+ * armour kinds, null for anything carried in a hand.
+ *
+ * This is the bridge the paper doll stands on, and it goes through ITEM_WEAPON
+ * rather than the engine's GEAR_BODY_LADDER on purpose. The guild forges ONE
+ * `armor` kind; the engine knows five body types (Plate/Mail/Robes/Vest/Cloak).
+ * Translating guild → engine would make this file pick which of the five a
+ * steel breastplate "really" is — a choice the player never made and a view has
+ * no business inventing (CLAUDE.md — ONE RULES FACT). The table above is keyed
+ * the way the guild actually thinks, kind + material, and every one of its
+ * answers is already checked against every forgeable recipe by
+ * dev/check-item-art.mjs — so a doll built on it cannot quietly show a blank
+ * square without that check failing first.
+ *
+ * `pack` is deliberately dropped: it exists to build a CSS url, and the
+ * compositor probes core/ce1/ce2 itself when it loads a layer by name.
+ *
+ * @param {{kind:string, material:string}} item
+ * @returns {?{layer:'top'|'hat'|'bottom', name:string, c:number}}
+ */
+export function wornLayerDesc(item) {
+  const w = item && ITEM_WEAPON[item.kind];
+  if (!w || !w.sheet) return null;
+  const s = w.sheet(item.material);
+  if (!s || !s.folder) return null;   // shield/bow resolve to weapon sheets, not worn layers
+  return { layer: s.folder, name: s.stem + (s.c ? '_c' + s.c : ''), c: s.c || 0 };
+}
+
+/** The hand kinds, in the vocabulary the compositor's weapon layers speak.
+ *  Mirrors fp-hands.js TYPE_KIND inverted — one table, so the doll and the
+ *  first-person viewmodel cannot come to different conclusions about a mace. */
+export const KIND_TO_ENGINE_TYPE = {
+  sword: 'Sword', dagger: 'Dagger', axe: 'Axe', bow: 'Bow', hammer: 'Hammer',
+  mace: 'Club', wand: 'Wand', staff: 'Wand', shield: 'Buckler',
+};
+
+/** Material → the engine `tier` that picks the same colour variant the icon
+ *  uses. MAT_COLOR is the guild's ladder; the compositor reads tier. */
+export function materialToTier(material) { return MAT_COLOR[material] || 0; }
+
 // ─── Gear as WORN, seen from behind ─────────────────────────────────────────
 // A first-person camera stands exactly where a camera behind the character
 // stands, so the right art for a viewmodel is the art the compositor already

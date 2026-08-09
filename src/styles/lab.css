@@ -163,3 +163,10 @@
 .shop-item.sold{opacity:0.3;pointer-events:none}
 .shop-price{font-size:0.7em;color:var(--qs-col);margin-top:3px;font-weight:600}
 
+
+/* The fighter, wearing what the WORN NOW list names — and wearing the previewed
+   piece while one is being considered, so the picture and the deltas agree. */
+.lab-doll-wrap{display:flex;justify-content:center;margin:2px 0 8px}
+.lab-doll{width:132px;height:132px;image-rendering:pixelated;
+  border:1px solid var(--border);border-radius:10px;
+  background:radial-gradient(ellipse at 50% 82%,rgba(212,168,67,0.15),rgba(0,0,0,0.3) 62%)}

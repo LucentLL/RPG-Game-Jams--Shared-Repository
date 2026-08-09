@@ -1,0 +1,109 @@
+/* ═══ THE COMPARE PANEL (src/platform/compare-panel.js) ═══════════════════════
+   What you have on, beside what is being offered. Used by the loot screen, the
+   travelling merchant, the laboratory shelf, the guild armory and the field
+   sheet's slot picker — five screens with two different item models and ONE
+   way of drawing the difference between two pieces of gear.
+
+   The green and the red are the LAB'S, to the hex: .lab-stat-delta.up/.down
+   (lab.css:120-121) has been the game's word for better/worse since the stats
+   panel got its preview, and a second green would be a second vocabulary for a
+   player to learn. --success is a near-miss (#4ade80 vs #7ad17a) and is
+   deliberately NOT used here. */
+.cmp{--cmp-up:#7ad17a;--cmp-down:#ef4444;
+  border:1px solid var(--border);border-radius:9px;background:rgba(0,0,0,0.22);
+  padding:7px 8px;margin-top:6px;
+  /* THE PANEL IS ITS OWN CONTAINER, so the stack below keys off how much room
+     THIS card actually has and not the viewport. It sits in a lab column, a
+     shop tile, an armory row and a field-sheet option — four very different
+     widths on one screen size, so a media query would be wrong in three of
+     them. (Set here rather than on an ancestor: a container query resolves
+     against the nearest ancestor container, so .cmp-sides can ask .cmp.) */
+  container-type:inline-size}
+.cmp.compact{padding:5px 6px;margin-top:4px;font-size:0.94em}
+
+.cmp-slot{font-family:'Cinzel',serif;font-size:0.62em;letter-spacing:0.1em;
+  text-transform:uppercase;color:var(--muted);margin-bottom:5px}
+
+/* THE SPLIT. Two columns wide, ONE column stacked — and the stack is not a
+   fallback, it is what a phone gets. Below ~320px of panel the two cards were
+   each ~140px and the gear-card art inside them (a 48px canvas plus a name plus
+   a socket strip) wrapped into four lines apiece. */
+.cmp-sides{display:grid;grid-template-columns:1fr 1fr;gap:6px;align-items:stretch}
+.cmp.solo .cmp-sides{grid-template-columns:1fr}
+@container (max-width:300px){
+  .cmp-sides{grid-template-columns:1fr}
+  /* The three stat columns collapse with them — 'Bonus Dmg' in a 60px column
+     wraps to three lines and the delta ends up under the label. */
+  .cmp-row{grid-template-columns:minmax(0,1fr) auto auto}
+}
+.cmp-side{min-width:0;padding:5px 6px;border-radius:7px;border:1px solid var(--border);
+  background:rgba(255,255,255,0.02)}
+/* The offered piece is the one being ASKED about, so it carries the gold. The
+   worn piece is context and stays quiet — reversing this made the panel read as
+   "here is your sword" with the offer as an afterthought. */
+.cmp-side.is-cand{border-color:rgba(212,168,67,0.5);background:rgba(212,168,67,0.07)}
+.cmp-side-title{font-family:'Cinzel',serif;font-size:0.58em;letter-spacing:0.09em;
+  text-transform:uppercase;color:var(--muted);margin-bottom:3px}
+.cmp-side.is-cand .cmp-side-title{color:var(--gold)}
+.cmp-side-body{min-width:0}
+.cmp-name{display:block;font-size:0.8em;font-weight:600;color:#e8e0d0;
+  overflow-wrap:anywhere}
+.cmp-sub{display:block;font-size:0.66em;color:var(--muted);margin-top:1px}
+.cmp-empty{display:block;font-size:0.76em;color:var(--dim);font-style:italic}
+
+/* A caller may hand in its own card markup rather than a name — the crucible's
+   gearCardHTML carries sockets and materia orbs, and redrawing them here would
+   be a second way to say the same thing. Shrink its art to fit two-up. */
+.cmp-side .gc-row{display:flex;gap:6px;align-items:center;min-width:0}
+.cmp-side .gc-icon-wrap{flex:0 0 auto}
+.cmp-side .gc-text{min-width:0}
+.cmp-side .gc-name{font-size:0.78em;font-weight:600;color:#e8e0d0;overflow-wrap:anywhere}
+.cmp-side .gc-pos{font-size:0.62em;color:var(--muted)}
+.cmp-side .gc-sockets{display:flex;align-items:center;gap:2px;margin-top:2px;flex-wrap:wrap}
+.cmp-side .gc-links{font-size:0.62em;color:var(--muted)}
+.cmp-side .gear-pixel-icon{width:32px!important;height:32px!important}
+
+/* THE NUMBERS. Three columns — name, worn, offered+delta — on the same grid as
+   the split above so a value sits under the card it belongs to. */
+.cmp-rows{margin-top:6px;display:flex;flex-direction:column;gap:1px}
+.cmp-row{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr) minmax(0,1fr);
+  gap:6px;align-items:baseline;padding:2px 0;
+  border-bottom:1px solid rgba(255,255,255,0.045)}
+.cmp.solo .cmp-row{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}
+.cmp-row:last-child{border-bottom:0}
+.cmp-label{font-size:0.68em;color:var(--muted);overflow-wrap:anywhere}
+.cmp-cur{font-size:0.74em;color:#b9b2a2;text-align:right}
+.cmp-cand{font-size:0.74em;font-weight:600;color:#e8e0d0;text-align:right}
+/* A word-valued stat that CHANGED has no delta to colour, so the row itself
+   carries the mark — otherwise 'Strike → Arrow Shot' looked identical to a row
+   where nothing happened. */
+.cmp-row.changed .cmp-cand{color:var(--gold)}
+
+.cmp-delta{margin-left:5px;font-size:0.92em;font-weight:700}
+.cmp-delta.up{color:var(--cmp-up)}
+.cmp-delta.down{color:var(--cmp-down)}
+
+/* Abilities gained and lost. Only the CHANGES are drawn (diffTags drops the
+   unchanged), so an unchanged loadout shows no strip at all rather than a wall
+   of chips the player has to scan for a difference. */
+.cmp-tags{display:flex;flex-wrap:wrap;gap:3px;margin-top:6px}
+.cmp-tag{padding:1px 7px;border-radius:10px;font-size:0.64em;
+  border:1px solid var(--border);color:var(--muted)}
+.cmp-tag.added{border-color:rgba(122,209,122,0.55);color:var(--cmp-up)}
+.cmp-tag.removed{border-color:rgba(239,68,68,0.5);color:var(--cmp-down);
+  text-decoration:line-through}
+
+.cmp-note{margin-top:5px;font-size:0.64em;color:var(--dim);font-style:italic;
+  overflow-wrap:anywhere}
+
+/* THE ONE-LINE VERDICT, for rows too tight for the panel. */
+.cmp-chip{display:inline-block;padding:1px 6px;border-radius:9px;font-size:0.92em;
+  font-weight:700;border:1px solid transparent;white-space:nowrap}
+.cmp-chip.up{color:#7ad17a;border-color:rgba(122,209,122,0.45);background:rgba(122,209,122,0.1)}
+.cmp-chip.down{color:#ef4444;border-color:rgba(239,68,68,0.4);background:rgba(239,68,68,0.09)}
+.cmp-chip.same{color:var(--dim);border-color:var(--border)}
+
+/* Inside the field sheet's picker the panel sits on an already-dark card. The
+   option is a BUTTON, so the panel must not eat its clicks — the whole row is
+   the equip control, and a tap on the numbers is still a tap on the option. */
+.fs-opt .cmp,.fs-gear .cmp{margin-top:5px;pointer-events:none}

@@ -44,9 +44,9 @@ import { ORB_FRAMES, PLANET_TO_ORB_COLOR, ORB_COLORS, GEAR_WEAPON_LADDER, GEAR_B
 // --- Extracted leaf modules (decomposition phase A) ---------------------------
 import { PLANETS, COMPOUNDS, ROUND_METALS, RANKS } from './data/progression.js';
 import {
-  GEAR_TYPES, EQUIP_SLOTS, GEAR_MATERIALS, REFINE_TABLE,
+  GEAR_TYPES, EQUIP_SLOTS, HAND_SLOTS, GEAR_MATERIALS, REFINE_TABLE,
   MAX_REFINEMENT, MAX_SOCKETS, WEAPON_GEAR_TYPES, SHIELD_GEAR_TYPES,
-  isTwoHandedType,
+  isTwoHandedType, gearDamage, gearArmor,
 } from './data/gear.js';
 import { BASIC_ATTACK, ALL_ATTACKS, ATTACKS, typeColor } from './data/attacks.js';
 import {
@@ -63,6 +63,7 @@ import { claimPad } from '../platform/ui-pad.js';
 import { saveGame, loadGame } from '../platform/storage.js';
 // What you are and what you are carrying, from inside the world. @see field-sheet.js.
 import { openFieldSheet } from '../platform/field-sheet.js';
+import { compareHTML, diffTags } from '../platform/compare-panel.js';
 // While the arena's loop runs, the controller is steering a fighter and must
 // not also be walking the menu cursor. The loop self-stops the moment
 // #actionScreen goes inactive, so this is exactly the window that matters.
@@ -1674,11 +1675,21 @@ function guildWeaponTier(stats){
 // every lens, which is also a playable state: you punch. The discriminator is
 // the presence of the field, never its contents, so nothing that never had an
 // armory is affected. @see fp-hands.js's bare hand, which is its other half.
+// COSMETIC MEANS COSMETIC. These stubs are a SPRITE DESCRIPTION and carry no
+// combat weight — a guild fight's numbers come from the guild model (the
+// member's stats and their real armory, @see battle-bridge.js), never from the
+// crucible's gear tables. `cosmetic:true` says so out loud, because the moment
+// gear gained intrinsic dmg/ac these stubs would otherwise have started paying
+// out: an archetype sword drawn for a portrait would have added damage the
+// member never earned, and — worse — the field's presence/absence
+// discriminator above would have become a COMBAT switch, making a member with
+// an empty armory strictly weaker than a rival who has no armory at all.
+// @see gearDamage / gearArmor, which skip anything marked this way.
 function guildCosmeticGear(archetype, stats, equipped){
   if (equipped && !equipped.weapon && !equipped.offhand) return { RHand: null, LHand: null, sheath: null };
   var m = GUILD_ARCH_WEAPON[archetype] || GUILD_ARCH_WEAPON.Adventurer;
   var tier = guildWeaponTier(stats);
-  var mk = function(type){ return type ? { type: type, tier: tier, pos: 'Hand' } : null; };
+  var mk = function(type){ return type ? { type: type, tier: tier, pos: 'Hand', cosmetic: true } : null; };
   var sheath = m.sheath ? { file: m.sheath.file, c: weaponTierToColor(tier, m.sheath.maxC) } : null;
   return { RHand: mk(m.r), LHand: mk(m.l), sheath: sheath };
 }
@@ -1874,10 +1885,19 @@ function gearIconHTML(gear, opts){
 }
 
 function gearCardHTML(gear){
+  if(!gear)return '';
   var socketsHTML='';
-  var filled=gear.materia.length;
-  var empty=gear.sockets-filled;
-  gear.materia.forEach(function(m,i){
+  // NOT EVERY PIECE OF GEAR IS A ROGUELIKE PIECE. `guildCosmeticGear` builds
+  // {type,tier,pos} stubs to dress a guild member for a played battle — no
+  // sockets, no materia, because a guild Item has none of that. This read
+  // `gear.materia.length` flat, so the arena's Sheet button (openArenaSheet →
+  // gearCardHTML) threw a TypeError and did nothing at all for any guild member
+  // fighting with a weapon equipped. A card for a piece with no sockets is a
+  // name and an icon, which is exactly right.
+  var materia=gear.materia||[];
+  var filled=materia.length;
+  var empty=Math.max(0,(gear.sockets||0)-filled);
+  materia.forEach(function(m,i){
     if(i>0){
       var isLinked=i<=gear.links;
       if(isLinked){
@@ -1903,11 +1923,15 @@ function gearCardHTML(gear){
   var stressStr=gear.stressed?'<span style="color:#ef4444;font-size:0.7em" title="Stressed — next failure destroys this gear"> ⚠ STRESSED</span>':'';
   var lvlStr=' <span style="color:#555;font-size:0.75em">Lv'+gearLevel(gear)+'</span>';
   var iconHTML = gearIconHTML(gear, {size: 48});
+  // A cosmetic piece has a type but no forged NAME, and no socket line to draw.
+  var nameStr=gear.name||gear.type||'Gear';
+  var socketLine=gear.sockets==null?posLabel
+    :posLabel+' · '+gear.sockets+' socket'+(gear.sockets===1?'':'s')+(empty>0?' ('+empty+' empty)':'');
   return '<div class="gc-row">'+
     '<div class="gc-icon-wrap">'+iconHTML+'</div>'+
     '<div class="gc-text">'+
-      '<div class="gc-name">'+refStr+gear.name+lvlStr+stressStr+'</div>'+
-      '<div class="gc-pos">'+posLabel+' · '+gear.sockets+' socket'+(gear.sockets>1?'s':'')+(empty>0?' ('+empty+' empty)':'')+'</div>'+
+      '<div class="gc-name">'+refStr+nameStr+lvlStr+stressStr+'</div>'+
+      '<div class="gc-pos">'+socketLine+'</div>'+
       '<div class="gc-sockets">'+socketsHTML+'</div>'+
       (gear.links>0?'<div class="gc-links">'+gear.links+' link'+(gear.links>1?'s':'')+'</div>':'')+
     '</div>'+
@@ -2872,38 +2896,81 @@ function _canDropGearOn(gear, slotPos){
   return slotPos === gear.pos;
 }
 
-// Equip a gear piece into a specific slot (drag-and-drop path). Replaces any
-// gear already in that slot. For hand gear, also enforces "one weapon + one
-// shield" by clearing the OTHER hand if the player drops a same-category item.
-function _equipDroppedGear(gear, slotPos){
-  if (!_canDropGearOn(gear, slotPos)) return;
+/**
+ * THE EQUIP RULE, as a pure function over an equipped map: what you would be
+ * wearing if you put `gear` in `slotPos`, including everything that has to come
+ * off to make room.
+ *
+ * ONE DERIVATION, TWO CALLERS. This rule used to live only inside the
+ * drag-and-drop path, which mutated `run.equipped` as it went — so the
+ * Laboratory's preview, which built its hypothetical by overwriting a single
+ * key, could not see the displacement. Previewing a BOW therefore showed you
+ * gaining a two-hander and losing nothing, when equipping it would in fact put
+ * your off-hand down: the preview understated the cost by exactly one item, and
+ * the split window's whole job is to be honest about what you give up.
+ * CLAUDE.md's ONE RULES FACT — so the rule is stated once, here, and the view
+ * asks it rather than re-deciding.
+ *
+ * @param {Object} equipped  the map to start from (never mutated)
+ * @param {Object} gear @param {string} slotPos
+ * @returns {Object} a new equipped map
+ */
+function equippedAfter(equipped, gear, slotPos){
+  var next = {};
+  EQUIP_SLOTS.forEach(function(s){ next[s] = equipped ? equipped[s] : null; });
+  if (!gear || !slotPos) return next;
   if (gear.pos === 'Hand'){
-    var lh = run.equipped.LHand, rh = run.equipped.RHand;
+    var lh = next.LHand, rh = next.RHand;
     if (isTwoHandedType(gear.type)){
       // A two-handed weapon fills both hands — clear whatever's in either.
-      run.equipped.LHand = null; run.equipped.RHand = null;
+      next.LHand = null; next.RHand = null;
     } else if ((lh && isTwoHandedType(lh.type)) || (rh && isTwoHandedType(rh.type))){
-      // A two-handed weapon can't share a hand — dropping anything else removes it.
-      run.equipped.LHand = null; run.equipped.RHand = null;
+      // A two-handed weapon can't share a hand — equipping anything else removes it.
+      next.LHand = null; next.RHand = null;
     } else {
       var otherHand = (slotPos === 'LHand') ? 'RHand' : 'LHand';
-      var existing  = run.equipped[otherHand];
+      var existing  = next[otherHand];
       if (existing){
         var draggedIsShield = SHIELD_GEAR_TYPES.indexOf(gear.type) >= 0;
         var existIsShield   = SHIELD_GEAR_TYPES.indexOf(existing.type) >= 0;
         // Two weapons are a LOADOUT now (dual wield) — only shield-on-shield
         // still bumps the other hand, because a pair of shields cannot swing.
         if (draggedIsShield && existIsShield){
-          run.equipped[otherHand] = null;
+          next[otherHand] = null;
         }
       }
     }
   }
   // Also clear from any current slot if it was already equipped (drag-to-move).
   EQUIP_SLOTS.forEach(function(s){
-    if (run.equipped[s] && run.equipped[s].id === gear.id) run.equipped[s] = null;
+    if (next[s] && next[s].id === gear.id) next[s] = null;
   });
-  run.equipped[slotPos] = gear;
+  next[slotPos] = gear;
+  return next;
+}
+
+/** Which worn pieces `gear` would displace out of `equipped` — what you give up.
+ *  Derived from the rule above, never re-decided. */
+function displacedBy(equipped, gear, slotPos){
+  var after = equippedAfter(equipped, gear, slotPos);
+  var gone = [];
+  EQUIP_SLOTS.forEach(function(s){
+    var was = equipped ? equipped[s] : null;
+    if (!was) return;
+    // Still worn somewhere? then it was not given up.
+    var kept = EQUIP_SLOTS.some(function(t){ return after[t] && after[t].id === was.id; });
+    if (!kept) gone.push(was);
+  });
+  return gone;
+}
+
+// Equip a gear piece into a specific slot (drag-and-drop path). Replaces any
+// gear already in that slot. For hand gear, also enforces "one weapon + one
+// shield" by clearing the OTHER hand if the player drops a same-category item.
+function _equipDroppedGear(gear, slotPos){
+  if (!_canDropGearOn(gear, slotPos)) return;
+  var next = equippedAfter(run.equipped, gear, slotPos);
+  EQUIP_SLOTS.forEach(function(s){ run.equipped[s] = next[s]; });
   delete run._pendingEquip;
   renderDraft();
 }
@@ -3975,7 +4042,17 @@ function tryActionAttack(attacker, defender, atkName, opts){
   var roll = Math.floor(Math.random() * 20) + 1;
   var total = roll + toHit;
   var aName = attacker === p1 ? 'You' : 'Opp';
-  if (total >= defender.ac){
+  // ASK THE MODEL FOR THE AC, do not re-sum it. `defender.ac` is the BASE
+  // (10+dex) and has never carried gear; the tactical lens has always rolled
+  // against getFighterAC (@see resolveAttack, and the opportunity attack), so
+  // this line meant the two lenses resolved the same swing against different
+  // numbers. Harmless while armour was worth a point or two of body refinement;
+  // the moment every piece of gear carried armour it meant the action arena
+  // took the whole damage half of that model and none of the defence half — and
+  // the field sheet standing over it printed an AC the fight would not honour.
+  // ONE RULES FACT (CLAUDE.md): one derivation, every lens.
+  var defAC = getFighterAC(defender);
+  if (total >= defAC){
     var crit = roll >= (matB.critRange || 20);
     var diceRoll = rollDice(atk.dice||'1d6');
     if (crit) diceRoll += rollDice(atk.dice||'1d6');
@@ -5253,7 +5330,10 @@ function updateStatSheet(){
     var mod=Math.floor((f.stats[s]-10)/2);var sign=mod>=0?'+':'';
     sg+='<div class="sg-item"><div class="val">'+f.stats[s]+'</div><div class="lbl">'+s+'</div><div class="mod">'+sign+mod+'</div></div>';
   });
-  var ac=f.ac+(f.ward||0);var fLinks=getFighterLinkCount(f);var rank=getRank(fLinks);
+  // The AC the FIGHT rolls against, not a second sum of it — this re-added ward
+  // to the base and stopped, so a sheet opened mid-battle under-reported every
+  // point of armour the wearer had on. @see getFighterAC, the one derivation.
+  var ac=getFighterAC(f);var fLinks=getFighterLinkCount(f);var rank=getRank(fLinks);
   // Build gear display. Roguelike fighters only (f._mr marks a guild fighter):
   // guild gear is guildCosmeticGear's VISUAL-ONLY kit — {type,tier,pos} stubs
   // with no name, materia or sockets — and reading g.materia.forEach off one
@@ -5579,14 +5659,22 @@ function gainMateriaXP(fighter,slotType,amount){
 }
 function getMateriaBonus(fighter,atkData){
   var b={toHit:0,critRange:20,extraRange:0,lifesteal:false,dotBonus:0,acBonus:0,lifestealDice:'1d4',bonusDmg:0};
-  if(!fighter.materia)return b;
-  // Refinement bonus from hand gear: +refinement to damage
+  // THE WEAPONS' OWN DAMAGE — type, material tier and refinement, from whatever
+  // is in either hand. A shield contributes 0 here and its worth to AC instead
+  // (getFighterAC), which is what makes trading an off-hand blade for a buckler
+  // a real decision rather than a cosmetic one.
+  //
+  // ABOVE THE MATERIA GUARD, deliberately. A sword is worth what a sword is
+  // worth whether or not anything is socketed into it — computed below the
+  // `!fighter.materia` return, an unsocketed blade would have dealt no bonus
+  // damage at all, which is the same "the engine cannot tell two items apart"
+  // bug this whole change exists to end.
   if(fighter.gear){
-    ['LHand','RHand'].forEach(function(pos){
-      var g=fighter.gear[pos];
-      if(g&&g.refinement)b.bonusDmg+=g.refinement;
+    HAND_SLOTS.forEach(function(pos){
+      b.bonusDmg+=gearDamage(fighter.gear[pos]);
     });
   }
+  if(!fighter.materia)return b;
   // All hand materia ('w') apply to all attacks
   fighter.materia.forEach(function(m){
     if(m.slot!=='w')return;var p=PLANETS[m.idx];var lvl=m.level;
@@ -5624,9 +5712,18 @@ function getMateriaBonus(fighter,atkData){
 }
 function getFighterAC(fighter){
   var ac=fighter.ac+(fighter.ward||0);
-  // Refinement bonus from body gear: +refinement to AC
-  if(fighter.gear&&fighter.gear.Body&&fighter.gear.Body.refinement){
-    ac+=fighter.gear.Body.refinement;
+  // ARMOUR, FROM EVERY PIECE THAT IS ARMOUR — including a shield in the hand.
+  //
+  // This used to add nothing but the BODY piece's refinement, which had two
+  // consequences the player could feel: a +9 helm and +9 greaves were worth
+  // literally nothing, and a buckler defended exactly as well as the dagger it
+  // replaced (that is, not at all). `gearArmor` answers both — the piece's own
+  // worth, its material tier, and its refinement — and it is the only thing that
+  // answers it, so the compare panel and the fight cannot disagree.
+  if(fighter.gear){
+    EQUIP_SLOTS.forEach(function(pos){
+      ac+=gearArmor(fighter.gear[pos]);
+    });
   }
   if(!fighter.materia)return ac;
   fighter.materia.forEach(function(m){if(!m.slot)return;var p=PLANETS[m.idx];if(p.bonus==='defense')ac+=Math.min(m.level,2)});
@@ -6572,7 +6669,17 @@ function showLootScreen(qsEarned){
     taken._lootRound=run.round;
     run.laboratory.push(taken);
     var card=document.createElement('div');card.className='loot-card';
-    card.innerHTML=gearCardHTML(gear);items.appendChild(card);
+    // BESIDE WHAT YOU ARE WEARING, not alone. This screen's whole question is
+    // "is what I just won better than what I have on", and it used to answer by
+    // printing the spoils and never once reading run.equipped — the player did
+    // the arithmetic from memory, against numbers that were never both on
+    // screen. The piece lands in the slot the equip rule would actually put it
+    // in, so the comparison is the one the Equip button will honour.
+    // The panel draws BOTH pieces, so the card is the panel — printing the won
+    // item above it as well would be the same art twice in 200px.
+    card.innerHTML=gearCompareHTML(gear,_previewSlotForGear(gear),{compact:true,candTitle:'Won'})
+      ||gearCardHTML(gear);
+    items.appendChild(card);
   });
   // Button text changes for round 7
   if(run.round>=TOTAL_ROUNDS){
@@ -6623,13 +6730,12 @@ function computeLabStats(equipped){
   };
 }
 
-// Apply a single-slot swap on top of a clone of run.equipped, returning a
-// new equipped map. Used to compute preview stats.
+// Apply a swap on top of run.equipped, returning a new equipped map. Used to
+// compute preview stats. Goes through `equippedAfter` so the preview obeys the
+// same displacement rule the equip button does — see that function's note on
+// the bow that used to cost nothing.
 function _previewEquippedWith(slot, gear){
-  var copy = {};
-  EQUIP_SLOTS.forEach(function(p){ copy[p] = run.equipped[p]; });
-  copy[slot] = gear;
-  return copy;
+  return equippedAfter(run.equipped, gear, slot);
 }
 
 // Resolve which slot a piece of gear should preview into. Hand gear goes
@@ -6639,6 +6745,13 @@ function _previewSlotForGear(gear){
   if (gear.pos === 'Hand'){
     var dom = (run && run.dominantHand) || 'R';
     var main = dom + 'Hand';
+    // A TWO-HANDER ALWAYS TAKES THE DOMINANT HAND. It fills both, so "is the
+    // main hand free" is not a question that applies to it — asked anyway, a bow
+    // with a full main hand resolved to the OFF hand, which is a slot
+    // equipDraftGear would never seat it in and canEquipGear refuses outright.
+    // The panel then compared it against the wrong worn piece and named the
+    // wrong slot. @see equippedAfter, which clears both hands either way.
+    if (isTwoHandedType(gear.type)) return main;
     if (!run.equipped[main]) return main;
     var off = (dom === 'R' ? 'LHand' : 'RHand');
     return off;
@@ -6649,6 +6762,105 @@ function _previewSlotForGear(gear){
   if (GEAR_HEAD_LADDER && gear.type in GEAR_HEAD_LADDER) return 'Head';
   if (GEAR_LOWER_LADDER && gear.type in GEAR_LOWER_LADDER) return 'Lower';
   return 'Body';
+}
+
+/**
+ * THE SPLIT WINDOW for one piece of crucible gear: what you are wearing in the
+ * slot it wants, what it is, and what changes if you take it.
+ *
+ * WHY THE DERIVED HALF IS A LOADOUT DIFFERENCE AND NOT A PER-ITEM STAT SHEET.
+ * Crucible power is not decomposable and cannot honestly be printed per item:
+ * `getMateriaBonus` only reads orbs whose slot letter is 'w', and
+ * `buildFighterMateria` assigns that letter from WHICH PIECE HOSTS THE ORB, so
+ * the same sword is worth different numbers depending on what else is worn —
+ * and COMPOUNDS pair planets across different items entirely. There is no
+ * `statsForGearPiece(gear)` and writing one would be a view inventing a rule
+ * (CLAUDE.md, ONE RULES FACT). So the honest question, and the one this asks, is
+ * `computeLabStats(with it) − computeLabStats(without it)`.
+ *
+ * The rows above that line ARE per-item, because those are facts about the piece
+ * itself whatever else is worn: its level, its +N, its sockets and links.
+ *
+ * @param {Object} gear @param {string} slot  the slot it would land in
+ * @param {{compact?:boolean, candTitle?:string, slotLabel?:string}} [opts]
+ * @returns {string} HTML, or '' when there is nothing sensible to compare
+ */
+function gearCompareHTML(gear, slot, opts){
+  opts = opts || {};
+  if (!gear || !slot) return '';
+  var equipped = (run && run.equipped) || null;
+  var worn = equipped ? equipped[slot] : null;
+  // An empty slot compares as zeroes rather than blanks: putting a 2-socket
+  // sword in an empty hand really is +2 sockets, and '—' would hide the gain.
+  var n = function(g, pick){ return g ? pick(g) : 0; };
+  var signedFmt = function(v){ return (v >= 0 ? '+' : '') + v; };
+  var rows = [
+    // WHAT THE PIECE ITSELF IS WORTH, first — this is the pair of numbers a
+    // player actually chooses between, and the reason a buckler is not a dagger.
+    { label: 'Damage', cur: n(worn, gearDamage), cand: gearDamage(gear), fmt: signedFmt },
+    { label: 'Armour', cur: n(worn, gearArmor),  cand: gearArmor(gear),  fmt: signedFmt },
+    { label: 'Level',   cur: n(worn, function(g){ return gearLevel(g); }),      cand: gearLevel(gear) },
+    { label: 'Refine',  cur: n(worn, function(g){ return g.refinement || 0; }), cand: gear.refinement || 0,
+      fmt: function(v){ return '+' + v; } },
+    { label: 'Sockets', cur: n(worn, function(g){ return g.sockets || 0; }),    cand: gear.sockets || 0 },
+    { label: 'Links',   cur: n(worn, function(g){ return g.links || 0; }),      cand: gear.links || 0 },
+  ];
+  var tags = [];
+  var note = '';
+  // The derived half needs a fighter to derive FROM — outside a run there are no
+  // stats to build one out of, so the item facts stand alone rather than being
+  // padded with numbers that would be guesses.
+  if (run && run.stats && equipped){
+    var before = computeLabStats(equipped);
+    var after  = computeLabStats(equippedAfter(equipped, gear, slot));
+    var signed = function(v){ return (v >= 0 ? '+' : '') + v; };
+    // "TOTAL", ON EVERY DERIVED ROW, because these are the WHOLE LOADOUT and the
+    // rows above are one piece — and for a two-hander those two scopes disagree
+    // on purpose. Swapping a shield for a bow reads "Armour +2 → +0 (−2)" for
+    // the piece and "Total AC 17 → 12 (−5)" for the fighter, because the bow
+    // also puts the OTHER hand down (the note below names it). Unlabelled, the
+    // pair looked like one of them was simply wrong.
+    rows.push({ label: 'Total AC',    cur: before.ac,         cand: after.ac });
+    rows.push({ label: 'Total To-Hit',cur: before.toHit,      cand: after.toHit,      fmt: signed });
+    rows.push({ label: 'Total Dmg',   cur: before.bonusDmg,   cand: after.bonusDmg,   fmt: signed });
+    // Lower is better — 19-20 beats 20-20, so the colour is inverted.
+    rows.push({ label: 'Crit On',   cur: before.critRange,  cand: after.critRange,  invert: true,
+      fmt: function(v){ return v + '-20'; } });
+    rows.push({ label: 'Range',     cur: before.extraRange, cand: after.extraRange, fmt: signed });
+    rows.push({ label: 'DOT',       cur: before.dotBonus,   cand: after.dotBonus,   fmt: signed });
+    rows.push({ label: 'Lifesteal',
+      cur: before.lifesteal ? before.lifestealDice : '—',
+      cand: after.lifesteal ? after.lifestealDice : '—' });
+    tags = diffTags(before.attacks, after.attacks);
+    // What it puts DOWN — the cost the player would otherwise only discover
+    // after tapping Equip. A two-hander is the whole reason this line exists.
+    // Everything given up EXCEPT the piece already drawn on the "Worn" side —
+    // naming the sword you can see being replaced reads as a second casualty.
+    var gone = displacedBy(equipped, gear, slot).filter(function(g){
+      return g.id !== gear.id && !(worn && g.id === worn.id);
+    });
+    if (gone.length){
+      note = 'Also puts down: ' + gone.map(function(g){ return g.name || g.type; }).join(', ');
+    }
+  }
+  return compareHTML({
+    slot: opts.slotLabel || _slotWord(slot),
+    cur:  worn ? { title: 'Worn', art: gearCardHTML(worn) } : { title: 'Worn', empty: true },
+    cand: { title: opts.candTitle || 'Offered', art: gearCardHTML(gear) },
+    rows: rows,
+    tags: tags,
+    note: note,
+    compact: !!opts.compact,
+  });
+}
+
+/** The player's word for a slot key — 'RHand' is not a thing anyone says. */
+function _slotWord(pos){
+  if (pos === 'Body') return 'Body';
+  if (pos === 'Head') return 'Head';
+  if (pos === 'Lower') return 'Legs';
+  var dom = (run && run.dominantHand) || 'R';
+  return (pos.charAt(0) === dom ? 'Main' : 'Off') + ' Hand';
 }
 
 // Format a stat delta number with sign and color class. Returns HTML.
@@ -6920,7 +7132,24 @@ function renderLab(){
 
   // ── Equipped gear section ──
   var eqEl=document.getElementById('labEquipped');
-  eqEl.innerHTML='<h3>⚔ WORN NOW</h3><div class="lab-gear" id="labEquipGear"></div>';
+  // THE FIGHTER, IN THE KIT THE LIST BELOW DESCRIBES. The draft has had a
+  // turntable of exactly this since it shipped (renderDraftCharacter); the
+  // laboratory — the screen where you actually CHANGE the kit — had five rows
+  // of text and no picture of who was wearing them. Same compositor, same
+  // engine gear, no new art. @see CharGen.render.
+  eqEl.innerHTML='<h3>⚔ WORN NOW</h3>'
+    +'<div class="lab-doll-wrap"><canvas id="labDoll" class="lab-doll" width="96" height="96"></canvas></div>'
+    +'<div class="lab-gear" id="labEquipGear"></div>';
+  var dollC=document.getElementById('labDoll');
+  if(dollC&&window.CharGen&&run.appearance){
+    // A preview dresses the figure in the piece being considered, so the split
+    // window's numbers and this picture answer the same question.
+    var dollGear=run._labPreview
+      ? equippedAfter(run.equipped, run._labPreview.gear, run._labPreview.slot)
+      : run.equipped;
+    try{ window.CharGen.render(dollC, { appearance: run.appearance, prime: run.prime,
+      anim:'idle', frame:0, face:0, gear: dollGear, bob:{disabled:true} }); }catch(_e){}
+  }
   var eqGear=document.getElementById('labEquipGear');
   EQUIP_SLOTS.forEach(function(pos){
     var gear=run.equipped[pos];
@@ -6977,7 +7206,13 @@ function renderLab(){
       }
       var canAfford=run.quicksilver>=item.price;
       if(item.type==='gear'){
-        card.innerHTML=gearCardHTML(item.gear)+'<div class="shop-price">'+(canAfford?'':'⚠ ')+'Buy: '+item.price+'☿</div><div class="lab-btn craft" style="margin-top:4px" onclick="event.stopPropagation();setLabPreview(\'shop\','+i+')">Preview Stats</div>';
+        // A price beside a piece of gear is only half a question. The other half
+        // — what you are already holding, and what changes if you spend the
+        // quicksilver — is the split window; the "Preview Stats" button stays,
+        // because it drives the FULL stats panel above (attacks and all).
+        card.innerHTML=(gearCompareHTML(item.gear,_previewSlotForGear(item.gear),{compact:true,candTitle:'For sale'})
+          ||gearCardHTML(item.gear))
+          +'<div class="shop-price">'+(canAfford?'':'⚠ ')+'Buy: '+item.price+'☿</div><div class="lab-btn craft" style="margin-top:4px" onclick="event.stopPropagation();setLabPreview(\'shop\','+i+')">Preview Stats</div>';
         card.onclick=function(){if(!item.sold&&canAfford)buyMerchantItem(i)};
       } else if(item.type==='materia'){
         var p=PLANETS[item.materia.planetIdx];
@@ -7037,7 +7272,13 @@ function renderLab(){
     if(canDrill)actionsHTML+='<button class="lab-btn craft" onclick="craftDrillSocket(\'lab\','+i+')">⚒ Drill ('+drillCost+'☿ · '+getDrillChance(gear)+'%)</button>';
     if(gear.materia.length>0)actionsHTML+='<button class="lab-btn craft" onclick="showUnslotPicker('+i+')">Unslot (5☿)</button>';
     if(hasEmptySockets&&hasLoose)actionsHTML+='<button class="lab-btn craft" onclick="showSlotPicker(\'lab\','+i+')">Slot (3☿)</button>';
-    var infoHTML='<div class="lab-gear-info" onclick="setLabPreview(\'lab\','+i+')" style="cursor:pointer" title="Click to preview stats with this gear">'+gearCardHTML(gear)+'</div>';
+    // The shelf answers "is this better than what I have on" in place now,
+    // rather than only through the stats panel two columns away. Clicking still
+    // drives that panel — the split window is the summary, the panel the detail.
+    var infoHTML='<div class="lab-gear-info" onclick="setLabPreview(\'lab\','+i+')" style="cursor:pointer" title="Click to preview stats with this gear">'
+      +(gearCompareHTML(gear,_previewSlotForGear(gear),{compact:true,candTitle:isFreshLoot(gear)?'Won':'On the shelf'})
+        ||gearCardHTML(gear))
+      +'</div>';
     item.innerHTML=infoHTML+
       '<div class="lab-gear-actions">'+actionsHTML+'</div>';
     stGear.appendChild(item);
@@ -7848,13 +8089,33 @@ window.CharGen = {
     var appearance = opts.appearance || generateAppearance((opts.seed | 0) || 1, prime);
     var gear = opts.gear || null;
     var eff = gear ? effectiveAppearance(appearance, gear) : appearance;
-    var weapons = gear ? fighterWeaponLayers({ gear: gear }) : null;
-    compositeCharacter(canvas, eff, opts.anim || 'idle', opts.frame | 0, opts.face | 0, weapons);
+    // PRE-RESOLVED LAYERS, for a caller that already knows what its gear looks
+    // like. The guild forges ONE `armor` kind where the engine knows five body
+    // types, so asking effectiveAppearance to dress a guild member would mean
+    // somebody deciding whether a steel breastplate is a Plate or a Mail — a
+    // choice the player never made. The guild resolves its own art from its own
+    // table (art.js wornLayerDesc, checked by dev/check-item-art.mjs) and hands
+    // the answer down; engine callers pass `gear` and are untouched.
+    // @see the paper doll in hall.js.
+    if (opts.layers){
+      eff = Object.assign({}, eff);
+      for (var lk in opts.layers){
+        if (opts.layers[lk]) eff[lk] = opts.layers[lk];
+      }
+    }
+    var weapons = opts.hands || (gear ? fighterWeaponLayers({ gear: gear }) : null);
+    compositeCharacter(canvas, eff, opts.anim || 'idle', opts.frame | 0, opts.face | 0, weapons,
+      opts.bob || null);
     // Redraw once the async part PNGs finish loading (mirrors the builder preview).
-    var ropts = { prime: prime, appearance: appearance, anim: opts.anim, frame: opts.frame, face: opts.face, gear: gear };
+    var ropts = { prime: prime, appearance: appearance, anim: opts.anim, frame: opts.frame,
+      face: opts.face, gear: gear, layers: opts.layers, hands: opts.hands, bob: opts.bob };
     elementsRegisterRedraw(canvas, function(){ self.render(canvas, ropts); });
     return appearance;
   },
+  /** Weapon layers for a hand loadout expressed in ENGINE types — the seam a
+   *  non-engine caller needs so it does not rebuild fighterWeaponLayers.
+   *  @param {{RHand?:Object, LHand?:Object}} gear */
+  handLayers: function(gear){ return fighterWeaponLayers({ gear: gear || {} }); },
   // The `top` sheet this character's body — and therefore their ARMS — is drawn
   // from, with Body gear folded in exactly as the compositor folds it, plus the
   // skin tone that sheet gets painted with.

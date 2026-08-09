@@ -773,3 +773,12 @@
 /* Hero-card bar stack → two columns, halving the header's height. */
 .bar-grid { display: grid; grid-template-columns: 1fr 1fr; column-gap: 18px; }
 @media (max-width: 620px) { .bar-grid { grid-template-columns: 1fr; } }
+
+/* The Armory's equipping header: the member on the left, what they carry on
+   the right. Wraps to a stack on a narrow screen — the doll is the anchor, so
+   it keeps its size and the list flows under it. */
+.equip-doll-row{display:flex;gap:12px;align-items:flex-start;flex-wrap:wrap;margin:6px 0}
+.equip-doll-side{flex:1 1 220px;min-width:0}
+canvas.paper-doll{image-rendering:pixelated;flex:0 0 auto;
+  border:1px solid var(--border);border-radius:10px;
+  background:radial-gradient(ellipse at 50% 82%,rgba(212,168,67,0.14),rgba(0,0,0,0.28) 62%)}

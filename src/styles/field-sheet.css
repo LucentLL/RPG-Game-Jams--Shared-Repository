@@ -94,3 +94,11 @@ button.fs-gear{width:100%;text-align:left;font:inherit;color:inherit;cursor:poin
 .fs-open{font-family:'Cinzel',serif;letter-spacing:0.04em}
 .delve-hud .fs-open{width:auto;height:26px;padding:0 10px;border-radius:13px;
   white-space:nowrap;font-size:0.72em;text-transform:uppercase}
+
+/* THE PAPER DOLL — the member, wearing what the list beside it names.
+   Pixelated and centred on a faint plinth so a 96px sheet cell reads as a
+   figure standing there rather than a floating crop. */
+.fs-doll-wrap{display:flex;justify-content:center;margin-bottom:8px}
+.fs-doll{width:128px;height:128px;image-rendering:pixelated;
+  border:1px solid var(--border);border-radius:10px;
+  background:radial-gradient(ellipse at 50% 82%,rgba(212,168,67,0.14),rgba(0,0,0,0.28) 62%)}

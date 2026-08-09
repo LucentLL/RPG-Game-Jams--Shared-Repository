@@ -35,11 +35,12 @@ import { roleFor } from './roles.js';
 import { qualityTier, itemLabel } from './item.js';
 import { MATERIAL_PRICE, buyPrice, sellPriceMat, itemSellValue, createMarket, refreshMarket, HUNT_MATERIALS } from './market.js';
 import { saveGame, loadGame } from '../platform/storage.js';
+import { compareHTML } from '../platform/compare-panel.js';
 import { playTournamentMatch, playQuestBout, playHuntBout, battleEngineReady } from './battle-bridge.js';
 import { stopRanchLoop } from './ranch.js';
 import { renderBuild, setTool as buildTool, armBuilding, armProp, cellClick as buildCell, buildZoomIn, buildZoomOut, buildZoomFit } from './build-view.js';
 import { openMapEditor, resumeEditor } from './map-editor.js';
-import { artSprite, itemSprite, hasItemSprite } from './art.js';
+import { artSprite, itemSprite, hasItemSprite, wornLayerDesc, KIND_TO_ENGINE_TYPE, materialToTier } from './art.js';
 import { hasDiorama, roomSceneHTML, bindRoomScene, stopRoomLoop } from './rooms.js';
 import { openDelve, hasDelveMap, isDelveOpen, exitDelve, closeDelveSilent } from './delve.js';
 import { openDelveFp, isDelveFpOpen, closeDelveFpSilent } from './delve-fp.js';
@@ -301,6 +302,169 @@ function doEquip(h, item) {
   h.equipped[item.slot] = item.id;
   item.location = h.id;
   item.history.wielders.push({ personId: h.id, fromWeek: guild.calendar.week, toWeek: null });
+}
+
+/**
+ * WHICH WORN PIECE `item` WOULD PUT DOWN, beyond the slot it is going into —
+ * the cost of the two-handed rule, named BEFORE the tap instead of discovered
+ * after it. Reads the same TWO_HANDED set `doEquip` enforces, so the warning and
+ * the behaviour cannot disagree; if the rule changes, both change together.
+ * @returns {string} a sentence, or '' when nothing else moves
+ */
+function displacedNote(h, item) {
+  if (!h || !item) return '';
+  const wornId = (s) => (h.equipped && h.equipped[s]) || null;
+  const named = (s) => {
+    const it = wornId(s) ? findItem(guild.inventory, wornId(s)) : null;
+    return it ? itemLabel(it) : '';
+  };
+  if (item.slot === 'weapon' && TWO_HANDED.has(item.kind)) {
+    const off = named('offhand');
+    return off ? `Two-handed — also puts down ${off}.` : '';
+  }
+  if (item.slot === 'offhand') {
+    const curId = wornId('weapon');
+    const cur = curId ? findItem(guild.inventory, curId) : null;
+    if (cur && TWO_HANDED.has(cur.kind)) return `Also puts down ${itemLabel(cur)} — a bow needs both hands.`;
+  }
+  return '';
+}
+
+/**
+ * THE PAPER DOLL — the member, wearing what they are actually carrying.
+ *
+ * THE GAP THIS FILLS (user request, 2026-08-09): "I would like to see a visual
+ * representation of the character that is wearing the gear, like Elder Scrolls,
+ * Diablo, or even Mega Man X." Every gear screen in the guild described the kit
+ * in words and numbers; the only picture of the member was `renderGuildSprite`,
+ * which draws them in ROLLED COSMETIC CLOTHES with EMPTY HANDS (its weapons are
+ * requested sheathed) and never once reads the armory. You could forge a
+ * mithril breastplate, put it on, and watch the portrait not change.
+ *
+ * NO NEW ART AND NO SECOND COMPOSITOR. Every slot the guild has is a layer the
+ * Elements sheets already carry and `compositeCharacter` already draws every
+ * frame — head→hat/, body→top/, lower→bottom/, weapon and offhand in the hands.
+ * The only thing missing was the translation, and it comes from the table that
+ * already answers it for the item ICON (`wornLayerDesc`), so the doll and the
+ * card in front of it cannot disagree about what a steel helm looks like.
+ *
+ * A STILL FRAME, DELIBERATELY. Bob is off: this is a panel that can sit beside
+ * twenty roster rows, and the arena's own portrait comment (renderGuildSprite)
+ * records why many bobbing canvases is a bad trade on a phone.
+ *
+ * @param {HTMLCanvasElement} canvas @param {Object} h  the member
+ * @param {?Object} [preview]  an item to show them wearing INSTEAD of what is
+ *   in that slot — the "try it on" half of a comparison.
+ */
+function paintMemberDoll(canvas, h, preview) {
+  if (!canvas || !h || !window.CharGen) return;
+  const eq = h.equipped || {};
+  const itemIn = (slot) => {
+    if (preview && preview.slot === slot) return preview;
+    return eq[slot] ? findItem(guild.inventory, eq[slot]) : null;
+  };
+  // Worn armour → the layers the compositor wears. `null` for an empty slot
+  // leaves the member's own clothes showing through, which is the truthful
+  // picture of someone with no helm rather than a hole in the drawing.
+  const layers = {};
+  for (const [slot, item] of [['head', itemIn('head')], ['body', itemIn('body')], ['lower', itemIn('lower')]]) {
+    const d = item ? wornLayerDesc(item) : null;
+    if (d) layers[d.layer] = { name: d.name, c: d.c };
+  }
+  // Hands → engine descriptors, through the shared kind table. A bow takes both
+  // hands, so the off-hand is dropped here for the same reason doEquip drops it.
+  const toEngine = (item) => {
+    if (!item) return null;
+    const type = KIND_TO_ENGINE_TYPE[item.kind];
+    if (!type) return null;
+    return { type, tier: materialToTier(item.material), pos: 'Hand', refinement: item.plus || 0 };
+  };
+  const wpn = itemIn('weapon');
+  const off = (wpn && TWO_HANDED.has(wpn.kind)) ? null : itemIn('offhand');
+  const hands = window.CharGen.handLayers({ RHand: toEngine(wpn), LHand: toEngine(off) });
+  window.CharGen.render(canvas, {
+    seed: h.appearanceSeed, appearance: h.appearance, prime: h.prime || h.bodyType,
+    anim: 'idle', frame: 0, face: canvas.__dollFace | 0,
+    layers, hands, bob: { disabled: true },
+  });
+}
+
+/** The doll as markup — a canvas the repaint pass below will find and paint. */
+function memberDollHTML(h, size, cls) {
+  if (!h) return '';
+  return `<canvas class="paper-doll ${cls || ''}" data-doll="${h.id}" width="96" height="96"
+    style="width:${size}px;height:${size}px"></canvas>`;
+}
+
+/**
+ * Paint every doll the last render put on screen. Mirrors `paintSprites`, which
+ * does the same job for roster portraits — hall.js rebuilds its whole page as an
+ * HTML string, so canvases can only be filled after that string is in the DOM.
+ */
+function paintDolls(root) {
+  (root || document).querySelectorAll('canvas.paper-doll[data-doll]').forEach((c) => {
+    const h = heroById(c.getAttribute('data-doll'));
+    if (h) paintMemberDoll(c, h);
+  });
+}
+
+/**
+ * The member's total gear rating if they equipped `item` — `gearBonus` asked of
+ * the loadout `doEquip` would actually produce, including whatever the
+ * two-handed rule takes off. Pure: it builds a hypothetical equipped map and
+ * touches no item, no hero and no save.
+ *
+ * The DISPLACEMENT RULE IS NOT RESTATED HERE. It is read off `TWO_HANDED`, the
+ * same set `doEquip` enforces and `displacedNote` reports, so the number, the
+ * warning and the behaviour move together (CLAUDE.md — ONE RULES FACT).
+ */
+function gearBonusAfterEquip(h, item) {
+  if (!h || !item) return gearBonus(guild.inventory, h);
+  const next = Object.assign({}, h.equipped || {});
+  next[item.slot] = item.id;
+  const wornWeapon = (h.equipped && h.equipped.weapon) ? findItem(guild.inventory, h.equipped.weapon) : null;
+  if (item.slot === 'weapon' && TWO_HANDED.has(item.kind)) delete next.offhand;
+  else if (item.slot === 'offhand' && wornWeapon && TWO_HANDED.has(wornWeapon.kind)) delete next.weapon;
+  // gearBonus reads hero.equipped, so ask it about a stand-in wearing `next`.
+  // Spread rather than mutate: `h` is the live roster member.
+  return gearBonus(guild.inventory, Object.assign({}, h, { equipped: next }));
+}
+
+/**
+ * The rows the compare panel draws for two guild items. EVERY NUMBER HERE IS
+ * ALREADY THE GUILD'S: `itemPower` is the ↯ the armory prints and the
+ * quartermaster ranks by, `qualityTier` names the band the forge assigns,
+ * `itemSellValue` is what the market would actually pay. Nothing is computed
+ * for display alone — a view may not author a number (CLAUDE.md, ONE RULES
+ * FACT), and a second ↯ derived a second way is exactly how two screens come to
+ * disagree about the same sword.
+ *
+ * An empty slot compares as zero rather than blank: equipping into a bare hand
+ * really is the whole of the item's ↯, and '—' would hide the gain.
+ *
+ * @param {?Object} worn @param {Object} cand @param {Object} h
+ */
+function itemCompareRows(worn, cand, h) {
+  if (!cand) return [];
+  const pct = (it) => (it && it.durability
+    ? Math.round((it.durability.current / (it.durability.max || 100)) * 100) : 0);
+  return [
+    { label: 'Rating', cur: worn ? Math.round(itemPower(worn, h)) : 0,
+      cand: Math.round(itemPower(cand, h)), fmt: (v) => '↯' + v },
+    // THE WHOLE MEMBER, beside the one piece — and for a bow the two disagree on
+    // purpose, because equipping it also puts the off-hand down. The per-item
+    // Rating counts one slot; this counts what they would actually walk out
+    // wearing, through the guild's own doEquip rule rather than a second guess
+    // at it. `displacedNote` names the piece that leaves.
+    { label: 'Total ↯', cur: gearBonus(guild.inventory, h),
+      cand: gearBonusAfterEquip(h, cand), fmt: (v) => '↯' + v },
+    { label: 'Quality', cur: worn ? worn.quality : 0, cand: cand.quality },
+    { label: 'Refine', cur: worn ? (worn.plus || 0) : 0, cand: cand.plus || 0, fmt: (v) => '+' + v },
+    { label: 'Condition', cur: worn ? pct(worn) : 0, cand: pct(cand), suffix: '%', fmt: (v) => v + '%' },
+    // Grade is a WORD, not a quantity — shown as what it would become.
+    { label: 'Grade', cur: worn ? qualityTier(worn.quality).name : '—', cand: qualityTier(cand.quality).name },
+    { label: 'Value', cur: worn ? itemSellValue(worn) : 0, cand: itemSellValue(cand), fmt: (v) => v + 'g', suffix: 'g' },
+  ];
 }
 
 /**
@@ -639,6 +803,13 @@ function memberSheetSpec(h) {
       return { key: slot, slot: SHEET_SLOT[slot], name: itemLabel(it), sub: bits + dur };
     }),
     notes: (h.traits || []).map((t) => ({ label: t, title: (TRAITS[t] || {}).desc || '' })),
+    // THE MEMBER, WEARING IT. The sheet lists five slots in the order a paper
+    // doll runs, and now shows the doll they describe — handed over as a PAINTER
+    // rather than as markup, because the sheet must not learn what a guild Item
+    // looks like any more than it learned what one is worth.
+    // `preview` lets the picker show a candidate worn before it is chosen.
+    doll: (canvas, previewId) => paintMemberDoll(canvas, h,
+      previewId ? findItem(guild.inventory, previewId) : null),
     // Re-describe after a change. The sheet holds a DESCRIPTION, not the member,
     // so the only honest way to show a swap is to ask the guild again.
     refresh: () => memberSheetSpec(h),
@@ -652,6 +823,7 @@ function memberSheetSpec(h) {
      */
     equip: {
       options(slot) {
+        const worn = h.equipped && h.equipped[slot] ? findItem(guild.inventory, h.equipped[slot]) : null;
         return (guild.inventory.items || [])
           .filter((it) => it.slot === slot
             && (it.location === 'armory' || it.location === h.id)
@@ -661,6 +833,12 @@ function memberSheetSpec(h) {
             id: it.id,
             label: itemLabel(it),
             sub: [it.material, it.kind, '↯' + Math.round(itemPower(it, h))].filter(Boolean).join(' · '),
+            // WHAT IT WOULD COST AND BUY, in the guild's own numbers — the sheet
+            // draws these, it does not compute them. ↯ is `itemPower`, the same
+            // figure the armory prints and the quartermaster ranks by, so a
+            // member cannot read two screens and get two answers.
+            rows: itemCompareRows(worn, it, h),
+            note: displacedNote(h, it),
           }));
       },
       apply(slot, itemId) {
@@ -1922,6 +2100,9 @@ function paintSprites() {
     const p = personById(cv.dataset.hid);
     if (p) try { window.renderGuildSprite(cv, p); } catch (e) { /* asset race — the redraw registry repaints on load */ }
   });
+  // The dolls ride the same pass: same reason (the page is rebuilt as a string),
+  // same tolerance for a sheet that has not landed yet.
+  try { paintDolls(document.getElementById('guildScreen')); } catch (e) { /* as above */ }
 }
 function statTotal(h) { return HERO_STATS.reduce((s, k) => s + (h.stats[k] || 0), 0); }
 function questOdds(hp, rec) {
@@ -2444,15 +2625,34 @@ function jobLabel(h) {
 // The Armory is a SEPARATE store now — finished gear only. Raw materials live in
 // the room that works them (ore → Forge stockroom, herbs → Laboratory, food →
 // Kitchen pantry), each shown by its room's storesPanel.
-function armoryPanel() {
+/**
+ * @param {?Object} h  the member the Equip buttons would arm. Passed in rather
+ *   than read from `selectedId` here so the shelf and the "◎ Equipping · NAME"
+ *   header above it can never name two different people — and so each row can
+ *   say what the swap would do to THAT member. Without it the shelf printed
+ *   absolute numbers with nothing to measure them against.
+ */
+function armoryPanel(h) {
   const inv = guild.inventory;
   const shelf = armoryItems(inv);
   const carried = inv.items.filter((it) => it.location !== 'armory');
   const shelfHTML = shelf.length ? shelf.map((it) => {
     const reworked = (it.history.repairs || []).filter((r) => r.from != null).length;
+    const worn = h && h.equipped && h.equipped[it.slot]
+      ? findItem(inv, h.equipped[it.slot]) : null;
+    // Against what that member has on in the same slot. No member selected means
+    // no comparison to draw — the shelf is then just a shelf, as before.
+    const cmp = h ? compareHTML({
+      slot: SHEET_SLOT[it.slot] || it.slot,
+      cur: { title: 'Worn', name: worn ? itemLabel(worn) : '', sub: worn ? `${worn.material} · ${worn.kind}` : '', empty: !worn },
+      cand: { title: 'On the shelf', name: itemLabel(it), sub: `${it.material} · ${it.kind}` },
+      rows: itemCompareRows(worn, it, h),
+      note: displacedNote(h, it),
+      compact: true,
+    }) : '';
     return `<div class="armory-item">
       <span class="ai-icon">${KIND_GLYPH[it.kind] || '▪'}</span>
-      <span class="ai-main"><b>${itemLabel(it)}</b><span class="rr-sub">${qualHTML(it)}${it.history.forgedByName ? ' · forged by ' + it.history.forgedByName : ''}${reworked ? ` · reworked ×${reworked}` : ''}</span></span>
+      <span class="ai-main"><b>${itemLabel(it)}</b><span class="rr-sub">${qualHTML(it)}${it.history.forgedByName ? ' · forged by ' + it.history.forgedByName : ''}${reworked ? ` · reworked ×${reworked}` : ''}</span>${cmp}</span>
       <span class="ai-actions">
         <button class="rc-hire" onclick="__guild.equipItem('${it.id}')">Equip</button>
         <button class="rc-hire sell" onclick="__guild.sellItem('${it.id}')">Sell ${itemSellValue(it)}g</button>
@@ -3157,11 +3357,11 @@ function armoryRoom() {
   const ctx = h ? `<div class="plan-card">
       <div class="plan-title">◎ Equipping · ${h.name} <span class="rr-sub">↯${combatPower(h)}</span></div>
       ${heroSwitcher()}
-      ${equippedLine(h)}
+      <div class="equip-doll-row">${memberDollHTML(h, 128, 'doll-lg')}<div class="equip-doll-side">${equippedLine(h)}</div></div>
       <div class="room-jobline">Pick a member, then <b>Equip</b> items from the armory below onto them.</div>
     </div>` : '';
   const bench = deptRoom('enchant', '✦', "Enchanter's Bench", enchantBody); // Enchanters (Enchanting elective) craft & slot materia
-  return `${ctx}${bench}<div class="room-cols">${armoryPanel()}${quartermasterPanel()}${marketPanel()}</div>`;
+  return `${ctx}${bench}<div class="room-cols">${armoryPanel(h)}${quartermasterPanel()}${marketPanel()}</div>`;
 }
 /** Appoint a Hall-of-Famer as the guild trainer (+15% training gains, one slot). */
 function appointTrainer(hofId) {

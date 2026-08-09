@@ -22,6 +22,9 @@
 /* After every screen's own CSS: the field sheet is an overlay ON one, so its
    card must not be reached by a lens's descendant rules. */
 @import './field-sheet.css';
+/* After the field sheet, because the compare panel is drawn INSIDE it as well
+   as on five other screens — it must not be outranked by .fs-* descendants. */
+@import './compare-panel.css';
 /* Last, so the menu cursor's ring wins the cascade over every screen's own
    hover and selected states. */
 @import './pad-ui.css';
