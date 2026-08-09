@@ -273,7 +273,32 @@ function cellBox(pix, row, col, cell) {
   return x1 < 0 ? null : { x: x0, y: y0, w: x1 - x0 + 1, h: y1 - y0 + 1 };
 }
 
-function buildStrip(weaponImg, armsImg, frames, skinTone) {
+/**
+ * Bake the played frames into one strip: arm first, weapon over it.
+ *
+ * `armOnly` draws the arm and NOT the weapon, which is the whole of the bare
+ * hand. It works because of the shape this function already had: the arm is not
+ * cropped by guesswork, it is found by walking out from the body pixels TOUCHING
+ * the weapon (@see armMask), so the weapon sheet is already doing two separate
+ * jobs here — it is the seed that locates the hand, and it is a thing that gets
+ * drawn. Keep the first and drop the second and what is left is the hand in the
+ * pose the art authored for holding that weapon: fingers closed, at the grip, on
+ * every swing frame. The player asked for exactly this — "empty arms/hands, same
+ * position on tilesheets" — and it costs no new art, which is the art law's
+ * first rule.
+ *
+ * `rest` therefore stays the WEAPON's box even though the weapon is invisible,
+ * and that is deliberate: it is the reference the whole of fit() is calibrated
+ * against, so the bare fist lands at the same size and the same place as the
+ * hand that would be gripping a sword. Measuring the arm instead would let an
+ * empty hand drift somewhere no armed hand has ever been.
+ *
+ * With no arms sheet there is nothing to draw at all — `put` drops the hand
+ * rather than showing a phantom. That is the same trade the armed path makes in
+ * reverse ("a floating sword is the bug we had"): the failure mode of a bare
+ * hand is empty hands, which is what the state means anyway.
+ */
+function buildStrip(weaponImg, armsImg, frames, skinTone, armOnly) {
   const S = WORN.cell;
   const strip = document.createElement('canvas');
   strip.width = S * frames.length;
@@ -329,7 +354,7 @@ function buildStrip(weaponImg, armsImg, frames, skinTone) {
       }
       g.putImageData(arm, ox, 0);
     }
-    g.drawImage(weaponImg, col * S, WORN.row * S, S, S, ox, 0, S, S);
+    if (!armOnly) g.drawImage(weaponImg, col * S, WORN.row * S, S, S, ox, 0, S, S);
   });
   applyTone(g, strip, skinTone);
   // The REST BOX IS THE WEAPON'S, not the composite's — see the note on `rest`
@@ -450,7 +475,7 @@ export function createFpHands(layer, spec) {
   // `delver` is the DELVE lens, not "has a pick": it decides stow arbitration
   // and the swing-time shield brace, and must hold even if the pick sheet fails.
   const H = { layer, weapon: null, offhand: null, shield: null, pick: null,
-    dead: false, bow: false, delver: !!(spec && spec.pick) };
+    dead: false, bow: false, bare: false, delver: !!(spec && spec.pick) };
   // TAKE THE CLASS OFF WHEN THE ANIMATION ENDS. `fire()` only ever put it on,
   // and nothing anywhere took it off again, so `fp-swinging` was permanent from
   // a member's first swing. Two things went quietly wrong for the rest of the
@@ -467,7 +492,7 @@ export function createFpHands(layer, spec) {
   const armsUrls = wornArms(arms && arms.file).urls;
   const skinTone = (arms && arms.skinTone) | 0;
 
-  const put = async (src, frames, cls, title) => {
+  const put = async (src, frames, cls, title, armOnly) => {
     if (!src) return null;
     try {
       const img = await loadImg(src.url);
@@ -478,7 +503,10 @@ export function createFpHands(layer, spec) {
       let armsImg = null;
       try { armsImg = await loadFirst(armsUrls); } catch (e) { armsImg = null; }
       if (H.dead) return null;
-      const built = buildStrip(img, armsImg, frames, skinTone);
+      // A bare hand IS the arm — with no body sheet there is nothing left to
+      // draw, and a hand-shaped hole is worse than empty hands.
+      if (armOnly && !armsImg) return null;
+      const built = buildStrip(img, armsImg, frames, skinTone, armOnly);
       const strip = built.strip;
       // The CROP is the whole composite over every frame it plays, or the arm
       // gets clipped and the swing jumps.
@@ -510,7 +538,11 @@ export function createFpHands(layer, spec) {
       // no measured grip, and the pivot falls back to the bottom-centre of the
       // weapon — where it sat before any of this existed.
       const grip = built.grip || { x: rest.x + rest.w / 2, y: rest.y + rest.h };
-      const hand = { el, cv, strip, box, rest, grip, n: frames.length, at: -1, timer: 0,
+      // What gets hung off the corner. For a bare hand that is the HAND — its
+      // own rest-frame box — because the weapon it was scaled against is not
+      // there to be seen. @see fit(), which explains what happens without this.
+      const frame = armOnly ? (stripUnion(strip, [0]) || rest) : rest;
+      const hand = { el, cv, strip, box, rest, frame, grip, n: frames.length, at: -1, timer: 0,
         side: off ? 'left' : 'right', kind: cls.indexOf('shield') >= 0 ? 'shield' : 'weapon' };
       handFrame(hand, 0);
       return hand;
@@ -531,7 +563,21 @@ export function createFpHands(layer, spec) {
     // smaller term — so this only bites where it was wrong.
     const base = Math.min(Hh, W * 0.78);
     for (const h of all()) {
-      const b = h.box, r = h.rest;
+      // TWO JOBS, AND FOR A BARE HAND THEY ARE TWO RECTANGLES. `rest` is the
+      // SCALE reference — how many source px map to REST_H of the lens — and
+      // `frame` is what gets hung off the corner. For anything held they are the
+      // same rectangle (the weapon), and this is then exactly the old maths.
+      //
+      // They part company when the hand is empty, and the measurement that
+      // caught it is worth keeping: the weapon's framing deliberately hides 46%
+      // of the rest pose below the edge BECAUSE THE BLADE IS WHAT YOU SEE — the
+      // grip lands 16px past the bottom of a 720px lens and the arm hangs off
+      // the corner behind it, contributing zero pixels at rest. Take the blade
+      // away and what is left in frame is nothing at all: **0% of the bare hand
+      // was on screen**, at every viewport tested. Scaling off the weapon is
+      // still right (it is what keeps a fist the size a gripping hand is), but
+      // the thing hung off the corner has to be a thing you can see.
+      const b = h.box, r = h.rest, f = h.frame || h.rest;
       const share = r.h / b.h;                       // how much of the crop the rest pose is
       // Two ceilings, and the art gets the last word: a fraction of the lens,
       // AND no more than MAX_SRC_PX screen px per source px. @see MAX_SRC_PX.
@@ -539,19 +585,23 @@ export function createFpHands(layer, spec) {
                              r.h * MAX_SRC_PX);
       const elH = Math.round(restH / share);
       const elW = Math.round(elH * (b.w / b.h));
-      const restW = elW * (r.w / b.w);
       h.el.style.height = elH + 'px';
       h.el.style.width = elW + 'px';
-      // Where the rest pose sits inside the crop, as fractions of the crop.
-      const right = (r.x + r.w - b.x) / b.w, left = (r.x - b.x) / b.w;
-      const bottom = (r.y + r.h - b.y) / b.h;
+      // The hung rectangle's own on-screen size, from the element's scale. With
+      // `f === r` this is `restH`/`restW` to the pixel — nothing moves for a
+      // hand that is holding something.
+      const perSrc = elH / b.h;
+      const hangH = f.h * perSrc, hangW = f.w * perSrc;
+      // Where the framed pose sits inside the crop, as fractions of the crop.
+      const right = (f.x + f.w - b.x) / b.w, left = (f.x - b.x) / b.w;
+      const bottom = (f.y + f.h - b.y) / b.h;
       // Hang it off the edge: the rest pose's own bottom goes BELOW the frame
       // by OFF_BOTTOM of its height, and its outer edge past the side by
       // OFF_SIDE of its width. Everything is measured from the rest pose, so a
       // sword and a buckler hang by the same amount of themselves.
       h.el.style.top = 'auto';
-      h.el.style.bottom = Math.round(-OFF_BOTTOM * restH - (1 - bottom) * elH) + 'px';
-      const push = Math.round(-OFF_SIDE * restW);
+      h.el.style.bottom = Math.round(-OFF_BOTTOM * hangH - (1 - bottom) * elH) + 'px';
+      const push = Math.round(-OFF_SIDE * hangW);
       if (h.side === 'left') { h.el.style.left = Math.round(push - left * elW) + 'px'; h.el.style.right = 'auto'; }
       else { h.el.style.right = Math.round(push - (1 - right) * elW) + 'px'; h.el.style.left = 'auto'; }
       // The PIVOT is the GRIP — measured, not guessed at the box's bottom-centre
@@ -617,14 +667,30 @@ export function createFpHands(layer, spec) {
     H.bow = !!(w && w.kind === 'bow');
     const SW = [WORN.rest].concat(WORN.swing);
     H.weapon = await put(w && wornWeapon(w.kind, w.material), H.bow ? WORN.bowDraw : SW, 'fp-hand-weapon', w && w.name);
+    // NOTHING EQUIPPED IS A LOADOUT (playtest decision, 2026-08-08: "they just
+    // show empty arms/hands; same position on tilesheets, but can be used for
+    // punching"). The reference sheet is a plain one-handed grip and is never
+    // drawn — it is only the seed that finds the hand, @see buildStrip — so what
+    // lands in frame is the fist the art already draws around a hilt, at the
+    // size and place an armed hand occupies. `fp-bare` is on it for the CSS to
+    // key off; `H.weapon` is the fist, because to everything downstream — the
+    // swing, the stow arbitration, the fit — an empty hand is simply the hand
+    // you lead with.
+    if (!H.dead && !w) {
+      H.bare = true;
+      H.weapon = await put(wornWeapon('sword', 'iron'), SW, 'fp-hand-weapon fp-bare', 'Bare hands', true);
+    }
     // A bow is two-handed: nothing goes in the other hand behind it.
     if (!H.dead && !H.bow) {
       if (s) H.shield = await put(wornShield(s.material), WORN.shieldBrace, 'fp-hand-shield', s.name);
       else if (o) H.offhand = await put(wornWeapon(o.kind, o.material), SW, 'fp-hand-offhand', o.name);
     }
-    // The PICK is not equipment — it is what a delver walks in carrying. It
-    // comes out for a seam whatever else is in hand, and when the weapon slot
-    // is empty it is the only thing there, so the hands are never simply blank.
+    // The PICK is not equipment — it is what a delver walks in carrying, and it
+    // comes out FOR A SEAM and nothing else. It used to be the fallback for an
+    // empty weapon slot too, on the reasoning that hands are never simply blank
+    // — which is how an unarmed delver came to fight a squirrel with a mining
+    // tool while their own standee swung a sword. Empty hands have their own
+    // answer now; the pick goes back to being for rock.
     if (!H.dead && H.delver) {
       H.pick = await put(wornPick(), SW, 'fp-hand-pick' + (H.weapon ? ' fp-stowed' : ''), 'Delver’s pick');
     }

@@ -46,7 +46,7 @@ import { facePanel, apronPanel, standsPanel, cloudsPanel, WALL_DIM, SEG_T, SEG_G
 import { createFpHands, fighterHandsSpec } from './fp-hands.js';
 import { createLook, touchPrimary } from '../platform/input.js';
 import { ladderArt } from './arena-terrain.js';
-import { perspectiveFor, perspRatio, camLean, onView, view } from '../platform/view-prefs.js';
+import { perspectiveFor, camLean, onView, view } from '../platform/view-prefs.js';
 import { createGlWorld } from '../platform/gl-world.js';
 
 /** World scale — the delve's, via tactical-fp, so a person is the same size
@@ -637,9 +637,30 @@ function placeShots(yaw) {
 // The camera
 // ---------------------------------------------------------------------------
 
+/**
+ * THE LENS, RE-FITTED FROM THE HEIGHT THE FRAME IS ACTUALLY BEING DRAWN AT.
+ *
+ * Called per frame, and guarded on the height so it is one property read when
+ * nothing moved. That is not caution, it is the FIX: the GL camera derives its
+ * pull-back from `perspectiveFor(stage.clientHeight)` fresh on every frame,
+ * so a DOM `perspective` written once at creation and left there is a SECOND,
+ * different lens the moment the stage is any other height — and the two draw
+ * the same world at two fields of view.
+ *
+ * It bit exactly where you would expect. The old `if (!h) return` gave up
+ * silently, and `actFpToggle` runs while `#actionScreen` may still be display:
+ * none — which is routine, because the camera choice is remembered, so a battle
+ * that starts in first person builds this view before the screen it lives on is
+ * laid out. The stage then measured 0, nothing was written, and the DOM kept
+ * battle.css's placeholder `perspective: 500px` against the canvas's 523. Four
+ * percent, and four percent of a projection is a fighter standing 19px off
+ * their own shadow at four tiles and further out the further they walk.
+ * Measured with `__actFpAgree()`, which is what it is for.
+ */
 function fitLens() {
   const h = V.stage && V.stage.clientHeight;
-  if (!h) return;
+  if (!h || h === V.lensH) return;
+  V.lensH = h;
   // The FoV slider is the only thing that decides this now. Its default of 72°
   // reproduces the old `PERSP * (h / PERSP_AT)` exactly, so the framing every
   // number in this file was measured against is still the default framing.
@@ -648,8 +669,9 @@ function fitLens() {
 
 // Either slider moves the picture NOW: re-fit the lens and clear the transform
 // write-guards, or the frame loop compares the new string against the old one,
-// finds them equal for the parts it did not change, and skips the write.
-onView(() => { if (!V) return; fitLens(); V.wtf = ''; V.po = ''; actFpFrame(); });
+// finds them equal for the parts it did not change, and skips the write. The
+// height has not changed, so fitLens's guard has to be dropped by hand.
+onView(() => { if (!V) return; V.lensH = 0; fitLens(); V.wtf = ''; actFpFrame(); });
 
 /**
  * PITCH IS A SHEAR, NOT A ROTATION — Hexen's answer, and the reason its
@@ -674,22 +696,41 @@ onView(() => { if (!V) return; fitLens(); V.wtf = ''; V.po = ''; actFpFrame(); }
  * was, so nothing changes size, and it leaves billboards screen-parallel, so
  * you can never look down on one and catch it being paper.
  *
- * In CSS the shear is one property. `perspective-origin` IS the vanishing
- * point: a point at infinity straight ahead projects there and nowhere else. A
- * rotation by θ puts the horizon at screen `P·tanθ` from centre, so moving the
- * origin by exactly that much reproduces the rotation's framing with none of
- * its depth change. And because fitLens keeps `perspective` proportional to the
- * stage height, `P/H` is the constant `PERSP/PERSP_AT` — the shear needs no
- * measurement and no resize handling.
+ * AND IT IS THE PROJECTION THAT SHEARS, NOT THE WORLD — which the first cut got
+ * wrong in a way nothing could see until the canvas turned up to disagree with
+ * it. That cut moved `perspective-origin`, on the reasoning that the origin IS
+ * the vanishing point, so putting it `P·tanθ` off centre reproduces a rotation's
+ * horizon with none of its depth change. The horizon, yes. Everything else, no:
+ * CSS projects to `O + m·(p − O)` with `m = P/(P − z)`, so moving `O` by Δ moves
+ * a point by `Δ·(1 − m)` — the full Δ at infinity, and NOTHING at the eye plane.
+ * That is a rubber sheet, not a shear: look up and the far stands slide while
+ * the grass at your feet stays nailed down.
  *
- * The knock-on: billboards no longer need their counter-rotation at all. That
- * whole term is gone from every per-frame transform string, which is a write
- * saved per standee per frame on the one lens that has a free look.
+ * Doom slides the whole PICTURE, and the rasteriser does too — one constant in
+ * the projection matrix (`proj[9]`, @see gl-world), applied after the divide, so
+ * every pixel at every depth moves together. With the canvas drawing the ground
+ * and the DOM drawing the people, "together" is not a nicety: it is the only
+ * thing keeping a fighter's feet on the field. At a 20 degree look the two rules
+ * differed by 17px at four tiles and 190 at the horizon.
+ *
+ * So the DOM shears too, and in the one space where a shear survives the divide:
+ * a screen slide of Δ is `t_y = Δ − Δ·z/P` applied in stage space, because
+ * `m·t_y = [P/(P−z)]·Δ·[(P−z)/P] = Δ` for every z. Two matrix cells, outermost
+ * on the world transform, and Δ/P is just `tan(free)` — the ratio the old
+ * `perspRatio()` was carrying is now the shear coefficient itself.
+ *
+ * The knock-on stands: billboards need no counter-rotation at all, because a
+ * shear leaves them screen-parallel. That whole term is gone from every
+ * per-frame transform string.
  */
 function aimLens(free) {
-  const oy = 50 + perspRatio() * Math.tan(free * Math.PI / 180) * 100;
-  const po = `50% ${oy.toFixed(2)}%`;
-  if (po !== V.po) V.stage.style.perspectiveOrigin = (V.po = po);
+  const t = Math.tan(free * Math.PI / 180);
+  if (!t) return '';
+  // Δ = P·tan(free) — the horizon's slide, in stage px — and the z→y coupling
+  // that carries it back to every nearer depth unchanged. Column-major: the
+  // 10th cell is z→y, the 14th is the y translate.
+  const d = perspectiveFor(V.lensH || V.stage.clientHeight) * t;
+  return `matrix3d(1,0,0,0,0,1,0,0,0,${(-t).toFixed(5)},1,0,0,${d.toFixed(2)},0,1) `;
 }
 
 /**
@@ -761,6 +802,10 @@ export function actFpFrame() {
   if (!me) return;
   const now = performance.now();
   V.last = now;
+  // ONE HEIGHT, ONE LENS. The DOM's `perspective` and the GL camera's pull-back
+  // are the same field of view expressed twice; fit them off the same reading
+  // of the same box on the same frame, or they are two cameras. @see fitLens.
+  fitLens();
 
   const T0 = V.bridge.terrain();
   const lift = liftAt(T0, me.ax, me.ay);
@@ -786,11 +831,13 @@ export function actFpFrame() {
   // shoulder camera's own lean stays a ROTATION and is the only pitch it has:
   // a constant cannot produce a swing, and over the shoulder the free look is
   // held at zero so the three-quarter framing is a fact and not a suggestion.
-  aimLens(V.pov === 'shoulder' ? 0 : V.pitch);
-  // The scale is OUTERMOST and undoes K exactly: the picture is the one the
-  // framing was measured at, only the rasters underneath it shrank.
+  const free = V.pov === 'shoulder' ? 0 : V.pitch;
+  // The look's shear is OUTERMOST OF ALL — it works on the projected frame, so
+  // everything else must already have happened. @see aimLens.
+  // The scale is next and undoes K exactly: the picture is the one the framing
+  // was measured at, only the rasters underneath it shrank.
   const sc = (1 / K).toFixed(4);
-  const wtf = `scale3d(${sc},${sc},${sc})${lean ? ` rotateX(${lean}deg)` : ''} rotateY(${deg.toFixed(2)}deg) translate3d(${(-ex).toFixed(1)}px,${(-ey).toFixed(1)}px,${(-ez).toFixed(1)}px)`;
+  const wtf = `${aimLens(free)}scale3d(${sc},${sc},${sc})${lean ? ` rotateX(${lean}deg)` : ''} rotateY(${deg.toFixed(2)}deg) translate3d(${(-ex).toFixed(1)}px,${(-ey).toFixed(1)}px,${(-ez).toFixed(1)}px)`;
   if (wtf !== V.wtf) V.world.style.transform = (V.wtf = wtf);
 
   // THE CANVAS IS AIMED BY THE SAME NUMBERS THE CSS CHAIN IS AIMED BY — this is
@@ -801,18 +848,33 @@ export function actFpFrame() {
   // camera pulled back P/lens world px. @see HANDOFF-RENDERER.md §-1, and
   // delve-fp.js's twin of this block. The arena's lens is 1/K, so P/lens = P·K.
   //
-  // PITCH IS THE SHOULDER LEAN ONLY, exactly as the delve passes it. The free
-  // look is a `perspective-origin` SHEAR on the DOM lens and deliberately not a
-  // rotation (@see aimLens) — billboards, the viewmodel and the HUD all ride
-  // that lens, so putting the free pitch in the GL camera alone would tilt the
-  // world out from under everything drawn over it.
+  // PITCH IS THE SHOULDER LEAN ONLY — as a ROTATION. The free look is not a
+  // rotation in either backend (@see aimLens for the measured 1.6x size swing
+  // that made it a shear), and it is NOT nothing either: it is a shear here too.
+  //
+  // THIS LINE WAS MISSING AND IT WAS HALF THE PLAYTEST BUG. `aimLens` slides the
+  // DOM's vanishing point by `P·tan(free)` and every DOM thing rides that lens —
+  // both fighters, every arrow, every boulder — while the canvas underneath them
+  // kept a level horizon, so LOOKING UP OR DOWN WALKED THE WHOLE CAST OFF THE
+  // GROUND. Measured with `__actFpAgree()` before the fix: an opponent four
+  // tiles out floated 77px above their own shadow at a 10 degree look and 159px
+  // at 20 — which is what "in 1st person, both characters are outside of the
+  // map" looks like from the player's chair.
+  //
+  // gl-world has carried the matching cell all along (`proj[9]`, @see its
+  // `project`/`draw`) and nothing in the repo ever wrote it. Its contract is
+  // `tan(pitch)/tan(fovY/2)`, positive looks up — which resolves to a screen
+  // slide of `tan(free)·(H/2)/tan(fov/2)` = `P·tan(free)`, the DOM's number
+  // exactly. One angle, one horizon, two backends.
   if (V.gl) {
     const st = V.stage;
     if (st && st.clientHeight) V.gl.resize(st.clientWidth, st.clientHeight, glDpr());
+    const fovY = view.fov * Math.PI / 180;
     V.gl.setCamera({
       x: ex, y: ey, z: ez, yaw: V.yaw,
       pitch: lean ? lean * Math.PI / 180 : 0,
-      fovY: view.fov * Math.PI / 180,
+      shear: free ? Math.tan(free * Math.PI / 180) / Math.tan(fovY / 2) : 0,
+      fovY,
       back: st && st.clientHeight ? perspectiveFor(st.clientHeight) * K : 0,
     });
     // No fog in an arena — you can see the far stands, and the sky behind them
@@ -931,10 +993,12 @@ export function actFpToggle(kind, bridge) {
     stage.appendChild(host);
     V = {
       host, world: host.querySelector('.tfp-world'), bridge,
-      // The stage owns the LENS: `perspective` is the field of view and
-      // `perspective-origin` is where the horizon sits, which is how this view
-      // pitches. Held rather than re-queried — both are written per frame.
-      stage: host.querySelector('.tfp-stage'), po: '',
+      // The stage owns the LENS: `perspective` is the field of view, and it is
+      // the ONE number the DOM and the canvas both fit themselves to, so it is
+      // held rather than re-queried and re-fitted per frame. (The horizon is no
+      // longer a property here — the look shears the world transform instead,
+      // @see aimLens.) `lensH` is the height it was last fitted at.
+      stage: host.querySelector('.tfp-stage'), lensH: 0,
       pov: 'first', yaw: 0, pitch: 0, wtf: '', last: 0,
       actors: new Map(), shots: new Map(), dressing: [], want: [], gl: null,
       boardKey: '', ringCv: host.querySelector('.afp-ring'),
@@ -1027,6 +1091,66 @@ if (typeof window !== 'undefined') {
     return V.gl.probe();
   };
   window.__actFpStep = () => { actFpFrame(); return window.__actFpDebug(); };
+  /**
+   * DO THE TWO CAMERAS AGREE ABOUT WHERE A FIGHTER IS STANDING?
+   *
+   * The world is drawn by the rasteriser and the people standing in it are
+   * drawn by the compositor, so this view has TWO cameras that must be the same
+   * camera. Nothing checked that, and nothing could: `probe()` reads the
+   * canvas's pixels and `getBoundingClientRect` reads the DOM's box, and until
+   * they are put in the same units neither can contradict the other.
+   *
+   * They can here. `gl.project` returns a world point in stage CSS px (it exists
+   * for overhead labels, and doubles as this proof), and the DOM side is read by
+   * hanging a ZERO-SIZED marker in `.tfp-bbs` at the same world point: a 0x0 box
+   * has no shape to distort, so its client rect IS that point after the whole
+   * CSS chain. Same point, two projections, one number: `dx`/`dy`.
+   *
+   * The standee's own bounding box will NOT do, and the reason is worth keeping:
+   * a billboard is a real quad leaning with the shoulder camera's `rotateX`, so
+   * off to the side it projects as a TRAPEZOID and its box centre drifts from the
+   * ground point it is anchored on — 19px at four tiles out, pure measurement
+   * artefact, exactly the sort of small honest lie that would make a real 20px
+   * displacement unfalsifiable.
+   *
+   * IT CAUGHT A REAL ONE (2026-08-08). A stray `position:relative` in
+   * action-arena.css re-flowed `.tfp-world` to full stage width and moved its
+   * `transform-origin` off the eye, displacing the whole DOM cast from the
+   * canvas's world by `(700 - 2100·cos yaw, 0, 2100·sin yaw)` stage px — the
+   * playtest's "in 1st person, both characters are outside of the map". `dx` was
+   * 146 px at seven tiles and 546 px over the shoulder. Anything past a pixel or
+   * two here is that class of bug: a lens re-authoring where the world is.
+   */
+  window.__actFpAgree = () => {
+    if (!V || !V.gl) return null;
+    actFpFrame();
+    const T0 = V.bridge.terrain();
+    const s = V.stage.getBoundingClientRect();
+    const mark = document.createElement('div');
+    mark.style.cssText = 'position:absolute;left:0;top:0;width:0;height:0';
+    V.world.querySelector('.tfp-bbs').appendChild(mark);
+    const out = [];
+    for (const f of (V.bridge.fighters() || []).filter(Boolean)) {
+      const lift = liftAt(T0, f.ax, f.ay);
+      const g = V.gl.project(f.ax * T, lift, f.ay * T);
+      // Behind the eye there is no pixel to disagree about — and the CSS chain
+      // does not report a sign, so a point projected through it from behind
+      // comes back as a plausible-looking number. Drop them rather than compare.
+      if (!isFinite(g.x) || !isFinite(g.y)) continue;
+      mark.style.transform = `translate3d(${f.ax * T}px,${lift}px,${f.ay * T}px)`;
+      const r = mark.getBoundingClientRect();
+      const dom = { x: r.x - s.x, y: r.y - s.y };
+      out.push({
+        at: [+f.ax.toFixed(2), +f.ay.toFixed(2)],
+        gl: { x: +g.x.toFixed(1), y: +g.y.toFixed(1) },
+        dom: { x: +dom.x.toFixed(1), y: +dom.y.toFixed(1) },
+        dx: +(dom.x - g.x).toFixed(1), dy: +(dom.y - g.y).toFixed(1),
+      });
+    }
+    mark.remove();
+    const worst = out.reduce((m, o) => Math.max(m, Math.abs(o.dx), Math.abs(o.dy)), 0);
+    return { pov: V.pov, yawDeg: +(V.yaw * 180 / Math.PI).toFixed(1), worst: +worst.toFixed(1), fighters: out };
+  };
   // Look, without a mouse: a headless pane can never hold a pointer lock, so
   // the only way to prove the steer's angle path is to hand it the same numbers
   // the lock would have banked. Goes through actFpSteer, not around it.

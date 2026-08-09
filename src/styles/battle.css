@@ -212,9 +212,11 @@
    which came later in the file — so splitting this stylesheet or importing
    another one that mentioned .ff-menu would have silently un-gated it. And a
    media query could only ever answer "is the screen small", when the real
-   question is "does this player want the list" — which on a PC only the player
-   can answer. ffSyncMode() in crucible.js sets the class: always on a narrow
-   screen, and on any screen where the player has asked for it.
+   question is "how does this game play" — which a width cannot answer at all.
+   ffSyncMode() in crucible.js sets the class: it is THE DEFAULT EVERYWHERE
+   (user decree, 2026-08-08), forced on a narrow screen where the full panel
+   does not fit, and switchable off on a PC by anyone who wants the old panel.
+   The list shipped working-but-off on a PC, which is a feature nobody meets.
 
    The phone's own SPACE rules — the 6px HP cards, the 28px d-pad, the crushed
    log — stay in the media block further down, where they belong. */
@@ -319,10 +321,21 @@
   position: absolute; inset: 0; overflow: hidden;
   perspective: 500px; perspective-origin: 50% 50%;
 }
-/* Placed at the stage's centre, so the subject's eye is the world's origin. */
+/* Placed at the stage's centre, so the subject's eye is the world's origin.
+   `transform-origin` is PINNED, and it is load-bearing: the world transform is
+   `scale · rotate · translate(-eye)`, which lands the eye on the pivot — so the
+   pivot has to be the box's own origin point and nothing else. It normally is,
+   because an out-of-flow `left/top:50%` box with no width shrinks to 0x0 and a
+   0x0 box's `50% 50%` IS `0 0`. That is a coincidence of layout, not a promise,
+   and action-arena.css cashed it in once already: one `position:relative` added
+   for a z-index the element did not need re-flowed this to 1400px wide, moved
+   the pivot to `700px 0`, and swung the entire DOM cast off the canvas's world
+   by up to nine tiles as the camera turned. Stated outright it cannot happen
+   again, in any lens, at any window size. */
 .tfp-world {
   position: absolute; left: 50%; top: 50%;
   transform-style: preserve-3d; will-change: transform;
+  transform-origin: 0 0;
 }
 .tfp-geo, .tfp-path, .tfp-bbs { transform-style: preserve-3d; }
 .tfp-q {

@@ -22,6 +22,15 @@ function heroSpec(hero) {
     appearance: hero.appearance,
     appearanceSeed: hero.appearanceSeed,
     prime: hero.prime,
+    // WHAT THEY ACTUALLY OWN — passed for the SPRITE, not for the stats. The
+    // mechanical gear→engine conversion is still deferred (DESIGN.md), so this
+    // changes no number; it only tells the compositor's cosmetic kit that this
+    // fighter HAS an armory and can therefore be empty-handed. Without it a
+    // member with nothing equipped walks into the arena swinging an archetype
+    // sword while their own first-person hands are honestly bare.
+    // @see guildCosmeticGear — a rival or a hunt's prey has no `equipped` at
+    // all, and goes on being dressed by archetype exactly as before.
+    equipped: hero.equipped || null,
     // Obedience (K5): the tactical lens rolls P(obey)=(discipline+bond)/200 (+trait
     // mods) each executed turn — failure is Foolery, the hero fighting their own way.
     obedience: {

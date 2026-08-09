@@ -95,6 +95,41 @@ const ROOTS = [
   { sel: '.assembly-overlay', back: (el) => click(el.querySelector('.as-dismiss,.assembly-close')) },
   { sel: '.mat-detail-overlay.show', back: () => window.closeMatDetail && window.closeMatDetail() },
   { sel: '.craft-overlay.show', back: () => window.cancelCraft && window.cancelCraft() },
+  /**
+   * THE TACTICAL COMMAND LIST OWNS THE CURSOR, and that ownership IS the Final
+   * Fantasy grammar: you are in the list, or you are in one command's controls,
+   * and Back returns you to the list. Never both, never the whole screen.
+   *
+   * Without these three the cursor is flat over `.screen.active`, and ArrowDown
+   * from the list walked straight onto the board — measured: header, then five
+   * grid cells, never reaching Attack. The menu was on screen and unplayable
+   * without a mouse, which is the same "works but nobody meets it" the default
+   * flip fixed. @see battle.css's command-list block.
+   *
+   * ORDER IS THE LOGIC. An open command is checked before the list, so the
+   * cursor is wherever you last chose to be; the list is the fallback when
+   * everything is shut.
+   *
+   * THE ROOT IS THE OPEN COMMAND'S BOX, NOT `.controls`, and the reason is a
+   * rule of this file rather than of the battle screen: `.controls` floats over
+   * the board and carries `pointer-events:none` so it cannot eat a click meant
+   * for a cell — only the open child re-enables `auto`. `onScreen` reads
+   * `pointer-events:none` as not-there (correctly — you cannot put a cursor on
+   * something that cannot be clicked), so a root of `.controls` matched nothing
+   * and the cursor stayed in the list with ⎋ inert. Naming the live child fixes
+   * it and is more honest anyway: the root is exactly the thing you can act on.
+   *
+   * Nothing is lost by the confinement: a board cell's click queues ONE adjacent
+   * step (`onCellClick`), which is exactly what the d-pad inside Move does, and
+   * the d-pad is in frame the whole time. Touch is untouched either way — this
+   * scopes a cursor, not a hit test — so the phone keeps tapping the same menu
+   * and gains the same grammar the moment a pad or keyboard appears.
+   */
+  { sel: '#battleScreen.ff-list.ff-move .move-controls', back: () => window.ffClose && window.ffClose() },
+  { sel: '#battleScreen.ff-list.ff-attack .atk-bar', back: () => window.ffClose && window.ffClose() },
+  { sel: '#battleScreen.ff-list.ff-view .exec-bar', back: () => window.ffClose && window.ffClose() },
+  { sel: '#battleScreen.ff-list.ff-sheet .stat-sheet', back: () => window.ffClose && window.ffClose() },
+  { sel: '#battleScreen.ff-list .ff-menu', back: null },
 ];
 
 /**
@@ -307,7 +342,17 @@ function activate(el) {
 function back() {
   const r = _root || padRoot();
   if (!r) return;
-  if (r.rule) { if (r.rule.back) r.rule.back(r.el); return; }
+  if (r.rule) {
+    if (r.rule.back) r.rule.back(r.el);
+    // BACK IS ALWAYS A MOVE, so re-place the cursor. Every back until now closed
+    // an overlay by REMOVING it, and `watchDom` picked that up as a childList
+    // mutation — but it observes childList only, and the tactical command list
+    // closes by flipping a class on a node that never moves. Nothing fired, so
+    // the ring sat inside a command that was no longer open until the next
+    // arrow press knocked it loose. `pending` makes a double schedule free.
+    if (!pending) pending = requestAnimationFrame(recover);
+    return;
+  }
   const btn = r.el.querySelector('[data-pad-back]');
   if (btn) activate(btn);
 }

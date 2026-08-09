@@ -1660,7 +1660,22 @@ function guildWeaponTier(stats){
 // Archetype (+ stats, for tier) → cosmetic { RHand, LHand, sheath } for the compositor.
 // `sheath` is a back-mounted descriptor { file, c } used OUTSIDE combat (portraits,
 // roaming); it's resolved to a color from the same weapon tier as the hand weapon.
-function guildCosmeticGear(archetype, stats){
+//
+// AN EMPTY ARMORY IS AN ANSWER, NOT A GAP (playtest, 2026-08-08). The cosmetic
+// kit exists so a hero never reads as unfinished, and for a rival or a hunt's
+// prey — who have no armory at all — that is still exactly right. For a GUILD
+// MEMBER it was a lie the moment the first-person view learned to read the real
+// armory: the standee swung an archetype sword while the viewmodel, honestly
+// holding what the member owns, came up with nothing but the delver's pick.
+// One fact, two authors, and the player caught it in one camera cycle.
+//
+// So `equipped` decides. ABSENT means "this person has no armory" → dress them.
+// PRESENT AND EMPTY-HANDED means "this person owns no weapon" → empty hands, in
+// every lens, which is also a playable state: you punch. The discriminator is
+// the presence of the field, never its contents, so nothing that never had an
+// armory is affected. @see fp-hands.js's bare hand, which is its other half.
+function guildCosmeticGear(archetype, stats, equipped){
+  if (equipped && !equipped.weapon && !equipped.offhand) return { RHand: null, LHand: null, sheath: null };
   var m = GUILD_ARCH_WEAPON[archetype] || GUILD_ARCH_WEAPON.Adventurer;
   var tier = guildWeaponTier(stats);
   var mk = function(type){ return type ? { type: type, tier: tier, pos: 'Hand' } : null; };
@@ -1694,7 +1709,7 @@ function renderGuildSprite(canvas, person, facing){
   // battery on mobile. Register a redraw so the portrait still fills in when the
   // async sprite sheets finish loading, but never join the per-frame bob loop.
   // Portraits are out-of-combat: the hero wears their weapon SHEATHED on the back.
-  var weapons = fighterWeaponLayers({ gear: guildCosmeticGear(person.archetype, person.stats) }, true);
+  var weapons = fighterWeaponLayers({ gear: guildCosmeticGear(person.archetype, person.stats, person.equipped) }, true);
   compositeCharacter(canvas, appearance, 'idle', 0, row, weapons, { excite: 0, phase: 0 });
   elementsRegisterRedraw(canvas, function(){ renderGuildSprite(canvas, person, facing); });
 }
@@ -4454,7 +4469,7 @@ function guildFighterFromSpec(spec, num){
     materia: [],
     // Cosmetic weapon by archetype so fighters don't duel bare-handed. This is
     // VISUAL ONLY — the mechanical gear→engine conversion stays stubbed (DESIGN.md).
-    gear: guildCosmeticGear(spec.archetype, s),
+    gear: guildCosmeticGear(spec.archetype, s, spec.equipped),
     _mr: s,                    // raw MR stats — charge-tier gates read these (trained stats grow the kit)
     _obey: spec.obedience || null, // {discipline, bond, obeyMod} — Foolery rolls in the tactical lens
   };
@@ -4613,7 +4628,7 @@ function makeRanchActor(person){
   return {
     id: person.id, name: person.name,
     appearance: ensureAppearance(person, prime), prime: prime,
-    gear: guildCosmeticGear(person.archetype, person.stats), // cosmetic weapon (visual only)
+    gear: guildCosmeticGear(person.archetype, person.stats, person.equipped), // cosmetic weapon (visual only)
     anim: { name: 'idle', frame: 0, timer: performance.now(), onDone: null },
     facing: Math.PI, _bobExcite: 0, _bobPhase: Math.floor(Math.random() * 1400),
     sheatheWhenIdle: true, // roaming the ranch: weapon on the back; drawn only for drills
@@ -7965,6 +7980,15 @@ function ffPick(cmd){
   }
 }
 window.ffPick = ffPick;
+/**
+ * Shut whatever command is open, without the caller having to know which.
+ *
+ * This is the menu cursor's BACK, and it is the second half of the command
+ * list's grammar: the list, then one command's controls, then back to the list.
+ * @see ui-pad.js's ROOTS, which is what routes ⎋ / B here.
+ */
+function ffClose(){ if (_ffCmd) ffPick(_ffCmd); }
+window.ffClose = ffClose;
 
 /** The width at which the full panel stops fitting. The twin of battle.css's
  *  `@media (max-height:620px),(max-width:560px)` — change one, change both. */
@@ -7972,9 +7996,26 @@ var FF_TIGHT = '(max-height: 620px), (max-width: 560px)';
 function ffScreenIsTight(){
   return typeof matchMedia === 'function' && matchMedia(FF_TIGHT).matches;
 }
-/** The PC preference. A tight screen has no say — there is no room for the
- *  panel there, so the list is not optional. */
-var _ffListPref = loadGame('battleCmdList') === true;
+/**
+ * The PC preference — DEFAULT ON (user, 2026-08-08: "I requested Final Fantasy
+ * menus to work on PC in tactical many prompts ago, and they are still not the
+ * default").
+ *
+ * The list shipped able to work on a PC and switched off there, which answered
+ * a smaller question than the one asked: a feature reachable behind a switch
+ * nobody has pressed is not the way the game plays. It is the default on every
+ * screen now, and the switch survives for anyone who wants the full panel back.
+ *
+ * THE KEY IS VERSIONED, and that is the whole of the migration. `false` under
+ * v1 meant "the default, or a player who turned it off back when off was
+ * normal"; under v2 the same byte would mean "a player who rejected the new
+ * default" — a different claim about a different question, and reading the old
+ * value as the new answer is how a flipped default silently fails to reach
+ * anyone who ever touched the switch. A fresh key asks everyone once. Same rule
+ * view-prefs.js follows when a stored value changes MEANING rather than value.
+ */
+var FF_PREF_KEY = 'battleCmdList2';
+var _ffListPref = loadGame(FF_PREF_KEY) !== false;
 
 /**
  * Put the battle screen into (or out of) command-list mode.
@@ -8012,7 +8053,7 @@ function ffToggleList(){
   var scr = document.getElementById('battleScreen');
   var was = !!(scr && scr.classList.contains('ff-list'));
   _ffListPref = !_ffListPref;
-  saveGame('battleCmdList', _ffListPref);
+  saveGame(FF_PREF_KEY, _ffListPref);
   ffSyncMode();
   // tacFitFighters reserves the panel's REAL height at the bottom of the frame
   // (it reads `.controls`.offsetHeight), and the whole point of the switch is

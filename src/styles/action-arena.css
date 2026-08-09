@@ -165,9 +165,28 @@
 .afp-gl{position:absolute;inset:0;z-index:1;width:100%;height:100%;display:none;pointer-events:none}
 .afp-gl-on .afp-gl{display:block}
 .afp-gl-on .tfp-geo{display:none}
-/* The stage has to sit ABOVE the canvas for the billboards to read, and it is
-   the canvas's own parent, so it needs a stacking level of its own. */
-.afp-gl-on .tfp-world{position:relative;z-index:2}
+/* The world has to sit ABOVE the canvas for the billboards to read. Here — and
+   NOT in the delve — that is settled inside the stage, because this markup puts
+   the canvas and the world side by side under it (stage > canvas z1 · world);
+   the delve hangs its canvas beside the stage instead, which is why delve.css
+   ranks `.fp-stage` and records that ranking `.fp-world` "changed nothing".
+
+   RANK IT, DO NOT POSITION IT. `.tfp-world` is ALREADY `position:absolute`
+   (battle.css), so `z-index` applies as it stands; the `position:relative` that
+   shipped alongside it re-flowed the element from an out-of-flow shrink-to-fit
+   0x0 box into an in-flow block filling the stage — 1400px wide on a desktop —
+   which moved its `transform-origin` from `0 0` to `700px 0`. A transform about
+   a pivot that is not the eye is a WORLD THAT MOVES: the whole DOM cast lands
+   at `M(p) + (I - M)(O)`, i.e. displaced from the canvas's picture of the same
+   world by `(700 - 2100·cos(yaw), 0, 2100·sin(yaw))` stage px — up to 2.3 tiles
+   of depth and 9 tiles of sideways, SWINGING AS YOU TURN. Measured live before
+   the fix: over the shoulder the subject you are meant to be standing behind
+   sat at screen x 154 of a 1400px stage instead of dead centre at 700, and in
+   first person the opponent stood on the apron outside a field they were four
+   tiles inside of. Every lens is a camera on one world (CLAUDE.md); this was
+   one lens quietly re-authoring where the world is. `transform-origin` is now
+   pinned in battle.css so no future layout change can move the pivot again. */
+.afp-gl-on .tfp-world{z-index:2}
 
 /* Dressing is world geometry now, not billboards — placed once, standing on its
    own ground. A round prop is a CROSS of two quads, so it must be visible from

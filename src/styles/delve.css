@@ -471,10 +471,14 @@
    first cut ranked .fp-world and changed nothing on a real compositor).
    Depth against geometry is the known trade — labels belong on top anyway. */
 .fp-gl-on .fp-stage { z-index: 2; }
+/* The pivot is the EYE — see battle.css's twin of this rule for the whole
+   story. Same structure, same silent dependency on a 0x0 shrink-to-fit box,
+   and the arena has already proved what one stray `position` costs. */
 .fp-world {
   position: absolute; left: 50%; top: 50%;
   transform-style: preserve-3d;
   will-change: transform;
+  transform-origin: 0 0;
 }
 .fp-geo, .fp-bbs { transform-style: preserve-3d; }
 /* Every surface. Centred on its own transform, so a quad is placed by where its
