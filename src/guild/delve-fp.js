@@ -2730,6 +2730,10 @@ export async function openDelveFp(localeId, member, hooks, carry) {
   if (!mapForLocale(localeId) || !member || F || opening) return false;
   opening = true;
   try {
+    // A fresh open may still name a spawn tile — the same allowance the
+    // top-down makes, and it MUST be the same or a view swap would land the two
+    // lenses in different places. @see delve.js, campus.js stationFor.
+    const spawnAt = carry && carry.at && !carry.swap ? carry.at : null;
     if (carry && !carry.swap) carry = null;   // only a live swap may carry state
     const p = await prep(carry ? carry.mapId : localeId);
     // A view swap arrives with the TOP-DOWN screen active, not the guild's —
@@ -2819,7 +2823,7 @@ export async function openDelveFp(localeId, member, hooks, carry) {
       if (carry.haul) F.haul = { kills: {}, gold: 0, mats: {}, field: 0, bouts: 0, swings: 0, ...carry.haul };
     }
     try {
-      mount(p, carry ? carry.at : null);
+      mount(p, carry ? carry.at : spawnAt);
       // The FACING crosses the swap too — the lenses are 1:1 by decree.
       // openestDir only chooses for a fresh march in through the gate.
       if (carry && carry.dir != null) {

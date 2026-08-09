@@ -20,7 +20,7 @@ import { DISCIPLINES, ELECTIVES, ELECTIVE_IDS, DISCIPLINE_IDS, disciplineById, e
 import { RATION_RECIPES, getRation, rationUnlocked, previewYield, cook } from './cooking.js';
 import { orbCost, orbReqTheory, orbUnlocked, previewOrbLevel, craftMateria, slotMateria, itemSockets, orbLabel, craftBlessing, blessingUnlocked, BLESSING_REQ_THEORY, BLESSING_COST } from './enchanting.js';
 import { PLANETS } from '../game/data/progression.js';
-import { advanceWeek, formatDate } from './calendar.js';
+import { advanceWeek, formatDate, shortDate, yearsAhead, monthName, weekOfMonth } from './calendar.js';
 import { weeklyUpkeep, heroWage, addGold, guildIncome } from './economy.js';
 import { RECIPES, CATEGORY_ORDER, getRecipe, previewQuality, forge, study, recipeUnlocked, rework, previewRework, refine, refineChance, recipeForItem, materialOreCost, MATERIAL_META, MAX_PLUS, REFINE_GUARDS, REFINE_STAMINA } from './smithing.js';
 import { POTION_RECIPES, getPotionRecipe, previewPotency, previewBrewYield, brew, potionUnlocked, applyPotion } from './alchemy.js';
@@ -46,7 +46,7 @@ import { openDelve, hasDelveMap, isDelveOpen, exitDelve, closeDelveSilent } from
 import { openDelveFp, isDelveFpOpen, closeDelveFpSilent } from './delve-fp.js';
 import { ORE_KINDS, setCampusGuild } from './delve-maps.js';
 import { icon } from './icons.js';
-import { ensureCampus } from './campus.js';
+import { ensureCampus, stationFor } from './campus.js';
 import { openScroll, openScrollPane, closeScroll, refreshScroll, isScrollOpen } from './scroll-ui.js';
 import { SEATS, REALMS, TOWNS, DUNGEON_CELLS, seatById, realmById, seatForEvent, rivalSeat } from './world-guilds.js';
 import { openGlobe, refreshGlobePanel, isGlobeOpen, flatMapDataUrl } from './globe.js';
@@ -992,14 +992,17 @@ const WALKABLE = {
   academy: ['classroom', 'the classroom'],
 };
 /** The "walk inside" bar shown atop every walkable room. */
-function strollBar(id) {
-  const w = WALKABLE[id];
-  const room = getRoom(id);
-  if (!w || !room || !hasDelveMap(w[0])) return '';
-  const subject = heroById(selectedId) || guild.roster[0];
-  if (!subject) return '';
-  return `<div class="tourney-lens quest-lens"><button class="tourney-play" onclick="__guild.strollRoom('${w[0]}')">Walk ${w[1]} — take ${subject.name.split(' ')[0]} inside</button></div>`;
-}
+/**
+ * RETIRED (user decree, 2026-08-09) — "I'm not a fan of the 'Walk the …'
+ * buttons." Every room grew its own, and each opened a private copy of that room
+ * standing alone in a field. There is one estate and one way onto it now: take
+ * control of a member and you arrive wherever their week has them, on the same
+ * grounds as everyone else. @see walkGuild, campus.js stationFor.
+ *
+ * WALKABLE is still the room→interior table and is still correct — the campus
+ * stamps those same charts — so it stays for `kindForMapId` and the editor.
+ */
+function strollBar() { return ''; }
 /** Body types the Elements compositor builds from (crucible BODY_TYPES). */
 const MASTER_BUILDS = ['salt', 'sulfur', 'mercury'];
 /**
@@ -1041,8 +1044,29 @@ function masterName(v) {
   if (t) { m.name = t; save(); }
 }
 /** Walk the grounds: the Guildmaster on the campus map, doors into every building. */
-async function walkGuild() {
-  const m = ensureMaster(guild);
+/**
+ * WALK THE GROUNDS — one estate, one instance of every building, and you begin
+ * where the person you are playing actually is.
+ *
+ * WHAT THIS REPLACED (user decree, 2026-08-09): "I don't like that there are
+ * separate instances of the buildings with nothing on their exterior. The
+ * buildings should have one instance, inside the actual guild map." It was
+ * exactly so — every room printed its own "Walk the great hall" button, and each
+ * one opened a STANDALONE chart holding just that room: a bare wall ring with a
+ * turf apron painted round it, which is the blank building in a field from the
+ * report. Those charts were never a second design, only a second COPY: the
+ * campus already stamps the very same interiors into itself (campus.js
+ * buildCampusMap), doors and furniture and all, and walking through a doorway
+ * there puts you inside with the roof faded away.
+ *
+ * So there is one walk now. `memberId` says whose boots — the roster member if
+ * you name one, the Guildmaster otherwise — and `stationFor` says where they
+ * are standing when you arrive.
+ *
+ * @param {string} [memberId] whose week to begin in
+ */
+async function walkGuild(memberId) {
+  const m = (memberId && heroById(memberId)) || ensureMaster(guild);
   if (!hasDelveMap('campus') || isDelveOpen()) return;
   try {
     const hooks = {
@@ -1050,7 +1074,13 @@ async function walkGuild() {
       fight: async () => null,
       onKill: () => null,
       onOre: () => null,
-      companions: (mid) => (INTERIOR_FOLK[mid] ? INTERIOR_FOLK[mid](guild.roster) : []).slice(0, 5),
+      // THE WHOLE HOUSEHOLD, up to a budget. Everyone is somewhere now rather
+      // than five people being anywhere, so the cap climbs — but it stays a cap:
+      // every companion is a per-frame composite, and a roster all animating on
+      // one plane is exactly the ceiling `perf-many-characters` records.
+      companions: (mid) => (INTERIOR_FOLK[mid] ? INTERIOR_FOLK[mid](guild.roster) : []).slice(0, 10),
+      // ...and each of them stands where their week puts them.
+      stationOf: (p) => stationFor(guild, p),
       // The Guildmaster works stations too — and the estate plans in his own hall
       // are the one station only this walk can reach the interesting way.
       use: (stationId, api) => useStation(m, stationId, api),
@@ -1058,7 +1088,12 @@ async function walkGuild() {
     };
     hooks.swapView = makeSwapView('campus', m, hooks);
     hooks.sheet = () => memberSheetSpec(m);   // stats + gear from inside the walk
-    await openDelve('campus', m, hooks);
+    // Begin the walk where their week has them — at the anvil, in the library,
+    // asleep in the dormitory. A spawn tile is not session state, so it rides
+    // as a plain `at` and the swap guard leaves it alone.
+    const st = stationFor(guild, m);
+    if (st) notice = `${m.name.split(' ')[0]} — ${st.why}.`;
+    await openDelve('campus', m, hooks, st ? { at: [st.x, st.y] } : null);
   } catch (e) {
     console.warn('walk: failed to open', e);
     notice = 'The gate is stuck — try again.';
@@ -1072,6 +1107,16 @@ async function walkGuild() {
  * (toast · choose · workAt) — see delve.js workAt for the animation contract.
  */
 async function useStation(h, id, api) {
+  // THE GUILDMASTER IS NOT A ROSTER MEMBER. `ensureMaster` builds a walking
+  // body — an appearance and a name — with no `assignment`, no `professions`
+  // and no `condition`, because he never trains or is dispatched. Both work
+  // stations read those fields immediately, so walking the grounds as him and
+  // touching the anvil threw a TypeError. It could only ever happen on the
+  // campus walk, which is now the ONLY walk, so the guard is no longer optional.
+  if ((id === 'anvil' || id === 'cauldron') && (!h || !h.assignment)) {
+    if (api && api.toast) api.toast('The guildmaster looks it over, and leaves the work to those trained for it.');
+    return null;
+  }
   if (id === 'anvil') return anvilRefine(h, api);
   if (id === 'cauldron') return cauldronBrew(h, api);
   if (id === 'estatePlan') return readEstatePlan();
@@ -1234,8 +1279,13 @@ async function anvilRefine(h, api) {
 /** Who is at work in each interior — they populate the room as you walk it.
  *  Capped by the caller; a handful of animated bodies is the budget. */
 const INTERIOR_FOLK = {
-  // On the grounds: everyone who isn't shut indoors is out and about.
-  campus: (r) => r.filter((h) => ['train', 'rest', 'quest', 'hunt'].includes(h.assignment.type)),
+  // ON THE GROUNDS: EVERYONE. This used to keep only train/rest/quest/hunt, so
+  // the smith, the cook, the brewer, the enchanter and the scholar — the five
+  // people with the most obviously placeable jobs — did not exist on the estate
+  // at all. The grounds hold every room, so they hold everyone in them; where
+  // each one stands is `stationFor`. (user decree 2026-08-09: "All characters
+  // should be 'doing' something at all times according to their schedules.")
+  campus: (r) => r.slice(),
   guildhall: (r) => r.filter((h) => h.assignment.type === 'train'),
   library: (r) => r.filter((h) => h.assignment.type === 'study'),
   kitchen: (r) => r.filter((h) => h.assignment.type === 'cook'),
@@ -2245,6 +2295,26 @@ function curriculumPanel(h) {
 }
 
 /** The member's stat / condition / gear card — the shared header used in the Roster room. */
+/**
+ * THE ONE WAY ONTO THE GROUNDS — take control of this member and stand where
+ * their week has them. Replaces the nine per-room "Walk the …" buttons, each of
+ * which opened its own copy of one room in an empty field.
+ *
+ * It NAMES THE PLACE before you go, because that is the whole point: the answer
+ * to "where is Elowen" should be visible from the roster, not discovered by
+ * arriving. `stationFor` is the same derivation the walk itself uses, so the
+ * label cannot promise a room the spawn will not deliver.
+ */
+function takeControlBar(h) {
+  if (!h || !hasDelveMap('campus')) return '';
+  const st = stationFor(guild, h);
+  const first = (h.name || '').split(' ')[0];
+  return `<div class="tourney-lens quest-lens">
+      <button class="tourney-play" onclick="__guild.walkGuild('${h.id}')">
+        ⚑ Take control of ${first} — ${st.why}
+      </button></div>`;
+}
+
 function heroHeader(h) {
   const rep = report && report.results ? report.results.find((r) => r.id === h.id) : null;
   const stats = HERO_STATS.map((s) => {
@@ -2276,7 +2346,8 @@ function heroHeader(h) {
       ${bar('Bond', h.condition.loyalty ?? 60, '#c9a0e8')}${bar('Discipline', h.condition.discipline ?? 40, '#9fb8a8')}
       </div>
       ${h.condition.injury ? `<div class="injury-flag">⚠ ${injuryLabel(h.condition.injury)} — recovers (rest) until healed; a potent draught cures it</div>` : ''}
-      ${equippedLine(h)}`;
+      ${equippedLine(h)}
+      ${takeControlBar(h)}`;
 }
 
 function skillShapeOf(h) {
@@ -2330,11 +2401,24 @@ function trainPlan(h) {
     const n = i + 1, t = n % 10, h = n % 100;
     return n + (t === 1 && h !== 11 ? 'st' : t === 2 && h !== 12 ? 'nd' : t === 3 && h !== 13 ? 'rd' : 'th');
   };
-  const nowRow = `<div class="sched-row now"><span class="sr-wk">this wk</span><span class="sr-name">${jobLabel(h)}</span></div>`;
+  // THE DATE IS A PROJECTION AND SAYS SO. The ordinal above is the truth — the
+  // queue only advances on weeks the member actually trains — but "5th" cannot
+  // be compared against a tournament dated to a week, which is what the player
+  // is really planning against. So both: the ordinal is what the queue promises,
+  // the date is where it lands IF nothing interrupts, and the title says as much.
+  const woy = guild.calendar.weekOfYear;
+  const dateFor = (i) => {
+    const wk = woy + i + 1;
+    const yrs = yearsAhead(woy, i + 1);
+    return shortDate(wk) + (yrs ? ` · Yr ${guild.calendar.year + yrs}` : '');
+  };
+  const nowRow = `<div class="sched-row now"><span class="sr-wk">this wk</span><span class="sr-name">${jobLabel(h)}</span>
+      <span class="sr-date">${shortDate(woy)}</span></div>`;
   const rows = sched.length
     ? sched.map((p, i) => `<div class="sched-row"><span class="sr-wk">${ord(i)}</span>
         <span class="sr-name">${(getDrill(p.trainingId) || REST).name}</span>
         ${p.intensity === 'heavy' ? '<span class="sr-h" title="heavy">H</span>' : ''}
+        <span class="sr-date" title="If no quest, hunt or workshop week interrupts">${dateFor(i)}</span>
         <button class="sr-x" onclick="__guild.scheduleRemoveAt(${i})" title="Remove from plan">✕</button></div>`).join('')
     : '<div class="hint" style="text-align:left;padding:6px 2px">No weeks queued — the member repeats this week’s drill until you plan ahead. Queue upcoming weeks below.</div>';
   const addBtns = DRILLS.map((d) => `<button class="sched-btn" onclick="__guild.scheduleAdd('${d.id}')" title="Queue ${d.name} (${heavy ? 'heavy' : 'light'})">+ ${d.main}</button>`).join('')
@@ -4348,11 +4432,18 @@ function openRoomHelp(id) {
   openScroll({ title: h.title, glyph: h.glyph || '❦', render: () => `<div class="help-scroll">${h.body()}</div>` });
 }
 
-/** A one-line role banner shown atop every room. */
-function roleTag(roomId) {
-  const r = roleFor(roomId);
-  return r ? `<div class="role-banner"><span class="role-name">${r.glyph} ${r.name}</span> <span class="dim">— ${r.blurb}</span></div>` : '';
-}
+/**
+ * RETIRED (user request, 2026-08-09). Every room opened with a role banner —
+ * "◧ The Season — Tournaments ahead, enter heroes early and train toward them",
+ * "▣ Adventurer — Trains, then quests in the field" — a permanent line of
+ * explanation directly under a banner that already names the room, above the
+ * thing you came to do. That is what the ? is for now; the blurbs still live in
+ * roles.js for anything that wants them.
+ *
+ * Kept as a no-op rather than deleted at the call site so the header stays one
+ * expression, and so this note sits where the next person will look for it.
+ */
+function roleTag() { return ''; }
 
 // --- EO-style room scenes -----------------------------------------------------
 // Every room opens on an illustrated banner (Etrian Odyssey town-facility style):

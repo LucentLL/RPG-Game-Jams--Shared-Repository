@@ -1124,9 +1124,15 @@ function mountScene(prep, entry) {
   // The room's own people — whoever the caller says works here, going about
   // their business. They wander, they don't fight, and they don't block.
   D.companions = [];
+  // WHERE SOMEONE STANDS IS THE MODEL'S ANSWER, not a dice roll. A lens may say
+  // `at` for a person — the guild derives it from that member's week, so the
+  // smith is found at the anvil and the injured in the dormitory — and only
+  // falls back to open floor for a walk that has no opinion (a wilds locale).
+  // `home` follows it too, or the idle wander would drift them off their post.
   for (const person of (D.hooks.companions ? D.hooks.companions(map.id) : [])) {
     if (!person || person.id === D.member.id) continue;
-    const spot = randomFloor();
+    const want = D.hooks.stationOf ? D.hooks.stationOf(person) : null;
+    const spot = (want && canStand(want.x, want.y)) ? want : randomFloor();
     if (!spot) break;
     spawnCompanion(person, spot.x, spot.y);
   }
@@ -1166,7 +1172,13 @@ export async function openDelve(localeId, member, hooks, carry) {
     <div class="delve-toasts"></div>
     <button class="dv-use" hidden onclick="__delve.use()"></button>`;
 
-    if (carry && !carry.swap) carry = null;   // only a live swap may carry state
+    // ONLY A LIVE SWAP MAY CARRY STATE — but a fresh open may still say WHERE to
+    // stand. `at` is not session state (no haul, no worked veins, no stack); it
+    // is the spawn tile, and it is what lets a walk begin where the member's
+    // week actually puts them instead of always at the front gate.
+    // @see campus.js stationFor.
+    const spawnAt = carry && carry.at && !carry.swap ? carry.at : null;
+    if (carry && !carry.swap) carry = null;
     D = {
       map: null, theme: null, hooks, member, gfx, field: null, host,
       pass: null, tall: null, solids: [], uses: [], useNear: null, working: false,
@@ -1202,7 +1214,7 @@ export async function openDelve(localeId, member, hooks, carry) {
     // scene latched as "a delve is open" and lock the feature out for the rest
     // of the page. Tear it down and let the caller report the failure.
     try {
-      mountScene(prep, carry ? carry.at : null);
+      mountScene(prep, carry ? carry.at : spawnAt);
       // A live swap carries the SURFACE too (a body on a bridge must arrive on
       // it, not under it) — validated against what the cell actually offers.
       if (carry && carry.lev != null && D && D.player

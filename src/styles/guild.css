@@ -812,3 +812,11 @@ button.rs-worker{background:transparent;border:0;padding:0;cursor:pointer;font:i
 .rs-worker.rs-pick{border-radius:9px;transition:transform 0.09s ease}
 .rs-worker.rs-pick:hover{transform:translateY(-3px)}
 .rs-worker.rs-pick.sel{background:radial-gradient(ellipse at 50% 78%,rgba(212,168,67,0.32),transparent 66%)}
+
+/* The projected date on a plan row. Quiet — the ordinal is the promise, this is
+   only where it lands if nothing interrupts — and it drops off a narrow screen
+   before the drill name does. */
+.sched-row .sr-date{margin-left:auto;padding:0 8px;font-size:0.72em;color:var(--dim);
+  white-space:nowrap;font-variant:small-caps;letter-spacing:0.04em}
+.sched-row.now .sr-date{color:var(--gold);opacity:0.85}
+@media (max-width:560px){.sched-row .sr-date{display:none}}

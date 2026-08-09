@@ -222,6 +222,104 @@ export function doorOf(b) {
 }
 
 /**
+ * WHERE A MEMBER ACTUALLY IS THIS WEEK, as a tile on the grounds.
+ *
+ * THE GAP THIS FILLS (user decree, 2026-08-09): "when you take over a character,
+ * you should start controlling them in the location that they are currently
+ * based on their schedule. Maybe Elowen is sleeping in the quarters, studying in
+ * the academy, sparring in the guild arena, blacksmithing a weapon in the forge.
+ * All characters should be 'doing' something at all times." The week was always
+ * stored — `assignment.type` has said "forge" or "study" or "hunt" since the
+ * guild shipped — but nothing ever turned it into a PLACE, so every walk began
+ * at the front gate no matter who you were or what they were meant to be doing.
+ *
+ * IT ANSWERS IN CAMPUS TILES, and it lives here because this module already owns
+ * where every building stands (`doorOf`, `footprintOf`) and where its furniture
+ * was re-based to (the stamp loop below). A caller asking "where is Elowen"
+ * must not have to know that the anvil moved when the Forge was dragged.
+ *
+ * The decision tree is the one `ranch.js dutyFor` worked out for the retired
+ * 22×22 ranch — injury sends you to bed, a trade sends you to its station, a
+ * spar to the arena, a march to the gate — re-expressed against the real estate
+ * rather than a second invented one. Falls back to the gate, which is always a
+ * legal tile.
+ *
+ * @param {Object} guild @param {Object} member
+ * @returns {{x:number, y:number, why:string}}
+ */
+export function stationFor(guild, member) {
+  const c = ensureCampus(guild);
+  const gate = { x: 13.5, y: CAMPUS_H - 4.7, why: 'at the gate' };
+  if (!member) return gate;
+  const a = member.assignment || {};
+  const cond = member.condition || {};
+
+  const placed = (kind) => (c.buildings || []).find((b) => b.kind === kind) || null;
+  /** A tile INSIDE a building — its named workstation if the room has one,
+   *  otherwise the middle of its floor. Never the doorway: standing in a
+   *  doorway reads as arriving, not as working. */
+  const inside = (kind, useId, why) => {
+    const b = placed(kind);
+    if (!b) return null;
+    const room = roomOf(kind);
+    if (!room) return null;
+    const top = b.base - room.h;
+    if (useId) {
+      const p = (room.props || []).find((q) => q.use === useId);
+      // Stand one tile BELOW the station, facing it — on it would be inside the
+      // anvil. The stamp loop re-bases props the same way.
+      if (p) return { x: b.x + p.x - 1 + 0.5, y: top + p.y - 1 + 1.5, why };
+    }
+    return { x: b.x + room.w / 2, y: top + room.h / 2 + 0.5, why };
+  };
+
+  // Hurt comes first: a broken arm outranks whatever the plan said.
+  if (cond.injury) return inside('dormitory', null, 'laid up in the dormitory') || gate;
+
+  switch (a.type) {
+    case 'forge':   return inside('forge', 'anvil', 'at the anvil') || gate;
+    case 'brew':    return inside('apothecary', 'cauldron', 'over the cauldron') || gate;
+    case 'cook':    return inside('kitchen', null, 'working the kitchen') || gate;
+    case 'study':   return inside('library', null, 'reading in the library') || gate;
+    case 'enchant': return inside('armory', null, 'at the enchanting bench') || gate;
+    // Away from the estate entirely — they are on the road, so the gate is the
+    // honest answer rather than pretending they are indoors.
+    case 'quest':
+    case 'hunt':    return { ...gate, why: 'mustering at the gate' };
+    default: break;
+  }
+  // Training. Resting is the dormitory; sparring is the arena; everything else
+  // is drill, which happens in the yard outside the hall.
+  if (a.trainingId === 'rest') return inside('dormitory', null, 'resting in the dormitory') || gate;
+  if (a.trainingId === 'spar') return inside('arena', null, 'sparring in the arena') || gate;
+  if (a.type === 'train') {
+    const hall = placed('guildhall');
+    if (hall) {
+      const d = doorOf(hall);
+      return { x: d[0] + 0.5, y: d[1] + 2.5, why: 'drilling in the yard' };
+    }
+  }
+  return gate;
+}
+
+/** The building a room's interior map id belongs to — the inverse of
+ *  BUILDING_KINDS[].to, so a caller holding a map id can find the real thing on
+ *  the estate instead of loading a second copy of it. */
+export function kindForMapId(mapId) {
+  for (const k in BUILDING_KINDS) if (BUILDING_KINDS[k].to === mapId) return k;
+  return null;
+}
+
+/** Just inside a building's door — where "walk into the Forge" should land you. */
+export function doorstepOf(guild, kind) {
+  const c = ensureCampus(guild);
+  const b = (c.buildings || []).find((x) => x.kind === kind);
+  if (!b) return null;
+  const d = doorOf(b);
+  return { x: d[0] + 0.5, y: d[1] + 0.5 };
+}
+
+/**
  * The layout as a delve map. This IS the grounds — `mapForLocale('campus')`
  * returns it, and the Build tab reads the same result, so the plan you edit and
  * the ground you walk are one object.
