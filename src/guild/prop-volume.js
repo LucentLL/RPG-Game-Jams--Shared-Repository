@@ -268,6 +268,40 @@ export function footprint(p, w, d) {
 }
 
 /**
+ * HOW MUCH FLOOR A PROP DENIES YOU — one number, one place, every lens.
+ *
+ * ONE COLLISION FACT (CLAUDE.md) says a thing blocks the space its art occupies
+ * in every lens, no more and no less. Three call sites each derived that from
+ * the same authored width and each got a different answer, which is what a
+ * playtester walked into: a barrel that fills a corridor in first person and
+ * leaves room to pass in top-down. The three were
+ *   delve.js  a RECTANGLE, `clamp(p.w/96, .12, .5)` half-width by `SOLID_DEPTH`
+ *             deep, pinned to the BACK of the cell — so you could walk in front
+ *             of the barrel and not behind it;
+ *   delve-fp  `clamp(max(w,d) * 0.45, .14, .5)` for a lying prop, and
+ *   delve-fp  `min(w/2, max(.12, w * 0.42))` for a standing one — both circles.
+ * Two shapes and three formulas for one question about one barrel.
+ *
+ * IT IS A CIRCLE, and that is the honest reading rather than the convenient
+ * one: a barrel is a barrel from every side, so the space it denies cannot
+ * depend on which way the camera happens to be pointing. The rectangle was a
+ * 2.5-D convention — a prop's art rests on the bottom edge of its tile, so the
+ * slab was put where the art LOOKED like it stood — and it does not survive a
+ * lens that can walk around the thing.
+ *
+ * `0.12` is the floor: something small still stops a foot rather than being
+ * scenery you slide through. Never past the art's own half-width, which is the
+ * law's own definition of "bigger than the art".
+ *
+ * @param {number} w width in tiles @param {number} [d] depth in tiles
+ */
+export function blockerRadius(w, d) {
+  const span = Math.max(w || 0, d || 0);
+  if (!(span > 0)) return 0.06;
+  return Math.min(span / 2, Math.max(0.12, span * 0.45));
+}
+
+/**
  * Authoring slop, in tiles, when deciding whether a small thing is resting on a
  * big one. The maps anchor a stack of ledgers ON the desk's drawn face in the
  * top-down view (`y: 5.8` against a desk whose footprint ends at 5.69), which

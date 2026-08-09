@@ -29,7 +29,7 @@ import { loadImg, SHEET_URLS, doorTexture, keyTexture } from './delve.js';
 import { ART, artSprite, artCropCss, artTexRect, SWAY } from './art.js';
 import { createFpHands, armsOf } from '../game/fp-hands.js';
 import { waterFrames, WADE_SPEED, submergeFor, isSwimming } from './water.js';
-import { propVolume, propCell, footprint, REST_SLOP, PLAYER_H } from './prop-volume.js';
+import { propVolume, propCell, footprint, blockerRadius, REST_SLOP, PLAYER_H } from './prop-volume.js';
 import { icon } from './icons.js';
 import { createLook, readPad, padReset, touchPrimary, onTouchPrimary, PAD } from '../platform/input.js';
 import { claimPad } from '../platform/ui-pad.js';
@@ -2040,7 +2040,7 @@ function lieSolid(host, p, vol, fp, base) {
   // A bed blocks like a bed: its own footprint's circle, now that 'f' cells
   // no longer hard-block (@see canStandAt).
   F.propBlockers.push({
-    x: fp.cx, y: fp.cy, r: Math.max(0.14, Math.min(0.5, Math.max(fp.w, fp.d) * 0.45)),
+    x: fp.cx, y: fp.cy, r: blockerRadius(fp.w, fp.d),
     lv: F.model.surfacesAt(Math.floor(fp.cx), Math.floor(fp.cy))[0] || 0,
   });
   // Under GL the bed joins the BUFFER — a DOM solid composites over the
@@ -2339,7 +2339,7 @@ function buildProps(props) {
       // wider than the art's own half-width (a potion bottle is 8px; a blocker
       // past its glass is "bigger than the art", the law's own definition).
       F.propBlockers.push({
-        x: at.x, y: at.y, r: Math.min(wTiles / 2, Math.max(0.12, wTiles * 0.42)) || 0.06,
+        x: at.x, y: at.y, r: blockerRadius(wTiles),
         lv: F.model.surfacesAt(Math.floor(at.x), Math.floor(at.y))[0] || 0,
       });
     }

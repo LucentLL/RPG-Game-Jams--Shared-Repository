@@ -28,7 +28,7 @@ import { preyById } from './locales.js';
 import { THEMES, DECALS, ORE_KINDS, oreKindAt, mapForLocale, validateMap, makeLevelModel, CLIMB_CH, DECK_CH, FLOOR_LV, wetCells, waterDepths } from './delve-maps.js';
 import { waterFrames, waterStripUrl, WADE_SPEED, submergeFor, isSwimming } from './water.js';
 import { artSprite } from './art.js';
-import { propVolume } from './prop-volume.js';
+import { propVolume, propCell, blockerRadius } from './prop-volume.js';
 import { readPad, padReset, touchPrimary, onTouchPrimary, PAD } from '../platform/input.js';
 import { claimPad } from '../platform/ui-pad.js';
 import { openFieldSheet } from '../platform/field-sheet.js';
@@ -171,9 +171,9 @@ const bakeChar = (ch, x, y, model) => {
 const CLIMB_SPEED = 0.42;
 /** Where a climber renders while between levels: visibly on the way up. */
 const CLIMB_LIFT = 0.5;
-/** Upright props — boulders, stalagmites, the cart, furniture. These block only
- *  the shallow floor slice their art actually rests on (SOLID_DEPTH), so you can
- *  step in behind one and have it sort in front of you. */
+/** Upright props — boulders, stalagmites, the cart, furniture. Each blocks the
+ *  CIRCLE its own art occupies (@see blockerRadius, the one derivation every
+ *  lens reads), so you can step past one on any side you can see room on. */
 const FOOTED = { r: 1, t: 1, m: 1, f: 1 };
 /**
  * How many swaying standees a map may have before the wind drops. Each one is a
@@ -634,7 +634,11 @@ async function bakeMap(map, theme) {
     // floor dressing land on plain floor and must not leave stray entries a
     // later chart could collide with a real furnishing's.
     if (at(cx, cy) !== 'f') continue;
-    fw.set(cx + ',' + cy, { x: p.x, half: Math.max(0.12, Math.min(0.5, (p.w || 48) / 96)) });
+    // The prop's own centre and radius, in tiles — `propCell` is what turns an
+    // authored foot line into the middle of the cell it occupies, so the y here
+    // is the same point first person stands the thing on.
+    const c = propCell(p), w = (p.w || 48) / 48;
+    fw.set(cx + ',' + cy, { x: c.x, y: c.y, r: blockerRadius(w) });
   }
   const pass = [], tall = [], solids = [];
   for (let y = 0; y < rows; y++) {
@@ -649,10 +653,17 @@ async function bakeMap(map, theme) {
       // (baked.model) is what actually rules a step, not a wall test.
       tall[y].push(ch === '#' || ch === 'B' || ch === 'b' || ch === 'F' || ch === 'D');
       if (FOOTED[ch]) {
+        // A CIRCLE, from the one derivation every lens reads (@see
+        // blockerRadius). This was a shallow slab pinned to the BACK of the
+        // cell, which is where a 2.5-D prop's art LOOKS like it stands — and it
+        // meant you could walk in front of a barrel here and not in first
+        // person, the playtest's "I can't walk by this barrel in 1st or 3rd
+        // person, but I can walk around it in top-down". A barrel is a barrel
+        // from every side; what it denies you cannot depend on the camera.
         const f = ch === 'f' ? fw.get(x + ',' + y) : null;
-        const cx = f ? f.x : x + 0.5, half = f ? f.half : 0.5;
         solids.push({
-          x0: cx - half, x1: cx + half, y0: y + 1 - SOLID_DEPTH, y1: y + 1,
+          x: f ? f.x : x + 0.5, y: f ? f.y : y + 0.5,
+          r: f ? f.r : 0.5,                     // r/t/m art is near tile-wide
           lv: model.surfacesAt(x, y)[0] || 0,   // the ground it stands on
         });
       }
@@ -1786,7 +1797,8 @@ const tallAt = (x, y) => {
 const clearOfSolids = (x, y, lv) => {
   for (const s of D.solids) {
     if (lv != null && Math.abs(lv - (s.lv || 0)) >= 2) continue;
-    if (x > s.x0 - BODY_R && x < s.x1 + BODY_R && y > s.y0 - BODY_R && y < s.y1 + BODY_R) return false;
+    const dx = x - s.x, dy = y - s.y, rr = s.r + BODY_R;
+    if (dx * dx + dy * dy < rr * rr) return false;
   }
   return true;
 };
