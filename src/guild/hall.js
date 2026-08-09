@@ -2230,13 +2230,13 @@ function curriculumPanel(h) {
     trackBody = `<div class="opt-list">${seconds.map((id) => { const d = disciplineById(id);
       return `<button class="opt ${h.track.second === id ? 'active' : ''}" onclick="__guild.setSecondDiscipline('${id}')">
         <span><span class="o-name">${d.glyph} ${d.name}</span> <span class="o-desc">${d.blurb}</span></span></button>`; }).join('')}</div>
-      <div class="hint" style="text-align:left;padding:4px 2px">A Double Major gives up a trade to train two combat disciplines — a pure fighter. Train either in the drill menu.</div>`;
+      `;
   } else {
     const cur = memberElective(h);
     trackBody = `<div class="opt-list">${ELECTIVE_IDS.map((id) => { const e = ELECTIVES[id];
       return `<button class="opt ${cur && cur.id === id ? 'active' : ''}" onclick="__guild.setElective('${id}')">
         <span><span class="o-name">${e.glyph} ${e.name}</span> <span class="o-desc">${e.blurb}</span></span></button>`; }).join('')}</div>
-      <div class="hint" style="text-align:left;padding:4px 2px">An Elective is the member's trade — they work its room (${cur ? `the ${cur.room}` : 'once chosen'}). Every member still trains combat besides.</div>`;
+      `;
   }
   return `<div class="plan-title">Curriculum — <span class="pt-cur">${maj.glyph} ${maj.name}</span> <span class="dim" style="font-weight:400;text-transform:none">major · their nature</span></div>
     <div class="disc-list">${discRows}</div>
@@ -2343,7 +2343,7 @@ function trainPlan(h) {
   return `<div class="plan-title">Upcoming Weeks <span class="dim" style="font-weight:400;text-transform:none">— training plan · queues as ${heavy ? 'heavy' : 'light'}</span></div>
     <div class="sched-list">${nowRow}${rows}</div>
     <div class="sched-add">${addBtns}</div>
-    <div class="cal-note">Plan ahead: each row is a future <b>training</b> week, run in order. Quest, hunt, or workshop weeks don’t consume the plan — it waits.</div>`;
+    `;
 }
 
 /** Quest board scoped to member h, with party-projected odds. Picking one dispatches h. */
@@ -2664,7 +2664,7 @@ function armoryPanel(h) {
       <div class="plan-title">Armory · finished gear</div>
       <div class="armory-shelf">${shelfHTML}</div>
       ${carried.length ? `<div class="rr-sub" style="margin-top:8px">${carried.length} item(s) carried by heroes.</div>` : ''}
-      <div class="hint" style="text-align:left;padding:6px 0 0">The Forge can ⚒ rework a shelved piece's quality, or ✦ refine it +1 at a time — raw ore lives in the Forge's own stockroom.</div>
+      
     </div>`;
 }
 
@@ -2703,7 +2703,7 @@ function libraryShelfPanel() {
       <div class="plan-title">The Shelf · ${books.length} volume${books.length === 1 ? '' : 's'}</div>
       <div class="armory-shelf">${rows}</div>
       <div style="margin-top:8px;font-size:0.82em">${guide}</div>
-      <div class="hint" style="text-align:left;padding:6px 0 0">The shelf also teaches the shop floor: every trade week, the worker consults the best volume on their craft for a little Theory.</div>
+      
     </div>`;
 }
 
@@ -2772,7 +2772,7 @@ function marketPanel() {
       ${haulSection}
       <div class="dept-lbl" style="margin-top:8px">The bookseller's shelf</div>
       <div class="market-list">${bookRows || '<div class="hint">Sold out this week — the shelf turns over each Advance Week.</div>'}</div>
-      <div class="hint" style="text-align:left;padding:6px 0 0">Materials deliver to their room's store (ore → Forge, herbs → Laboratory, food → Kitchen); books shelve in the Library. Pelts &amp; surplus meat from the Wilds sell here. Stock refreshes each week.</div>
+      
     </div>`;
 }
 
@@ -3171,12 +3171,17 @@ function roomStatus(id) {
 
 function rosterRoom() {
   const h = heroById(selectedId);
-  const list = `<div class="plan-card"><div class="plan-title">▣ Roster · ${guild.roster.length}/${maxRoster(guild)}</div>
-      <div class="roster-list">${guild.roster.map(rosterRow).join('')}</div></div>`;
-  if (!h) return list;
+  // NO SECOND LIST. The banner's standees are the picker now (roomWorkerStrip),
+  // so the full roster card that used to sit here was the same six people asked
+  // the same question a screen further down.
+  if (!h) {
+    return `<div class="plan-card"><div class="hint" style="text-align:center;padding:14px 2px">
+        Pick a member from the row above — ${guild.roster.length}/${maxRoster(guild)} in the guild.
+      </div></div>`;
+  }
   // MR-style: the member card up top, then two columns — this week's drill menu
   // beside the week-by-week plan — then the quest board. Less scroll, bigger rows.
-  return `${list}
+  return `
     <div class="plan-card">${heroHeader(h)}</div>
     <div class="plan-card">${curriculumPanel(h)}</div>
     <div class="train-cols">
@@ -3254,8 +3259,11 @@ function wildsRoom() {
       : `<div class="hint" style="text-align:left;padding:4px 2px">Pick a quarry above to dispatch <b>${subject.name.split(' ')[0]}</b>.</div>`;
     // A charted locale can be WALKED — the Delve (delve.js): live 2.5D exploration.
     const delveRow = hasDelveMap(open.id)
+      // The walk's rules used to be printed here in full, on every visit. They
+      // live on the room's help scroll now (ROOM_HELP.wilds) — the button is in
+      // the banner. What stays is the cost, which is not an explanation.
       ? `<div class="tourney-lens quest-lens"><button class="tourney-play" ${hCanMarch ? '' : 'disabled'} onclick="__guild.exploreLocale('${open.id}')">⚒ ${hCanMarch ? `Walk ${open.name} — take ${subject.name.split(' ')[0]} in on foot` : `${subject.name.split(' ')[0]} can't march right now`}</button></div>
-        <div class="hint" style="text-align:left;padding:0 2px 6px">The area is charted. There is ONE walk and you choose the camera <b>while you are in it</b> — the view button on the HUD swaps between looking down on ${subject.name.split(' ')[0]} and standing in their boots, and the walk carries over: same position, same facing, same worked veins, same haul. <b>From above</b>: move with WASD or the stick, close with a creature to fight it, bump a vein to mine it. <b>From inside</b>: WASD steps and sidesteps, ←/→ turn, <b>Space</b> or a click strikes at what is in front of you — a creature within reach, or the seam in the wall. Fights happen <b>there, in the corridor</b>: you aim and time the blow, whether it lands is rolled from ↯ against the creature (tiredness costs you accuracy), <b>Shift</b> guards and <b>R</b> drinks a draught from the Apothecary. Health only comes back part way between fights, so how deep you push is the question. Entering costs ${QUEST_STAMINA} stamina and kills pay real spoils on the spot (repeat marches the same week find thinner pickings) — losing a bout sends ${subject.name.split(' ')[0]} home.</div>`
+        <div class="hint" style="text-align:left;padding:0 2px 6px">Costs ${QUEST_STAMINA} stamina · kills pay spoils on the spot.</div>`
       : '';
     preyPanel = `<div class="plan-title">${open.glyph} ${open.name} <span class="dim" style="font-weight:400;text-transform:none">— ${open.biome}</span></div>
       <div class="opt-list">${rows}</div>${delveRow}${lensBar}`;
@@ -3270,8 +3278,7 @@ function wildsRoom() {
       <div class="plan-title">The Wilds · ${disc.length}/${Object.keys(LOCALES).length} mapped</div>
       <div class="wild-map">${areaCards}${scoutRow}</div>
     </div>
-    <div class="plan-card">${preyPanel || '<div class="hint">Scout an area to open the hunt.</div>'}</div>
-    <div class="hint" style="text-align:left;padding:2px 4px 0">A kill brings home game meat (Kitchen pantry → the Hunter's Table diet), a pelt (sold at the Market), gold, reputation, and field insight.</div>`;
+    <div class="plan-card">${preyPanel || '<div class="hint">Scout an area to open the hunt.</div>'}</div>`;
 }
 
 /** A work department: shows ONLY the members assigned to this job, plus an "Assign a
@@ -3321,7 +3328,7 @@ function kitchenRoom() {
           <span class="rr-portrait sm">${personSprite(m, 34)}</span>
           <span class="rr-main"><span class="rr-name">${m.name}</span><span class="rr-assign">${getDietPlan(m.assignment.dietId).name}</span></span>
         </button>`).join('')}</div>
-      <div class="hint" style="text-align:left;padding:6px 2px 0">Every diet draws its food from the pantry each week — plain tables eat grain, the rich ones salted meat. A short pantry means plain rations and grumbling.</div></div>`;
+      </div>`;
   const pantry = storesPanel('The Pantry · provisions', 'kitchen', 'Restock at the ⚖ Market (Armory room), or set a Cook to work below. One unit feeds one member for a week.');
   const cooks = deptRoom('cook', '', 'Kitchen', cookBody); // Cooks (Cooking elective) produce rations here
   if (!h) return cooks + menu + pantry;
@@ -3346,7 +3353,7 @@ function apothecaryRoom() {
   return `${ctx}<div class="plan-card">
       <div class="plan-title">Apothecary · ${potionCount(inv)} potion(s)</div>
       <div class="armory-shelf">${shelfHTML}</div>
-      <div class="hint" style="text-align:left;padding:6px 0 0">The Apothecary shelves finished brews only — raw herbs live in the ⚗ Laboratory's stores.</div>
+      
     </div>`;
 }
 
@@ -3402,8 +3409,7 @@ function quartersRoom() {
   const housed = guild.roster.length, cap = maxRoster(guild);
   return `${hallOfFamePanel()}<div class="plan-card">
       <div class="plan-title">Bunkrooms · ${housed}/${cap} housed</div>
-      <div class="hint" style="text-align:left">Your members sleep here between weeks. Beds come from Living Quarters — expand it in the Grounds to house more.
-        Sell-swords for hire are down in the Town; unnamed prospects train in the Academy.</div>
+      
     </div>`;
 }
 
@@ -3417,8 +3423,7 @@ function townRoom() {
   const full = guild.roster.length >= maxRoster(guild);
   return `<div class="plan-card">
       <div class="plan-title">The Wayhouse · sell-swords for hire · roster ${guild.roster.length}/${maxRoster(guild)}</div>
-      <div class="hint" style="text-align:left">Grown fighters passing through town. They cost gold and come as they are — no
-        upbringing, no loyalty, no say in what they became. New faces drift in each week.</div>
+      
       <div class="recruit-list">${guild.recruits.map(recruitCard).join('')}</div>
       ${full ? '<div class="hint">No room on the roster — expand Living Quarters in the Grounds.</div>' : ''}
     </div>`;
@@ -3690,7 +3695,7 @@ function studyRoom() {
         ${item('tourneys', 'Tournaments', nextT ? (nextT.week - cur <= 0 ? 'one this week' : 'next in ' + (nextT.week - cur) + 'w') : 'a quiet season', !!nextT && nextT.week - cur <= 1)}
         ${item('map', 'World Map', SEATS.length + ' halls, one sheet', false)}
       </div>
-      <div class="desk-note">Take a scroll from the desk — it unrolls with the paperwork inside. The same letters hang on the room boards; the desk is where the guildmaster reads everything at once.</div>
+      
     </div>`;
 }
 
@@ -3817,7 +3822,7 @@ function worldRoom() {
   }).join('');
   return `<div class="plan-card">
       <div class="plan-title">The Known World</div>
-      <div class="hint" style="text-align:left">Four realms, thirty-two halls — yours among them. Drag the globe to turn it, pinch or ＋/− to zoom: closer in, the free towns and your charted Wilds delves appear. Tournaments pulse at the hall hosting them; envoys (☉${CONTACT_GOLD}, sent here or from the desk's Contacts scroll) light a hall up with its dossier.</div>
+      
       <div class="tourney-lens quest-lens">
         <button class="tourney-play" onclick="__guild.openGlobe()">Turn the globe</button>
         <button class="tourney-play" onclick="__guild.deskScroll('map')">Unroll the flat map</button>
@@ -3894,7 +3899,7 @@ function groundsRoom() {
       </div>
       <div class="tourney-lens quest-lens"><button class="tourney-play" onclick="__guild.walkGuild()">Walk the grounds — enter any building through its door</button></div>
       <div class="tourney-lens quest-lens"><button class="tourney-play" onclick="__guild.mapEditor()">The drafting table — draw a new map, then walk it</button></div>
-      <div class="fac-note">The estate plans are spread on the table in the Great Hall (and on the desk in your study). Read them to raise, move or pull down a building.</div>
+      
     </div>
     <div class="plan-card">
       <div class="plan-title">The Grounds · capacity</div>
@@ -4067,7 +4072,7 @@ function calendarRoom() {
         ${rows}
       </div>
       ${farRow}
-      <div class="cal-note">Pick an event on the grid to read it — <b>nominate one champion and train them toward the date</b>. Each resolves on its week; an injured champion can't compete.</div>
+      
       <button class="opt" onclick="__guild.setAskTournaments()" style="margin-top:8px;width:100%">
         <span><span class="o-name">${ask ? '' : ''} Due-match chooser</span> <span class="o-desc">${ask ? 'each due match asks: fight, command, or simulate' : 'due matches simulate quietly'}</span></span>
         <span class="o-cost">${ask ? 'ON' : 'OFF'}</span></button>
@@ -4131,7 +4136,7 @@ function arenaRoom() {
   return `<div class="plan-card">
       <div class="plan-title">⚔ The Arena · <span class="rr-sub">as ${h.name}</span></div>
       ${heroSwitcher()}
-      <div class="room-jobline">Step into the ring <b>right now</b> — <b>⚔ Live</b> (on-screen stick or WASD, tap to attack) or <b>♟ Tactics</b> (queue your moves; both sides execute simultaneously). Pure practice: no gold, no injuries.</div>
+      
       <div class="dept-lbl">Choose an opponent</div>
       <div class="opt-list">${dummy}${oppList}</div>
     </div>`;
@@ -4146,6 +4151,201 @@ function roomTile(room) {
       <span class="rt-tag">${role ? role.name : room.tag}</span>
       <span class="rt-status">${roomStatus(room.id)}</span>
     </button>`;
+}
+
+/**
+ * HOW A ROOM WORKS, ON A SCROLL YOU ASK FOR — not a wall of italics you scroll
+ * past forever.
+ *
+ * THE GAP THIS FILLS (user request, 2026-08-09): "hide all this text that
+ * explains what the mode does. You can add a button that helps or explains the
+ * mode to the player with a popup scroll." The Wilds carried an eleven-line
+ * paragraph on every visit, teaching a walk the player had already taken; the
+ * rooms behind it each carried their own. Rules a player reads once do not earn
+ * permanent space above the thing they came to do.
+ *
+ * STATE STAYS ON THE SCREEN. Only the TEACHING moves here — "Dispatching Elowen
+ * · 40 stamina" is not an explanation, it is what is about to happen, and it
+ * stays where it was. The test applied to each line: would a player who knows
+ * the game still need it? If yes it is not help, it is status.
+ *
+ * The scroll is the one the Study already unrolls (scroll-ui.js), so this is a
+ * new use of a built thing, not a second modal.
+ */
+const ROOM_HELP = {
+  wilds: {
+    title: 'Hunting the Wilds', glyph: '❦',
+    body: () => {
+      const who = (heroById(selectedId) || guild.roster[0] || {}).name || 'your hunter';
+      const first = who.split(' ')[0];
+      return `<p>Pick <b>who hunts</b>, open a charted area, choose a quarry, and dispatch.
+        Marching costs <b>${QUEST_STAMINA} stamina</b>. Unmapped ground is fog until you
+        commission a scout.</p>
+      <p><b>One walk, two cameras.</b> The view button on the HUD swaps between looking
+        down on ${first} and standing in their boots, and the walk carries over: same
+        position, same facing, same worked veins, same haul.</p>
+      <p><b>From above</b> — move with WASD or the stick, close with a creature to fight
+        it, bump a vein to mine it.<br>
+        <b>From inside</b> — WASD steps and sidesteps, ←/→ turn, <b>Space</b> or a click
+        strikes at what is in front of you: a creature within reach, or the seam in the wall.</p>
+      <p><b>Fights happen there, in the corridor.</b> You aim and time the blow; whether it
+        lands is rolled from ↯ against the creature, and tiredness costs you accuracy.
+        <b>Shift</b> guards, <b>R</b> drinks a draught from the Apothecary.</p>
+      <p>Health only comes back part way between fights, so <i>how deep you push is the
+        question</i>. Kills pay real spoils on the spot — a second march the same week finds
+        thinner pickings — and losing a bout sends ${first} home.</p>
+      <p class="help-foot">A kill brings home game meat (Kitchen pantry → the Hunter's Table
+        diet), a pelt (sold at the Market), gold, reputation, and field insight.</p>`;
+    },
+  },
+  roster: {
+    title: 'Your People', glyph: '▣',
+    body: () => `<p>Pick a member from the row at the top of the room; everything below is
+        about them.</p>
+      <p><b>Training</b> sets what they drill this week, and the plan beside it queues the
+        weeks after. A <b>major</b> and its disciplines decide what they are becoming;
+        electives add a trade.</p>
+      <p><b>Stamina</b> is spent by marching and questing and comes back with rest.
+        <b>Fatigue</b> is the cost of heavy drilling — push through it and they get hurt.
+        <b>Morale</b> and <b>bond</b> move with how you treat them at the weekly Assembly.</p>
+      <p>Dispatching on a quest sends them off for the week. They return with gold,
+        reputation and wear.</p>`,
+  },
+  armory: {
+    title: 'The Armory', glyph: '⚒',
+    body: () => `<p>Finished gear lives here. Pick the member you are <b>equipping</b> at the
+        top, then <b>Equip</b> any piece from the shelf onto them — each row shows what it
+        would do against what they are already wearing.</p>
+      <p>A <b>bow needs both hands</b>: equipping one puts the off-hand down, and picking up
+        a shield puts the bow down.</p>
+      <p>The Forge can ⚒ rework a shelved piece's quality or ✦ refine it <b>+1</b> at a time.
+        Refining raises what the piece is worth — damage on a weapon, armour on everything
+        else — and a failed attempt can cost you the piece.</p>
+      <p>Raw ore lives in the Forge's own stockroom; the ⚖ Market beside the shelf buys and
+        sells materials.</p>`,
+  },
+  kitchen: {
+    title: 'The Kitchen', glyph: '☘',
+    body: () => `<p>Everyone eats. Each member's <b>diet</b> draws from the pantry every week
+        — plain tables eat grain, the rich ones salted meat.</p>
+      <p>A short pantry means plain rations and grumbling. Restock at the ⚖ Market in the
+        Armory, or set a <b>Cook</b> to work here to produce rations from what you have.</p>
+      <p>One unit feeds one member for one week. Game meat brought back from a hunt unlocks
+        the Hunter's Table.</p>`,
+  },
+  forge: {
+    title: 'The Forge', glyph: '⚒',
+    body: () => `<p>Set a <b>Smith</b> to work and choose a recipe. Quality comes from their
+        Practice and the material — an unskilled smith barely covers the ore, so profit is
+        the trade itself, not the arbitrage.</p>
+      <p><b>Rework</b> raises a finished piece's quality. <b>Refine</b> adds +1 at a time,
+        with the odds falling as the number climbs; Tempering Oil softens a failure and a
+        Smith's Blessing preserves the level.</p>
+      <p>Ore is bought at the ⚖ Market and shelved in this room's stockroom.</p>`,
+  },
+  library: {
+    title: 'The Library', glyph: '▤',
+    body: () => `<p>Set a member with the Scribing elective to <b>study</b> a subject and their
+        <b>Theory</b> in it climbs — Theory is what unlocks recipes.</p>
+      <p>A member who knows a subject well enough can instead <b>write</b> a volume, authored
+        by them and shelved here for good: ★ at 30 Theory, ★★ at 55, ★★★ at 80.</p>
+      <p>The shelf teaches the shop floor too — every trade week, a worker consults the best
+        volume on their craft for a little Theory. Buy volumes at the ⚖ Market.</p>`,
+  },
+  laboratory: {
+    title: 'The Laboratory', glyph: '⚗',
+    body: () => `<p>Set an <b>Alchemist</b> to brew. Potions treat injuries and fatigue, and
+        Tempering Oil softens a failed refine at the Forge.</p>
+      <p>Raw herbs are bought at the ⚖ Market and shelved in this room's stores. Finished
+        brews go next door to the <b>Apothecary</b>.</p>`,
+  },
+  apothecary: {
+    title: 'The Apothecary', glyph: '✚',
+    body: () => `<p>Finished brews shelve here — raw herbs live in the ⚗ Laboratory's stores.</p>
+      <p>Pick a member, then use a potion on them. Injuries cost weeks; a draught bought at
+        the right moment buys those weeks back.</p>
+      <p>Members carry draughts into a walked hunt — <b>R</b> drinks one in the field.</p>`,
+  },
+  quarters: {
+    title: 'The Quarters', glyph: '⌂',
+    body: () => `<p>Your members sleep here between weeks. Beds come from Living Quarters —
+        expand it in the <b>Grounds</b> to house more.</p>
+      <p>Sell-swords for hire are down in the <b>Town</b>; unnamed prospects train in the
+        <b>Academy</b>. The Hall of Fame here remembers members who retired, and a
+        Hall-of-Famer can be appointed <b>trainer</b> for +15% on training gains.</p>`,
+  },
+  town: {
+    title: 'The Town', glyph: '⌂',
+    body: () => `<p>Grown fighters passing through. They cost gold and <b>come as they are</b>
+        — no upbringing, no loyalty, no say in what they became.</p>
+      <p>New faces drift in each week. Hiring needs a free bed, so expand Living Quarters in
+        the Grounds first if the roster is full.</p>`,
+  },
+  arena: {
+    title: 'The Arena', glyph: '⚔',
+    body: () => `<p>Step into the ring <b>right now</b> — this is practice: no gold, no
+        injuries, nothing at stake but what you learn.</p>
+      <p><b>⚔ Live</b> — the on-screen stick or WASD, tap to attack, in real time.<br>
+        <b>♟ Tactics</b> — queue your moves; both sides execute simultaneously.</p>
+      <p>They are two cameras on one fight, not two games. The same rules decide it either way.</p>`,
+  },
+  grounds: {
+    title: 'The Grounds', glyph: '⌂',
+    body: () => `<p>Everything your gold has raised. <b>Expand a facility</b> to raise its cap —
+        Living Quarters houses more members, the Mess Hall feeds more, the Training Yard
+        holds more equipment.</p>
+      <p>The estate plans are spread on the table in the Great Hall and on the desk in your
+        Study: read them to <b>raise, move or pull down</b> a building.</p>
+      <p>Upkeep is billed every week on Advance Week.</p>`,
+  },
+  calendar: {
+    title: 'The Season', glyph: '▦',
+    body: () => `<p>Every week is a coin. Pick an event on the grid to read it, then
+        <b>nominate one champion</b> and train them toward the date.</p>
+      <p>Each event resolves on its own week — an <b>injured champion cannot compete</b>, so
+        watch what you spend them on beforehand.</p>
+      <p>A ♛ tentpole pays double and moves you a rank. The World Cup comes once every four
+        years and is the only bracket that can kill.</p>`,
+  },
+  study: {
+    title: 'The Study', glyph: '✎',
+    body: () => `<p>Take a scroll from the desk and it unrolls with the paperwork inside. The
+        same letters hang on the room boards — the desk is where the guildmaster reads
+        <b>everything at once</b>.</p>
+      <p>The <b>Ledger</b> is what Advance Week will bank and bill. <b>Contacts</b> sends an
+        envoy to a rival hall, lighting their keep on the world map and bringing their
+        circulars here. The <b>Quest Board</b> is the same board as the Roster's.</p>`,
+  },
+  world: {
+    title: 'The Known World', glyph: '◍',
+    body: () => `<p>Four realms, thirty-two halls — yours among them.</p>
+      <p>Drag the globe to turn it, pinch or ＋/− to zoom. Closer in, the free towns and your
+        charted Wilds delves appear. Tournaments pulse on the weeks they run.</p>
+      <p>Halls you have made contact with are named; the rest stay anonymous until an envoy
+        reaches them.</p>`,
+  },
+  academy: {
+    title: 'The Academy', glyph: '✎',
+    body: () => `<p>A member declares a <b>major</b> — the combat road they are walking — and
+        specialises into its <b>disciplines</b> as they advance.</p>
+      <p>An <b>elective</b> adds a trade: Smithing, Cooking, Alchemy, Enchanting, Scribing.
+        A trade is what lets them work the matching room.</p>
+      <p>A <b>double major</b> is slower on both roads but ends wider. Members have private
+        preferences about what they would rather be studying.</p>`,
+  },
+};
+
+/** The ? that unrolls it. Rendered into every room banner that has one. */
+function helpButton(roomId) {
+  return ROOM_HELP[roomId]
+    ? `<button class="room-help" title="How this works" aria-label="How this works" onclick="event.stopPropagation();__guild.help('${roomId}')">?</button>`
+    : '';
+}
+/** Unroll a room's help. Re-renders with the guild beneath it, like every scroll. */
+function openRoomHelp(id) {
+  const h = ROOM_HELP[id];
+  if (!h) return;
+  openScroll({ title: h.title, glyph: h.glyph || '❦', render: () => `<div class="help-scroll">${h.body()}</div>` });
 }
 
 /** A one-line role banner shown atop every room. */
@@ -4201,18 +4401,41 @@ function roomScene(roomId) {
   // after render) rebinds the canvases and runs the animation loop. Rooms without
   // a set keep the compact EO-style banner.
   if (hasDiorama(roomId)) {
-    return roomSceneHTML(roomId, workers, room, ROOM_FLAVOR[roomId] || '');
+    // The ? goes here too, or it reaches only the rooms WITHOUT a diorama —
+    // which is every room except the ones most in need of explaining (the
+    // forge, the armory, the kitchen and the library all have interiors).
+    return roomSceneHTML(roomId, workers, room, ROOM_FLAVOR[roomId] || '', helpButton(roomId));
   }
-  const sprites = workers.slice(0, 5).map((h) => `<span class="rs-worker" title="${h.name}">${personSprite(h, 52)}</span>`).join('');
+  const sprites = roomWorkerStrip(roomId, workers);
   const art = (SCENE_ART[roomId] || []).map(([n, st]) => artSprite(n, 'rs-art', st)).join('');
   return `<div class="room-scene scene-${roomId}">
       <span class="rs-glyph">${room.glyph}</span>
+      ${helpButton(roomId)}
       <div class="rs-text"><div class="rs-name">${room.glyph} ${room.name}</div>
         <div class="rs-flavor">${ROOM_FLAVOR[roomId] || ''}</div></div>
       ${art ? `<div class="rs-artrow">${art}</div>` : ''}
       <div class="rs-floor"></div>
       <div class="rs-workers">${sprites || '<span class="rs-empty">no one here this week</span>'}</div>
     </div>`;
+}
+
+/**
+ * The people in the room's banner — and in the rooms where the body is ABOUT a
+ * member, the way you choose which one.
+ *
+ * The banner used to be scenery: five `<span>`s, `slice(0,5)`, no handler. So
+ * the Roster grew a second full list of the same people underneath purely to be
+ * clickable, and the room asked you the same question twice (playtest,
+ * 2026-08-09). Where selection is the room's whole job the standees ARE the
+ * picker: every member, a button, the current one lit.
+ */
+const PICKS_MEMBER = new Set(['roster']);
+function roomWorkerStrip(roomId, workers) {
+  if (PICKS_MEMBER.has(roomId)) {
+    return guild.roster.map((h) => `<button class="rs-worker rs-pick ${h.id === selectedId ? 'sel' : ''}"
+        title="${h.name}" onclick="__guild.selectHero('${h.id}')">${personSprite(h, 52)}</button>`).join('');
+  }
+  return workers.slice(0, 5).map((h) => `<span class="rs-worker" title="${h.name}">${personSprite(h, 52)}</span>`).join('');
 }
 function renderHub() {
   const nt = nextTournament(guild);
@@ -4402,7 +4625,7 @@ export function openGuild() {
 // Every handler no-ops while a week is advancing (a played battle can be mid-flight;
 // rail buttons still render behind the battle screen and would corrupt the in-flight
 // week). practiceBout/advanceAll keep their own internal checks as a second belt.
-const __guildApi = { selectHero, setActivity, setTraining, setIntensity, scheduleAdd, scheduleRemoveAt, scheduleClear, setRecipe, setForgeMode, setRefineItem, setRefineGuard, setStudyMode, setEnchantMode, setSpecialization, setPotion, setDiscipline, usePotion, setDiet, setQuest, setHunt, selectWildsLocale, scoutRegion, setPlayHunt, exploreLocale, strollRoom, walkGuild, masterName, masterBuild, masterReroll, sellMaterial, setElective, setTrackKind, setSecondDiscipline, setCookRecipe, setEnchantPlanet, slotOrb, assignTo, setSpar, equipItem, unequipSlot, setPolicy, provision, buyMaterial, sellItem, buyBook, hire, promoteApprentice, dismissApprentice, bidTuition, sendOffer, rejectApplication, advanceAll, back, openRoom, toggleFullscreen, upgradeFacility, enterTournament, leaveTournament, setPlayNext, setPlayQuest, setAskTournaments, toggleDraw, selectCalEvent, praiseHero, scoldHero, openAssembly, closeAssembly, appointTrainer, practiceBout, openBuild, closeBuild, enterRoomFromRanch, manageMemberFromRanch, buildTool, buildArm: armBuilding, buildArmProp: armProp, buildCell, buildZoomIn, buildZoomOut, buildZoomFit, deskScroll, deskDispatch, makeContact, openGlobe: openWorldGlobe, mapEditor: openEditor };
+const __guildApi = { help: openRoomHelp, selectHero, setActivity, setTraining, setIntensity, scheduleAdd, scheduleRemoveAt, scheduleClear, setRecipe, setForgeMode, setRefineItem, setRefineGuard, setStudyMode, setEnchantMode, setSpecialization, setPotion, setDiscipline, usePotion, setDiet, setQuest, setHunt, selectWildsLocale, scoutRegion, setPlayHunt, exploreLocale, strollRoom, walkGuild, masterName, masterBuild, masterReroll, sellMaterial, setElective, setTrackKind, setSecondDiscipline, setCookRecipe, setEnchantPlanet, slotOrb, assignTo, setSpar, equipItem, unequipSlot, setPolicy, provision, buyMaterial, sellItem, buyBook, hire, promoteApprentice, dismissApprentice, bidTuition, sendOffer, rejectApplication, advanceAll, back, openRoom, toggleFullscreen, upgradeFacility, enterTournament, leaveTournament, setPlayNext, setPlayQuest, setAskTournaments, toggleDraw, selectCalEvent, praiseHero, scoldHero, openAssembly, closeAssembly, appointTrainer, practiceBout, openBuild, closeBuild, enterRoomFromRanch, manageMemberFromRanch, buildTool, buildArm: armBuilding, buildArmProp: armProp, buildCell, buildZoomIn, buildZoomOut, buildZoomFit, deskScroll, deskDispatch, makeContact, openGlobe: openWorldGlobe, mapEditor: openEditor };
 window.__guild = {};
 for (const k in __guildApi) {
   window.__guild[k] = (...args) => {

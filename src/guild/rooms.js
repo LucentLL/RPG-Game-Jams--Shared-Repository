@@ -118,7 +118,10 @@ const FACE = { s: Math.PI, n: 0, w: Math.PI / 2, e: -Math.PI / 2 };
  * @param {string} roomId @param {{id:string,name:string}[]} workers
  * @param {{glyph:string,name:string}} room @param {string} flavor
  */
-export function roomSceneHTML(roomId, workers, room, flavor) {
+/** @param {string} [extra] markup the caller hangs in the corner — the room's
+ *  "how this works" button. Passed in rather than built here so rooms.js stays
+ *  a scene painter and does not learn what a help scroll is. */
+export function roomSceneHTML(roomId, workers, room, flavor, extra) {
   const set = ROOM_SET[roomId];
   if (!set) return '';
   const propsHTML = set.props.map((p) => {
@@ -141,6 +144,7 @@ export function roomSceneHTML(roomId, workers, room, flavor) {
   return `<div class="room-diorama scene-${roomId}" data-room="${roomId}">
       <div class="rdi-wall"></div>
       <div class="rdi-floor"></div>
+      ${extra || ''}
       <div class="rdi-caption"><span class="rdi-title">${room.glyph} ${room.name}</span><span class="rdi-flavor">${flavor || ''}</span></div>
       <div class="rdi-stage">${propsHTML}${seats}${empty}</div>
     </div>`;
