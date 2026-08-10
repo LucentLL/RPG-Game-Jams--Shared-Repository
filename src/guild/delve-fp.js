@@ -26,7 +26,8 @@ import { ART_BASE } from '../config/assets.js';
 import { THEMES, LIGHTS, DECALS, ORE_KINDS, oreKindAt, mapForLocale, validateMap, makeLevelModel, DECK_CH, wetCells, waterDepths } from './delve-maps.js';
 import { preyById } from './locales.js';
 import { loadImg, SHEET_URLS, doorTexture, keyTexture } from './delve.js';
-import { ART, artSprite, artCropCss, artTexRect, SWAY } from './art.js';
+import { ART, artSprite, artCropCss, artTexRect, SWAY, KIND_TO_ENGINE_TYPE } from './art.js';
+import { gearReach } from '../game/data/gear.js';
 import { createFpHands, armsOf } from '../game/fp-hands.js';
 import { waterFrames, WADE_SPEED, submergeFor, isSwimming } from './water.js';
 import { propVolume, propCell, footprint, blockerRadius, REST_SLOP, PLAYER_H } from './prop-volume.js';
@@ -234,6 +235,31 @@ const DECOR_H = { boulder: 700 * K, boulderGray: 700 * K, stalagTall: 1100 * K, 
  * health ceiling and the potions exist to create. One number, both ways.
  */
 const SWING_MS = 380, MELEE = 1.25, SWING_CONE = 0.3;
+
+/**
+ * How far THIS member's swing reaches — MELEE for every weapon that has always
+ * reached the next tile, and one tile further for a whip.
+ *
+ * ONE RULES FACT: the board gives a Lash two tiles where a Strike gets one
+ * (data/gear.js WEAPON_REACH, measured off the art), so a whip that reached no
+ * further HERE would be a different weapon in this lens than in the other two.
+ * The delve measures in tiles like the board, so the extra tile is literally +1.
+ *
+ * READ THE NOTE ABOVE ON MELEE BEFORE TOUCHING THIS. Foes still swing at MELEE,
+ * which means a whip-wielder genuinely out-ranges them — the standoff IS the
+ * weapon, and it is paid for at the other end (a whip's `dmg` is 1 against a
+ * sword's 2). What it must never become is the 1.9/1.10 split that comment
+ * records: that gap was UNAUTHORED and applied to every weapon, so a wedged
+ * creature was a free kill for anyone. This one is a property of one weapon the
+ * player chose and gave up damage for. If it plays as a free kill anyway, the
+ * fix is to give creatures a reach fact of their own, not to quietly clamp the
+ * whip back to MELEE and make the lenses disagree again.
+ */
+function meleeReach(F) {
+  const w = F.hooks.gear && F.hooks.gear.weapon;
+  const type = w && KIND_TO_ENGINE_TYPE[w.kind];
+  return MELEE + (gearReach({ type }) - 1);
+}
 
 /**
  * FIRST-PERSON COMBAT — Morrowind's contract, not the arena's.
@@ -3138,7 +3164,7 @@ function trySwing() {
     spawnShot('arrow', 'player', F.px + dx * 0.4, F.py + dy * 0.4, dx, dy, null);
     return;
   }
-  let best = null, bd = MELEE;
+  let best = null, bd = meleeReach(F);   // a whip picks its target a tile further out
   for (const c of F.creatures) {
     const vx = c.x - F.px, vy = c.y - F.py, d = Math.hypot(vx, vy) || 1e-6;
     if (d > bd) continue;

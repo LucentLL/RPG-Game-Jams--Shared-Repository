@@ -31,22 +31,28 @@ export const CAMPUS_W = 46, CAMPUS_H = 46;
  * (null = an outbuilding with no inside yet). `px` is the facade's render width,
  * from which the tile footprint is derived; `frac` is where the door falls
  * across that width. Every `art` key must exist in art.js ART.
+ *
+ * `roof` is the colourway its tiles are laid in — one of art.js ROOF_KIT.colours,
+ * and the building's OWN fact, not the renderer's: the estate should read as a
+ * place that grew a building at a time, not a subdivision. Chosen against the
+ * facade each one already wears, so the roof and the walls under it agree.
+ * Annexes carry one too even though only a roomed building grows a roof today.
  */
 export const BUILDING_KINDS = {
-  guildhall:  { name: 'Great Hall', art: 'bldgGuildhall',  px: 240, frac: 0.50, to: 'guildhall',  glyph: '', cost: 0, core: true },
-  library:    { name: 'Library',    art: 'bldgLibrary',    px: 238, frac: 0.50, to: 'library',    glyph: '', cost: 0, core: true },
-  academy:    { name: 'Academy',    art: 'bldgAcademy',    px: 238, frac: 0.50, to: 'classroom',  glyph: '', cost: 0, core: true },
-  forge:      { name: 'Forge',      art: 'bldgForge',      px: 285, frac: 0.45, to: 'forge',      glyph: '', cost: 0, core: true },
-  kitchen:    { name: 'Kitchen',    art: 'bldgKitchen',    px: 285, frac: 0.45, to: 'kitchen',    glyph: '', cost: 0, core: true },
-  armory:     { name: 'Armory',     art: 'bldgArmory',     px: 288, frac: 0.27, to: 'armory',     glyph: '†', cost: 0, core: true },
-  dormitory:  { name: 'Dormitory',  art: 'bldgDormitory',  px: 267, frac: 0.50, to: 'dormitory',  glyph: '', cost: 0, core: true },
-  apothecary: { name: 'Apothecary', art: 'bldgApothecary', px: 144, frac: 0.50, to: 'apothecary', glyph: '', cost: 0, core: true },
-  arena:      { name: 'Arena',      art: 'bldgArena',      px: 228, frac: 0.50, to: 'arena',      glyph: '⚔', cost: 0, core: true },
+  guildhall:  { name: 'Great Hall', art: 'bldgGuildhall',  px: 240, frac: 0.50, to: 'guildhall',  glyph: '', cost: 0, core: true, roof: 'red' },
+  library:    { name: 'Library',    art: 'bldgLibrary',    px: 238, frac: 0.50, to: 'library',    glyph: '', cost: 0, core: true, roof: 'blue' },
+  academy:    { name: 'Academy',    art: 'bldgAcademy',    px: 238, frac: 0.50, to: 'classroom',  glyph: '', cost: 0, core: true, roof: 'gray' },
+  forge:      { name: 'Forge',      art: 'bldgForge',      px: 285, frac: 0.45, to: 'forge',      glyph: '', cost: 0, core: true, roof: 'black' },
+  kitchen:    { name: 'Kitchen',    art: 'bldgKitchen',    px: 285, frac: 0.45, to: 'kitchen',    glyph: '', cost: 0, core: true, roof: 'brown' },
+  armory:     { name: 'Armory',     art: 'bldgArmory',     px: 288, frac: 0.27, to: 'armory',     glyph: '†', cost: 0, core: true, roof: 'gray' },
+  dormitory:  { name: 'Dormitory',  art: 'bldgDormitory',  px: 267, frac: 0.50, to: 'dormitory',  glyph: '', cost: 0, core: true, roof: 'red' },
+  apothecary: { name: 'Apothecary', art: 'bldgApothecary', px: 144, frac: 0.50, to: 'apothecary', glyph: '', cost: 0, core: true, roof: 'green' },
+  arena:      { name: 'Arena',      art: 'bldgArena',      px: 228, frac: 0.50, to: 'arena',      glyph: '⚔', cost: 0, core: true, roof: 'yellow' },
   // Annexes: more of an existing facade, buildable and demolishable. They have no
   // interior of their own — an outbuilding, not a second Forge you can walk into.
-  storehouse: { name: 'Storehouse', art: 'bldgKitchen',    px: 285, frac: 0.45, to: null, glyph: '', cost: 900 },
-  bunkhouse:  { name: 'Bunkhouse',  art: 'bldgDormitory',  px: 267, frac: 0.50, to: null, glyph: '', cost: 1200 },
-  watchtower: { name: 'Watchtower', art: 'bldgLibrary',    px: 238, frac: 0.50, to: null, glyph: '', cost: 1500 },
+  storehouse: { name: 'Storehouse', art: 'bldgKitchen',    px: 285, frac: 0.45, to: null, glyph: '', cost: 900, roof: 'brown' },
+  bunkhouse:  { name: 'Bunkhouse',  art: 'bldgDormitory',  px: 267, frac: 0.50, to: null, glyph: '', cost: 1200, roof: 'red' },
+  watchtower: { name: 'Watchtower', art: 'bldgLibrary',    px: 238, frac: 0.50, to: null, glyph: '', cost: 1500, roof: 'blue' },
 };
 
 /** Free-standing dressing you can place and clear. `w` is render px — NOT
@@ -372,7 +378,7 @@ export function buildCampusMap(guild) {
     // cleared — a tree grown across your own doorstep would lock the room out.
     if (g[dy]) g[dy][dx] = '.';
     if (g[dy + 1] && g[dy + 1][dx] === 't') g[dy + 1][dx] = '.';
-    return { id: b.id, to: k.to, art: k.art, name: k.name, x: b.x, y: top, w, h, px: k.px, roomed: !!room, door: [dx, dy] };
+    return { id: b.id, to: k.to, art: k.art, name: k.name, x: b.x, y: top, w, h, px: k.px, roomed: !!room, door: [dx, dy], roof: k.roof };
   });
   g[CAMPUS_H - 3][13] = 'w'; // the gate — the way back to the desk
 
@@ -395,7 +401,7 @@ export function buildCampusMap(guild) {
     // marks the ones whose rect got a stamped interior (annexes did not) — the
     // renderer caps those with a roof so their wall ring reads as a building,
     // not a fence. Nothing here is a portal any more except a stair.
-    facades: buildings.map((b) => ({ art: b.art, name: b.name, x: b.x, y: b.y, w: b.w, h: b.h, px: b.px, roomed: b.roomed, door: b.door })),
+    facades: buildings.map((b) => ({ art: b.art, name: b.name, x: b.x, y: b.y, w: b.w, h: b.h, px: b.px, roomed: b.roomed, door: b.door, roof: b.roof })),
     portals: stairs,
     props: props.concat(roomProps),
   };

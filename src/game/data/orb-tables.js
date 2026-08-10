@@ -28,6 +28,11 @@ var GEAR_WEAPON_LADDER = {
   // Mace (maces pack): flanged → spiked → ornate head, five finishes each.
   Mace:   [ {stem:'mace1', maxC:5}, {stem:'mace1', maxC:5}, {stem:'mace2', maxC:5}, {stem:'mace2', maxC:5}, {stem:'mace3', maxC:5} ],
   Club:   [ {stem:'pickaxe1', maxC:2} ],
+  // Whip (the whips kit — 112px cells, re-cut by dev/bake-whips.mjs): braided
+  // leather → barbed thorn → weighted ball-chain → chain with a blade on the
+  // end. The stems carry different variant counts (whip/thornwhip ship one
+  // recolour, ballchain/chainblade two), so maxC is per rung, not per type.
+  Whip:   [ {stem:'whip', maxC:2}, {stem:'thornwhip', maxC:2}, {stem:'ballchain', maxC:3}, {stem:'chainblade', maxC:3}, {stem:'chainblade', maxC:3} ],
   Buckler:[ {stem:'shield1', maxC:0, slotSuffix:true}, {stem:'shield1', maxC:0, slotSuffix:true}, {stem:'shield2', maxC:6, slotSuffix:true}, {stem:'shield2', maxC:6, slotSuffix:true} ]
 };
 

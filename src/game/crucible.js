@@ -35,7 +35,7 @@ import {
 // --- Extracted data modules (decomposition phase A, cont.) --------------------
 import {
   GS, MATERIA_MAX_LVL, MATERIA_DUST_COST, TOTAL_ROUNDS, TILE_SIZE, TILE_COLS, battlefieldTileset,
-  ELEMENTS_CELL, ELEMENTS_COLS, ELEMENTS_ROWS, CAST_FX_COUNT, CAST_FX_FRAME_MS,
+  ELEMENTS_CELL, ELEMENTS_COLS, ELEMENTS_ROWS, weaponCellOf, CAST_FX_COUNT, CAST_FX_FRAME_MS,
   ORB_BASE_PATH, ORB_CELL, ORB_COLS, ORB_ROWS, SPRITE_CELL, SPRITE_COLS, SPRITE_ROWS,
   ACTION_TILE, ACTION_GS, MOVE_PHASE,
 } from './data/config.js';
@@ -48,7 +48,7 @@ import {
   MAX_REFINEMENT, MAX_SOCKETS, WEAPON_GEAR_TYPES, SHIELD_GEAR_TYPES,
   isTwoHandedType, gearDamage, gearArmor,
 } from './data/gear.js';
-import { BASIC_ATTACK, ALL_ATTACKS, ATTACKS, typeColor } from './data/attacks.js';
+import { BASIC_ATTACK, ALL_ATTACKS, ATTACKS, isMissile, typeColor } from './data/attacks.js';
 import {
   G, CTL, CT, CTR, CFL, CF, CFR, CWL, CW, CWR, WL, W, WR, WBL, WB, WBR, RK1, RK2, FL1, FL2,
   BF_TEMPLATES,
@@ -498,11 +498,21 @@ var ELEMENTS_BASE   = ELEMENTS_BASES[0]; // legacy alias (still used by self-tes
 // content, then at draw time fall back to a populated column when the
 // requested cell is empty — so the weapon stays visible across all anims.
 var _weaponNonEmpty = {};  // file → { 'row,col': 1 }
+
+// A weapon sheet reports its own cell size — @see weaponCellOf in data/config.js
+// for why that is a division and not a table.
 function _scanWeaponEmpties(file, img){
   if (_weaponNonEmpty[file]) return;
   var w = img.naturalWidth || img.width;
   var h = img.naturalHeight || img.height;
   if (!w || !h) return;
+  // THE CELL, NOT ELEMENTS_CELL. With 48 hardcoded here a 2576px-wide whip
+  // sheet was scanned as if it were 1104: the x loop ran to 1103 against a row
+  // of 2576, so it only ever looked at the left 43% of the sheet and reported
+  // the slash block empty. Worse on a NARROWER sheet — the index walks straight
+  // off the end of the scanline into the next one, stays inside the buffer, and
+  // returns a plausible-looking map of the wrong pixels with nothing thrown.
+  var cell = weaponCellOf(img);
   var cv = document.createElement('canvas');
   cv.width = w; cv.height = h;
   var ctx = cv.getContext('2d');
@@ -514,8 +524,8 @@ function _scanWeaponEmpties(file, img){
   for (var r = 0; r < ELEMENTS_ROWS; r++){
     for (var c = 0; c < ELEMENTS_COLS; c++){
       var found = false;
-      for (var x = c*ELEMENTS_CELL; x < (c+1)*ELEMENTS_CELL && !found; x++){
-        for (var y = r*ELEMENTS_CELL; y < (r+1)*ELEMENTS_CELL; y++){
+      for (var x = c*cell; x < (c+1)*cell && x < w && !found; x++){
+        for (var y = r*cell; y < (r+1)*cell && y < h; y++){
           if (data[(y*w + x)*4 + 3] > 0){ found = true; break; }
         }
       }
@@ -1224,18 +1234,31 @@ function compositeCharacter(canvas, appearance, animName, frame, facingRow, weap
     if (!img) return false;
     var wCol = _resolveWeaponSrcCol(desc.file, col, facingRow|0, animName);
     if (wCol < 0) return false;  // weapon has no good cell for this pose — hide
-    var wSrcX = wCol * ELEMENTS_CELL;
+    // A weapon sheet may be cut at a different cell size than the body (a whip
+    // needs 112px to hold its lash where a sword needs 48). The two are drawn
+    // at the SAME pixel scale — that is the whole point, and it is what makes
+    // the whip visibly out-reach the sword — so the bigger cell is drawn bigger
+    // in proportion and CENTRED on the body's box. Centre, because that is the
+    // registration the artist drew to: the wielder stands at the middle of the
+    // cell in both kits, so aligning the middles aligns the grips.
+    var wCell = weaponCellOf(img);
+    var k = wCell / ELEMENTS_CELL;
+    var wSize = drawSize * k;
+    var inset = (wSize - drawSize) / 2;
+    var wSrcX = wCol * wCell, wSrcY = (facingRow|0) * wCell;
     var doMirror = desc.mirror && WEAPON_MIRROR_OK_ANIMS[animName || 'idle'];
     var dyTotal = dy + (extraDy||0);
+    // The mirror axis stays the BODY's centre line, which is also the weapon
+    // box's centre line now that the box is centred on it.
     if (doMirror){
       ctx.save();
       ctx.translate(dx + drawSize/2, 0);
       ctx.scale(-1, 1);
       ctx.translate(-(dx + drawSize/2), 0);
-      ctx.drawImage(img, wSrcX, srcY, ELEMENTS_CELL, ELEMENTS_CELL, dx, dyTotal, drawSize, drawSize);
+      ctx.drawImage(img, wSrcX, wSrcY, wCell, wCell, dx - inset, dyTotal - inset, wSize, wSize);
       ctx.restore();
     } else {
-      ctx.drawImage(img, wSrcX, srcY, ELEMENTS_CELL, ELEMENTS_CELL, dx, dyTotal, drawSize, drawSize);
+      ctx.drawImage(img, wSrcX, wSrcY, wCell, wCell, dx - inset, dyTotal - inset, wSize, wSize);
     }
     return true;
   }
@@ -1958,7 +1981,9 @@ function renderGearIcons() {
     ctx.clearRect(0, 0, c.width, c.height);
     if (!img) { pendingForLater = true; return; }
     // Use the south-facing idle cell (col 1 per Settings.json — "Walk stand").
-    ctx.drawImage(img, ELEMENTS_CELL, 0, ELEMENTS_CELL, ELEMENTS_CELL, 0, 0, c.width, c.height);
+    // A weapon sheet reports its own cell size; a body layer is always 48.
+    var cell = (layer === 'weapon') ? weaponCellOf(img) : ELEMENTS_CELL;
+    ctx.drawImage(img, cell, 0, cell, cell, 0, 0, c.width, c.height);
   });
   if (pendingForLater) elementsRegisterRedraw(document, renderGearIcons);
 }
@@ -2169,6 +2194,11 @@ var BUILDER_HAND_CYCLE = [
   {type:'Axe', tier:0, pos:'Hand'}, {type:'Axe', tier:2, pos:'Hand'},
   {type:'Hammer', tier:0, pos:'Hand'}, {type:'Hammer', tier:2, pos:'Hand'},
   {type:'Club', tier:0, pos:'Hand'},
+  // The whip's four rungs are four different sheets (orb-tables GEAR_WEAPON_LADDER
+  // — leather, thorn, ball-chain, chainblade), so the builder walks all four.
+  // They are also the only cells here cut at 112px rather than 48.
+  {type:'Whip', tier:0, pos:'Hand'}, {type:'Whip', tier:1, pos:'Hand'},
+  {type:'Whip', tier:2, pos:'Hand'}, {type:'Whip', tier:3, pos:'Hand'},
   {type:'Buckler', tier:0, pos:'Hand'}, {type:'Buckler', tier:3, pos:'Hand'}
 ];
 // Back-worn sheath cosmetics — a weapon slung across the back. Distinct `file`s are
@@ -3179,18 +3209,22 @@ if (typeof window !== 'undefined'){
     };
   };
   // Would an attack of this reach land right now, and why/why not?
-  window.__arenaTestAttack = function(range){
+  // `missile` defaults to the old meaning of `range` so existing probe calls
+  // read the same, but a reach-2 SWING (a whip) is __arenaTestAttack(2, false).
+  window.__arenaTestAttack = function(range, missile){
     if (!p1 || !p2) return null;
-    var atk = { name: 'probe', range: range };
+    var isM = (missile === undefined) ? range >= 2 : !!missile;
+    var atk = { name: 'probe', range: range, missile: isM };
     var hA = fighterHeight(p1), hB = fighterHeight(p2);
     var d = Math.hypot(p2.ax - p1.ax, p2.ay - p1.ay);
+    var hg = isM ? Math.max(0, hA - hB) * HIGH_GROUND_RANGE : 0;
     return {
-      range: range, dist: +d.toFixed(2), hAtk: hA, hDef: hB,
-      effRange: +((range || 1) + Math.max(0, hA - hB) * HIGH_GROUND_RANGE).toFixed(2),
-      highGroundBonusRange: +(Math.max(0, hA - hB) * HIGH_GROUND_RANGE).toFixed(2),
+      range: range, missile: isM, dist: +d.toFixed(2), hAtk: hA, hDef: hB,
+      effRange: +((range || 1) + hg).toFixed(2),
+      highGroundBonusRange: +hg.toFixed(2),
       toHitBonus: hA > hB ? HIGH_GROUND_TOHIT : 0,
       losClear: arenaLOS(_arenaT, p1.ax, p1.ay, p2.ax, p2.ay),
-      meleeBlockedByLevel: (range || 1) <= 1 && hA !== hB,
+      meleeBlockedByLevel: !isM && hA !== hB,
       viable: actionAttackViable(p1, p2, atk),
     };
   };
@@ -3249,9 +3283,9 @@ function actionAttackViable(attacker, defender, atk){
   if (!atk || atk.special) return !!atk; // heals/teleports have their own rules
   var d = Math.hypot(defender.ax - attacker.ax, defender.ay - attacker.ay);
   var hA = fighterHeight(attacker), hD = fighterHeight(defender);
-  var reach = (atk.range || 1) + Math.max(0, hA - hD) * HIGH_GROUND_RANGE;
+  var reach = (atk.range || 1) + (isMissile(atk) ? Math.max(0, hA - hD) * HIGH_GROUND_RANGE : 0);
   if (d > reach + 0.3) return false;
-  if ((atk.range || 1) <= 1 && hA !== hD) return false;
+  if (!isMissile(atk) && hA !== hD) return false;
   return arenaLOS(_arenaT, attacker.ax, attacker.ay, defender.ax, defender.ay);
 }
 
@@ -3997,13 +4031,19 @@ function tryActionAttack(attacker, defender, atkName, opts){
   var ddx = defender.ax - attacker.ax, ddy = defender.ay - attacker.ay;
   var dist = Math.sqrt(ddx*ddx + ddy*ddy);
   var hAtk = fighterHeight(attacker), hDef = fighterHeight(defender);
+  // A LEDGE STOPS A SWING, HOWEVER LONG THE SWING IS. Both of these were
+  // written as `range <= 1`, i.e. "melee" spelled as a number — fine while
+  // every reach-2 attack was also a missile. A whip is neither: it reaches two
+  // tiles and it is still a swing, so it must be refused across a level like
+  // any blade, and it must NOT collect the archer's high-ground bonus. Asking
+  // `isMissile` says what these rules always meant.
   var effRange = (atk.range || 1) + (atk.range > 0 ? matB.extraRange : 0)
-    + Math.max(0, hAtk - hDef) * HIGH_GROUND_RANGE;
+    + (isMissile(atk) ? Math.max(0, hAtk - hDef) * HIGH_GROUND_RANGE : 0);
   if (dist > effRange + 0.3){
     if (attacker === p1) actionLog('⚔ '+atk.name+' — out of range', 'miss');
     return;
   }
-  if ((atk.range || 1) <= 1 && hAtk !== hDef){
+  if (!isMissile(atk) && hAtk !== hDef){
     if (attacker === p1) actionLog('⚔ '+atk.name+' — '+(hDef > hAtk ? 'they are above you' : 'they are below you')+', climb to reach', 'miss');
     return;
   }
@@ -4016,12 +4056,17 @@ function tryActionAttack(attacker, defender, atkName, opts){
     attacker.facing = Math.atan2(ddx, -ddy);
     // A bow/crossbow shot draws-and-looses (nockBow); everything else swings (slash).
     var _wtype = equippedWeaponType(attacker);
-    var _drawsBow = atk.range >= 2 && (_wtype === 'Bow' || _wtype === 'Crossbow');
+    var _drawsBow = isMissile(atk) && (_wtype === 'Bow' || _wtype === 'Crossbow');
     setFighterAnim(attacker, _drawsBow ? 'nockBow' : 'slash');
     // Dual wield is SPEED: a melee blow recovers about a fifth faster with the
     // off-hand harrying between swings.
-    var _cdBase = atk.range > 1 ? 0.95 : 0.7;
-    if (atk.range <= 1 && isDualWielding(attacker)) _cdBase *= 0.78;
+    //
+    // KEYED ON `missile`, NOT ON `range`. A whip reaches two tiles and is still
+    // a swing: it should recover at a swing's pace and take the off-hand bonus
+    // like any other melee weapon. Reading `range` here gave it a bow's timing
+    // for no reason anyone authored.
+    var _cdBase = isMissile(atk) ? 0.95 : 0.7;
+    if (!isMissile(atk) && isDualWielding(attacker)) _cdBase *= 0.78;
     attacker._atkCD = _cdBase + (chargeTier ? 0.25 : 0); // a charged swing recovers a touch slower
     /**
      * A ranged attack is a THING IN FLIGHT now, not a paid-up result with a
@@ -4032,7 +4077,10 @@ function tryActionAttack(attacker, defender, atkName, opts){
      * now, not just the moment of aiming. Bows, thrown blades and spells all
      * ride the one rule; only specials stay instant.
      */
-    if (atk.range >= 2){ spawnLiveProjectile(attacker, defender, atk, atkName, chargeTier); return; }
+    // ONLY A MISSILE FLIES. This read `atk.range >= 2` — true of every ranged
+    // attack there was, and the reason a reach-2 melee weapon could not exist:
+    // the whip would have left the wielder's hand and sailed across the arena.
+    if (isMissile(atk)){ spawnLiveProjectile(attacker, defender, atk, atkName, chargeTier); return; }
   }
   // Roll-to-hit reuses the same stat → modifier → +prof + materia chain.
   // A charged release lands more reliably (+2 to-hit — SS2's "charges connect").
@@ -4891,14 +4939,20 @@ function buildFighterMateria(equipped){
   return result;
 }
 
-// The equipped weapon decides the basic attack: a bow/crossbow looses an Arrow Shot
-// (ranged — spawns a projectile) in place of the melee Strike.
+// The equipped weapon decides the basic attack: a bow/crossbow looses an Arrow
+// Shot (ranged — spawns a projectile) and a whip cracks a Lash (reach 2, and it
+// stays in the hand) in place of the melee Strike.
 function basicAttackForEquipped(equipped){
   if(equipped){
     var hands=[equipped.RHand, equipped.LHand];
     for(var i=0;i<hands.length;i++){
       var it=hands[i];
       if(it && (it.type==='Bow' || it.type==='Crossbow')) return 'Arrow Shot';
+    }
+    // Checked in a second pass so a bow in either hand still wins over a whip
+    // in the other — the shot is the longer answer.
+    for(var j=0;j<hands.length;j++){
+      if(hands[j] && hands[j].type==='Whip') return 'Lash';
     }
   }
   return 'Strike';

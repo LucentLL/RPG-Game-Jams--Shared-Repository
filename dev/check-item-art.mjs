@@ -18,110 +18,24 @@
  */
 import fs from 'node:fs';
 import path from 'node:path';
-import zlib from 'node:zlib';
 import { fileURLToPath } from 'node:url';
 import { RECIPES } from '../src/guild/smithing.js';
 import { itemSprite, hasItemSprite } from '../src/guild/art.js';
+import { readPng, encodePng } from './png.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC = path.join(HERE, '..', 'public');
-const CELL = 48, COLS = 23, ROWS = 4;
-
-/** Alpha plane of a PNG — enough to answer "does this cell paint anything?". */
-function alphaOf(file) {
-  const b = fs.readFileSync(file);
-  let p = 8, w = 0, h = 0, bd = 0, ct = 0; const idat = [];
-  while (p < b.length) {
-    const len = b.readUInt32BE(p), type = b.toString('ascii', p + 4, p + 8);
-    const data = b.subarray(p + 8, p + 8 + len);
-    if (type === 'IHDR') { w = data.readUInt32BE(0); h = data.readUInt32BE(4); bd = data[8]; ct = data[9]; }
-    else if (type === 'IDAT') idat.push(data);
-    else if (type === 'IEND') break;
-    p += 12 + len;
-  }
-  if (bd !== 8 || (ct !== 6 && ct !== 2)) throw new Error(`${file}: bitDepth=${bd} colorType=${ct}`);
-  const ch = ct === 6 ? 4 : 3, stride = w * ch;
-  const raw = zlib.inflateSync(Buffer.concat(idat));
-  const a = new Uint8Array(w * h);
-  let prev = Buffer.alloc(stride);
-  for (let y = 0; y < h; y++) {
-    const ft = raw[y * (stride + 1)];
-    const line = Buffer.from(raw.subarray(y * (stride + 1) + 1, y * (stride + 1) + 1 + stride));
-    for (let i = 0; i < stride; i++) {
-      const l = i >= ch ? line[i - ch] : 0, u = prev[i], ul = i >= ch ? prev[i - ch] : 0;
-      if (ft === 1) line[i] = (line[i] + l) & 255;
-      else if (ft === 2) line[i] = (line[i] + u) & 255;
-      else if (ft === 3) line[i] = (line[i] + ((l + u) >> 1)) & 255;
-      else if (ft === 4) {
-        const pp = l + u - ul, pa = Math.abs(pp - l), pb = Math.abs(pp - u), pc = Math.abs(pp - ul);
-        line[i] = (line[i] + (pa <= pb && pa <= pc ? l : pb <= pc ? u : ul)) & 255;
-      }
-    }
-    for (let x = 0; x < w; x++) a[y * w + x] = ch === 4 ? line[x * ch + 3] : 255;
-    prev = line;
-  }
-  return { w, h, a };
-}
-
-/** Full RGBA, for the optional contact sheet. */
-function rgbaOf(file) {
-  const b = fs.readFileSync(file);
-  let p = 8, w = 0, h = 0, bd = 0, ct = 0; const idat = [];
-  while (p < b.length) {
-    const len = b.readUInt32BE(p), type = b.toString('ascii', p + 4, p + 8);
-    const data = b.subarray(p + 8, p + 8 + len);
-    if (type === 'IHDR') { w = data.readUInt32BE(0); h = data.readUInt32BE(4); bd = data[8]; ct = data[9]; }
-    else if (type === 'IDAT') idat.push(data);
-    else if (type === 'IEND') break;
-    p += 12 + len;
-  }
-  const ch = ct === 6 ? 4 : 3, stride = w * ch;
-  const raw = zlib.inflateSync(Buffer.concat(idat));
-  const px = Buffer.alloc(w * h * 4);
-  let prev = Buffer.alloc(stride);
-  for (let y = 0; y < h; y++) {
-    const ft = raw[y * (stride + 1)];
-    const line = Buffer.from(raw.subarray(y * (stride + 1) + 1, y * (stride + 1) + 1 + stride));
-    for (let i = 0; i < stride; i++) {
-      const l = i >= ch ? line[i - ch] : 0, u = prev[i], ul = i >= ch ? prev[i - ch] : 0;
-      if (ft === 1) line[i] = (line[i] + l) & 255;
-      else if (ft === 2) line[i] = (line[i] + u) & 255;
-      else if (ft === 3) line[i] = (line[i] + ((l + u) >> 1)) & 255;
-      else if (ft === 4) {
-        const pp = l + u - ul, pa = Math.abs(pp - l), pb = Math.abs(pp - u), pc = Math.abs(pp - ul);
-        line[i] = (line[i] + (pa <= pb && pa <= pc ? l : pb <= pc ? u : ul)) & 255;
-      }
-    }
-    for (let x = 0; x < w; x++) {
-      px[(y * w + x) * 4] = line[x * ch];
-      px[(y * w + x) * 4 + 1] = line[x * ch + 1];
-      px[(y * w + x) * 4 + 2] = line[x * ch + 2];
-      px[(y * w + x) * 4 + 3] = ch === 4 ? line[x * ch + 3] : 255;
-    }
-    prev = line;
-  }
-  return { w, h, px };
-}
-
-const CRC = (() => {
-  const t = [];
-  for (let n = 0; n < 256; n++) { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1; t[n] = c >>> 0; }
-  return (buf) => { let c = 0xffffffff; for (const v of buf) c = t[(c ^ v) & 255] ^ (c >>> 8); return (c ^ 0xffffffff) >>> 0; };
-})();
-function encodePng(w, h, px) {
-  const stride = w * 4, raw = Buffer.alloc((stride + 1) * h);
-  for (let y = 0; y < h; y++) { raw[y * (stride + 1)] = 0; px.copy(raw, y * (stride + 1) + 1, y * stride, (y + 1) * stride); }
-  const chunk = (type, data) => {
-    const len = Buffer.alloc(4); len.writeUInt32BE(data.length);
-    const td = Buffer.concat([Buffer.from(type, 'ascii'), data]);
-    const cc = Buffer.alloc(4); cc.writeUInt32BE(CRC(td));
-    return Buffer.concat([len, td, cc]);
-  };
-  const ihdr = Buffer.alloc(13);
-  ihdr.writeUInt32BE(w, 0); ihdr.writeUInt32BE(h, 4); ihdr[8] = 8; ihdr[9] = 6;
-  return Buffer.concat([Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]),
-    chunk('IHDR', ihdr), chunk('IDAT', zlib.deflateSync(raw, { level: 9 })), chunk('IEND', Buffer.alloc(0))]);
-}
+// COLS/ROWS are the layout every sheet shares. THE CELL IS NOT A CONSTANT: a
+// whip sheet is cut at 112px because its lash does not fit 48 (dev/bake-whips
+// .mjs), so it is measured off each file — sheet width ÷ COLS, the same
+// division the renderer does (data/config.js weaponCellOf).
+//
+// This was `const CELL = 48` and it made the check LIE. On a 2576px whip sheet
+// it sampled a 48px box at column×48, which lands a third of the way into
+// column 0 of a 112px grid, and reported `ok` for a garbage slice that happened
+// to contain pixels — certifying exactly the bug this file exists to catch.
+const COLS = 23, ROWS = 4;
+const cellOf = (im) => im.w / COLS;
 
 /** Pull the sheet URL and the cell back out of the CSS itemSprite emits, so the
  *  test reads exactly what the game will paint rather than a parallel guess. */
@@ -150,34 +64,43 @@ for (const r of RECIPES) {
     problems.push(`${r.id}: missing sheet ${path.relative(PUBLIC, res.file).replace(/\\/g, '/')}`);
     continue;
   }
-  const { w, a } = alphaOf(res.file);
+  const im = readPng(res.file);
+  const CELL = cellOf(im);
+  const rel = path.relative(PUBLIC, res.file).replace(/\\/g, '/');
+  if (CELL !== Math.round(CELL) || im.h !== CELL * ROWS) {
+    problems.push(`${r.id}: ${rel} is ${im.w}×${im.h} — not ${COLS}×${ROWS} square cells`);
+    continue;
+  }
   let n = 0;
   for (let y = 0; y < CELL; y++) {
     for (let x = 0; x < CELL; x++) {
       const px = res.col * CELL + x, py = res.row * CELL + y;
-      if (a[py * w + px] >= 12) n++;
+      if (im.px[(py * im.w + px) * 4 + 3] >= 12) n++;
     }
   }
-  const rel = path.relative(PUBLIC, res.file).replace(/\\/g, '/');
   if (!n) problems.push(`${r.id}: BLANK cell r${res.row}c${res.col} of ${rel}`);
-  else console.log(`  ok  ${r.id.padEnd(18)} ${String(n).padStart(3)}px  r${res.row}c${res.col}  ${rel}`);
+  else console.log(`  ok  ${r.id.padEnd(18)} ${String(n).padStart(4)}px  ${String(CELL).padStart(3)}px cell  r${res.row}c${res.col}  ${rel}`);
 }
 
 // `--sheet <out.png>` also draws every icon as one contact sheet, because a
 // cell that paints SOMETHING still isn't proof it paints the right thing.
 const sheetAt = process.argv.indexOf('--sheet');
 if (sheetAt > 0 && process.argv[sheetAt + 1] && !problems.length) {
-  const Z = 3, PAD = 2, COLS_OUT = 8;
+  // BOX, not zoom. Cells are no longer one size, so each is fitted into the
+  // same square — a 112px whip cell lands beside a 48px sword cell at the
+  // proportion the game draws them, which is the comparison worth looking at.
+  const BOX = 144, PAD = 2, COLS_OUT = 8;
   const cells = [...seen].map((k) => { const [kind, material] = k.split('/'); return { kind, material, ...resolve(kind, material) }; });
   const rows = Math.ceil(cells.length / COLS_OUT);
-  const CW = CELL * Z + PAD, OW = COLS_OUT * CW + PAD, OH = rows * CW + PAD;
+  const CW = BOX + PAD, OW = COLS_OUT * CW + PAD, OH = rows * CW + PAD;
   const out = Buffer.alloc(OW * OH * 4);
   for (let i = 0; i < OW * OH; i++) { out[i * 4] = 20; out[i * 4 + 1] = 21; out[i * 4 + 2] = 30; out[i * 4 + 3] = 255; }
   cells.forEach((c, n) => {
-    const im = rgbaOf(c.file);
+    const im = readPng(c.file);
+    const CELL = cellOf(im);
     const ox = PAD + (n % COLS_OUT) * CW, oy = PAD + ((n / COLS_OUT) | 0) * CW;
-    for (let y = 0; y < CELL * Z; y++) for (let x = 0; x < CELL * Z; x++) {
-      const sx = c.col * CELL + ((x / Z) | 0), sy = c.row * CELL + ((y / Z) | 0);
+    for (let y = 0; y < BOX; y++) for (let x = 0; x < BOX; x++) {
+      const sx = c.col * CELL + ((x * CELL / BOX) | 0), sy = c.row * CELL + ((y * CELL / BOX) | 0);
       const s = (sy * im.w + sx) * 4;
       if (im.px[s + 3] < 12) continue;
       const o = ((oy + y) * OW + ox + x) * 4;

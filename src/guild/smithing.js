@@ -62,6 +62,10 @@ const KINDS = [
   { kind: 'hammer', slot: 'weapon', noun: 'Hammer', skill: 8,  bulk: 3, stamina: 34, mats: ['iron', 'steel', 'mithril'] },
   { kind: 'staff',  slot: 'weapon', noun: 'Staff',  skill: 14, bulk: 2, stamina: 28, mats: ['iron', 'steel', 'mithril'] },
   { kind: 'bow',    slot: 'weapon', noun: 'Bow',    skill: 16, bulk: 2, stamina: 28, mats: ['leather', 'steel', 'mithril'] },
+  // A whip is plaited hide long before it is chain — same three metals as the
+  // bow, and for the same reason. Skill sits between the hammer and the staff:
+  // the plaiting is the hard part, not the metal.
+  { kind: 'whip',   slot: 'weapon', noun: 'Whip',   skill: 11, bulk: 2, stamina: 28, mats: ['leather', 'steel', 'mithril'] },
   { kind: 'wand',   slot: 'weapon', noun: 'Wand',   skill: 16, bulk: 1, stamina: 24, mats: ['iron', 'steel', 'mithril'] },
   // ── Armor ────────────────────────────────────────────────────────────────
   { kind: 'greaves', slot: 'lower',  noun: 'Greaves', skill: 3,  bulk: 2, stamina: 26, mats: ['leather', 'iron', 'steel', 'mithril'] },

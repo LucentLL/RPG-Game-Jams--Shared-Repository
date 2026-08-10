@@ -27,7 +27,7 @@ import { TILES_BASE, ART_BASE } from '../config/assets.js';
 import { preyById } from './locales.js';
 import { THEMES, DECALS, ORE_KINDS, oreKindAt, mapForLocale, validateMap, makeLevelModel, CLIMB_CH, DECK_CH, FLOOR_LV, wetCells, waterDepths } from './delve-maps.js';
 import { waterFrames, waterStripUrl, WADE_SPEED, submergeFor, isSwimming } from './water.js';
-import { artSprite } from './art.js';
+import { artSprite, ROOF_KIT, ROOF_GABLE_COL, roofCol } from './art.js';
 import { propVolume, propCell, blockerRadius } from './prop-volume.js';
 import { readPad, padReset, touchPrimary, onTouchPrimary, PAD } from '../platform/input.js';
 import { claimPad } from '../platform/ui-pad.js';
@@ -215,6 +215,9 @@ export const SHEET_URLS = {
   sand: TILES_BASE + 'sand.png',
   stonewall: TILES_BASE + 'stonewall.png',
   woodwall: TILES_BASE + 'woodwall.png',
+  // The roof strip — one clay-tile field per colourway plus the gable face.
+  // @see art.js ROOF_KIT / dev/bake-roofs.mjs.
+  roofs: TILES_BASE + ROOF_KIT.file,
   shelves: ART_BASE + 'bookshelf_3x.png',
   mansion: ART_BASE + 'mansion_3x.png',
   kitchen: ART_BASE + 'kitchen_3x.png',
@@ -245,6 +248,9 @@ async function loadSheets(map, theme) {
   if (/[rt]/.test(chars)) keys.add('rocks');
   if (/[=m]/.test(chars)) keys.add('rails');
   if (chars.includes('n')) keys.add('woodwall');   // bridge decks are planked
+  // Only a ROOMED facade grows a roof (gableRoof below), so only a map that has
+  // one pays for the roof strip. An interior never does.
+  if ((map.facades || []).some((f) => f.roomed)) keys.add('roofs');
   const sheets = {};
   for (const k of keys) sheets[k] = await loadImg(SHEET_URLS[k] || (TILES_BASE + k + '.png'));
   return sheets;
@@ -808,24 +814,30 @@ export function keyTexture() {
   return (_keyUrl = cv.toDataURL());
 }
 
-/** Shingles for the gabled roofs — drawn, cached, tiled at 48px. */
-let _shingleUrl = null;
-function shingleUrl() {
-  if (_shingleUrl) return _shingleUrl;
+/**
+ * One cell of the roof strip as a repeatable 48px texture.
+ *
+ * This used to be six bands of #8a4a3a DRAWN in canvas — legal at the time,
+ * because no owned kit carried roof tiles. One does now (art.js ROOF_KIT), so
+ * the roof is real clay tile in seven colourways and the drawn one is gone.
+ *
+ * A data URL rather than a background-position into the strip, because
+ * `.dv-roofq` repeats its texture and CSS cannot repeat a sub-rectangle of an
+ * image. Cached per column: a campus has a dozen buildings and at most eight
+ * distinct cells between them. Same move as `apronTileUrl`.
+ */
+const _roofUrls = new Map();
+function roofTileUrl(roofs, col) {
+  if (_roofUrls.has(col)) return _roofUrls.get(col);
+  const T = ROOF_KIT.cell;
   const cv = document.createElement('canvas');
-  cv.width = 48; cv.height = 48;
+  cv.width = T; cv.height = T;
   const g = cv.getContext('2d');
-  for (let row = 0; row < 6; row++) {
-    const y = row * 8;
-    g.fillStyle = '#8a4a3a';
-    g.fillRect(0, y, 48, 8);
-    g.fillStyle = '#a05a44';
-    g.fillRect(0, y, 48, 2);
-    g.fillStyle = '#5a2c22';
-    g.fillRect(0, y + 7, 48, 1);
-    for (let x = (row % 2) * 12; x < 48; x += 24) g.fillRect(x, y + 2, 1, 5);
-  }
-  return (_shingleUrl = cv.toDataURL());
+  g.imageSmoothingEnabled = false;
+  g.drawImage(roofs, col * T, 0, T, T, 0, 0, T, T);
+  const url = cv.toDataURL();
+  _roofUrls.set(col, url);
+  return url;
 }
 
 /** Campus turf for the apron outside interior walls — cached, tiled at 96px. */
@@ -852,7 +864,7 @@ function apronTileUrl(cliffs) {
  * decal); a pitch is what says "building" from a 52° camera.
  */
 const ROOF_RISE = 54;
-function gableRoof(b) {
+function gableRoof(b, roofs) {
   const x = b.x * TILE, y = b.y * TILE, w = b.w * TILE, h = b.h * TILE;
   const z = standZ(b.y + b.h) - 1;
   const els = [];
@@ -864,21 +876,24 @@ function gableRoof(b) {
     els.push(d);
     return d;
   };
-  const shingles = `background-image:url(${shingleUrl()})`;
+  // The building names its own colourway (campus.js BUILDING_KINDS); the gable
+  // ends take the kit's plaster face, which is one tile for all seven roofs.
+  const shingles = `background-image:url(${roofTileUrl(roofs, roofCol(b.roof))})`;
+  const gable = `background-image:url(${roofTileUrl(roofs, ROOF_GABLE_COL)})`;
   if (w >= h) {
     // Ridge east–west: slopes face north/south, gables cap east/west.
     const d2 = h / 2, L = Math.hypot(d2, ROOF_RISE), deg = (Math.atan2(ROOF_RISE, d2) * 180 / Math.PI).toFixed(2);
     mk(`left:${x}px;top:${y}px;width:${w}px;height:${L}px;transform-origin:50% 0;transform:translateZ(96px) rotateX(${deg}deg);${shingles}`);
     mk(`left:${x}px;top:${y + h - L}px;width:${w}px;height:${L}px;transform-origin:50% 100%;transform:translateZ(96px) rotateX(-${deg}deg);${shingles}`);
-    mk(`left:${x - ROOF_RISE}px;top:${y}px;width:${ROOF_RISE}px;height:${h}px;transform-origin:100% 50%;transform:translateZ(96px) rotateY(90deg);clip-path:polygon(100% 0,0 50%,100% 100%)`, 'dv-roofq dv-gable');
-    mk(`left:${x + w}px;top:${y}px;width:${ROOF_RISE}px;height:${h}px;transform-origin:0 50%;transform:translateZ(96px) rotateY(-90deg);clip-path:polygon(0 0,100% 50%,0 100%)`, 'dv-roofq dv-gable');
+    mk(`left:${x - ROOF_RISE}px;top:${y}px;width:${ROOF_RISE}px;height:${h}px;transform-origin:100% 50%;transform:translateZ(96px) rotateY(90deg);clip-path:polygon(100% 0,0 50%,100% 100%);${gable}`, 'dv-roofq dv-gable');
+    mk(`left:${x + w}px;top:${y}px;width:${ROOF_RISE}px;height:${h}px;transform-origin:0 50%;transform:translateZ(96px) rotateY(-90deg);clip-path:polygon(0 0,100% 50%,0 100%);${gable}`, 'dv-roofq dv-gable');
   } else {
     // Ridge north–south: slopes face east/west, gables cap north/south.
     const d2 = w / 2, L = Math.hypot(d2, ROOF_RISE), deg = (Math.atan2(ROOF_RISE, d2) * 180 / Math.PI).toFixed(2);
     mk(`left:${x}px;top:${y}px;width:${L}px;height:${h}px;transform-origin:0 50%;transform:translateZ(96px) rotateY(-${deg}deg);${shingles}`);
     mk(`left:${x + w - L}px;top:${y}px;width:${L}px;height:${h}px;transform-origin:100% 50%;transform:translateZ(96px) rotateY(${deg}deg);${shingles}`);
-    mk(`left:${x}px;top:${y - ROOF_RISE}px;width:${w}px;height:${ROOF_RISE}px;transform-origin:50% 100%;transform:translateZ(96px) rotateX(-90deg);clip-path:polygon(0 100%,50% 0,100% 100%)`, 'dv-roofq dv-gable');
-    mk(`left:${x}px;top:${y + h}px;width:${w}px;height:${ROOF_RISE}px;transform-origin:50% 0;transform:translateZ(96px) rotateX(90deg);clip-path:polygon(0 0,50% 100%,100% 0)`, 'dv-roofq dv-gable');
+    mk(`left:${x}px;top:${y - ROOF_RISE}px;width:${w}px;height:${ROOF_RISE}px;transform-origin:50% 100%;transform:translateZ(96px) rotateX(-90deg);clip-path:polygon(0 100%,50% 0,100% 100%);${gable}`, 'dv-roofq dv-gable');
+    mk(`left:${x}px;top:${y + h}px;width:${w}px;height:${ROOF_RISE}px;transform-origin:50% 0;transform:translateZ(96px) rotateX(90deg);clip-path:polygon(0 0,50% 100%,100% 0);${gable}`, 'dv-roofq dv-gable');
   }
   return els;
 }
@@ -1096,7 +1111,7 @@ function mountScene(prep, entry) {
       // quads join its els so the building fades as one thing, and so does
       // the contact shadow — a detached ellipse over the doorway reads as a
       // hole in the grass. Append, never prepend: els[0] stays the .dv-up.
-      const els = gableRoof(b);
+      const els = gableRoof(b, baked.sheets.roofs);
       const occ = D.occluders[D.occluders.length - 1];
       for (const e of els) occ.els.push(e);
       const sh = propEl.querySelector('.dv-shadow');

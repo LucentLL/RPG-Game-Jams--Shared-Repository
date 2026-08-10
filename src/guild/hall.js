@@ -64,7 +64,10 @@ const ARCH_GLYPH = { Knight: '⚔', Mage: '✦', Ranger: '➳', Cleric: '☩', R
 // `shield` is a DRAWN glyph, not a character: the typographic set has no shield
 // that isn't an emoji, and icons.js has carried one since the emoji purge.
 const KIND_GLYPH = { sword: '⚔', armor: '▣', bow: '➳', axe: '⚒', dagger: '†', shield: icon('shield'),
-  mace: '⌇', hammer: '⚒', staff: '≀', wand: '✧', helm: '⌂', greaves: '⑃' };
+  mace: '⌇', hammer: '⚒', staff: '≀', wand: '✧', helm: '⌂', greaves: '⑃',
+  // U+223F SINE WAVE — a lash in one stroke, and a maths symbol rather than a
+  // pictograph, so no platform renders it in colour.
+  whip: '∿' };
 
 let guild = null;
 let selectedId = null;

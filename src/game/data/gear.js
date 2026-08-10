@@ -28,6 +28,10 @@ var GEAR_TYPES=[
   {type:'Axe',     pos:'Hand', sMin:1,sMax:3, icon:'⚒', dmg:3, ac:0},
   {type:'Hammer',  pos:'Hand', sMin:1,sMax:3, icon:'', dmg:3, ac:0},
   {type:'Club',    pos:'Hand', sMin:0,sMax:1, icon:'⌇', dmg:1, ac:0},
+  // The whip buys a tile of reach and pays for it in weight: dmg 1 against a
+  // sword's 2, and no shield can sit alongside a thing you need room to crack.
+  // (Not a two-hander — see TWO_HANDED_GEAR_TYPES — it just wants the space.)
+  {type:'Whip',    pos:'Hand', sMin:1,sMax:3, icon:'∿', dmg:1, ac:0},
   {type:'Buckler', pos:'Hand', sMin:0,sMax:2, icon:'▣', dmg:0, ac:2},
   // Body — the piece that covers the most of you is worth the most.
   {type:'Plate',   pos:'Body', sMin:1,sMax:4, icon:'▣', dmg:0, ac:4},
@@ -97,8 +101,56 @@ var MAX_REFINEMENT=10;
 var MAX_SOCKETS=5;
 
 // Gear roles (kept for gameplay logic in draft/loadout/AI generation).
-var WEAPON_GEAR_TYPES = ['Sword','Dagger','Club','Wand','Bow','Axe','Hammer'];
+//
+// A WEAPON MUST BE LISTED HERE OR IT IS QUIETLY A SHIELD. buildFighterMateria
+// buckets a hand piece as 'w' if this list names it and 's' otherwise, so an
+// unlisted weapon pays every orb socketed in it out as ARMOUR and three UI
+// sites label it SHIELD — with no error anywhere.
+var WEAPON_GEAR_TYPES = ['Sword','Dagger','Club','Wand','Bow','Axe','Hammer','Whip'];
 var SHIELD_GEAR_TYPES = ['Buckler'];
+
+/**
+ * HOW FAR A WEAPON REACHES, IN TILES. The one authority, for every lens.
+ *
+ * NOT a taste knob — MEASURED OFF THE ART, which is what makes it the same fact
+ * the player can see. Both kits are drawn at one pixel scale: an Elements
+ * character (head+top+bottom+hair, east stand) stands 24px tall, and a sword's
+ * slash cell reaches 24px past the cell's centre — one character-height, and
+ * the tile the board already gives it. The whip's crack reaches 56px, which is
+ * 2.33 character-heights; at PLAYER_H = 0.844 tiles (prop-volume.js) that is
+ *
+ *     56/24 × 0.844 = 1.97 tiles → 2
+ *
+ * so the board's integer 2 is not a rounding of a made-up number, it is where
+ * the drawing already ended. Change the art and this must be re-measured;
+ * dev/check-reach.mjs is what will tell you the lenses have drifted apart.
+ *
+ * Everything unlisted reaches 1 — the adjacent tile every melee weapon has
+ * always had. @see fighterReach, and delve-fp.js MELEE for the same fact in
+ * the lens that measures in fractions of a tile.
+ */
+var WEAPON_REACH = { Whip: 2 };
+
+/** What ONE piece reaches, or 1 if it is not a weapon that says otherwise. */
+function gearReach(gear){
+  if (!gear || gear.cosmetic) return 1;
+  return WEAPON_REACH[gear.type] || 1;
+}
+
+/**
+ * What a FIGHTER reaches: the longest thing in either hand. A whip in the
+ * off-hand still reaches two tiles, because the reach belongs to the weapon
+ * and not to the hand it is in.
+ */
+function fighterReach(equipped){
+  if (!equipped) return 1;
+  var best = 1;
+  for (var i = 0; i < HAND_SLOTS.length; i++) {
+    var r = gearReach(equipped[HAND_SLOTS[i]]);
+    if (r > best) best = r;
+  }
+  return best;
+}
 
 // Two-handed weapons occupy BOTH hands: equipping one clears the off-hand, and no
 // shield or second weapon can sit alongside it. Bows and crossbows are drawn with
@@ -142,5 +194,6 @@ export {
   GEAR_MATERIALS, REFINE_TABLE,
   MAX_REFINEMENT, MAX_SOCKETS, WEAPON_GEAR_TYPES, SHIELD_GEAR_TYPES,
   TWO_HANDED_GEAR_TYPES, isTwoHandedType,
+  WEAPON_REACH, gearReach, fighterReach,
   gearTierBonus, gearDamage, gearArmor,
 };

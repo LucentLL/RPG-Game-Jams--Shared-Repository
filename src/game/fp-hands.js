@@ -42,6 +42,7 @@
 import { loadImg } from '../guild/delve.js';
 import { WORN, wornWeapon, wornShield, wornPick, wornArms } from '../guild/art.js';
 import { ELEMENTS_SKIN_SOURCE, ELEMENTS_SKIN_TONES } from './data/sprite-tables.js';
+import { weaponCellOf } from './data/config.js';
 
 /**
  * How a held thing sits in the frame.
@@ -123,6 +124,7 @@ const TYPE_KIND = {
   Sword: 'sword', Dagger: 'dagger', Axe: 'axe', Bow: 'bow', Crossbow: 'bow',
   Hammer: 'hammer', Mace: 'mace', Club: 'mace',
   Wand: 'wand', Staff: 'staff', Rod: 'wand',
+  Whip: 'whip',
 };
 export function fighterHandsSpec(fighter) {
   const g = (fighter && fighter.gear) || {};
@@ -215,8 +217,18 @@ function cellAlpha(pix, row, col, cell) {
  * pixels only), and that is the whole trick: a torso sits two pixels from a
  * sword's grip in a straight line but a dozen steps away along the arm, so a
  * radius would drag the chest in and a walk does not.
+ *
+ * `at` IS THE ANSWER FOR A WEAPON THAT LETS GO. Every blade stays welded to the
+ * fist for the whole swing, so "touching the weapon" always found the hand. A
+ * WHIP DOES NOT: on the crack frame the lash is a stroke of leather in mid-air
+ * with a gap between it and the wielder, so nothing touches, nothing seeds, and
+ * the viewmodel's hand vanished for one frame of every swing. When the caller
+ * knows where the grip was — it measures it on the rest frame, where the whip
+ * IS in the hand — it passes that point, and the seed becomes the body pixels
+ * at the grip. Still authored body pixels, still the same hand; only the way of
+ * FINDING it changes, for the frames where the weapon has left it behind.
  */
-function armMask(body, weapon, reach, cell) {
+function armMask(body, weapon, reach, cell, at) {
   const dist = new Int16Array(cell * cell).fill(-1);
   const q = [];
   for (let y = 0; y < cell; y++) {
@@ -232,6 +244,21 @@ function armMask(body, weapon, reach, cell) {
       }
       if (touching) { dist[y * cell + x] = 0; q.push(y * cell + x); }
     }
+  }
+  // Nothing touched: fall back to the known grip. NEAREST body pixel, not the
+  // pixels AT the grip — the grip was measured on the rest frame and the arm
+  // has moved since, so the point itself is often just off the fist by then.
+  // Whatever body pixel is closest to where the hand was IS the hand.
+  if (!q.length && at) {
+    let best = -1, bd = Infinity;
+    for (let y = 0; y < cell; y++) {
+      for (let x = 0; x < cell; x++) {
+        if (!body[y * cell + x]) continue;
+        const d = (x - at.x) * (x - at.x) + (y - at.y) * (y - at.y);
+        if (d < bd) { bd = d; best = y * cell + x; }
+      }
+    }
+    if (best >= 0) { dist[best] = 0; q.push(best); }
   }
   for (let h = 0; h < q.length; h++) {
     const p = q[h], x = p % cell, y = (p / cell) | 0;
@@ -310,7 +337,15 @@ function cellBox(pix, row, col, cell) {
  * hand is empty hands, which is what the state means anyway.
  */
 function buildStrip(weaponImg, armsImg, frames, skinTone, armOnly) {
-  const S = WORN.cell;
+  // TWO CELL SIZES, ONE FRAME. The body is always cut at 48; a weapon sheet
+  // reports its own (112 for the whips, whose lash does not fit 48). The strip
+  // is built at the WEAPON's cell and the body is placed CENTRED inside it,
+  // which is the same registration the third-person compositor draws — both
+  // kits put the wielder at the middle of the cell, so aligning the middles
+  // aligns the grips. `off` is 0 for every sheet that is already 48.
+  const B = WORN.cell;
+  const S = weaponCellOf(weaponImg) || B;
+  const off = (S - B) / 2;
   const strip = document.createElement('canvas');
   strip.width = S * frames.length;
   strip.height = S;
@@ -334,8 +369,17 @@ function buildStrip(weaponImg, armsImg, frames, skinTone, armOnly) {
     const ox = i * S;
     if (ap && wp) {
       const wm = cellAlpha(wp, WORN.row, col, S);
-      const bm = cellAlpha(ap, WORN.row, col, S);
-      const dist = armMask(bm, wm, WORN.armReach, S);
+      // The body's 48px mask, seated in the weapon's frame. armMask walks
+      // geodesically from body pixels TOUCHING weapon pixels, so both masks
+      // have to be in one coordinate space or the walk finds no seed at all
+      // and the hand comes back empty.
+      const bm = new Uint8Array(S * S);
+      const bm0 = cellAlpha(ap, WORN.row, col, B);
+      for (let y = 0; y < B; y++) for (let x = 0; x < B; x++) bm[(y + off) * S + (x + off)] = bm0[y * B + x];
+      // `grip` is measured on frame 0 (below) and reused from then on, which is
+      // exactly what a whip needs: the rest frame is the one where the lash is
+      // still in the fist.
+      const dist = armMask(bm, wm, WORN.armReach, S, i === 0 ? null : grip);
       // THE GRIP, for free: the seed pixels of that walk ARE the body touching
       // the weapon, which is the hand on the handle. Their centre is the point
       // fit() pins to the near corner. Taken from the rest frame only — the
@@ -354,7 +398,10 @@ function buildStrip(weaponImg, armsImg, frames, skinTone, armOnly) {
       for (let y = 0; y < S; y++) {
         for (let x = 0; x < S; x++) {
           if (dist[y * S + x] < 0) continue;
-          const sx = col * S + x, sy = WORN.row * S + y;
+          // Back out of the weapon's frame into the body sheet's own cell.
+          const bx = x - off, by = y - off;
+          if (bx < 0 || by < 0 || bx >= B || by >= B) continue;
+          const sx = col * B + bx, sy = WORN.row * B + by;
           if (sx >= ap.w || sy >= ap.h) continue;
           const si = (sy * ap.w + sx) * 4, di = (y * S + x) * 4;
           arm.data[di] = ap.d[si];
@@ -414,7 +461,10 @@ function applyTone(g, strip, skinTone) {
 /** The tight box a set of strip columns occupies — union, or the art jumps as
  *  it plays. Cell-local coordinates, measured on the strip we just baked. */
 function stripUnion(strip, cols) {
-  const S = WORN.cell;
+  // The strip is square cells laid side by side, so its HEIGHT is the cell —
+  // and that is the weapon's cell, which is not always WORN.cell (a whip's is
+  // 112). Reading it off the canvas keeps this honest for any sheet.
+  const S = strip.height;
   try {
     const g = strip.getContext('2d', { willReadFrequently: true });
     const d = g.getImageData(0, 0, strip.width, strip.height).data;
@@ -442,7 +492,7 @@ function stripUnion(strip, cols) {
 function handFrame(hand, i) {
   if (hand.at === i) return;
   hand.at = i;
-  const S = WORN.cell, b = hand.box;
+  const S = hand.strip.height, b = hand.box;   // the strip's own cell — @see stripUnion
   const g = hand.cv.getContext('2d');
   g.imageSmoothingEnabled = false;
   g.clearRect(0, 0, b.w, b.h);

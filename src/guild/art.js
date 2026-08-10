@@ -249,6 +249,44 @@ export const SWAY = {
   treeFillCanopy: 0.045, treeFillDark: 0.04,
 };
 
+/**
+ * THE ROOF KIT — what a building is roofed in, and in what colour.
+ *
+ * A stamped room's gable used to be shingles DRAWN in canvas (delve.js's old
+ * `shingleUrl`: six bands of brown with a highlight and a nail dot). That was
+ * legal when no owned kit carried roof tiles; `2021_rooftops_update` does, in
+ * seven colourways at the delve's own 48px, so the drawn one is gone.
+ *
+ * `dev/bake-roofs.mjs` cuts one field tile per colourway out of those seven
+ * 768×768 sheets into a 384×48 strip, plus the gable face in the last column —
+ * two tiles are wanted and 320KB of dormers and chimneys are not. Both the bake
+ * and the renderer read THIS table, so the column a colour lands in and the
+ * column the renderer reaches for cannot drift apart.
+ *
+ * `colours` is ordered, and the order is the strip. APPEND, NEVER REORDER: a
+ * building names its roof by string (campus.js BUILDING_KINDS), and reordering
+ * would silently re-roof the estate.
+ */
+export const ROOF_KIT = {
+  file: 'roofs.png',                                              // under TILES_BASE
+  cell: 48,
+  colours: ['black', 'blue', 'brown', 'gray', 'green', 'red', 'yellow'],
+  /** Source cells on a `tileB_2021rooftops_<colour>.png`, in 48px tiles.
+   *  `field` is the one fully-opaque cell whose clay tiles run in vertical
+   *  courses — the fall of a roof, which is the direction gableRoof's quad
+   *  folds. `gable` is cream plaster between timber bands, and it is identical
+   *  in all seven files, so it is baked once. */
+  src: { field: [1, 7], gable: [7, 12] },
+};
+/** Column of the gable face in the baked strip — one past the last colourway. */
+export const ROOF_GABLE_COL = ROOF_KIT.colours.length;
+/** A roof colour name → its column in the strip. Unknown names fall to the
+ *  first colourway rather than painting nothing, because a roof is not optional. */
+export function roofCol(colour) {
+  const i = ROOF_KIT.colours.indexOf(colour);
+  return i < 0 ? 0 : i;
+}
+
 // ─── Item art: one cell off an Elements weapon sheet ─────────────────────────
 // Armory items have never had a picture — only a KIND_GLYPH emoji. But the
 // compositor's weapon overlays are real art, and one cell of them is a real
@@ -291,6 +329,13 @@ const ITEM_WEAPON = {
   // `sheet` overrides the material→stem rule for kinds where one stem cannot
   // cover the ladder — see shieldSheet.
   shield: { sheet: shieldSheet, laidCol: 16, laidRow: 3 },
+  // A WHIP IS NOT AN ELEMENTS SHEET. It comes from the whips kit, re-cut onto
+  // this column layout at 112px cells by dev/bake-whips.mjs — same 23×4 grid,
+  // a bigger cell, because 56px of lash does not fit in 48. The CSS below needs
+  // no adjusting for that: background-size works out to COLS×ROWS whatever the
+  // cell measures. Col 1 is the whip carried — coil in hand rather than mid-
+  // crack, which is what an item lying in an armory should look like.
+  whip:   { sheet: whipSheet, laidCol: 1, laidRow: 2 },
   // ── Worn armour: not the weapon folder at all ────────────────────────────
   // A breastplate, a helm and a pair of greaves are BODY LAYERS — they live in
   // top/, hat/ and bottom/, and they are drawn on a person rather than lying on
@@ -321,6 +366,20 @@ function shieldSheet(material) {
   return tier >= 2
     ? { pack: 1, stem: 'shield2L', c: Math.min(tier, 6) }   // ce1 carries shield2 + variants
     : { pack: 0, stem: 'shield1L', c: 0 };                  // core carries the plain pair
+}
+
+/**
+ * Braided leather, then chain. The whip's ladder crosses FOUR stems, not two —
+ * whip · thornwhip · ballchain · chainblade (orb-tables GEAR_WEAPON_LADDER) —
+ * and each ships a different number of recolours, so the variant is clamped per
+ * stem rather than by one maxC. Materials are leather/steel/mithril (a whip is
+ * hide before it is ever metal, the same as a bow).
+ */
+function whipSheet(material) {
+  const tier = MAT_COLOR[material] || 0;
+  if (tier >= 3) return { pack: 0, stem: 'chainblade', c: 3 };
+  if (tier >= 2) return { pack: 0, stem: 'ballchain', c: 2 };
+  return { pack: 0, stem: 'whip', c: 0 };
 }
 
 /** Hide-and-horn, then a steel-limbed bow. Same two-stem problem as the shield. */
@@ -414,7 +473,7 @@ export function wornLayerDesc(item) {
  *  first-person viewmodel cannot come to different conclusions about a mace. */
 export const KIND_TO_ENGINE_TYPE = {
   sword: 'Sword', dagger: 'Dagger', axe: 'Axe', bow: 'Bow', hammer: 'Hammer',
-  mace: 'Club', wand: 'Wand', staff: 'Wand', shield: 'Buckler',
+  mace: 'Club', wand: 'Wand', staff: 'Wand', shield: 'Buckler', whip: 'Whip',
 };
 
 /** Material → the engine `tier` that picks the same colour variant the icon

@@ -162,7 +162,10 @@
   background-size: 48px 48px; background-repeat: repeat;
   image-rendering: pixelated;
 }
-.dv-gable { background-color: #b09a78; box-shadow: inset 0 0 0 2px rgba(44, 26, 16, 0.5); }
+/* The gable end is the kit's own plaster-and-timber face now, not a flat fill —
+   delve.js hands it the background-image. The inset keeps the edge reading
+   against the slopes it closes. */
+.dv-gable { box-shadow: inset 0 0 0 2px rgba(44, 26, 16, 0.5); }
 /* The lawn beyond an interior's walls — the world does not end at the room. */
 .dv-apron {
   position: absolute; z-index: 0; pointer-events: none;
