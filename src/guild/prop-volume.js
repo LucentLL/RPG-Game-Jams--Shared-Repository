@@ -165,7 +165,15 @@ export const PROP_VOL = /** @type {Record<string, Volume>} */ ({
   forgeFurnace: { form: 'stand', h: 1.25 * PLAYER_H, d: 0.55 },
   stoneOven:    { form: 'stand', h: 1.00 * PLAYER_H, d: 0.42 },
   kitchenStove: { form: 'stand', h: 1.00 * PLAYER_H, d: 0.40, fold: 0.20 },
-  anvilBare:    { form: 'stand', h: 0.50 * PLAYER_H, d: 0.28 },
+  // MEASURED off the crop (anvils_3x 264,0,84×48, read at 8x): the working
+  // face is the pale slab from the top of the art down to the highlight strip
+  // at row ~22 of 48 — 0.45 — and everything under it is the body and stump,
+  // drawn as elevation. Without the fold it extruded as a silhouette, which
+  // has no notion of a top at all: the drawn face got worn as a front and the
+  // middle read hollow (owner, 2026-08-15). The number is the art's, not the
+  // screenshot's — the same 0.45 the teacher's desk takes, and for the same
+  // reason: a slab on a base.
+  anvilBare:    { form: 'stand', h: 0.50 * PLAYER_H, d: 0.28, fold: 0.45 },
 
   // ── Beds: drawn in plan, so they lie down ─────────────────────────────────
   // `h` is the mattress-top: a quarter of a person is where you sit down to.
@@ -178,9 +186,16 @@ export const PROP_VOL = /** @type {Record<string, Volume>} */ ({
   // animated art and leafy organics read better as sprites — the same call the
   // voxel mod's own overworld makes. `d` is now ALSO the extrusion depth, so a
   // pole can say it is a pole instead of inheriting a crate's default.
-  provisionBarrel: { form: 'stand', h: 0.50 * PLAYER_H },
-  quenchBarrel:    { form: 'stand', h: 0.50 * PLAYER_H },
-  storeBarrel:     { form: 'stand', h: 0.50 * PLAYER_H },
+  // A BARREL TURNS TO YOU (owner, 2026-08-15). Extruding one gave it corners:
+  // the silhouette is a rounded upright with no drawn top, so pushing it back
+  // builds a flat-fronted box with a hollow middle, and the round thing reads
+  // square from every angle but dead-on. A barrel is radially symmetric — the
+  // one shape a billboard models EXACTLY right — so it takes the tree's
+  // treatment and faces the walker, which is cheaper than the box that was
+  // wrong.
+  provisionBarrel: { form: 'stand', h: 0.50 * PLAYER_H, flat: true },
+  quenchBarrel:    { form: 'stand', h: 0.50 * PLAYER_H, flat: true },
+  storeBarrel:     { form: 'stand', h: 0.50 * PLAYER_H, flat: true },
   // The witch-hatted cauldron is FOUR FRAMES of art (.apoth-boil walks them
   // top-down) — a carving cannot stir, so she stays a sprite, at the height
   // the art actually draws her rather than the pot's old waist-high number.
