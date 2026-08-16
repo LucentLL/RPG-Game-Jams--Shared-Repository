@@ -30,6 +30,7 @@ and port reads the same file.
   "spawns":  [{ "prey": "ghost", "x": 18, "y": 16 }],
   "regions": [{ "x": 0, "y": 0, "w": 8, "h": 6, "theme": "forge" }],
   "paint":   [{ "x": 0, "y": 0, "w": 8, "h": 6, "theme": "forge" }],
+  "walls":   [{ "x": 3, "y": 7, "w": 5, "h": 1, "theme": "dormitory" }],
   "locks":   [[21, 11]]
 }
 ```
@@ -106,8 +107,84 @@ rules change smuggled in by an exporter; inventing a field for any of them
 papers over a decision. So: **reported, never resolved here.** The pin is what
 should move.
 
-`regions` and `paint` are in the schema and no shipped chart uses either; the
-exporter would write them if one did.
+`regions` is in the schema and no shipped chart uses one; the exporter would
+write it if one did. `paint` and `walls` are documented in full below.
+
+## THE THREE RECT CHANNELS: `paint`, `walls`, `regions`
+
+All three are the same four numbers plus a `theme` — `{x, y, w, h, theme}` —
+and they are **not interchangeable**. They differ by which surface they speak
+for, and getting them confused is the one mistake this shape invites:
+
+| key | surface | what it can change |
+| --- | --- | --- |
+| `paint` | the **GROUND** of the cells in the rect | dressing only |
+| `walls` | the **VERTICAL faces** of the cells in the rect — block sides, wall runs, terrace risers, trench inner faces | dressing only |
+| `regions` | a **ROOM** — walls *and* a ceiling (even under open sky) *and* gameplay meaning (`campus.js:362`) | it says a place EXISTS |
+
+`paint` and `walls` are **FILL-ONLY DRESSING AND NEVER A RULE** (CLAUDE.md,
+ONE RULES FACT). Neither may change a height, a passability, a collision, a
+line of sight, or what a cell *is*. That is not a convention — it is the
+reason they are allowed to be authored per-rect at all: a rules fact has to
+come from the shared model, so anything a lens could decide on its own must be
+unable to decide anything.
+
+A `walls` rect that lands on a floor cell is simply **nothing to dress** —
+legal, and worth a note, not an error.
+
+### `walls`: what a chart's stone is made of
+
+A chart has one `theme`, and until 2026-08-16 that was the *only* thing that
+could say what a wall looked like: a player building in the 3D drafting table
+got dirt walls and no way to ask for anything else. `walls` is the missing
+channel. Each rect dresses the vertical surfaces of the cells it covers with
+another theme's **wall contract** — `THEMES[t].walls`, i.e.
+`{sheet, tall, low, crown}` (`src/guild/themes.js`).
+
+**Absent means the map's own theme.** Every shipped chart is unchanged by the
+addition and nothing needed migrating.
+
+**Later rects win over earlier ones**, exactly as `paint` does — which is what
+makes "change *this one block* to wood" a 1×1 rect appended to the array
+rather than a second mechanism.
+
+Ten themes carry a wall contract (`interior`, `guildhall`, `kitchen`, `forge`,
+`apothecary`, `armory`, `dormitory`, `classroom`, `guildmaster`, `arena`).
+`mine` and `meadow` do not: their verticals come off the cliff sheet's own
+faces (`delve-fp.js:475`), so naming one in a `walls` rect asks for a texture
+that does not exist and the faces keep what they already wore.
+
+#### The one chart that uses it
+
+`forge` dresses `{x: 3, y: 7, w: 5, h: 1, theme: "dormitory"}` — the two
+waist-high `b` blocks flanking the smithy's south approach, in the `dormitory`
+theme's plank wall, so they read as timber benches against the sooty stone
+instead of more of the same wall. The three floor cells between them are in
+the rect and are simply not dressed: nothing vertical there, which is the
+fill-only rule doing its job in a shipped file rather than in a comment.
+
+#### The lint is advice, never an error
+
+`dev/check-maps.mjs` prints these under **the dressing** and the run stays
+green; nothing dressing gets wrong may fail a build.
+
+- a rect covering **no vertical surface** (all flat ground) — *nothing to
+  dress here*. Asked of the level model, never of raw char adjacency, and
+  deliberately generous: the note fires only when nothing in the rect could
+  own a face. A face is owned by the cell the **material** is in — a block's
+  sides belong to the block, not to the floor tile in front of it.
+- a rect naming a theme with **no walls contract** in `THEMES`.
+- a rect lying **entirely off the grid** — the usual way is a rect authored
+  against a bigger draft, after which the grid shrank under it.
+
+### A climb is a FLOOR cell, not a wall
+
+Related, and the same confusion from the other side: `L` (ladder), `v` (vine)
+and `S` (stairs) are **ground you walk onto**, dressed with the thing you
+climb. They are not something you hang on a wall's face. Painting one into a
+wall cell **replaces the wall** — put the climb on the floor cell *in front
+of* the ledge it serves ("directly south of the ledge it serves, so it leans
+on its face"), and the wall stays standing.
 
 ## `entry` and portal `x`/`y` are numbers, not integers
 

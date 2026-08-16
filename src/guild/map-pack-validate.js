@@ -37,6 +37,17 @@
  * dropping data is how a creek dries up between two formats. See the module
  * note at the bottom of this comment.
  *
+ * ── WHAT THE PIN GAINED (2026-08-16): `walls` ────────────────────────────
+ *
+ * A chart had ONE theme and no way at all to say "these blocks are wood" —
+ * `paint` dresses GROUND and `regions` declares a ROOM, so a player building
+ * in the 3D drafting table got dirt walls and nothing else. `walls` is the
+ * missing third channel: the same rect shape as `paint`, equally fill-only,
+ * dressing the VERTICAL faces of the cells it covers with another theme's
+ * wall contract (THEMES[t].walls). Absent = the map's own theme, so every
+ * shipped chart is unchanged and nothing needed migrating.
+ * @see THE THREE RECT CHANNELS in checkPackMap for the distinction.
+ *
  * FIELDS THE PINNED SCHEMA HAS NO HOME FOR (report, never invent):
  *   · `water` — ferncreek's 28 wet cells (delve-maps.js:707). Nowhere to go.
  *   · prop `cls` — one apothecary cauldron carries a CSS class.
@@ -66,13 +77,16 @@ export const PACK_KINDS = ['delve', 'arena'];
  * addition here is a schema change and belongs in the schema doc first.
  */
 export const MAP_KEYS = ['schema', 'kind', 'id', 'name', 'theme', 'grid', 'entry',
-  'foe', 'water', 'exitStairs', 'props', 'portals', 'spawns', 'regions', 'paint', 'locks'];
+  'foe', 'water', 'exitStairs', 'props', 'portals', 'spawns', 'regions', 'paint', 'walls', 'locks'];
 export const PROP_KEYS = ['art', 'x', 'y', 'facing', 'use', 'label', 'cls'];
 export const PORTAL_KEYS = ['x', 'y', 'to', 'at', 'enter', 'stairs'];
 export const SPAWN_KEYS = ['prey', 'x', 'y'];
 export const RECT_KEYS = ['x', 'y', 'w', 'h', 'theme'];
 /** The arrays the schema says are omitted when empty. */
-export const ARRAY_KEYS = ['props', 'portals', 'spawns', 'regions', 'paint', 'locks'];
+export const ARRAY_KEYS = ['props', 'portals', 'spawns', 'regions', 'paint', 'walls', 'locks'];
+/** The three rect channels, in the one order everything prints them: ground,
+ *  vertical, room. @see THE THREE RECT CHANNELS below. */
+export const RECT_KEYS_BY_CHANNEL = ['paint', 'walls', 'regions'];
 
 /**
  * THE GRID VOCABULARY.
@@ -281,7 +295,36 @@ export function checkPackMap(raw, stem, ctx = {}) {
     else if (raw.grid[Math.floor(s.y)][Math.floor(s.x)] === '#') warn(`${at} '${s.prey}' at ${s.x},${s.y} is on void`);
   }
 
-  for (const key of ['regions', 'paint']) {
+  // ── THE THREE RECT CHANNELS ──────────────────────────────────────────────
+  //
+  // One rect shape, three different surfaces, and they are NOT
+  // interchangeable. The distinction is written here because it is exactly
+  // the thing a later author will get wrong:
+  //
+  //   · `paint`   — the GROUND. Fill-only dressing for the floor of the cells
+  //                 in the rect (delve.js paintGround / the FP floorTexAt).
+  //   · `walls`   — the VERTICAL faces of the cells in the rect: block sides,
+  //                 wall runs, terrace risers, trench inner faces. Fill-only,
+  //                 same as paint, and never touches the floor.
+  //   · `regions` — a ROOM. Walls AND a ceiling (even under open sky) AND
+  //                 gameplay meaning (campus.js:362). It says a place EXISTS;
+  //                 the other two only say what its surfaces are made of.
+  //
+  // paint and walls are DRESSING AND NEVER A RULE (ONE RULES FACT, CLAUDE.md).
+  // Neither may change a height, a passability, a collision, a line of sight
+  // or what a cell IS — so neither can make a file illegal, only odd, and
+  // everything odd about them is advice. @see lintWallsRects.
+  //
+  // Later rects win over earlier ones in all three, which is what makes
+  // "change THIS one block to wood" a 1×1 rect appended to `walls` rather
+  // than a second mechanism.
+  //
+  // A rect is checked for SHAPE here and nothing else: `x,y,w,h` four finite
+  // numbers covering something, and a `theme` THEMES actually has. Whether it
+  // lands on the grid, and whether there is anything under it worth dressing,
+  // are lint questions — the grid can be resized under a rect, and that is an
+  // authoring smudge, not a broken file.
+  for (const key of RECT_KEYS_BY_CHANNEL) {
     for (const [i, r] of (Array.isArray(raw[key]) ? raw[key] : []).entries()) {
       const at = `${key}[${i}]`;
       if (!plain(r)) { bad(`${at} is not an object`); continue; }
@@ -332,6 +375,100 @@ export function buildPackMap(raw, stem, ctx = {}) {
 // ---------------------------------------------------------------------------
 
 const ORTH = [[0, -1], [0, 1], [-1, 0], [1, 0]];
+
+/**
+ * WHAT A `walls` RECT DRESSES — advice, and ONLY ever advice.
+ *
+ * Kept out of `lintDelveMap` on purpose. That function's findings are FAILURES
+ * to their caller (dev/check-maps.mjs fails the run on every line it returns),
+ * because a climb that serves nothing is a walk that cannot happen. Nothing
+ * here can stop a walk: `walls` is dressing and never a rule, so the worst a
+ * bad rect can do is dress less than the author expected. A build that died
+ * because a rect hung off the edge of a resized grid would be a build that
+ * taught authors to stop dressing anything.
+ *
+ * Three notes, one per way a rect can quietly mean nothing:
+ *
+ *  1. IT COVERS NO VERTICAL SURFACE. Asked OF the level model, never of raw
+ *     char adjacency — the same rule lintDelveMap keeps, and for the same
+ *     reason: a lint that disagrees with what the lens draws teaches lies. A
+ *     cell owns a face when it is solid or void (floorAt null — 'B', 'b', '#'),
+ *     when a deck runs over it, or when any orthogonal neighbour stands at a
+ *     different level (a terrace riser, a trench's inner face). Deliberately
+ *     generous: the note fires only when NOTHING in the rect could own a face
+ *     under any reading, so it never nags an author whose rect merely spills
+ *     onto some floor.
+ *  2. ITS THEME HAS NO WALLS CONTRACT. `mine` and `meadow` dress their
+ *     verticals from the cliff sheet's own faces (delve-fp.js:475-489), so
+ *     naming one here asks for a wall texture that does not exist and the
+ *     faces keep whatever the map already wore.
+ *  3. IT LIES ENTIRELY OFF THE GRID. The usual way: a rect authored against a
+ *     bigger draft, then the grid shrank under it.
+ *
+ * @param {any} map a built pack map
+ * @param {{makeLevelModel?:Function}} [model] the delve-maps tables. Without
+ *   `makeLevelModel` the verticality question is skipped rather than guessed.
+ * @returns {string[]} notes, in rect order
+ */
+export function lintWallsRects(map, model = {}) {
+  const rects = Array.isArray(map && map.walls) ? map.walls : [];
+  const out = [];
+  if (!rects.length || !Array.isArray(map.grid) || !map.grid.length) return out;
+  const W = map.grid[0].length, H = map.grid.length;
+  const m = typeof model.makeLevelModel === 'function' ? model.makeLevelModel(map.grid) : null;
+
+  /**
+   * Does this cell OWN a vertical face for `walls` to dress?
+   *
+   * "Own" is the whole question, and the answer is: the cell the material is
+   * in. A block's four sides belong to the BLOCK, not to the floor standing
+   * next to it — so a rect dropped on the tile in front of a wall dresses
+   * nothing, which is precisely the mistake worth a note. The three ways a
+   * cell owns one:
+   *   · it IS the material — 'B', 'b', '#' (floorAt null);
+   *   · a deck runs over it (the riser under the span);
+   *   · its own floor meets a DIFFERENT floor next door (a terrace riser, a
+   *     trench's inner face), or it stands at the plateau rim, where the
+   *     cliff face hangs off this cell and no other.
+   */
+  const at = (x, y) => (map.grid[y] || '')[x] || '#';   // off the grid reads as void
+  const vertical = (x, y) => {
+    if (!m) return true;                          // no model, no opinion
+    const f = m.floorAt(x, y);
+    if (f == null) return true;
+    if (m.deckAt(x, y) != null) return true;
+    return ORTH.some(([dx, dy]) => {
+      const nx = x + dx, ny = y + dy;
+      if (at(nx, ny) === '#') return true;        // the rim: this cell's own drop
+      const nf = m.floorAt(nx, ny);
+      return nf != null && nf !== f;              // a riser between two real floors
+    });
+  };
+
+  rects.forEach((r, i) => {
+    const at = `walls[${i}]`;
+    // Shape faults are checkPackMap's, and it refuses the file outright; a
+    // malformed rect here would only produce a second, vaguer complaint.
+    if (!plain(r) || ![r.x, r.y, r.w, r.h].every(isNum) || !(r.w > 0 && r.h > 0)) return;
+    const where = `${r.x},${r.y} ${r.w}×${r.h}`;
+    const x0 = Math.floor(r.x), y0 = Math.floor(r.y);
+    const x1 = Math.ceil(r.x + r.w), y1 = Math.ceil(r.y + r.h);
+
+    if (x1 <= 0 || y1 <= 0 || x0 >= W || y0 >= H) {
+      out.push(`${at} ${where} lies entirely off the ${W}×${H} grid — a resize left it outside, and it now dresses nothing`);
+      return;
+    }
+    if (isStr(r.theme) && THEMES[r.theme] && !THEMES[r.theme].walls) {
+      out.push(`${at} ${where} names theme '${r.theme}', which has no walls contract — its verticals come off the cliff sheet's own faces, so these keep the map's dressing`);
+    }
+    let any = false;
+    for (let y = Math.max(0, y0); y < Math.min(H, y1) && !any; y++) {
+      for (let x = Math.max(0, x0); x < Math.min(W, x1) && !any; x++) if (vertical(x, y)) any = true;
+    }
+    if (!any) out.push(`${at} ${where} covers no vertical surface — nothing to dress here; the GROUND is 'paint', and a room is 'regions'`);
+  });
+  return out;
+}
 
 /**
  * WHAT A WALK WOULD TRIP OVER.

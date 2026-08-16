@@ -241,6 +241,14 @@ async function loadSheets(map, theme) {
     const t = THEMES[r.theme];
     if (t && t.sheet) keys.add(t.sheet);
   }
+  // WALL dressing is the mirror of paint: a rect names which stone the VERTICAL
+  // faces are cut from, so only that theme's WALL sheet rides along. A theme
+  // with no `walls` contract (the mine, the meadow) cuts its faces from the
+  // cliff kit, which is always loaded — such a rect costs nothing to serve.
+  for (const r of (map.walls || [])) {
+    const t = THEMES[r.theme];
+    if (t && t.walls && t.walls.sheet) keys.add(t.walls.sheet);
+  }
   const chars = map.grid.join('');
   // 's' locale exits, upper-floor 'd' stairwells, and climbing portals all
   // paint stair mouths — any of them means the sheet must ride along.
@@ -333,13 +341,62 @@ function paintGround(g, grid, theme, sheets, themeAt, water) {
 }
 
 /**
+ * THE WALL DRESSING — which stone a cell's VERTICAL surfaces are cut from.
+ *
+ * `map.walls` is exactly the shape of `map.paint` and exactly as fill-only: a
+ * list of `{x,y,w,h,theme}` rects, LATER RECTS WINNING. That ordering is the
+ * whole of the second half of the ask — "select a block and change it to
+ * another type" is a 1×1 rect appended, not a second feature.
+ *
+ * Where paint swaps the GROUND fill, this swaps the vertical surfaces: block
+ * sides, wall runs, terrace risers, the trench's inner faces — everything you
+ * could put a hand flat against. It reads THEMES[t].walls, the wall contract
+ * ({sheet, tall, low, crown}); a theme without one cuts its faces from the
+ * cliff kit exactly as the map's own theme does.
+ *
+ * IT IS DRESSING AND NEVER A RULE (ONE RULES FACT, CLAUDE.md). It may not
+ * change a height, a passability, a collision, a line of sight, or what a cell
+ * IS. A rect over open floor has no vertical surface to dress: legal, and it
+ * draws nothing. It is NOT `regions` either — a region is a ROOM (walls AND a
+ * ceiling AND gameplay meaning); this only says what the stone is made of.
+ *
+ * ABSENT MEANS THE MAP'S OWN THEME, which is why no shipped chart moved: with
+ * no rects this returns null everywhere and every expression downstream falls
+ * back to what it always read.
+ *
+ * Exported because BOTH LENSES READ IT (ONE WORLD, CLAUDE.md): delve-fp.js
+ * imports this very function, so a chart cannot mean one thing seen from above
+ * and another seen from inside it.
+ */
+export function wallThemeAt(rects, x, y) {
+  if (!rects || !rects.length) return null;
+  for (let i = rects.length - 1; i >= 0; i--) {
+    const r = rects[i];
+    if (x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h && THEMES[r.theme]) return r.theme;
+  }
+  return null;
+}
+
+/**
  * Cut the wall textures once. Cliff faces always come from the kit's rock
  * tiles (south walls read the art upright; side walls rotated so the top
  * edge lies along the boundary, W mirror-flipped). Raised-block textures are
  * per KIND — 'B' tall, 'b' low — and a theme with `walls` (interiors) cuts
  * them from its own sheet instead (bookshelf faces, crown-wood tops/sides).
+ *
+ * `opts` is how a WALLS DRESSING borrows a theme's stone without borrowing its
+ * geometry (@see wallThemeAt):
+ *   · `wallH` PINS the tall block's height to the plane's own, so dressing a
+ *     48px rock block in ashlar cannot silently make it a 96px one. Dressing
+ *     may not change a height (ONE RULES FACT, CLAUDE.md) — and in the
+ *     first-person lens a wall is WALL_H whatever its theme, so an unpinned
+ *     height here would also be the two lenses disagreeing about one world.
+ *   · `dressing` makes the RIM/cliff face come off the wall contract too where
+ *     the theme carries one. "Make this edge wood" has to produce wood, not
+ *     the wood theme's rock.
+ * Both default off, so every existing call is the cut it always was.
  */
-function cutWallTex(sheets, theme) {
+function cutWallTex(sheets, theme, opts = {}) {
   const cliffs = sheets.cliffs; // rock rim/face art always comes from the cliff kit
   const texCv = (w, h, draw) => {
     const c = document.createElement('canvas');
@@ -358,26 +415,31 @@ function cutWallTex(sheets, theme) {
     const w2 = texCv(h, TILE, (cg) => { cg.translate(h, 0); cg.scale(-1, 1); cg.drawImage(e, 0, 0); });
     return [e.toDataURL(), w2.toDataURL()];
   };
-  const faceS = texCv(TILE, DEPTH, (cg) => { sheetTile(cg, theme.faceTop.m, 0, 0); sheetTile(cg, theme.faceBot.m, 0, TILE); });
+  // A rect off the theme's WALL sheet: either STRETCHED to fill the texture
+  // (one whole shelf face), or REPEATED at world scale — the rect is drawn at
+  // its own size times TILE/walls.src, so a 48px source lands 1:1 (no
+  // squashing) and a 16px brick is blown up to a 48px course before it tiles.
+  // Getting this wrong silently halves the height of every stone course.
+  // Hoisted out of the block branch because the RIM face borrows it too when
+  // this cut is a walls dressing.
+  const wallCut = !theme.walls ? null : (rect, dw, dh) => texCv(dw, dh, (cg) => {
+    const w = sheets[theme.walls.sheet];
+    if (!theme.walls.tileFill) { cg.drawImage(w, rect[0], rect[1], rect[2], rect[3], 0, 0, dw, dh); return; }
+    const scale = TILE / (theme.walls.src || TILE);
+    const tw = Math.max(1, Math.round(rect[2] * scale)), th = Math.max(1, Math.round(rect[3] * scale));
+    for (let y = 0; y < dh; y += th) {
+      for (let x = 0; x < dw; x += tw) cg.drawImage(w, rect[0], rect[1], rect[2], rect[3], x, y, tw, th);
+    }
+  });
+  const faceS = (opts.dressing && wallCut)
+    ? wallCut(theme.walls.tall, TILE, DEPTH)
+    : texCv(TILE, DEPTH, (cg) => { sheetTile(cg, theme.faceTop.m, 0, 0); sheetTile(cg, theme.faceBot.m, 0, TILE); });
   const [faceSideE, faceSideW] = sidePair(faceS, DEPTH);
 
   let block;
   if (theme.walls) {
-    const w = sheets[theme.walls.sheet];
-    const H = theme.wallH || 96;
-    // A rect either STRETCHES to fill the texture (one whole shelf face), or
-    // REPEATS at world scale — the rect is drawn at its own size times
-    // TILE/walls.src, so a 48px source lands 1:1 (no squashing) and a 16px
-    // brick is blown up to a 48px course before it tiles. Getting this wrong
-    // silently halves the height of every stone course.
-    const scale = TILE / (theme.walls.src || TILE);
-    const cut = (rect, dw, dh) => texCv(dw, dh, (cg) => {
-      if (!theme.walls.tileFill) { cg.drawImage(w, rect[0], rect[1], rect[2], rect[3], 0, 0, dw, dh); return; }
-      const tw = Math.max(1, Math.round(rect[2] * scale)), th = Math.max(1, Math.round(rect[3] * scale));
-      for (let y = 0; y < dh; y += th) {
-        for (let x = 0; x < dw; x += tw) cg.drawImage(w, rect[0], rect[1], rect[2], rect[3], x, y, tw, th);
-      }
-    });
+    const H = opts.wallH || theme.wallH || 96;
+    const cut = wallCut;
     const tall = cut(theme.walls.tall, TILE, H);
     const low = cut(theme.walls.low, TILE, BLOCK_H);
     const top = cut(theme.walls.crown, TILE, TILE);          // crown wood, stretched — the shelf's top
@@ -395,8 +457,6 @@ function cutWallTex(sheets, theme) {
       block[n] = { face: tn.toDataURL(), sideE: tE, sideW: tW, top: top.toDataURL(), h: n * BLOCK_H };
     }
   } else {
-    const bFace = texCv(TILE, BLOCK_H, (cg) => sheetTile(cg, theme.faceTop.m, 0, 0));
-    const [bE, bW] = sidePair(bFace, BLOCK_H);
     const bTop = texCv(TILE, TILE, (cg) => {
       sheetTile(cg, theme.fill[0], 0, 0);
       const strip = (t, ox, oy, w2, h2) => cg.drawImage(cliffs, t[0] * TILE + ox, t[1] * TILE + oy, w2, h2, ox, oy, w2, h2);
@@ -405,19 +465,24 @@ function cutWallTex(sheets, theme) {
       strip(theme.rim.nw, 0, 0, 24, 24); strip(theme.rim.ne, 24, 0, 24, 24);
       strip(theme.rim.sw, 0, 24, 24, 24); strip(theme.rim.se, 24, 24, 24, 24);
     });
-    const one = { face: bFace.toDataURL(), sideE: bE, sideW: bW, top: bTop.toDataURL(), h: BLOCK_H };
     // Terrace faces stack the kit's own courses: the lipped top course first,
     // plain rock beneath it — exactly how the chasm's 2-tall face is built.
-    const stack = (n) => texCv(TILE, n * BLOCK_H, (cg) => {
+    const stack = (h2) => texCv(TILE, h2, (cg) => {
       sheetTile(cg, theme.faceTop.m, 0, 0);
-      for (let i = 1; i < n; i++) sheetTile(cg, theme.faceBot.m, 0, i * TILE);
+      for (let i = TILE; i < h2; i += TILE) sheetTile(cg, theme.faceBot.m, 0, i);
     });
-    block = { B: one, b: one };
-    for (let n = 2; n <= 6; n++) {
-      const fn2 = stack(n);
-      const [fE, fW] = sidePair(fn2, n * BLOCK_H);
-      block[n] = { face: fn2.toDataURL(), sideE: fE, sideW: fW, top: bTop.toDataURL(), h: n * BLOCK_H };
-    }
+    const kind = (h2) => {
+      const f = stack(h2);
+      const [e, w2] = sidePair(f, h2);
+      return { face: f.toDataURL(), sideE: e, sideW: w2, top: bTop.toDataURL(), h: h2 };
+    };
+    // 'b' is ALWAYS one course — a waist-high block is waist-high in every
+    // theme. Only 'B' takes the pinned height, and undressed that is BLOCK_H,
+    // which is the single course this branch has always cut.
+    const low = kind(BLOCK_H);
+    const H = opts.wallH || BLOCK_H;
+    block = { B: H === BLOCK_H ? low : kind(H), b: low };
+    for (let n = 2; n <= 6; n++) block[n] = kind(n * BLOCK_H);
   }
   // The pit floor wears the theme's own ground fill (a step down is still this
   // place); a bridge deck wears planks when the wood sheet rode along, and a
@@ -445,29 +510,35 @@ function cutWallTex(sheets, theme) {
  */
 function extractGeometry(grid, themeNameAt, extras) {
   const { rows, cols, at, isFloor, isVoid } = gridFns(grid);
+  // The wall dressing (@see wallThemeAt). Null everywhere on a chart with no
+  // `walls` rects, which is what keeps every run merged exactly as before.
+  const wallAt = (extras && extras.wallAt) || (() => null);
+  // A face belongs to the FLOOR cell it hangs off, never to the void it faces —
+  // that cell is the one a rect can name, so its dressing is what the face wears
+  // and a run may only extend while that answer holds.
   const faces = [];
   for (let y = 0; y <= rows; y++) {
     for (let x = 0; x < cols;) {
       if (isVoid(x, y) && isFloor(x, y - 1)) {
-        const x0 = x;
-        while (x < cols && isVoid(x, y) && isFloor(x, y - 1)) x++;
-        faces.push({ kind: 's', x: x0, y, len: x - x0 });
+        const x0 = x, t = wallAt(x, y - 1);
+        while (x < cols && isVoid(x, y) && isFloor(x, y - 1) && wallAt(x, y - 1) === t) x++;
+        faces.push({ kind: 's', x: x0, y, len: x - x0, wall: t });
       } else x++;
     }
   }
   for (let x = -1; x <= cols; x++) {
     for (let y = 0; y < rows;) {
       if (isVoid(x, y) && isFloor(x - 1, y)) {
-        const y0 = y;
-        while (y < rows && isVoid(x, y) && isFloor(x - 1, y)) y++;
-        faces.push({ kind: 'e', x, y: y0, len: y - y0 });
+        const y0 = y, t = wallAt(x - 1, y);
+        while (y < rows && isVoid(x, y) && isFloor(x - 1, y) && wallAt(x - 1, y) === t) y++;
+        faces.push({ kind: 'e', x, y: y0, len: y - y0, wall: t });
       } else y++;
     }
     for (let y = 0; y < rows;) {
       if (isVoid(x, y) && isFloor(x + 1, y)) {
-        const y0 = y;
-        while (y < rows && isVoid(x, y) && isFloor(x + 1, y)) y++;
-        faces.push({ kind: 'w', x: x + 1, y: y0, len: y - y0 });
+        const y0 = y, t = wallAt(x + 1, y);
+        while (y < rows && isVoid(x, y) && isFloor(x + 1, y) && wallAt(x + 1, y) === t) y++;
+        faces.push({ kind: 'w', x: x + 1, y: y0, len: y - y0, wall: t });
       } else y++;
     }
   }
@@ -478,8 +549,13 @@ function extractGeometry(grid, themeNameAt, extras) {
       // A block carries the NAME of the theme whose wall it is, so a room's
       // shelves and the estate's rock can stand on one plane. Terraces ('2',
       // '3') are blocks you STAND on — same geometry, more courses of face.
+      // A `walls` rect OUTRANKS the region it stands in: the region says which
+      // room this is, the rect says what this particular block is made of, and
+      // the more specific answer is the later one the user painted. The two
+      // travel in SEPARATE fields because they are cut differently (@see
+      // tex.byWall) — a room may raise its walls, dressing may not.
       if (ch === 'B' || ch === 'b' || '23456'.includes(ch)) {
-        blocks.push({ x, y, kind: ch, theme: themeNameAt ? themeNameAt(x, y) : null });
+        blocks.push({ x, y, kind: ch, theme: themeNameAt ? themeNameAt(x, y) : null, wall: wallAt(x, y) });
       }
     }
   }
@@ -513,12 +589,14 @@ function extractGeometry(grid, themeNameAt, extras) {
           // patch of baked ground re-drawn as a quad that sorts over the
           // sunken body but under anyone standing on the lip itself.
           const sf = model.floorAt(x, y + 1);
-          pits.push({ x, y, lv, walls, lip: sf != null && sf > lv });
+          // The trench's INNER faces are vertical surfaces of this cell, so a
+          // walls rect dresses them; its floor is ground and stays paint's.
+          pits.push({ x, y, lv, walls, lip: sf != null && sf > lv, wall: wallAt(x, y) });
         }
         if (CLIMB_CH[ch] === 'stairs') {
           // Steps ascend toward the neighbour one level up that they serve.
           const dir = ORTH.find(([dx, dy]) => model.surfacesAt(x + dx, y + dy).includes((lv || 0) + 1));
-          if (dir) stairs.push({ x, y, lv: lv || 0, dx: dir[0], dy: dir[1] });
+          if (dir) stairs.push({ x, y, lv: lv || 0, dx: dir[0], dy: dir[1], wall: wallAt(x, y) });
         }
         if (DECK_CH[ch]) {
           const d = model.deckAt(x, y);
@@ -573,6 +651,10 @@ async function bakeMap(map, theme) {
     return null;
   };
   const themeAt = (x, y) => THEMES[paintNameAt(x, y)] || THEMES[themeNameAt(x, y)] || theme;
+  // WALLS is paint's mirror on the vertical (@see wallThemeAt). It is read by
+  // the GEOMETRY, never by paintGround — the ground fill above is paint's alone.
+  const wallRects = map.walls || [];
+  const wallAt = (x, y) => wallThemeAt(wallRects, x, y);
   // The liquid channel — an overlay on the chart, not a grid char (@see
   // wetCells), so it is asked separately from everything the rgrid answers.
   // A dry map never loads the sheet.
@@ -677,18 +759,30 @@ async function bakeMap(map, theme) {
     }
   }
   // One texture set per theme on the plane. attachTerrain picks by the name each
-  // block carries; the cliff faces stay the base theme's, since a face only ever
-  // hangs off the map's own rim.
+  // piece of geometry carries. The WHOLE cut is kept now, not just `.block`: a
+  // `walls` rect can name the cliff face a rim cell wears as well as the sides
+  // of a block, and both live in the same cut.
   const tex = cutWallTex(sheets, theme);
   tex.byTheme = {};
   for (const name of new Set(regions.map((r) => r.theme))) {
-    if (THEMES[name]) tex.byTheme[name] = cutWallTex(sheets, THEMES[name]).block;
+    if (THEMES[name]) tex.byTheme[name] = cutWallTex(sheets, THEMES[name]);
+  }
+  // A SECOND pool for the wall dressing, cut differently on purpose: a region
+  // is a room and may stand its own walls at its own height (the campus's
+  // shelf-high interiors on a meadow), a `walls` rect is dressing and must
+  // leave the plane's geometry exactly where it found it.
+  tex.byWall = {};
+  for (const name of new Set(wallRects.map((r) => r.theme))) {
+    if (THEMES[name]) {
+      tex.byWall[name] = cutWallTex(sheets, THEMES[name], { wallH: tex.block.B.h, dressing: true });
+    }
   }
   return {
     url: cv.toDataURL('image/png'), pass, tall, solids, model, cols, rows, sheets,
     voidColor: sampleVoidColor(sheets.cliffs, theme),
     tex, wet, wframes,
-    ...extractGeometry(rgrid, regions.length ? themeNameAt : null, { model, agrid: map.grid }),
+    ...extractGeometry(rgrid, regions.length ? themeNameAt : null,
+      { model, agrid: map.grid, wallAt: wallRects.length ? wallAt : null }),
   };
 }
 
@@ -1312,26 +1406,38 @@ export function attachTerrain(parent, baked, opts = {}) {
    *  when someone walks behind it (see trackOccluder). Faces are not listed —
    *  a cliff hangs BELOW the plane and can never cover anyone standing on it. */
   const blocks = [];
+  /**
+   * The CUT a piece of vertical geometry draws from: the one its `walls` rect
+   * (or its region) names, else the plane's own. Every caller below reads the
+   * texture through this, so a chart with no dressing gets the base cut for
+   * everything exactly as it always did.
+   */
+  const cutFor = (g) => (g && g.wall && tex.byWall && tex.byWall[g.wall])
+    || (g && g.theme && tex.byTheme && tex.byTheme[g.theme]) || tex;
   for (const f of baked.faces) {
     const z = zMode === 'under' ? 1 : (f.kind === 's' ? 10 + f.y * TILE - 1 : 10 + (f.y + f.len) * TILE - 1);
+    const C = cutFor(f);
     if (f.kind === 's') {
       el('dv-face', `left:${f.x / cols * 100}%;top:${f.y / rows * 100}%;width:${f.len / cols * 100}%;height:${dW / rows * 100}%;` +
-        `background-image:url(${tex.faceS});background-size:${100 / f.len}% 100%;` +
+        `background-image:url(${C.faceS});background-size:${100 / f.len}% 100%;` +
         `transform-origin:50% 0;transform:rotateX(-90deg);z-index:${z};`);
     } else if (f.kind === 'e') {
       el('dv-face', `left:${f.x / cols * 100}%;top:${f.y / rows * 100}%;width:${dW / cols * 100}%;height:${f.len / rows * 100}%;` +
-        `background-image:url(${tex.faceSideE});background-size:100% ${100 / f.len}%;` +
+        `background-image:url(${C.faceSideE});background-size:100% ${100 / f.len}%;` +
         `transform-origin:0 50%;transform:rotateY(90deg);z-index:${z};`);
     } else { // 'w'
       el('dv-face', `left:${(f.x - dW) / cols * 100}%;top:${f.y / rows * 100}%;width:${dW / cols * 100}%;height:${f.len / rows * 100}%;` +
-        `background-image:url(${tex.faceSideW});background-size:100% ${100 / f.len}%;` +
+        `background-image:url(${C.faceSideW});background-size:100% ${100 / f.len}%;` +
         `transform-origin:100% 50%;transform:rotateY(-90deg);z-index:${z};`);
     }
   }
   // Faces BETWEEN two blocks stay inside the joined wall — skip them so a run
   // of cells reads as one continuous shelf/rock wall with no seams poking out.
-  /** The texture set for a block: its own region's, else the plane's base. */
-  const setFor = (b) => (b.theme && tex.byTheme && tex.byTheme[b.theme]) || tex.block;
+  /** The block textures for a block: its own dressing's or region's, else the
+   *  plane's base. Height comes from the SAME set the faces do — a wall theme
+   *  changes what the stone is, never how tall it stands (ONE RULES FACT), and
+   *  every set on the plane cuts B/b/2..6 at the identical heights. */
+  const setFor = (b) => cutFor(b).block;
   const bBlock = new Map(baked.blocks.map((b) => [b.x + ',' + b.y, b]));
   const hOf = (x, y) => {
     const q = bBlock.get(x + ',' + y);
@@ -1384,7 +1490,9 @@ export function attachTerrain(parent, baked, opts = {}) {
     const base = 10 + (p.y + 1) * TILE;
     const zTop = zMode === 'under' ? 1 : base - 8;
     const zFace = zMode === 'under' ? 1 : base - 4;
-    const K = tex.block.b;
+    // The trench's inner faces take the cell's own dressing; its FLOOR keeps
+    // the plane's ground fill, because ground is paint's and never walls'.
+    const K = cutFor(p).block.b;
     el('dv-block-top', cell(p.x, p.y, 1, 1) +
       `background-image:url(${tex.pitTop});background-size:100% 100%;transform:translateZ(${drop}px);z-index:${zTop};`);
     const [wN, , wW, wE] = p.walls;
@@ -1416,7 +1524,8 @@ export function attachTerrain(parent, baked, opts = {}) {
   // tile deep, the last flush with the landing — Doom steps, not a decal.
   for (const s of (baked.stairs || [])) {
     const base = 10 + (s.y + 1) * TILE;
-    const K = tex.block[2] || tex.block.b;
+    const SC = cutFor(s);
+    const K = SC.block[2] || SC.block.b;
     for (let i = 0; i < 4; i++) {
       const zTread = (s.lv + (i + 1) / 4) * BLOCK_H;
       let rx = s.x, ry = s.y, rw = 1, rh = 0.25;

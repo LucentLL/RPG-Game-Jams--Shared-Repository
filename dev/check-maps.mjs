@@ -25,6 +25,13 @@
  *    that dropping the authored one loses nothing: derived must equal
  *    authored, everywhere, or the migration is not what it claims to be.
  *
+ * 4. THE DRESSING, AS ADVICE. Every `walls` rect — the channel that says what
+ *    a chart's VERTICAL faces are made of, the way `paint` says it for the
+ *    ground — is asked whether it lands on anything: a rect off the grid after
+ *    a resize, a theme with no walls contract, a rect with no face under it.
+ *    All three are NOTES. Dressing is never a rule, so nothing it gets wrong
+ *    may fail a build; @see lintWallsRects.
+ *
  * It reads the JSON with plain `fs` — no Vite, no bundler, no glob — because
  * a check that needs the build to run is a check nobody runs. (It does import
  * the game's real tables, which reach `import.meta.env` through art.js, so it
@@ -46,7 +53,7 @@ const DIR = resolvePath(process.argv[2] || join(ROOT, 'content', 'maps'));
 
 const { DELVE_MAPS, makeLevelModel, validateMap, CLIMB_CH, DECK_CH } =
   await import(new URL('../src/guild/delve-maps.js', import.meta.url));
-const { checkPackMap, buildPackMap, lintDelveMap, PACK_KINDS } =
+const { checkPackMap, buildPackMap, lintDelveMap, lintWallsRects, PACK_KINDS } =
   await import(new URL('../src/guild/map-pack-validate.js', import.meta.url));
 const { lawfulWidth } = await import(new URL('../src/guild/prop-width.js', import.meta.url));
 
@@ -93,7 +100,7 @@ for (const file of files) {
   const map = buildPackMap(raw, stem, { ids });
   built.set(stem, map);
   const dims = `${map.grid[0].length}×${map.grid.length}`;
-  const counts = ['props', 'portals', 'spawns', 'locks', 'paint', 'regions']
+  const counts = ['props', 'portals', 'spawns', 'locks', 'paint', 'walls', 'regions']
     .filter((k) => (map[k] || []).length)
     .map((k) => `${(map[k] || []).length} ${k}`);
   ok(`${map.kind} '${map.id}' · theme ${map.theme} · ${dims}${counts.length ? ' · ' + counts.join(', ') : ''}`);
@@ -125,6 +132,26 @@ for (const [stem, map] of built) {
   if (!issues.length) ok(`${stem}: the walk resolves — every climb serves, every deck mounts, every pit has a way out`);
   for (const i of issues) fail(`${stem}: ${i}`);
 }
+
+// ── The dressing ───────────────────────────────────────────────────────────
+// `walls` says what a chart's VERTICAL faces are made of — block sides, wall
+// runs, terrace risers, trench faces — the way `paint` says it for the ground.
+// It is dressing and NEVER a rule (ONE RULES FACT), so every fault it can have
+// is a note and none of them fails the run: a rect left hanging off a resized
+// grid must not be able to stop a build. Every kind is asked, not just delve —
+// an arena field has blocks to dress too.
+
+console.log('\nthe dressing:');
+let dressed = 0;
+for (const [stem, map] of built) {
+  const rects = (map.walls || []).length;
+  if (!rects) continue;
+  dressed++;
+  const issues = lintWallsRects(map, { makeLevelModel });
+  if (!issues.length) ok(`${stem}: ${rects} walls rect${rects === 1 ? '' : 's'} — every one lands on a real face`);
+  for (const i of issues) note(`${stem}: ${i}`);
+}
+if (!dressed) ok("no chart dresses its walls — every vertical face wears the map's own theme");
 
 // ── The ladder, against what shipped ───────────────────────────────────────
 

@@ -67,6 +67,7 @@
  * Default out is the Unity repo's Assets/Tests/EditMode/delve-fixture.json
  * (the house path — dump-rooms.mjs:167).
  */
+import './_needs-vite-env.mjs';   // must come first — see that file
 import { readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';

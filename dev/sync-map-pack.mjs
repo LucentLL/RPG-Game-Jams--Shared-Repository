@@ -55,6 +55,7 @@
  * machines produce the same guid. An existing .meta is never rewritten — once
  * Unity has seen a guid, it owns it.
  */
+import './_needs-vite-env.mjs';   // must come first — see that file
 import { readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join, basename } from 'node:path';

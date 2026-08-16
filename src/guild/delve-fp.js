@@ -25,7 +25,7 @@
 import { ART_BASE } from '../config/assets.js';
 import { THEMES, LIGHTS, DECALS, ORE_KINDS, oreKindAt, mapForLocale, validateMap, makeLevelModel, DECK_CH, wetCells, waterDepths } from './delve-maps.js';
 import { preyById } from './locales.js';
-import { loadImg, SHEET_URLS, doorTexture, keyTexture } from './delve.js';
+import { loadImg, SHEET_URLS, doorTexture, keyTexture, wallThemeAt } from './delve.js';
 import { ART, artSprite, artCropCss, artTexRect, SWAY, KIND_TO_ENGINE_TYPE } from './art.js';
 import { gearReach } from '../game/data/gear.js';
 import { createFpHands, armsOf } from '../game/fp-hands.js';
@@ -1223,6 +1223,34 @@ function wantSet(px, py, yaw, R, near, far) {
     const t = F.paintThemeAt && F.paintThemeAt(x, y);
     return (t && F.surfByTheme[t] && F.surfByTheme[t].floor) || SC.floor;
   };
+  /**
+   * WALLS — paint's mirror, and the exact opposite half of a surface set. It
+   * reaches the faces you could put a hand flat against (the wall itself, a
+   * waist-high run and its lid, a terrace riser, a trench's cut bank, a
+   * staircase's risers and treads) and NOTHING that decides a fact: no height,
+   * no passability, no collision, no ceiling, no floor. Ground stays paint's.
+   *
+   * NULL is the whole backward-compatibility story. Every texture expression
+   * below reads `(WS && WS.x) || <what it always read>`, so a chart with no
+   * `walls` rects builds the identical want-set it always did — including the
+   * merges, since an unchanged texture identity splits no run.
+   *
+   * …and it carries its half of the RETAINED-SCENE KEY with it. applyWants
+   * only ever re-reads a quad's FOG: a key it already holds keeps the texture
+   * it was built with, so a cell whose dressing changed has to arrive under a
+   * DIFFERENT key or the edit silently does not repaint. The key is '' where
+   * nothing is dressed, so every shipped key is the string it has always been.
+   *
+   * Set and key come back together from ONE scan of the rect list — this runs
+   * per cell, and the want-set is built a few dozen times over at mount
+   * (@see fitViewRadius).
+   */
+  const NO_WALL = { set: null, key: '' };
+  const wallAt = (x, y) => {
+    const t = F.wallThemeAt && F.wallThemeAt(x, y);
+    const s = t && F.surfByTheme[t];
+    return s ? { set: s, key: '@' + t } : NO_WALL;
+  };
   const cx = Math.floor(px), cy = Math.floor(py);
   const want = new Map();
   /** How many times a merged quad repeats its own tile, across and down. The
@@ -1276,16 +1304,21 @@ function wantSet(px, py, yaw, R, near, far) {
     const wx = (x + 0.5) * T, wz = (y + 0.5) * T;
     const id = x + ',' + y;
     const SC = surfAt(x, y);
+    // The cell's wall dressing, and the suffix that keeps its quads honest
+    // across a re-edit. Both are null/'' on every chart that carries no rects.
+    const { set: WS, key: wk } = wallAt(x, y);
     if (WALL[ch] || LOW[ch]) {
       // A waist-high run needs a lid, or you look down into an open box.
       // lid, not ceil: a lid is floor-lit (you look DOWN at it under the
       // room's light), and the ceil bake is tuned for the dark overhead.
-      if (LOW[ch]) add('d' + id, SC.lid || SC.ceil, T, T, wx, -LOW_H, wz, 'rotateX(90deg)', 'fp-floor', fog);
+      // The lid is this block's CROWN — the top-down lens cuts it from the
+      // same wall contract (`walls.crown`), so the dressing takes it too.
+      if (LOW[ch]) add('d' + id + wk, (WS && (WS.lid || WS.ceil)) || SC.lid || SC.ceil, T, T, wx, -LOW_H, wz, 'rotateX(90deg)', 'fp-floor', fog);
       // Once any surface climbs to eye-above-the-walls (level 2 up), walls
       // need TOPS or they read as open-topped hollow boxes from a terrace.
       // Charts that never leave the ground pay nothing.
       else if (ch !== '#' && F.maxLv >= 2) {
-        add('wt' + id, SC.lid || SC.ceil, T, T, wx, -WALL_H, wz, 'rotateX(90deg)', 'fp-floor', fog);
+        add('wt' + id + wk, (WS && (WS.lid || WS.ceil)) || SC.lid || SC.ceil, T, T, wx, -WALL_H, wz, 'rotateX(90deg)', 'fp-floor', fog);
       }
       return;
     }
@@ -1357,9 +1390,15 @@ function wantSet(px, py, yaw, R, near, far) {
       const cover = (WALL[nch] || nch === '#') ? Infinity : LOW[nch] ? LOW_H / STEP_PX : heightAt(sd.nx, sd.ny);
       if (cover >= lv) continue;
       const h = (lv - cover) * STEP_PX;
-      // Any band reaching below grade is cut earth (the bank), not dressing.
-      const rtex = cover < 0 ? (S.bank || SC.low) : SC.low;
-      add(sd.k + id, rtex, T, h, sd.px, -(cover * STEP_PX) - h / 2, sd.pz, sd.rot, 'fp-wall',
+      // Any band reaching below grade is cut earth (the bank), not dressing —
+      // and the BASE map's bank at that, never the region's, because on a sky
+      // map a region's `low` is a row of tree trunks. A `walls` rect is the one
+      // thing that may say otherwise: naming the stone of a trench's inner face
+      // is exactly what it is for.
+      const rtex = cover < 0
+        ? ((WS && (WS.bank || WS.low)) || S.bank || SC.low)
+        : ((WS && WS.low) || SC.low);
+      add(sd.k + id + wk, rtex, T, h, sd.px, -(cover * STEP_PX) - h / 2, sd.pz, sd.rot, 'fp-wall',
         fogAt(sd.fx, sd.fy), 1, Math.max(1, Math.round(lv - cover)));
     }
     // The rungs. A climb cell is the ONLY place the level may change, so the
@@ -1390,21 +1429,24 @@ function wantSet(px, py, yaw, R, near, far) {
         F.model.surfacesAt(x + ddx, y + ddy).includes(lv + 1));
       if (dir) {
         const [ddx, ddy] = dir;
-        const treadTex = SC.lid || SC.floor;
+        // A dressed staircase is dressed WHOLE — treads with risers. The
+        // top-down lens cuts both off the block set for the same reason: a
+        // stair is one built thing, not a floor with faces under it.
+        const treadTex = (WS && (WS.lid || WS.floor)) || SC.lid || SC.floor;
         for (let i = 0; i < 4; i++) {
           const topY = -(lv + (i + 1) / 4) * STEP_PX;
           // The tread strip's centre, walking from the low edge toward `dir`.
           const off = (i + 0.5) / 4 - 0.5;   // −0.375 … +0.375 across the cell
           const tx2 = wx + ddx * off * T, tz2 = wz + ddy * off * T;
           const w2 = ddx ? T / 4 : T, d2 = ddx ? T : T / 4;
-          add('t' + i + id, treadTex, w2, d2, tx2, topY, tz2, 'rotateX(90deg)', 'fp-floor', fog);
+          add('t' + i + id + wk, treadTex, w2, d2, tx2, topY, tz2, 'rotateX(90deg)', 'fp-floor', fog);
           // The riser under this tread's low edge, facing back down the run.
           // Width is ALWAYS the tile: a quad's own X axis is what rotateY(±90)
           // swings onto the world's Z, so an east/west riser T wide spans the
           // cell's full depth — STEP_PX/4 there drew a 36px sliver (review).
           const rx = wx + ddx * (i / 4 - 0.5) * T, rz = wz + ddy * (i / 4 - 0.5) * T;
           const rot = ddy === 1 ? 'rotateY(180deg)' : ddy === -1 ? '' : ddx === 1 ? 'rotateY(-90deg)' : 'rotateY(90deg)';
-          add('t' + (i + 4) + id, SC.low, T, STEP_PX / 4,
+          add('t' + (i + 4) + id + wk, (WS && WS.low) || SC.low, T, STEP_PX / 4,
             ddx ? rx : wx, topY + STEP_PX / 8, ddx ? wz : rz, rot, 'fp-wall', fog);
         }
       }
@@ -1528,11 +1570,16 @@ function wantSet(px, py, yaw, R, near, far) {
    * distance, not its cell's: the two sides of a block a tile apart should not
    * be equally dark.
    */
+  // A dressed run splits from an undressed one for free: this returns a
+  // different texture identity, and the run-match test below is that identity.
+  // An ORE seam and a DOOR are not dressing — a seam is what the rock contains
+  // and a door is a thing that opens, so neither is a surface a `walls` rect
+  // may repaint (repainting the seam would also hide the ore).
   const wallTex = (x, y) => {
-    const ch = at(x, y), SC = surfAt(x, y);
+    const ch = at(x, y), SC = surfAt(x, y), WS = wallAt(x, y).set;
     return ch === 'o' ? ((S.ores && S.ores[oreKindAt(x, y)]) || SC.wall)
       : ch === 'D' ? doorTexture(F.locks.has(x + ',' + y))
-        : (LOW[ch] ? SC.low : SC.wall);
+        : (LOW[ch] ? (WS && WS.low) || SC.low : (WS && WS.wall) || SC.wall);
   };
   const open = (x, y) => !WALL[at(x, y)] && !LOW[at(x, y)];
   // key, the neighbour a face looks at, its rotation, and where the plane sits.
@@ -1593,7 +1640,7 @@ function wantSet(px, py, yaw, R, near, far) {
           // squeezed into one tile with its texture repeated four times inside.
           const drop = -nf * STEP_PX;          // 0 on level ground
           const h2 = h + drop + uL;            // grade face + below-grade drop + dome rise
-          add(`${sd.k}${n}:${x},${y}`, tex, n * T, h2,
+          add(`${sd.k}${n}:${x},${y}${wallAt(x, y).key}`, tex, n * T, h2,
             (sd.horiz ? x + n / 2 : x + sd.off) * T, -(h + uL) + h2 / 2, (sd.horiz ? y + sd.off : y + n / 2) * T,
             sd.rot, 'fp-wall', fogAt(mid[0], mid[1]), n, h2 / h);
         }
@@ -2758,9 +2805,13 @@ async function prep(mapId) {
   // themes (the Surfaces palette) join the same pool: their sets are baked
   // whole but only their FLOOR is ever read (@see floorTexAt).
   const surfByTheme = {};
+  // WALLS themes join the same pool for the opposite half of a set: paint reads
+  // only `.floor` out of its sets, the wall dressing only the vertical cuts
+  // (@see wallThemeAt, and wallAt in the want-set).
   const names = [...new Set([
     ...(map.regions || []).map((r) => r.theme),
     ...(map.paint || []).map((r) => r.theme),
+    ...(map.walls || []).map((r) => r.theme),
   ])].filter((n) => THEMES[n]);
   const sets = await Promise.all(names.map((n) => cutSurfaces(THEMES[n], { ores: false })));
   names.forEach((n, i) => { surfByTheme[n] = sets[i]; });
@@ -2813,6 +2864,11 @@ function mount(prep, entry) {
     }
     return null;
   };
+  // WALLS rects — paint's mirror on the vertical. THE SAME FUNCTION the
+  // top-down lens reads (delve.js), not a second copy of the rule: a chart
+  // that means wood from above has to mean wood from inside it (ONE WORLD).
+  F.wallRects = map.walls || [];
+  F.wallThemeAt = (x, y) => wallThemeAt(F.wallRects, x, y);
   // The light comes with the place. Everything that fades — quads, sprites, the
   // stage behind them — reads it, so switching a map switches the whole mood in
   // one assignment rather than in six. A coarse-pointer device takes the
