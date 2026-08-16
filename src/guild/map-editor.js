@@ -21,6 +21,7 @@ import { invalidateBake } from './delve.js';
 import { ART, artSprite, artTexRect } from './art.js';
 import { waterFrames, waterFrameAt, WATER_TINT } from './water.js';
 import { PROP_VOL, PLAYER_H } from './prop-volume.js';
+import { FACING_STEP, facingClass, facingMatters, facingOf } from './prop-facing.js';
 import { PREY } from './locales.js';
 
 /**
@@ -304,6 +305,10 @@ export function openMapEditor(ctx) {
       // `pick` is what the eye has selected; `held` is the tool set down to
       // make room for it (@see toggleHand).
       pick: null, held: null,
+      // `q` is the ONE palette query — it reaches across every tab (@see
+      // searchHits). `propFacing` is the turn the OBJECT BRUSH is holding, so
+      // a row of desks can all be laid facing the same way in one pass.
+      q: '', propFacing: 0,
     };
   }
   buildDom(host);
@@ -344,6 +349,8 @@ function buildDom(host) {
           <button class="med-btn" data-act="view3d" title="Toggle the extruded 3D view">⬒ 3D</button>
           <button class="med-btn" data-act="rotL" title="Rotate the 3D view left">⟲</button>
           <button class="med-btn" data-act="rotR" title="Rotate the 3D view right">⟳</button>
+          <button class="med-btn med-turn" data-act="turnL" title="Turn the selected object left (Shift+Q)">↶</button>
+          <button class="med-btn med-turn" data-act="turnR" title="Turn the selected object right (Shift+E)">↷</button>
           <button class="med-btn" data-act="fit" title="Fit the whole map in view">⌖</button>
           <button class="med-btn" data-act="zoomOut">−</button>
           <button class="med-btn" data-act="zoomIn">+</button>
@@ -354,11 +361,15 @@ function buildDom(host) {
         <div class="med-view"><canvas class="med-canvas"></canvas>
           <div class="med-readout"></div>
           <div class="med-help">L-click paint · R-click pick · Shift+click erase
-            · X+drag room · V+drag fill · 1-5 tabs · Q/E turn · G 3D · F fit</div>
+            · X+drag room · V+drag fill · 1-5 tabs · Q/E turn the view
+            · <b>Shift+Q/E turn the object</b> · G 3D · F fit</div>
         </div>
         <div class="med-status"></div>
       </div>
       <div class="med-side">
+        <input class="med-find" type="search" placeholder="Search the whole palette…"
+          title="One query across every tab — tiles, objects, flags and surfaces at once"
+          value="${esc(E.q || '')}">
         <div class="med-tabs">
           <button data-tab="tiles">Tiles</button>
           <button data-tab="props">Objects</button>
@@ -372,7 +383,16 @@ function buildDom(host) {
   host.querySelector('.med-bar').addEventListener('click', onBarClick);
   host.querySelector('.med-tabs').addEventListener('click', (e) => {
     const b = e.target.closest('[data-tab]');
-    if (b) { E.tab = b.dataset.tab; renderSide(); }
+    // Reaching for a tab is asking for that tab, not for the search results
+    // filtered to it — so the query lets go. (Whatever you armed stays armed.)
+    if (b) { E.tab = b.dataset.tab; E.q = ''; syncFind(); renderSide(); }
+  });
+  // THE ONE SEARCH BOX, and it lives OUTSIDE .med-palette on purpose: the
+  // palette is rebuilt on every keystroke, and an input inside it would be
+  // rebuilt too — taking the caret with it, one letter per click.
+  host.querySelector('.med-find').addEventListener('input', (e) => {
+    E.q = e.target.value;
+    renderSide();
   });
   const cv = host.querySelector('.med-canvas');
   cv.addEventListener('pointerdown', onDown);
@@ -516,34 +536,161 @@ function toast(msg) {
   if (el) { el.textContent = msg; el.classList.add('on'); setTimeout(() => el.classList.remove('on'), 2500); }
 }
 
-/**
- * The Objects chips, grouped and filtered. Split out of renderSide because the
- * search box has to survive its own keystrokes.
- *
- * A query matches the id OR the group's name, so "barrel" finds the three
- * barrels wherever they are filed and "wall" brings up everything that hangs.
- * With a query the headings stay: knowing a match came from Storage rather
- * than Outdoors is most of what makes a result readable.
- */
+/** The Objects chips, grouped. Split out of renderSide because the tab's list
+ *  is long enough to be worth building on its own. */
 function renderProps() {
   const host = document.getElementById('editorScreen');
   const box = host && host.querySelector('.med-proplist');
   if (!box) return;
-  const q = (E.propQ || '').trim().toLowerCase();
-  let shown = 0;
-  const html = propGroups.map((g) => {
-    const hit = q && g.name.toLowerCase().includes(q);
-    const items = q && !hit ? g.items.filter((p) => p.id.toLowerCase().includes(q)) : g.items;
-    if (!items.length) return '';
-    shown += items.length;
-    return `<div class="med-group">${g.name}</div>` + items.map((p) => `
+  box.innerHTML = propGroups.map((g) =>
+    `<div class="med-group">${g.name}</div>` + g.items.map((p) => `
       <button class="med-chip med-prop ${E.sel.kind === 'prop' && E.sel.id === p.id ? 'on' : ''}" data-prop="${p.id}"
-        title="${p.id} — ${p.rung}× the player's height, ${p.form === 'wall' ? 'hangs on a wall' : p.form === 'lie' ? 'lies flat' : 'stands on the floor'}">
+        title="${p.id} — ${p.rung}× the player's height, ${propTurnNote(p.id)}">
         <span class="med-thumb">${artSprite(p.id, '', 'width:100%')}</span>
         ${p.id}<span class="med-ch">${p.rung}×</span>
+      </button>`).join('')).join('');
+}
+
+/** How a chip's art stands, and whether turning it means anything — the same
+ *  sentence the toast gives when a turn is refused, so the palette says it
+ *  BEFORE you place the thing rather than after. */
+function propTurnNote(art) {
+  const k = facingClass(art);
+  const stands = k === 'wall' ? 'hangs on a wall'
+    : PROP_VOL[art] && PROP_VOL[art].form === 'lie' ? 'lies flat' : 'stands on the floor';
+  return `${stands}; ${k === 'volume' ? 'has depth — Shift+Q/E turns it'
+    : k === 'card' ? 'a flat card — turn it as you see fit'
+      : k === 'flat' ? 'reads the same from every angle' : 'takes its facing from its wall'}`;
+}
+
+// ---------------------------------------------------------------------------
+// THE ONE SEARCH — Wizordum's flat palette, over our four tabs
+// ---------------------------------------------------------------------------
+
+/**
+ * Every armable thing in the whole palette, as one flat list.
+ *
+ * Tabs answer "what KIND of thing am I placing"; a search answers "where is
+ * the thing I already know the name of", and those are different questions.
+ * Wizordum's palette is one searchable list for exactly this reason, and it
+ * is the only shape that lets a palette grow past delve props — you cannot
+ * remember which of five tabs a stone floor is filed under, but you can
+ * always type "stone".
+ *
+ * Each hit carries the tab it came from, so arming one also moves you there:
+ * clear the query and you are standing where the thing lives.
+ */
+function paletteCatalogue() {
+  const out = [];
+  out.push({ tab: 'tiles', name: 'Raise ground', badge: 'Sculpt', swatch: '#3c4457', glyph: '▲',
+    sel: { kind: 'vert', dir: 1 }, key: 'vert1' });
+  out.push({ tab: 'tiles', name: 'Lower ground', badge: 'Sculpt', swatch: '#3c4457', glyph: '▼',
+    sel: { kind: 'vert', dir: -1 }, key: 'vert-1' });
+  out.push({ tab: 'tiles', name: 'Water (wade across)', badge: 'Overlay', swatch: WATER_TINT, glyph: '≈',
+    sel: { kind: 'water' }, key: 'water', terms: 'liquid lake creek river sea flood' });
+  for (const t of TILES) {
+    out.push({ tab: 'tiles', name: t.name, badge: `Tile '${t.ch}'`, swatch: t.color, glyph: t.glyph,
+      sel: { kind: 'tile', id: t.ch }, key: 'tile' + t.ch });
+  }
+  out.push({ tab: 'tiles', name: 'Eraser', badge: 'Tile', swatch: '#2b2f38', glyph: '✕',
+    sel: { kind: 'erase' }, key: 'erase' });
+  for (const g of propGroups) {
+    for (const p of g.items) {
+      out.push({ tab: 'props', name: p.id, badge: g.name, art: p.id, note: `${p.rung}×`,
+        sel: { kind: 'prop', id: p.id }, key: 'prop' + p.id, terms: g.name });
+    }
+  }
+  for (const f of FLAGS) {
+    out.push({ tab: 'flags', name: f.name, badge: 'Flag', swatch: '#3c4457',
+      glyph: f.id === 'entry' ? '⚑' : f.id === 'spawn' ? '☠' : f.id === 'lock' ? '▣' : '◈',
+      sel: { kind: 'flag', id: f.id }, key: 'flag' + f.id, terms: f.hint });
+  }
+  for (const s of SURFACES) {
+    out.push({ tab: 'paint', name: s.name, badge: 'Surface', swatch: themeTint(s.id),
+      tip: `exports as '${s.id}'`,
+      sel: { kind: 'paint', id: s.id }, key: 'paint' + s.id, terms: s.id + ' ' + s.also.join(' ') + ' floor ground' });
+  }
+  out.push({ tab: 'paint', name: 'Surface eraser', badge: 'Surface', swatch: '#2b2f38', glyph: '✕',
+    sel: { kind: 'paintErase' }, key: 'paintErase' });
+  return out;
+}
+/** Built once — nothing in it depends on the map being edited. */
+let CATALOGUE = null;
+const catalogue = () => (CATALOGUE || (CATALOGUE = paletteCatalogue()));
+
+/**
+ * The catalogue narrowed to a query.
+ *
+ * Two ways to match, and both are needed:
+ *
+ *   · anywhere inside the entry's own NAME — ids are camelCase, so "barrel"
+ *     has to reach `provisionBarrel` from the middle of the word, and "stone"
+ *     has to reach "limestone slabs";
+ *   · at the START of any WORD of its badge and extra terms — a group name is
+ *     a weaker signal than a name, and substring-matching it is how "door"
+ *     came back holding a well, a stall and a lamp post (all filed under
+ *     "Out-door-s"). Word-start is the fix, and camelCase counts as a break.
+ *
+ * Every word of the query must match, so two words narrow rather than widen.
+ */
+const WORDS = (s) => String(s || '').replace(/([a-z0-9])([A-Z])/g, '$1 $2').toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
+function searchHits(q) {
+  const s = String(q || '').trim().toLowerCase();
+  if (!s) return [];
+  const words = s.split(/\s+/);
+  return catalogue().filter((h) => {
+    if (!h._name) { h._name = String(h.name).toLowerCase(); h._words = WORDS(`${h.name} ${h.badge} ${h.tip || ''} ${h.terms || ''}`); }
+    return words.every((w) => h._name.includes(w) || h._words.some((t) => t.startsWith(w)));
+  });
+}
+
+/** Is this hit the thing currently in hand? */
+function hitArmed(h) {
+  const a = E.sel, b = h.sel;
+  if (!a || a.kind !== b.kind) return false;
+  if ('id' in b) return a.id === b.id;
+  if ('dir' in b) return a.dir === b.dir;
+  return true;
+}
+
+/** The flat result list, in place of whichever tab you were on. */
+function renderSearch(pal) {
+  const hits = searchHits(E.q);
+  E._hits = hits;
+  if (!hits.length) {
+    pal.innerHTML = `<div class="med-hint">Nothing in the palette matches “${esc(E.q)}”. The search reaches
+      tiles, objects, flags and surfaces at once — try a shorter word, or click a tab to go back.</div>`;
+    pal.onclick = null;
+    return;
+  }
+  pal.innerHTML = `<div class="med-group">${hits.length} match${hits.length === 1 ? '' : 'es'} across the palette</div>`
+    + hits.map((h, i) => `
+      <button class="med-chip med-hit ${hitArmed(h) ? 'on' : ''}" data-hit="${i}"
+        title="${esc(`${h.badge} · ${h.name}${h.tip ? ' — ' + h.tip : ''}${h.art ? ' — ' + propTurnNote(h.art) : ''}`)}">
+        ${h.art
+          ? `<span class="med-thumb">${artSprite(h.art, '', 'width:100%')}</span>`
+          : `<span class="med-swatch" style="background:${h.swatch}">${h.glyph || ''}</span>`}
+        ${esc(h.name)}<span class="med-ch">${esc(h.note || h.badge)}</span>
       </button>`).join('');
-  }).join('');
-  box.innerHTML = html || `<div class="med-hint">Nothing matches “${esc(q)}”.</div>`;
+  pal.onclick = (e) => {
+    const b = e.target.closest('[data-hit]');
+    if (!b) return;
+    const h = (E._hits || [])[+b.dataset.hit];
+    if (!h) return;
+    // Tapping what is already armed puts it down — the same contract every
+    // other chip in this editor has.
+    E.sel = hitArmed(h) ? { kind: 'none' } : { ...h.sel };
+    E.tab = h.tab;
+    E.pick = null;
+    syncBar(); renderSide(); draw();
+  };
+}
+
+/** Push E.q back INTO the box — for the paths that change it without typing
+ *  (a tab click). Typing never routes here, so the caret is never touched. */
+function syncFind() {
+  const box = document.querySelector('.med-find');
+  if (box && box.value !== E.q) box.value = E.q || '';
 }
 
 function renderSide() {
@@ -552,6 +699,12 @@ function renderSide() {
   host.querySelectorAll('.med-tabs button').forEach((b) => b.classList.toggle('on', b.dataset.tab === E.tab));
   host.querySelector('.med-title').textContent = `${E.map.name} · ${E.map.grid[0].length}×${E.map.grid.length} · ${E.map.theme}`;
   const pal = host.querySelector('.med-palette');
+  host.querySelector('.med-side').classList.toggle('med-finding', !!(E.q || '').trim());
+
+  // A QUERY OUTRANKS THE TAB. While one is typed the palette is Wizordum's
+  // flat list across all four tabs; clearing it (or clicking a tab) puts the
+  // tab back exactly as it was.
+  if ((E.q || '').trim()) { renderSearch(pal); refreshStatus(); return; }
 
   if (E.tab === 'tiles') {
     // GROUPED, because this palette holds three different KINDS of thing and
@@ -610,21 +763,18 @@ function renderSide() {
   } else if (E.tab === 'props') {
     pal.innerHTML = `<div class="med-hint">Click an object, then click WHERE it stands — quarter-tile precision,
         and a small piece dropped on a bigger one rests on top of it. Size follows the ladder
-        automatically (×player rung shown). Shift+click the map removes it.</div>
-      <input class="med-search" type="search" placeholder="Search objects…" value="${esc(E.propQ || '')}">
+        automatically (×player rung shown). Shift+click the map removes it.
+        <b>Shift+Q/E</b> turns the object in hand (and any placed object you select with an empty hand).
+        Search the whole palette from the box above.</div>
       <div class="med-proplist"></div>`;
     renderProps();
-    // The list redraws ALONE on every keystroke. A full renderSide() would
-    // rebuild the input too and take the caret with it — you would get one
-    // letter per click into the box.
-    const box = pal.querySelector('.med-search');
-    box.oninput = (e) => { E.propQ = e.target.value; renderProps(); };
     pal.onclick = (e) => {
       const b = e.target.closest('[data-prop]');
       if (!b) return;
       E.sel = same('prop', b.dataset.prop) ? { kind: 'none' } : { kind: 'prop', id: b.dataset.prop };
       E.pick = null; syncBar(); draw();
-      // Repaint the chips in place, for the same caret reason.
+      // Repaint the chips in place — the list is long and a full renderSide()
+      // would scroll it back to the top on every pick.
       renderProps();
     };
   } else if (E.tab === 'flags') {
@@ -797,6 +947,20 @@ function lint() {
   if (!exits.length && !(m.portals || []).length) out.push('no exit cell (s/d/w) — the walk cannot end');
   if (exits.length > 1) out.push(`${exits.length} exit cells — the top-down keeps only the last one scanned as the live exit`);
   for (const p of m.props) if (!PROP_VOL[p.art]) out.push(`prop '${p.art}' has no volume entry — author its ladder height first`);
+  // A facing the editor itself would have refused — so this only ever fires on
+  // an IMPORT. The words are the schema's (map-pack-validate.js), because a
+  // lint that disagrees with the validator teaches lies.
+  for (const p of m.props) {
+    if (!('facing' in p) || p.facing == null) continue;
+    if (!Number.isInteger(p.facing) || p.facing < 0 || p.facing > 359) {
+      out.push(`prop '${p.art}' has facing ${JSON.stringify(p.facing)} — it must be a whole number of degrees, 0-359`);
+      continue;
+    }
+    const k = facingClass(p.art);
+    if (k === 'flat') out.push(`prop '${p.art}' authors facing ${p.facing}° but is radially symmetric — it draws identically at every angle`);
+    else if (k === 'wall') out.push(`prop '${p.art}' authors facing ${p.facing}° but hangs on a wall — the bake takes the wall's own orientation`);
+    else if (p.facing % FACING_STEP) out.push(`prop '${p.art}' faces ${p.facing}°, off the ${FACING_STEP}° compass the editor steps by`);
+  }
 
   for (let y = 0; y < H; y++) {
     for (let x = 0; x < W; x++) {
@@ -1007,6 +1171,121 @@ function deleteSelection() {
   draw();
 }
 
+// ---------------------------------------------------------------------------
+// FACING — which way a placed thing is turned
+// ---------------------------------------------------------------------------
+
+/**
+ * TURN THE OBJECT, not the camera.
+ *
+ * User decree, 2026-08-15: "some objects have voxel depth so directional
+ * facing is important. some objects will remain 2D and rotate as I see fit."
+ * The discriminator is already in the data and the answer is already written —
+ * prop-facing.js — so this function decides NOTHING about what a turn means.
+ * It asks, and it reports the refusal in the words of the reason.
+ *
+ * Two targets, in priority order, because both are the same verb:
+ *   · a PLACED prop you selected with an empty hand — turn that one piece;
+ *   · otherwise the OBJECT BRUSH — so a row of desks all come out facing the
+ *     same way instead of being turned one at a time after the fact.
+ *
+ * The binding is Wizordum's Shift+Q/E. Plain Q/E has turned the 3D VIEW in
+ * this editor since the day it grew one, and a camera bearing is not an
+ * object's facing — so the chord takes the shifted pair and the hint line says
+ * both out loud.
+ *
+ * Collision does not move: blockerRadius(w, d) is a circle off max(w, d) and
+ * is already rotation-invariant, so ONE COLLISION FACT holds at every angle
+ * and nothing here needs to touch the grid.
+ */
+function turnProp(dir) {
+  const step = (deg) => ((Math.round(deg / FACING_STEP) * FACING_STEP + dir * FACING_STEP) % 360 + 360) % 360;
+  const refuse = (art) => {
+    const k = facingClass(art);
+    if (k === 'flat') {
+      toast(`'${art}' reads the same from every angle — a barrel has no front, so there is nothing to turn.`);
+      return true;
+    }
+    if (k === 'wall') {
+      toast(`'${art}' hangs on a wall and takes its facing FROM that wall — a turn set here would not survive the bake.`);
+      return true;
+    }
+    return false;
+  };
+
+  // A selected placed prop is the thing you are looking at, so it wins.
+  const pk = E.pick;
+  if (pk && pk.kind === 'prop') {
+    const p = E.map.props[pk.i];
+    // An undo (or an erase) can retire the index under a stale selection.
+    if (!p || p.art !== pk.label) { E.pick = null; toast('That object is gone — select it again.'); draw(); return; }
+    if (refuse(p.art)) return;
+    snap();
+    const f = step(facingOf(p));
+    // 0 is written as ABSENCE: an absent facing is exactly the art's own
+    // orientation, which is what let the whole shipped corpus migrate without
+    // a chart changing. Turning back to north must leave no trace behind.
+    if (f) p.facing = f; else delete p.facing;
+    toast(`'${p.art}' turned to ${f}°${facingClass(p.art) === 'card' ? ' (a flat card — your call)' : ''}.`);
+    refreshStatus(); draw();
+    return;
+  }
+
+  if (E.sel.kind === 'prop') {
+    if (refuse(E.sel.id)) return;
+    E.propFacing = step(E.propFacing || 0);
+    toast(`'${E.sel.id}' will be placed at ${E.propFacing}°. Shift+Q/E turns it further.`);
+    refreshStatus(); draw();
+    return;
+  }
+
+  toast('Nothing to turn — arm an object, or press Esc and click a placed one to select it.');
+}
+
+/**
+ * The direction a facing points, in WORLD units (x east, y south).
+ *
+ * 0° is the orientation the art was drawn in, which on a plan is toward the
+ * viewer — south, +y. Degrees run clockwise seen from above; on a y-down plan
+ * that is clockwise on screen too, so the same vector serves both canvases.
+ */
+function facingVec(deg) {
+  const r = (deg * Math.PI) / 180;
+  return [-Math.sin(r), Math.cos(r)];
+}
+
+/** Should the plan/3D view draw this prop's facing at all? A turned thing
+ *  always says so; an untouched one only while it is selected, so a chart full
+ *  of default props stays as clean as it has always looked. */
+function facingShown(p, i) {
+  if (!facingMatters(p.art)) return false;
+  const sel = E.pick && E.pick.kind === 'prop' && E.pick.i === i;
+  return facingOf(p) !== 0 || !!sel;
+}
+
+/**
+ * THE NOTCH. A prop in plan is a top-down crop with no front to read, so a
+ * facing you cannot see is a facing you cannot author: this is the arrowhead
+ * that says which way you turned it. Cyan while the piece is selected, amber
+ * otherwise — the same two colours the pick ring and the hover cursor already
+ * mean "chosen" and "here" with.
+ */
+function drawNotch(g, cx, cy, r, deg, hot) {
+  const [dx, dy] = facingVec(deg);
+  const px = -dy, py = dx;
+  const bx = cx + dx * r * 0.34, by = cy + dy * r * 0.34;
+  g.beginPath();
+  g.moveTo(cx + dx * r, cy + dy * r);
+  g.lineTo(bx + px * r * 0.36, by + py * r * 0.36);
+  g.lineTo(bx - px * r * 0.36, by - py * r * 0.36);
+  g.closePath();
+  g.fillStyle = hot ? '#6fd3ff' : 'rgba(255,215,107,.9)';
+  g.fill();
+  g.lineWidth = 1;
+  g.strokeStyle = 'rgba(10,12,18,.7)';
+  g.stroke();
+}
+
 /** Validate + lint, and say the first thing that is wrong. Shared by the
  *  toolbar's ⚠ and the Map tab's button — one answer, two doors. */
 function runValidate() {
@@ -1018,6 +1297,71 @@ function runValidate() {
       : 'Clean: rows even, entry on floor.');
     issues.forEach((i) => console.warn('editor lint:', i));
   } catch (err) { toast(String(err.message || err)); }
+}
+
+/** What is in the hand, in one phrase — the readout's ID field, and the answer
+ *  to "why is my click doing that". */
+function handLabel() {
+  const s = E.sel || { kind: 'none' };
+  if (s.kind === 'none') return 'empty — a tap SELECTS';
+  if (s.kind === 'tile') return `'${s.id}' ${TILE_BY_CH[s.id] ? TILE_BY_CH[s.id].name : 'tile'}`;
+  // The brush's turn is shown only for art it will actually be written onto —
+  // a banner reading "@ 90°" would be promising something the placement quite
+  // correctly refuses to do.
+  if (s.kind === 'prop') return s.id + (E.propFacing && facingMatters(s.id) ? ` @ ${E.propFacing}°` : '');
+  if (s.kind === 'flag') { const f = FLAGS.find((x) => x.id === s.id); return f ? f.name : s.id; }
+  if (s.kind === 'paint') { const p = SURFACES.find((x) => x.id === s.id); return `surface — ${p ? p.name : s.id}`; }
+  if (s.kind === 'paintErase') return 'surface eraser';
+  if (s.kind === 'water') return 'water';
+  if (s.kind === 'erase') return 'eraser';
+  if (s.kind === 'vert') return s.dir > 0 ? 'raise ground' : 'lower ground';
+  return s.kind;
+}
+
+/**
+ * THE ALWAYS-ON READOUT, in Wizordum's four fields — Layer / Tile / Pos / ID —
+ * spoken in this editor's own nouns.
+ *
+ * `Level` is our Layer: our heights are a DERIVED model, not a stack you
+ * switch between, so the number is read off makeLevelModel and agrees with the
+ * walk by construction. `Map` is our ID (the chart the draft will register
+ * under), and `Hand` is the other half of an ID — Wizordum has one palette and
+ * so always knows what you are holding; we have four tabs and a search, so the
+ * armed thing has to say its own name.
+ *
+ * Every field is present at all times, even reading '—'. A readout that
+ * appears and disappears is one you have to hunt for, and the whole point of
+ * this strip is that the answer is already there when the question occurs.
+ */
+function readoutHtml() {
+  const m = E.map, h = E.hover;
+  const inMap = h && h.x >= 0 && h.y >= 0 && h.y < m.grid.length && h.x < m.grid[0].length;
+  const f = [];
+  const add = (k, v, cls) => f.push(`<span class="med-ro${cls ? ' ' + cls : ''}"><b>${k}</b>${esc(v)}</span>`);
+  if (inMap) {
+    const model = levelModel();
+    const lv = model.floorAt(h.x, h.y), dk = model.deckAt(h.x, h.y);
+    const ch = m.grid[h.y][h.x], t = TILE_BY_CH[ch];
+    add('Level', (lv == null ? 'no floor' : String(lv)) + (dk != null ? ` · deck ${dk}` : ''));
+    add('Tile', `'${ch}' ${t ? t.name : '?'}${wetNow().has(h.x + ',' + h.y) ? ' + water' : ''}`);
+    add('Pos', `${h.x}, ${h.y}`);
+    const prop = m.props.find((p) => Math.abs(p.x - h.fx) < 0.5 && Math.abs(p.y - 0.4 - h.fy) < 0.5);
+    if (prop) add('Obj', prop.art + (facingMatters(prop.art) ? ` · ${facingOf(prop)}°` : ''));
+  } else {
+    add('Level', '—'); add('Tile', '—'); add('Pos', '—');
+  }
+  add('Map', m.id);
+  add('Hand', handLabel());
+  // A SELECTION OUTRANKS NOTHING NOW — it sits beside the hover instead of
+  // replacing it, so moving the cursor one pixel no longer loses the answer
+  // you just asked for, and neither does asking a second question.
+  if (E.pick) {
+    const p = E.pick.kind === 'prop' ? m.props[E.pick.i] : null;
+    add('Sel', `${E.pick.label}`
+      + (p && facingMatters(p.art) ? ` · ${facingOf(p)}° (Shift+Q/E turns)` : '')
+      + (E.sel.kind === 'none' ? ' · Del removes, Esc drops' : ''), 'med-ro-sel');
+  }
+  return f.join('');
 }
 
 /**
@@ -1035,33 +1379,7 @@ function refreshStatus() {
   const host = document.getElementById('editorScreen');
   if (!host) return;
   const out = host.querySelector('.med-readout');
-  // A SELECTION OUTRANKS THE HOVER. Once you have picked something up with
-  // your eyes, the readout is about that thing until you drop it — otherwise
-  // moving the cursor a pixel loses the answer you just asked for.
-  if (out && E.pick) {
-    out.textContent = `▣ ${E.pick.label}   ·   ${E.pick.kind}`
-      + (E.sel.kind === 'none' ? '   ·   Del removes it, Esc drops it' : '');
-  } else if (out) {
-    const h = E.hover, m = E.map;
-    const inMap = h && h.x >= 0 && h.y >= 0 && h.y < m.grid.length && h.x < m.grid[0].length;
-    if (!inMap) out.textContent = '';
-    else {
-      const ch = m.grid[h.y][h.x];
-      const t = TILE_BY_CH[ch];
-      const model = levelModel();
-      const lv = model.floorAt(h.x, h.y), dk = model.deckAt(h.x, h.y);
-      const wet = wetNow().has(h.x + ',' + h.y);
-      const prop = m.props.find((p) => Math.abs(p.x - h.fx) < 0.5 && Math.abs(p.y - 0.4 - h.fy) < 0.5);
-      out.textContent = [
-        `${h.x},${h.y}`,
-        `'${ch}' ${t ? t.name : '?'}`,
-        lv == null ? 'no floor' : `level ${lv}`,
-        dk != null ? `deck ${dk}` : '',
-        wet ? 'water' : '',
-        prop ? prop.art : '',
-      ].filter(Boolean).join('  ·  ');
-    }
-  }
+  if (out) out.innerHTML = readoutHtml();
   const badge = host.querySelector('.med-lint');
   if (badge) {
     // CACHED against the chart itself. draw() runs on every hover move and
@@ -1069,7 +1387,10 @@ function refreshStatus() {
     // pixel on a town-scale plan is how a drafting table starts to stutter.
     const m = E.map;
     const key = m.grid.join('\n') + '|' + [m.props, m.spawns, m.portals, m.paint, m.locks, m.water]
-      .map((a) => (a || []).length).join(',') + '|' + JSON.stringify(m.entry);
+      .map((a) => (a || []).length).join(',') + '|' + JSON.stringify(m.entry)
+      // A turn changes no array's LENGTH, so without this a facing lint would
+      // sit behind a stale count until something else moved.
+      + '|' + m.props.map((p) => p.facing || 0).join(',');
     if (E._lintKey !== key) {
       E._lintKey = key;
       try { validateMap(m); E._lintN = lint().length; } catch (err) { E._lintN = -1; }
@@ -1080,6 +1401,9 @@ function refreshStatus() {
     badge.title = n < 0 ? 'The chart is malformed — click for the reason'
       : n ? `${n} thing${n > 1 ? 's' : ''} a walk would trip over — click to read` : 'Nothing to report';
   }
+  // The turn buttons follow the SELECTION, which changes on a plain click that
+  // never goes near syncBar's usual callers. Asking here means one place knows.
+  syncBar();
 }
 
 function onBarClick(e) {
@@ -1098,6 +1422,7 @@ function onBarClick(e) {
     fitView(true);
   }
   else if (act === 'undo') undo();
+  else if (act === 'turnL' || act === 'turnR') turnProp(act === 'turnL' ? -1 : 1);
   else if (act === 'rotL' || act === 'rotR') {
     E.rot = (E.rot + (act === 'rotL' ? 3 : 1)) % 4;
     if (E.view !== 'iso') toast('Rotation turns the 3D view — press ⬒ 3D to see it.');
@@ -1166,8 +1491,12 @@ function onKey(e) {
   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') { e.preventDefault(); undo(); return; }
   if (e.ctrlKey || e.metaKey || e.altKey) return;
   const k = e.key.toLowerCase();
-  if (HOT_TABS[k]) { E.tab = HOT_TABS[k]; renderSide(); e.preventDefault(); return; }
+  if (HOT_TABS[k]) { E.tab = HOT_TABS[k]; E.q = ''; syncFind(); renderSide(); e.preventDefault(); return; }
   if (k === 'x' || k === 'v') { E.mods[k] = true; return; }   // held, read at drag time
+  // SHIFTED Q/E TURNS THE OBJECT — Wizordum's own binding, and it does not
+  // collide: plain Q/E has turned the 3D VIEW here since the view existed, and
+  // the shifted pair merely duplicated it. The hint line says both.
+  if (e.shiftKey && (k === 'q' || k === 'e')) { turnProp(k === 'q' ? -1 : 1); e.preventDefault(); return; }
   if (k === 'q' || k === 'e') {
     E.rot = (E.rot + (k === 'q' ? 3 : 1)) % 4;
     if (E.view !== 'iso') toast('Rotation turns the 3D view — press ⬒ 3D to see it.');
@@ -1216,6 +1545,22 @@ function syncBar() {
   // The canvas says which mode it is in before you touch it.
   const cv = document.querySelector('.med-canvas');
   if (cv) cv.classList.toggle('med-picking', E.sel.kind === 'none');
+  // The turn buttons are the phone's Shift+Q/E — a tablet has no keyboard, and
+  // an author who cannot see that turning is possible will not go looking for
+  // a chord. They dim (never vanish) when there is nothing turnable in reach.
+  const pk = E.pick && E.pick.kind === 'prop' ? E.map.props[E.pick.i] : null;
+  const art = pk ? pk.art : (E.sel.kind === 'prop' ? E.sel.id : null);
+  const live = !!art && facingMatters(art);
+  const deg = pk ? facingOf(pk) : (E.sel.kind === 'prop' ? (E.propFacing || 0) : 0);
+  document.querySelectorAll('.med-bar .med-turn').forEach((b) => {
+    b.classList.toggle('off', !live);
+    const dir = b.dataset.act === 'turnL' ? 'left' : 'right';
+    b.title = live
+      ? `Turn '${art}' ${dir} by ${FACING_STEP}° — now at ${deg}° (Shift+${dir === 'left' ? 'Q' : 'E'})`
+      : art
+        ? `'${art}' ${facingClass(art) === 'flat' ? 'reads the same from every angle' : 'takes its facing from its wall'} — nothing to turn`
+        : `Turn an object ${dir} (Shift+${dir === 'left' ? 'Q' : 'E'}) — arm one, or select a placed one with an empty hand`;
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -1446,7 +1791,13 @@ function pick(c) {
     return best;
   };
   let i = near(E.map.props, (p) => [p.x, p.y - 0.4]);
-  if (i >= 0) { E.sel = { kind: 'prop', id: E.map.props[i].art }; E.tab = 'props'; renderSide(); return; }
+  if (i >= 0) {
+    // The eyedropper takes the WHOLE placement, turn included: copying a desk
+    // that faces the window and getting one facing the door is not a copy.
+    E.sel = { kind: 'prop', id: E.map.props[i].art };
+    E.propFacing = facingOf(E.map.props[i]);
+    E.tab = 'props'; syncBar(); renderSide(); return;
+  }
   i = near(E.map.spawns, (s) => [s.x + 0.5, s.y + 0.5]);
   if (i >= 0) { E.prey = E.map.spawns[i].prey; E.sel = { kind: 'flag', id: 'spawn' }; E.tab = 'flags'; renderSide(); return; }
   if ((E.map.water || []).some(([wx, wy]) => wx === x && wy === y)) {
@@ -1633,6 +1984,11 @@ function apply(c, erase) {
     const q4 = (v, max) => Math.min(Math.max(Math.round(v * 4) / 4, 0.25), max - 0.25);
     const ax = q4(c.fx, E.map.grid[0].length);
     const ay = q4(c.fy, E.map.grid.length);
+    // The brush's turn rides along — but only onto art a turn MEANS something
+    // for. A barrel placed while the brush happens to hold 90° gets no facing
+    // key at all, because writing one would be authoring a fact that is not
+    // true (prop-facing.js: flat is radially symmetric, wall takes the wall's).
+    const fdeg = facingMatters(art) ? ((E.propFacing || 0) % 360 + 360) % 360 : 0;
     if (vol.form === 'wall') {
       // Hung a hair proud of the cell's north edge — the charts' convention
       // (y ~ row + 0.02); wallSolid finds the actual stone from the map.
@@ -1656,7 +2012,7 @@ function apply(c, erase) {
       return;
     }
     const fOwn = !resting && under === '.' ? 1 : undefined;
-    E.map.props.push({ art, x: ax, y: ay, w, ...(fOwn ? { fOwn } : {}) });
+    E.map.props.push({ art, x: ax, y: ay, ...(fdeg ? { facing: fdeg } : {}), w, ...(fOwn ? { fOwn } : {}) });
     if (fOwn) setCell(cx, cyRow, 'f');
     return;
   }
@@ -1892,6 +2248,36 @@ function drawIso(g, s, m, model, themeFloor, wtile, wet) {
     }
   }
 
+  // ── The facing notch, laid on the ground the piece stands on ─────────────
+  // The art here is a billboard (a sprite cannot be turned without faking a
+  // pose, and the art law forbids that) — the EXTRUSION that turning is a fact
+  // about lives in the first-person lens. So the drafting table shows the turn
+  // where it can show it honestly: on the floor, projected through the same
+  // vrot the terrain took, so it swings with the camera like everything else.
+  m.props.forEach((p, i) => {
+    if (!facingShown(p, i)) return;
+    const cy = Number.isInteger(p.y) ? p.y - 0.5 : p.y;
+    const lvP = floorOf(Math.floor(p.x), Math.floor(cy)) || 0;
+    const [dx, dy] = facingVec(facingOf(p));
+    const nx = -dy, ny = dx, r = 0.6;
+    const bx = p.x + dx * r * 0.34, by = cy + dy * r * 0.34;
+    const pts = [
+      P(...vrot(p.x + dx * r, cy + dy * r), lvP),
+      P(...vrot(bx + nx * r * 0.4, by + ny * r * 0.4), lvP),
+      P(...vrot(bx - nx * r * 0.4, by - ny * r * 0.4), lvP),
+    ];
+    g.beginPath();
+    g.moveTo(pts[0][0], pts[0][1]);
+    g.lineTo(pts[1][0], pts[1][1]);
+    g.lineTo(pts[2][0], pts[2][1]);
+    g.closePath();
+    g.fillStyle = (E.pick && E.pick.kind === 'prop' && E.pick.i === i) ? '#6fd3ff' : 'rgba(255,215,107,.9)';
+    g.fill();
+    g.lineWidth = 1;
+    g.strokeStyle = 'rgba(10,12,18,.7)';
+    g.stroke();
+  });
+
   // ── Flags, planted at their ground ───────────────────────────────────────
   g.font = `${Math.round(s * 0.55)}px serif`;
   g.textAlign = 'center'; g.textBaseline = 'middle';
@@ -2038,6 +2424,15 @@ function draw() {
       g.fillRect(x0, y0, wPx, hPx);
     }
   }
+
+  // WHICH WAY EACH PIECE IS TURNED. A second pass, over the art rather than
+  // under it: a notch hidden behind the desk it belongs to would be no notch
+  // at all. Drawn at the FOOT, which is the point the anchor actually names.
+  m.props.forEach((p, i) => {
+    if (!facingShown(p, i)) return;
+    const hot = !!(E.pick && E.pick.kind === 'prop' && E.pick.i === i);
+    drawNotch(g, p.x * s, p.y * s, Math.max(7, s * 0.4), facingOf(p), hot);
+  });
 
   // Flags over everything: entry, spawns, portals.
   g.font = `${Math.round(s * 0.6)}px serif`;

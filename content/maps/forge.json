@@ -25,6 +25,7 @@
       "art": "anvilBare",
       "x": 5.5,
       "y": 6,
+      "facing": 45,
       "use": "anvil",
       "label": "Work the anvil"
     },

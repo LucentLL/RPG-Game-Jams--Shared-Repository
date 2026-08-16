@@ -29,6 +29,7 @@ import { THEMES, DECALS, ORE_KINDS, oreKindAt, mapForLocale, validateMap, makeLe
 import { waterFrames, waterStripUrl, WADE_SPEED, submergeFor, isSwimming } from './water.js';
 import { artSprite, ROOF_KIT, ROOF_GABLE_COL, roofCol } from './art.js';
 import { propVolume, propCell, blockerRadius } from './prop-volume.js';
+import { facingOf, facingClass, facingIsIdentity } from './prop-facing.js';
 import { readPad, padReset, touchPrimary, onTouchPrimary, PAD } from '../platform/input.js';
 import { claimPad } from '../platform/ui-pad.js';
 import { openFieldSheet } from '../platform/field-sheet.js';
@@ -1068,6 +1069,9 @@ function mountScene(prep, entry) {
     // `cls` lets a furnishing carry its own behaviour — the apothecary's
     // cauldron uses it to step through the sheet's four boiling frames.
     const el = addProp(artSprite(p.art, 'dv-furn ' + (p.cls || '')), p.x, p.y, p.w || 48);
+    // WHICH WAY IT IS TURNED. One answer for every lens (@see prop-facing.js);
+    // this one draws it as a rotateZ about the plane normal (@see applyFacing).
+    applyFacing(el, p);
     // A hung thing HANGS. The volume table's `mid` is its centre height on the
     // wall — the fact the FP lens has always drawn — and the lift is the same
     // translateZ a ledge rides. Without it the art bottom-anchors on the floor
@@ -1576,6 +1580,113 @@ function updateXray() {
     d.on = state;
     for (const el of d.els) el.classList.toggle('dv-xray', state === 1);
   }
+}
+
+/**
+ * A prop with no authored depth is still a THING and not a plane. `card` props
+ * (@see prop-facing.js) are the ones PROP_VOL gives no `d` — a bust, a globe, a
+ * statue — and the author turns them "as I see fit" (user decree). A hand's
+ * breadth is the thinnest any of them could honestly be, and it is what stops a
+ * turned card from having no width left to draw. In tiles: a tile is ~2.1 m.
+ */
+const CARD_D = 0.1;
+
+/**
+ * TURN A STANDEE TO ITS AUTHORED FACING — the top-down lens's half of the
+ * facing contract (@see prop-facing.js, which owns the number and the classes;
+ * this file only draws it).
+ *
+ * ── WHERE THE ROTATION GOES, AND WHY IT IS rotateZ ─────────────────────────
+ *
+ * The field is the ground plane, tilted `rotateX(TILT)` under perspective, so in
+ * ITS space +x is east, +y is south, and +z is straight UP out of the world —
+ * which is exactly why `--dvlift` raises a prop onto a ledge with translateZ.
+ * A yaw is a turn about the world's vertical, so in this lens it is a rotateZ.
+ *
+ * It goes on a wrapper OUTSIDE `.dv-up`, and the order is the whole point: CSS
+ * applies the child's transform first, so the art is stood upright by `.dv-up`'s
+ * counter-rotation and THEN swung about the plane normal. That is a rotation
+ * about the standee's own vertical axis — the same turn the extruder gives the
+ * first-person lens (@see platform/voxel-sprite.js yawQuads). Putting the yaw
+ * inside `.dv-up` instead would spin the picture in its own flat plane, which is
+ * a pinwheel, not a turn.
+ *
+ * `preserve-3d` on the wrapper is not optional: a transformed element flattens
+ * its subtree by default, and a flattened `.dv-up` is the squashed-into-the-
+ * floor standee this file has been bitten by twice.
+ *
+ * ── THE CLAMP, AND THE CARD DECISION ───────────────────────────────────────
+ *
+ * A turned card stops being camera-facing. That is the decree read straight —
+ * "a card in the world" — and it is the only reading that agrees with the other
+ * lenses, where a card at 90° genuinely presents its edge.
+ *
+ * But a standee is ONE elevation, and at exactly 90° a plane seen edge-on has no
+ * width at all: the prop would simply not be there, which is a worse lie than a
+ * slightly under-turned desk. So the drawn angle is CLAMPED at the point where
+ * the card is as narrow as the object is actually DEEP. The narrowest a real
+ * thing can ever look from any angle is min(width, depth), so the card is never
+ * asked to be thinner than the thing is — it turns until it is as slim as its own
+ * depth and stops. A prop authored at 90° draws at ~70° (a desk 0.9 tiles wide
+ * and 0.30 deep), which reads unmistakably as turned and never vanishes.
+ *
+ * Each quarter turn keeps the face it STARTED on, and the boundary angle belongs
+ * to the arc below it: 0-90 draws the front, 90-270 the back (the mirrored art,
+ * which is what `backface-visibility: visible` shows and what the extruder
+ * builds as a real back face), 270-360 the front again. So a prop held back from
+ * edge-on is held back on the side it was already showing, and never flips to
+ * the wrong face on the way.
+ *
+ * NOTHING ELSE MOVES. The contact shadow does not turn, and neither does
+ * collision: `blockerRadius` is a circle off max(w, d) (@see prop-volume.js), so
+ * the floor a prop denies you is the same at every angle. The shadow is a
+ * picture of that circle, so a turning shadow would be the one that lied.
+ *
+ * @param {HTMLElement} el  the `.dv-prop` wrapper addProp returned
+ * @param {object} p  the chart's prop, carrying `art`, `w` and maybe `facing`
+ */
+function applyFacing(el, p) {
+  // `wall` art returns 0 from facingOf (the wall it hangs on already turned it)
+  // and `flat` art is radially symmetric, so both land here as identity.
+  if (facingIsIdentity(p)) return null;
+  const kind = facingClass(p.art);
+  if (kind !== 'volume' && kind !== 'card') return null;
+  const vol = propVolume(p.art);
+  const deg = lensYaw(facingOf(p), (p.w || TILE) / TILE, (vol && vol.d) || CARD_D);
+  if (!deg) return null;
+  const up = el.querySelector('.dv-up');
+  if (!up) return null;
+  const yaw = document.createElement('div');
+  yaw.className = 'dv-yaw';
+  // Inline, not a stylesheet rule: the angle is per prop, and the two structural
+  // properties belong beside it where the reason for them is written down.
+  yaw.style.transformStyle = 'preserve-3d';
+  yaw.style.transformOrigin = '50% 100%';   // the ground point, same pivot as .dv-up
+  yaw.style.transform = `rotateZ(${deg.toFixed(2)}deg)`;
+  el.insertBefore(yaw, up);
+  yaw.appendChild(up);
+  // `.dv-up` is still the element the x-ray fade and the lazy height measure
+  // hold (trackOccluder pushed it before this ran), and moving it inside a
+  // wrapper changes neither its layout height nor its own transform.
+  return yaw;
+}
+
+/** The angle this lens may actually draw: the authored yaw, held back at the
+ *  point where a one-elevation standee would be narrower than the thing is deep.
+ *  @param {number} deg 0-359 clockwise @param {number} wT width in tiles
+ *  @param {number} dT depth in tiles */
+function lensYaw(deg, wT, dT) {
+  const w = Math.max(wT, 1e-3);
+  // min(w, d) / w — the narrowest honest projection, as a fraction of the width.
+  // A thing at least as deep as it is wide can never look narrower than it is
+  // drawn, so it has no room to turn in a lens with one elevation: limit 0.
+  const narrow = Math.min(1, Math.max(dT, 0) / w);
+  const lim = Math.acos(narrow) * 180 / Math.PI;     // 0…90
+  const a = ((deg % 360) + 360) % 360;
+  if (a <= 90) return Math.min(a, lim);
+  if (a <= 180) return Math.max(a, 180 - lim);
+  if (a <= 270) return Math.min(a, 180 + lim);
+  return Math.max(a, 360 - lim);
 }
 
 function addProp(html, x, y, w, room) {

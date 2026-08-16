@@ -32,7 +32,21 @@
  *     (form/h/d/mid/fold), the ART crop w/h, the width the ladder DERIVES
  *     (w = (form==='lie' ? d : h) × (art.w/art.h) × 48 — prop-volume's own
  *     arithmetic, check-volumes.mjs:103) and the width the chart AUTHORS, so
- *     the migration off eyeballed widths can be proved non-destructive.
+ *     the migration off eyeballed widths can be proved non-destructive;
+ *   · WHICH WAY EACH PROP IS TURNED — the authored angle, the angle
+ *     `facingOf` ANSWERS (they differ on a wall form, which is the whole
+ *     point), and the facing CLASS the art falls in.
+ *
+ * Plus THE FACING LAW ITSELF, as a table (`facingLaw`), which is not a chart
+ * claim and is the reason it is here at all: no shipped chart authors a facing
+ * yet, so per-prop rows alone would pin nothing but a corpus of zeroes. Every
+ * art in PROP_VOL — plus one id PROP_VOL has never heard of, for the
+ * permissive branch — is asked `facingClass`, `facingMatters`, and then
+ * `facingOf`/`facingIsIdentity` at every angle in FACING_PROBE: negatives, a
+ * full turn, more than a full turn, and the compass points between. That pins
+ * the two rules a lens could plausibly get wrong on its own — a wall form
+ * answers 0 whatever the chart says, and everything else is normalised into
+ * 0-359 — against real data rather than against a comment.
  *
  * Plus the shared tables every chart reaches into: LIGHTS, THEMES (with the
  * `sheet`/`src`/`rimSheet` fallbacks RESOLVED — delve.js:297, 312, 424-425,
@@ -66,6 +80,8 @@ const {
 } = await import(new URL('../src/guild/delve-maps.js', import.meta.url));
 const { PROP_VOL, PLAYER_H, LADDER } = await import(new URL('../src/guild/prop-volume.js', import.meta.url));
 const { ART } = await import(new URL('../src/guild/art.js', import.meta.url));
+const { facingOf, facingClass, facingMatters, facingIsIdentity, FACING_STEP } =
+  await import(new URL('../src/guild/prop-facing.js', import.meta.url));
 
 const K = (v) => Math.round(v * 1000);                       // the ×1000 fixture rounding
 const S = (v) => (v === undefined || v === null ? '' : String(v));
@@ -283,6 +299,16 @@ function dumpChart(map, { probe = false, generated = false } = {}) {
     entryX1000: K(map.entry[0]), entryY1000: K(map.entry[1]),
     props: (map.props || []).map((p) => ({
       art: p.art, x1000: K(p.x), y1000: K(p.y), w1000: K(p.w),
+      // WHICH WAY IT IS TURNED. `facingAuthored` is what the chart wrote (NIL
+      // where it wrote nothing — an absent facing and an authored 0 are the
+      // same DRAWN fact but not the same authoring fact, and the port must not
+      // be able to blur them); `facing` is what facingOf ANSWERS, which is the
+      // number a lens draws at. They part company on a wall form, whose angle
+      // comes from the wall and not from the chart.
+      facingAuthored: typeof p.facing === 'number' && Number.isFinite(p.facing) ? Math.round(p.facing) : NIL,
+      facing: facingOf(p),
+      facingCls: facingClass(p.art),
+      facingIdentity: !!facingIsIdentity(p),
       use: S(p.use), label: S(p.label),
       // RENDER-ONLY, dropped by the port (DelveMaps.cs:20-21): a CSS class,
       // the apothecary cauldron's only.
@@ -328,6 +354,49 @@ const probeMap = {
   water: [[5, 3], [6, 3], [7, 3], [8, 3]], locks: [[13, 1]], paint: [], regions: [],
 };
 
+// ── THE FACING LAW — the contract, not a chart claim ────────────────────────
+//
+// No shipped chart authors a facing (the field landed with the pack schema and
+// the corpus migrated at 0, which is exactly why nothing moved). So a fixture
+// that only wrote down per-prop facings would pin a field full of zeroes and
+// catch nothing — the port could force every angle to 0, or normalise the wrong
+// way round, and every assertion would still pass.
+//
+// This table asks the REAL prop-facing.js the two questions a lens could get
+// wrong on its own, for every art the volume ladder knows:
+//   · what CLASS is this art, and does facing mean anything for it;
+//   · what does facingOf ANSWER at each of these angles — including a wall
+//     form, which must answer 0 however hard the chart pushes.
+// The angles are deliberately hostile: a full turn, more than a full turn,
+// negatives (which JS's `%` leaves negative and C#'s leaves negative too, so
+// both sides have to do the same +360 dance), and the compass points a
+// FACING_STEP editor would actually produce.
+const FACING_PROBE = [-450, -360, -180, -45, 0, 1, 44, 45, 90, 135, 180, 270, 359, 360, 405, 720];
+
+// One id PROP_VOL has never heard of: facingClass's permissive branch answers
+// 'card' rather than refusing, "because refusing to draw something is worse
+// than drawing it unrotated" (prop-facing.js:45-47). An unknown art reaching a
+// lens is a bug elsewhere; it must not be a crash here.
+const FACING_ARTS = [...Object.keys(PROP_VOL).sort(), '__notAnArt'];
+
+const facingLaw = FACING_ARTS.map((art) => ({
+  art,
+  cls: facingClass(art),
+  matters: !!facingMatters(art),
+  // facingOf's answer at each FACING_PROBE angle, in that order.
+  answers: FACING_PROBE.map((f) => facingOf({ art, facing: f })),
+  // facingIsIdentity at each, as 1/0 (fixture law: no bare booleans in arrays
+  // — JsonUtility reads a bool[] but an int[] is what every other array here
+  // is, and one shape is easier to trust than two).
+  identity: FACING_PROBE.map((f) => (facingIsIdentity({ art, facing: f }) ? 1 : 0)),
+  // The three ways a chart can carry NO angle at all. All three are 0: an
+  // absent facing draws exactly as the art was drawn, which is the promise
+  // that let the whole corpus migrate untouched.
+  absent: facingOf({ art }),
+  nulled: facingOf({ art, facing: null }),
+  nan: facingOf({ art, facing: NaN }),
+}));
+
 // ── Run ─────────────────────────────────────────────────────────────────────
 const chartIds = Object.keys(DELVE_MAPS);
 const charts = [];
@@ -353,6 +422,7 @@ const fixture = {
   swimDepthX1000: K(SWIM_DEPTH), fordDepthX1000: K(FORD_DEPTH), minClear: MIN_CLEAR,
   playerHX1000: K(PLAYER_H), ladderX1000: LADDER.map(K),
   floorLv, climbCh, deckChars,
+  facingStep: FACING_STEP, facingProbe: FACING_PROBE, facingLaw,
   lights, themes, oreKinds,
   charts,
 };
@@ -372,3 +442,10 @@ console.log(`${n('grid')} grid rows, ${n('floor')} model cells, ${n('steps')} st
   + ` ${n('ore')} ore seams, ${n('depths')} wet cells, ${n('locks')} locks, ${n('warns')} lint warnings`);
 const unlawful = charts.flatMap((c) => c.vols.filter((v) => !v.lawful).map((v) => `${c.id}/${v.art} authored ${v.authoredW} vs derived ${v.derivedW}`));
 console.log(unlawful.length ? `** WIDTHS OFF THE LADDER: ${unlawful.join(' · ')}` : 'every authored width derives from the ladder (±1px)');
+
+const byCls = facingLaw.reduce((a, r) => ({ ...a, [r.cls]: (a[r.cls] || 0) + 1 }), {});
+const turned = charts.flatMap((c) => c.props.filter((p) => p.facing !== 0).map((p) => `${c.id}/${p.art} ${p.facing}°`));
+console.log(`facing law: ${facingLaw.length} arts × ${FACING_PROBE.length} angles `
+  + `(${Object.entries(byCls).map(([k, n]) => `${n} ${k}`).join(', ')}); step ${FACING_STEP}°`);
+console.log(turned.length ? `props turned off 0: ${turned.join(' · ')}`
+  : 'no chart turns a prop yet — every placement draws as the art was drawn (facing 0)');

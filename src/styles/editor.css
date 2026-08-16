@@ -54,7 +54,19 @@
   font-size: 12px; font-variant-numeric: tabular-nums;
   background: rgba(10, 12, 18, 0.72); border-radius: 4px; padding: 3px 7px;
 }
-.med-readout { bottom: 8px; color: #cfd6e6; }
+.med-readout {
+  bottom: 8px; color: #cfd6e6;
+  /* Wizordum's Layer/Tile/Pos/ID strip, in our nouns. It is ALWAYS populated,
+     so on a narrow pane it has to wrap rather than run off the canvas. */
+  right: 8px; display: flex; flex-wrap: wrap; gap: 2px 12px; line-height: 1.6;
+}
+.med-ro b {
+  font-weight: normal; color: #7f8aa3; text-transform: uppercase;
+  letter-spacing: .06em; font-size: 10px; margin-right: 4px;
+}
+/* The selected thing, in the pick ring's own colour — one fact, two places. */
+.med-ro-sel { color: #6fd3ff; }
+.med-ro-sel b { color: #4a7d9a; }
 /* The verb legend — dim, because it is for the first ten minutes and then it
    is furniture. Hidden on a narrow pane, where the canvas needs the room. */
 .med-help {
@@ -75,15 +87,31 @@
   border-top: 1px solid #262b38; margin-top: 6px;
 }
 .med-group:first-of-type { border-top: 0; margin-top: 0; }
-/* The Objects filter. Sticky, so it stays reachable while you scroll a group
-   open — the point of a search is that you never have to leave it. */
-.med-search {
-  position: sticky; top: 0; z-index: 2;
-  display: block; width: calc(100% - 20px); margin: 6px 10px 2px;
+/* THE ONE PALETTE SEARCH. Above the tabs, not inside a tab, because the query
+   reaches across all four of them — a box that lived in one tab would be
+   claiming to search that tab. It is outside .med-palette for a mechanical
+   reason too: the palette is rebuilt on every keystroke, and an input inside
+   it would be rebuilt with it, taking the caret along. */
+.med-find {
+  display: block; flex: 0 0 auto; width: calc(100% - 16px); margin: 8px;
   background: #0d1017; color: inherit; border: 1px solid #323a4e;
   border-radius: 6px; padding: 6px 8px; font: inherit; font-size: 13px;
 }
-.med-search:focus { outline: none; border-color: #4d7ea8; }
+.med-find:focus { outline: none; border-color: #4d7ea8; }
+/* While a query is live the tabs are not what the palette is showing — dim
+   them so the strip stops claiming to be the thing you are looking at. */
+.med-finding .med-tabs button:not(.on) { opacity: .3; }
+.med-finding .med-find { border-color: #4d7ea8; }
+
+/* A result row carries the tab it came from as its badge — a hit you cannot
+   place is a hit you cannot trust. */
+/* NOT uppercased: half these badges name a grid CHAR, and 'd' (doorway) and
+   'D' (door you walk open) are two different tiles that uppercase collapses. */
+.med-hit .med-ch { opacity: .55; font-size: 10.5px; }
+
+/* The object-turn buttons, dimmed when nothing in reach can be turned (a
+   barrel is radially symmetric; a banner takes its wall's orientation). */
+.med-turn.off { opacity: .3; }
 
 /* Water earns a tint of its own so the eye finds it in a column of grey. */
 .med-wet { border-color: #2f4a63; }
@@ -124,12 +152,12 @@
 }
 .med-ch { margin-left: auto; opacity: .45; font-size: 11px; }
 
-.med-prop .med-thumb {
+.med-prop .med-thumb, .med-hit .med-thumb {
   flex: 0 0 34px; width: 34px; height: 34px; display: inline-flex;
   align-items: flex-end; justify-content: center; overflow: hidden;
   background: #0d0f14; border-radius: 4px;
 }
-.med-prop .med-thumb .px-art { image-rendering: pixelated; }
+.med-prop .med-thumb .px-art, .med-hit .med-thumb .px-art { image-rendering: pixelated; }
 
 .med-field { display: flex; align-items: center; gap: 6px; margin: 8px 2px; font-size: 13px; }
 .med-field label { flex: 0 0 58px; opacity: .65; font-variant: small-caps; }

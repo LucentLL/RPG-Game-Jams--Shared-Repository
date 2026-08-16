@@ -202,7 +202,19 @@ const AXES = {
 /** Write one quad's six vertices. `rep` tiles the texture across it — the same
  *  thing `background-size: 25%` means to the DOM path, and free here. */
 function writeQuad(buf, at, q) {
-  const ax = AXES[q.rot || ''] || AXES[''];
+  // `q.ax` FIRST, and it is not optional once anything yaws.
+  //
+  // AXES is a lookup of six fixed strings, so a `rot` it does not hold falls
+  // through to AXES[''] and draws south-facing — silently. A quarter turn maps
+  // a VERTICAL face onto another vertical face, so rims and fronts keep a name;
+  // but a HORIZONTAL face (a lid, extrudeFold's top, extrudePlan's top) turned
+  // 90° is the same floor quad spun about its own normal, and the six names
+  // cannot say that — they pin a horizontal quad's width along +x and nothing
+  // else. Measured across the three extruders: of 147 yawed quads only 45 still
+  // name themselves; 102 need the explicit axes voxel-sprite.js hands over.
+  // Without this line a turned prop loses its lids and every off-axis face.
+  // Quads with no `ax` behave exactly as they always have.
+  const ax = q.ax || AXES[q.rot || ''] || AXES[''];
   const hw = q.w / 2, hh = q.h / 2;
   const [W, H] = ax;
   const wx = W[0] * hw, wy = W[1] * hw, wz = W[2] * hw;

@@ -31,6 +31,7 @@ import { gearReach } from '../game/data/gear.js';
 import { createFpHands, armsOf } from '../game/fp-hands.js';
 import { waterFrames, WADE_SPEED, submergeFor, isSwimming } from './water.js';
 import { propVolume, propCell, footprint, blockerRadius, REST_SLOP, PLAYER_H } from './prop-volume.js';
+import { facingOf, facingClass, facingIsIdentity } from './prop-facing.js';
 import { icon } from './icons.js';
 import { createLook, readPad, padReset, touchPrimary, onTouchPrimary, PAD } from '../platform/input.js';
 import { claimPad } from '../platform/ui-pad.js';
@@ -2061,7 +2062,7 @@ function fogSolids() {
  * A hair above the floor for the same reason the rails are: two coplanar quads
  * fight for depth and flicker.
  */
-function lieSolid(host, p, vol, fp, base) {
+function lieSolid(host, p, vol, fp, base, yaw) {
   const w = fp.w * T, d = fp.d * T;
   // A bed blocks like a bed: its own footprint's circle, now that 'f' cells
   // no longer hard-block (@see canStandAt).
@@ -2080,13 +2081,22 @@ function lieSolid(host, p, vol, fp, base) {
     voxCrop(p.art).then((cv) => {
       if (!F || !F.gl || F.map.id !== mapId) return;
       const t = Math.max(8, vol.h * T * 0.85);
-      F.propQuads.push(...extrudePlan(cv, { x: fp.cx * T, y: base, z: fp.cy * T, w, d, h: t }));
+      const q = extrudePlan(cv, { x: fp.cx * T, y: base, z: fp.cy * T, w, d, h: t });
+      // A bed lies whichever way the chart turned it — same fact, same degrees,
+      // as the top-down walk reads off the same prop (@see turnAssembly).
+      F.propQuads.push(...turnAssembly(q, fp.cx * T, fp.cy * T, glYaw(yaw || 0, p.art)));
       buildGeometry();
     }).catch(() => {});
     return;
   }
+  // The composited path can say ANY angle — a CSS transform is not a six-entry
+  // table. `rotateX(90deg)` lays the plan art on the floor and `rotateZ` then
+  // turns it in that plane; local +x is world +x and local +y is world +z once
+  // it is down, so a positive rotateZ is clockwise seen from above, which is
+  // exactly the convention facingOf() answers in.
+  const rot = 'rotateX(90deg)' + (yaw ? ` rotateZ(${yaw}deg)` : '');
   const el = solidQuad(host, artCropCss(p.art), w, d,
-    fp.cx * T, base - Math.max(2, vol.h * T * 0.5), fp.cy * T, 'rotateX(90deg)', p);
+    fp.cx * T, base - Math.max(2, vol.h * T * 0.5), fp.cy * T, rot, p);
   if (p.label) el.title = p.label;
 }
 
@@ -2261,7 +2271,144 @@ function voxCrop(art) {
   });
   return _voxCache[art];
 }
-function voxelProp(art, tx, ty, vol, lift) {
+/**
+ * WHICH WAY IT IS TURNED — the first-person half of the facing contract.
+ *
+ * The answer itself is NOT decided here: `facingOf(prop)` (prop-facing.js) is
+ * the one fact, shared with the top-down lens, so a desk points the same way in
+ * both or ONE WORLD is broken. This function only spends that number on an
+ * assembly of already-extruded quads.
+ *
+ * And it IS an assembly, which is why it can be turned at all. A 'volume' prop
+ * is real geometry pulled out of its own pixels (@see voxel-sprite.js) — front,
+ * mirrored back, and a rim walked from the silhouette — so turning it shows
+ * sides the extrusion actually built. Nothing is faked, nothing is a synthetic
+ * pose: the art law's line is "a carving cannot stir", not "a carving cannot be
+ * stood the other way round".
+ *
+ * COLLISION IS NOT TOUCHED, here or anywhere near here. `blockerRadius` is a
+ * circle off max(w, d) (prop-volume.js) and is already rotation-invariant, so a
+ * turned prop denies exactly the floor an unturned one does — which is the whole
+ * reason facing could land as a rendering fact without a passability playtest.
+ *
+ * ── WHAT THE RASTERISER CAN SAY, AND WHAT IT CANNOT ──────────────────────────
+ *
+ * gl-world.js turns a quad by NAME: writeQuad looks `q.rot` up in a six-entry
+ * AXES table ('', rotateY(±90/180), rotateX(±90)) and falls back to the
+ * unrotated basis for anything it does not recognise — so an arbitrary
+ * `rotateY(37deg)` would not be refused, it would be silently drawn straight.
+ * Therefore:
+ *
+ *   · positions   — rotated exactly, about the prop's own anchor;
+ *   · upright faces (front, back, vertical rims) — exact at every multiple of
+ *     90°, because those four orientations are all in the table;
+ *   · horizontal caps (a folded tabletop, a mattress top, the thin rims) —
+ *     exact at 0° and 180° (180° in a quad's own plane is just its UV rect
+ *     flipped in both axes); at 90°/270° the basis would need to TRANSPOSE,
+ *     which an axis-aligned UV rect cannot express, so the rectangle is turned
+ *     honestly (w and h swap, the geometry lands where it belongs) and the
+ *     picture on that one face stays in the old axis. The silhouette — which is
+ *     what reads as "which way is this pointing" — is right; a cap's grain is
+ *     not. That is the renderer's limit, not the chart's.
+ *   · anything off the 90° lattice — SNAPPED to the nearest quarter turn, whole:
+ *     positions and faces together. Rotating the mass to 45° while every face
+ *     stayed on a cardinal would not be a prop at 45°, it would be a prop pulled
+ *     apart, and a warned-about quarter turn is a smaller lie than that.
+ *
+ * ── WHY THIS IS NOT `extrudeSprite({ yaw })` ─────────────────────────────────
+ *
+ * voxel-sprite.js grew an assembly yaw of its own on the same day (its
+ * `yawQuads`, taken by all three extruders as `o.yaw`), and this lens should
+ * eventually hand the number over and delete the arithmetic below — one turn,
+ * one place, every consumer. It does not do so YET, for one measured reason:
+ * that function spins the opposite way. Asked "a front face points south at 0°;
+ * turn it 90°" it answers EAST, where prop-facing.js's own convention and the
+ * map editor's `facingVec` both answer WEST. 180° coincides; 90° and 270° come
+ * out swapped, which is the failure that would read as a bug in this lens.
+ * Deferring to it before that sign is settled would turn every desk in the
+ * delve a quarter the wrong way. @see the integration note in this lane's
+ * report; when it is fixed, `o.yaw` replaces `turnAssembly` at both call sites
+ * (and gl-world.js's writeQuad must learn to read the `ax` basis that function
+ * emits, or an off-axis yaw silently draws unrotated).
+ */
+const YAW_ROT = ['', 'rotateY(90deg)', 'rotateY(180deg)', 'rotateY(-90deg)'];
+const YAW_DEG = { '': 0, 'rotateY(90deg)': 90, 'rotateY(180deg)': 180, 'rotateY(-90deg)': 270 };
+const _yawWarned = new Set();
+/** The quarter turn this lens can actually draw, and a word when it is not the
+ *  one the chart asked for. */
+function glYaw(deg, art) {
+  const f = ((deg % 360) + 360) % 360;
+  const snap = (Math.round(f / 90) * 90) % 360;
+  if (snap !== f && !_yawWarned.has(art + ':' + f)) {
+    _yawWarned.add(art + ':' + f);
+    console.warn(`delve-fp: ${art} is authored facing ${f}° — the rasteriser's quad table only names quarter turns, `
+      + `so it is drawn at ${snap}°. Fix belongs in gl-world.js/voxel-sprite.js (an assembly yaw), never in the chart.`);
+  }
+  return snap;
+}
+/**
+ * Turn an extruded assembly about (cx, cz), CLOCKWISE SEEN FROM ABOVE — the
+ * convention prop-facing.js documents, so this lens and the top-down agree.
+ *
+ * World here is x east, z south, y negative-up; CSS `rotateY(θ)` maps
+ * (x,z) → (x·cosθ + z·sinθ, −x·sinθ + z·cosθ), which is ANTI-clockwise from
+ * above in that frame. So a facing of f degrees is CSS rotateY(−f), and a quad
+ * already named at CSS angle `a` becomes CSS angle `a − f`.
+ * THE SIGN IS THE WHOLE RISK, so it was checked against the two places that
+ * already hold the answer rather than reasoned about: every (face, quarter turn)
+ * pair maps to exactly the basis gl-world.js's own AXES table draws, and the
+ * question "a front face points south at 0°; turn it 90°, where does it point?"
+ * gets the same answer here as from the editor's `facingVec` — west. A lens that
+ * turned a desk the other way would satisfy every test in the repo and still be
+ * a ONE WORLD violation the moment a player walked between two views.
+ *
+ * @param {Array} quads mutated in place — they are ours, freshly extruded
+ */
+function turnAssembly(quads, cx, cz, deg) {
+  // Snapped again here, defensively: every branch below assumes a quarter turn,
+  // and a stray 37° would index the face table with a fraction.
+  const f = (((Math.round((deg || 0) / 90) * 90) % 360) + 360) % 360;
+  if (!f) return quads;
+  const th = f * Math.PI / 180, c = Math.cos(th), s = Math.sin(th);
+  for (const q of quads) {
+    const dx = q.x - cx, dz = q.z - cz;
+    q.x = cx + dx * c - dz * s;
+    q.z = cz + dx * s + dz * c;
+    const a = YAW_DEG[q.rot || ''];
+    if (a !== undefined) {                       // upright: rename the face
+      q.rot = YAW_ROT[((((a - f) % 360) + 360) % 360) / 90];
+      continue;
+    }
+    if (q.rot !== 'rotateX(90deg)' && q.rot !== 'rotateX(-90deg)') continue;
+    // Horizontal cap. A half turn is the UV rect read backwards in both axes;
+    // a quarter turn transposes the rectangle (see above).
+    if (f === 90 || f === 270) { const w = q.w; q.w = q.h; q.h = w; }
+    if (f === 180 || f === 270) {
+      const u = q.uv || [0, 0, 1, 1];
+      q.uv = [u[2], u[3], u[0], u[1]];
+    }
+  }
+  return quads;
+}
+
+/**
+ * A BILLBOARD CANNOT BE TURNED, and pretending otherwise would be faking a pose.
+ * A billboard is one plane held square to the walker every frame (@see place),
+ * so its orientation is the CAMERA'S, never the chart's. Three kinds of prop
+ * still take that path — the composited (non-GL) mode, `flat` art (a carving
+ * cannot stir, so an animated thing was never extruded in the first place), and
+ * anything with no volume authored at all. Say so once per art rather than let a
+ * turned desk quietly draw straight: the gap is real, and the fix is the
+ * rasteriser, whose extruded sides are geometry that CAN be turned.
+ */
+function warnBillboardFacing(p, why) {
+  if (facingIsIdentity(p) || _yawWarned.has('bb:' + p.art)) return;
+  _yawWarned.add('bb:' + p.art);
+  console.warn(`delve-fp: ${p.art} is authored facing ${facingOf(p)}° (${facingClass(p.art)}), but ${why} — `
+    + 'a camera-facing plane has no orientation of its own, so this lens draws it unturned.');
+}
+
+function voxelProp(art, tx, ty, vol, lift, yaw) {
   const a = ART[art];
   if (!a) return;
   const mapId = F.map.id;
@@ -2277,7 +2424,10 @@ function voxelProp(art, tx, ty, vol, lift) {
       ? extrudeFold(cv, { x: tx * T, y: -lift, z: ty * T, h, w, d, fold: vol.fold })
       : extrudeSprite(cv, { x: tx * T, y: -lift, z: ty * T, h, d });
     if (!q.length) return;
-    F.propQuads.push(...q);
+    // The crop cache is keyed by ART and holds PIXELS, which no facing changes;
+    // the turn is spent on this prop's own quads, so two desks of one art can
+    // face two ways without either poisoning the other's cache entry.
+    F.propQuads.push(...turnAssembly(q, tx * T, ty * T, glYaw(yaw || 0, art)));
     buildGeometry();   // fold them into the live buffer now, not next stride
   }).catch(() => { /* billboardless, not broken */ });
 }
@@ -2311,11 +2461,23 @@ function buildProps(props) {
   };
   for (const q of plan) {
     const { p, vol, at } = q;
+    /**
+     * WHICH WAY THE CHART TURNED IT. Read off the AUTHORED prop, once, from the
+     * shared answer (`facingOf`, prop-facing.js) — the top-down walk reads the
+     * same number off the same object, which is the whole of ONE WORLD here:
+     * step between the lenses on one chart and a desk points the same way.
+     * (`propCell` spreads the prop, so `at.facing === p.facing`; taking it from
+     * `p` says out loud that the turn is the chart's, not the cell's.)
+     * Wall forms answer 0 by construction — a portrait is oriented by the stone
+     * it hangs on, and `wallSolid` below reads that from the map.
+     */
+    const yaw = facingOf(p);
     if (!vol) {
       // `w` is the top-down view's pixels against its 48px tile, so w/48 is the
       // thing's width in TILES and T/48 carries it straight across. Left on the
       // authored anchor: a prop with no volume has not been looked at yet, and
       // moving it would hide that.
+      warnBillboardFacing(p, 'it has no authored volume, so no sides exist to turn');
       artBillboard(p.art, p.x, p.y, (p.w || 48) * (T / 48), p.label);
       continue;
     }
@@ -2329,7 +2491,7 @@ function buildProps(props) {
       continue;
     }
     const rest = restOn(q);
-    if (vol.form === 'lie') { lieSolid(host, p, vol, q.fp, ground - rest * T); continue; }
+    if (vol.form === 'lie') { lieSolid(host, p, vol, q.fp, ground - rest * T, yaw); continue; }
     /**
      * ONE SIZE FACT (CLAUDE.md law, user decree 2026-08-06: "all objects
      * should be the same size, relatively, across perspectives — I'm
@@ -2374,9 +2536,11 @@ function buildProps(props) {
     // art, leafy organics: a carving cannot stir). The composited path keeps
     // Hexen's answer: ONE SPRITE, turned to the walker every frame by place().
     if (glOn() && !vol.flat) {
-      voxelProp(p.art, at.x, at.y, { ...vol, h: hTiles }, rest * T);
+      voxelProp(p.art, at.x, at.y, { ...vol, h: hTiles }, rest * T, yaw);
       continue;
     }
+    // The price of Hexen's rule, and the one place a facing goes unspent here.
+    warnBillboardFacing(p, vol.flat ? 'it is flat art, which stays a sprite' : 'the composited path draws props as billboards');
     artBillboardH(p.art, at.x, at.y, hTiles * T, p.label, rest * T);
   }
 }
