@@ -114,13 +114,66 @@
   transform: translateY(var(--footpct, 0%));
 }
 .dv-player .dv-up canvas { width: 79px; height: 79px; }
+/* A BODY'S FOOTPRINT IS A BODY, not the canvas it is drawn on. The default
+   `56%` is a fraction of the WRAPPER, which is right for a creature (its
+   wrapper is the sheet frame, and the art fills it) and wrong for a hero: the
+   compositor hands over a 96px canvas holding a 48px cell, so 56% of the 79px
+   it is scaled to was a 44px slot — a whole tile wide, under a person about
+   half that. These are the shoulders and the stride, in plane pixels.
+   It does NOT turn with the walk. A standing body is near enough a circle from
+   above that the turn would be invisible, and buying an invisible turn would
+   cost a style write on every frame the player moves — which is the one thing
+   the render loop is built not to do.
+   These are the DRAWN size, spread included — shoulders and stride are 23×15,
+   and 1.35 of that is the penumbra every other shadow here is grown by (@see
+   SHADOW_SPREAD in delve.js, which does the multiplying for props). */
+.dv-player .dv-shadow { --shd-w: 31px; --shd-d: 20px; }
 .dv-prop .dv-up .px-art { display: block; width: 100%; }
+/* THE SHADOW IS THE THING'S OWN FOOTPRINT.
+   ------------------------------------------------------------------------
+   It used to be one 12px slot under everything — the same ellipse under a
+   four-foot desk and under a candle, which is exactly the tell a player
+   notices before they can name it. So the box is now the FOOTPRINT: `--shd-w`
+   is the art's authored width (the ONE SIZE FACT the chart carries) and
+   `--shd-d` its depth from the volume table, both in plane pixels, and
+   `--shd-rot` is the angle THIS LENS draws the object at (@see drawnYaw in
+   delve.js) so a thing and its shadow can never point different ways.
+
+   The three defaults reproduce the old ellipse exactly, so anything that has
+   not been given a footprint yet — creatures, facades, the ladders — looks
+   precisely as it did.
+
+   CENTRED ON THE FOOT LINE. `bottom` is minus half the depth, so half the
+   footprint lies in front of the drawn base and half behind, which is what a
+   plan-view rectangle actually does. (At the 12px default that is the old
+   `bottom: -6px`, to the pixel.)
+
+   `rotate()` inside a `preserve-3d` wrapper is a rotateZ about the PLANE's
+   normal — the same turn applyFacing spends on the art, in the same
+   direction. It is a rotate and never a scale: the camera-zoom rule (scale3d
+   only, never a 2D scale in the middle of the tilt) is about the camera
+   chain, and this is a leaf.
+
+   `closest-side` makes the gradient's own ellipse touch all four sides of the
+   box, so the dark patch IS the footprint rather than two thirds of it.
+
+   NOTHING HERE IS A RULE. A shadow may not change height, passability,
+   collision or line of sight, and none of these properties can: they are a
+   `background` on a `pointer-events: none` leaf. */
 .dv-shadow {
-  position: absolute; left: 50%; bottom: -6px;
-  width: 56%; height: 12px;
-  transform: translateX(-50%);
+  position: absolute; left: 50%;
+  bottom: calc(var(--shd-d, 12px) / -2);
+  width: var(--shd-w, 56%); height: var(--shd-d, 12px);
+  transform: translateX(-50%) rotate(var(--shd-rot, 0deg));
   border-radius: 50%;
-  background: radial-gradient(ellipse, rgba(0,0,0,.42), transparent 68%);
+  /* A FLAT CORE, THEN A FALLOFF — the silhouette a real contact shadow has,
+     and the same one the Unity port bakes into its mask (DropShadow: a solid
+     plateau out to 0.30 of the radius, then a smoothstep to nothing). Two
+     stops is as close as a CSS gradient gets to that curve, and near enough
+     that a chart throws one shape in both engines. */
+  background: radial-gradient(ellipse closest-side,
+    rgba(0, 0, 0, var(--shd-a, .42)) 0 30%,
+    rgba(0, 0, 0, calc(var(--shd-a, .42) * .55)) 62%, transparent 100%);
 }
 
 /* --- See-through occluders ---------------------------------------------- */

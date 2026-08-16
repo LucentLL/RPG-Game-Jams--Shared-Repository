@@ -1786,6 +1786,24 @@ function buildGeometry() {
     }
     // The furniture's extruded volumes ride the same buffer (@see voxelProp).
     if (F.propQuads && F.propQuads.length) quads.push(...F.propQuads);
+    /**
+     * CONTACT SHADOWS GO LAST, and that is the whole reason they are a second
+     * list instead of more entries in the first.
+     *
+     * Everything else in this buffer is an alpha CUTOUT — solid or air, so the
+     * depth buffer sorts it and order never matters (gl-world.js draws the
+     * geometry at a 0.5 threshold for exactly that reason). A shadow is the one
+     * quad here that is genuinely TRANSLUCENT, and a translucent fragment still
+     * writes depth: draw it before the floor it lies on and the floor loses the
+     * depth test behind it, leaving a shadow-shaped hole straight through to
+     * the sky. gl-world batches runs in first-seen texture order, so appending
+     * the shadow texture after every other quad in the chart is what puts its
+     * run last — and last means the floor is already down and the blend lands
+     * on it. `voxelProp` fills its list asynchronously as crops decode, which
+     * is precisely why the ordering cannot be left to the push order of one
+     * shared array.
+     */
+    if (F.shadowQuads && F.shadowQuads.length) quads.push(...F.shadowQuads);
     F.gl.setGeometry(quads);
     return;
   }
@@ -1874,6 +1892,11 @@ function decalBillboard(sheets, decalName, x, y, worldH) {
   el.appendChild(cv);
   cv.style.width = '100%'; cv.style.height = '100%';
   standDecor(el, x, y);
+  // Boulders, stalagmites, the cart: rock and timber standing on the floor,
+  // and the same disc the top-down draws under them (@see addPropCanvas in
+  // delve.js, which reads the identical crop rectangle).
+  const wT = worldH * (d.w / d.h) / T;
+  groundShadow(x, y, wT, wT, 0);
 }
 
 /** Decor turns to the walker every frame for the same reason a creature does:
@@ -2099,6 +2122,145 @@ function fogSolids() {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Contact shadows
+// ---------------------------------------------------------------------------
+
+/**
+ * THE ONE SHADOW TEXTURE, and the ceiling the renderer puts on how soft it can
+ * be.
+ *
+ * A soft shadow wants a long alpha ramp. This renderer's geometry pass is an
+ * alpha CUTOUT at 0.5 (`if (c.a < uCutout) discard`, gl-world.js) and that
+ * threshold is not negotiable from here — it is what lets the depth buffer sort
+ * the whole chart with no back-to-front pass, which is the entire reason the
+ * rasteriser exists. Everything below alpha 0.5 is therefore not faint: it is
+ * GONE. So the ellipse ramps between 0.5 and `CORE` and stops, which buys a
+ * shadow that is darkest under the object and lightest at its edge, with a
+ * crisp rim where it meets the floor.
+ *
+ * That rim is the honest limit. A shadow that fades away to nothing needs a
+ * blended pass in gl-world.js — the shadow runs drawn after everything, with
+ * `depthMask(false)` and a near-zero cutout — and that is a change to a file
+ * this lens does not own. Written down here so the next hand knows the fix is
+ * one uniform and one depth-mask call away, and is NOT "tune the texture".
+ *
+ * The colour is a dark neutral rather than pure black. At the rim the floor
+ * keeps half its own value, so a stone flag under a desk goes dim instead of
+ * going out; and because the fragment shader fogs the shadow exactly as it fogs
+ * the floor beside it, a distant one lifts into the weather on its own with no
+ * per-frame work at all.
+ *
+ * 64×64 for a shape with no detail in it — it is stretched to every footprint
+ * in the chart, and one texture means one extra draw call for every shadow in
+ * the world.
+ *
+ * ONE MEASURED SIDE EFFECT, and why it is left alone. The canvas clears to
+ * TRANSPARENT (gl-world draws no sky; the page's own backdrop is the sky), and
+ * the blend runs on the alpha channel too — so a fragment at alpha `a` over an
+ * opaque floor leaves the framebuffer at `a² + (1−a)`, which at 0.66 is 0.78.
+ * A shadow therefore lets about a fifth of the page backdrop through. Measured
+ * live rather than assumed: that backdrop is `rgb(16,14,20)`, darker than any
+ * shadow drawn here, so the bleed can only ever DEEPEN one — a core measured at
+ * 38 in the buffer reaches the eye at 33 against a floor of 62, a 47% darkening
+ * instead of the 40% intended. It is bounded, it is in the right direction, and
+ * removing it costs the same gl-world change the soft rim does. Do not "fix" it
+ * by lifting the alpha: that darkens the shadow, which is the wrong lever.
+ */
+const SHADOW_CUT = 0.502;      // a hair over gl-world's 0.5 discard, in 0..1
+const SHADOW_CORE = 0.66;      // alpha directly under the object
+/** Fraction of the radius that stays at full core alpha before it eases away
+ *  — the Unity port's DropShadow.Core, so the two masks share a silhouette. */
+const SHADOW_PLATEAU = 0.30;
+const SHADOW_RGB = [17, 14, 12];
+/** How far above the floor the quad floats, in world px. Two coplanar quads
+ *  fight for depth and flicker — the same hair `lieSolid` and the water lift
+ *  by, for the same reason. Up is negative. */
+const SHADOW_LIFT = 0.75;
+/**
+ * How much wider than its caster the ellipse lies. A penumbra is always bigger
+ * than the thing making it, and a footprint drawn at exactly 1.0 reads as a
+ * decal cut to the object rather than as shade. The number is the Unity port's
+ * (DropShadow.Spread) and the top-down's (delve.js SHADOW_SPREAD) — one chart,
+ * one shape, three cameras.
+ */
+const SHADOW_SPREAD = 1.35;
+
+let _shadowTex = null;
+function shadowTexture() {
+  if (_shadowTex) return _shadowTex;
+  const N = 64, cv = document.createElement('canvas');
+  cv.width = N; cv.height = N;
+  const g = cv.getContext('2d');
+  const im = g.createImageData(N, N), px = im.data;
+  for (let y = 0; y < N; y++) {
+    for (let x = 0; x < N; x++) {
+      // Unit disc in the quad's own UV, so the ellipse is whatever rectangle
+      // the caller stretches it to — one texture, every footprint.
+      const u = ((x + 0.5) / N) * 2 - 1, v = ((y + 0.5) / N) * 2 - 1;
+      const r = Math.hypot(u, v);
+      const i = (y * N + x) * 4;
+      px[i] = SHADOW_RGB[0]; px[i + 1] = SHADOW_RGB[1]; px[i + 2] = SHADOW_RGB[2];
+      // A FLAT CORE, THEN A SMOOTHSTEP — the same silhouette the Unity port
+      // bakes (DropShadow: solid out to 0.30 of the radius, then eased away),
+      // squeezed into the [cutout, core] band this pass leaves available.
+      // Outside the disc there is no shadow AT ALL (alpha 0, discarded, no
+      // depth written) — which is what lets the floor draw through it.
+      const e = Math.min(1, Math.max(0, (r - SHADOW_PLATEAU) / (1 - SHADOW_PLATEAU)));
+      const fall = 1 - e * e * (3 - 2 * e);       // smoothstep, 1 at the core
+      px[i + 3] = r >= 1 ? 0
+        : Math.round(255 * (SHADOW_CUT + (SHADOW_CORE - SHADOW_CUT) * fall));
+    }
+  }
+  g.putImageData(im, 0, 0);
+  return (_shadowTex = cv);
+}
+
+/**
+ * LAY A THING'S FOOTPRINT ON THE FLOOR IT STANDS ON.
+ *
+ * Same three facts the top-down lens shapes its ellipse from (@see shapeShadow
+ * in delve.js): the width the chart authored, the depth the volume table
+ * authored, and the angle THIS LENS draws the object at. The angle is
+ * `glYaw`'s quarter turn and not the chart's raw degrees, so a shadow can
+ * never point somewhere its object does not — and because a quarter turn of a
+ * floor quad is just its two extents swapped, it costs an `if`.
+ *
+ * DRESSING, NOT RULES. Nothing here is consulted by movement, reach, sight or
+ * height; it pushes one textured quad onto a list the geometry buffer reads.
+ *
+ * THE FLOOR IS `heightAt` — the same expression `standDecor` grounds a
+ * billboard with. `voxelProp` does NOT ask (it grounds an extruded prop at
+ * `-lift` alone), so on a terrace the two part company and the shadow is the
+ * one that is right; that gap is a real bug in the prop's own placement and
+ * hiding it under a matching shadow would only make it harder to find.
+ *
+ * @param {number} x @param {number} y cell coordinates of the thing
+ * @param {number} wT width in tiles @param {number} dT depth in tiles
+ * @param {number} deg the angle this lens draws it at
+ * @param {number} [rest] world px it stands ABOVE the floor (on a desk, say)
+ */
+function groundShadow(x, y, wT, dT, deg, rest) {
+  if (!F || !F.shadowQuads || !(wT > 0) || !(dT > 0)) return;
+  // RASTERISED PATH ONLY, and the list stays empty rather than misleading on
+  // the other one. The composited fallback draws its world as stacked CSS
+  // quads with no depth buffer at all — a shadow there would have to be sorted
+  // by hand against every floor it crosses, which is the whole class of work
+  // the rasteriser exists to end. A device that cannot run WebGL2 keeps the
+  // world it has always had.
+  if (!glOn()) return;
+  const f = ((((deg || 0) % 360) + 360) % 360);
+  const swap = f === 90 || f === 270;
+  const floor = -heightAt(Math.floor(x), Math.floor(y)) * STEP_PX - (rest || 0);
+  const S = T * SHADOW_SPREAD;
+  F.shadowQuads.push({
+    src: shadowTexture(),
+    w: (swap ? dT : wT) * S, h: (swap ? wT : dT) * S,
+    x: x * T, y: floor - SHADOW_LIFT, z: y * T,
+    rot: 'rotateX(90deg)', uv: [0, 0, 1, 1],
+  });
+}
+
 /**
  * FLAT ON THE FLOOR — for art drawn in PLAN. The beds: their sheet draws a bunk
  * from ABOVE, so a camera-facing sprite stands them on their footboards, which
@@ -2109,7 +2271,7 @@ function fogSolids() {
  * A hair above the floor for the same reason the rails are: two coplanar quads
  * fight for depth and flicker.
  */
-function lieSolid(host, p, vol, fp, base, yaw) {
+function lieSolid(host, p, vol, fp, base, yaw, rest) {
   const w = fp.w * T, d = fp.d * T;
   // A bed blocks like a bed: its own footprint's circle, now that 'f' cells
   // no longer hard-block (@see canStandAt).
@@ -2132,6 +2294,9 @@ function lieSolid(host, p, vol, fp, base, yaw) {
       // A bed lies whichever way the chart turned it — same fact, same degrees,
       // as the top-down walk reads off the same prop (@see turnAssembly).
       F.propQuads.push(...turnAssembly(q, fp.cx * T, fp.cy * T, glYaw(yaw || 0, p.art)));
+      // A bed is a mattress standing off the floor, so it shades the boards
+      // under it — its own footprint, at the same quarter turn.
+      groundShadow(fp.cx, fp.cy, fp.w, fp.d, glYaw(yaw || 0, p.art), rest);
       buildGeometry();
     }).catch(() => {});
     return;
@@ -2475,6 +2640,10 @@ function voxelProp(art, tx, ty, vol, lift, yaw) {
     // the turn is spent on this prop's own quads, so two desks of one art can
     // face two ways without either poisoning the other's cache entry.
     F.propQuads.push(...turnAssembly(q, tx * T, ty * T, glYaw(yaw || 0, art)));
+    // The footprint the extrusion actually stands on: its own drawn width and
+    // the depth the volume table gave it, turned by the SAME quarter turn the
+    // quads above were turned by, so the thing and its shadow cannot disagree.
+    groundShadow(tx, ty, w / T, d / T, glYaw(yaw || 0, art), lift);
     buildGeometry();   // fold them into the live buffer now, not next stride
   }).catch(() => { /* billboardless, not broken */ });
 }
@@ -2538,7 +2707,10 @@ function buildProps(props) {
       continue;
     }
     const rest = restOn(q);
-    if (vol.form === 'lie') { lieSolid(host, p, vol, q.fp, ground - rest * T, yaw); continue; }
+    // `rest` travels in world px beside the base it was already folded into:
+    // the base is where the art goes, and the shadow re-derives its floor from
+    // `heightAt` (@see groundShadow), so it needs the same lift on its own.
+    if (vol.form === 'lie') { lieSolid(host, p, vol, q.fp, ground - rest * T, yaw, rest * T); continue; }
     /**
      * ONE SIZE FACT (CLAUDE.md law, user decree 2026-08-06: "all objects
      * should be the same size, relatively, across perspectives — I'm
@@ -2612,6 +2784,22 @@ function artBillboard(name, x, y, worldW, title, rest) {
   el._glTex = artTexRect(name);
   if (title) el.title = title;
   standDecor(el, x, y, rest, sway);
+  /**
+   * Every billboard planted on the ground gets its footprint under it — this
+   * is the funnel for decor, for `flat` art, and for anything the volume table
+   * has never been told about. `markerBillboard` deliberately does NOT come
+   * through here: a way-out sign hangs in the air and casts nothing.
+   *
+   * Depth from the table when the table knows the art, and A DISC when it does
+   * not — depth equal to width. The ANGLE is zero and always will be: a
+   * billboard is one plane held square to the walker, so it has no orientation
+   * of its own to shadow (@see warnBillboardFacing, which says the same thing
+   * about the art), and the only footprint that does not depend on where the
+   * walker happens to be standing is a circle. Unity's port lands on the same
+   * rule from the other end (`CollectShadows` gives every billboard `D = W`).
+   */
+  const vol = propVolume(name);
+  groundShadow(x, y, worldW / T, (vol && vol.d) || worldW / T, 0, rest);
 }
 /** The same, given a HEIGHT — which is how everything with an authored volume
  *  is sized (@see prop-volume.js), and the one thing that was ever wrong. */
@@ -2942,6 +3130,9 @@ function mount(prep, entry) {
   // sheet decodes refill it (@see voxelProp). Their ground circles likewise.
   F.propQuads = [];
   F.propBlockers = [];
+  // Contact shadows are a SEPARATE list from the props that cast them, and the
+  // separation is load-bearing rather than tidy — @see shadowQuad.
+  F.shadowQuads = [];
   // The third-person self rides across portals — a fresh stage orphaned it.
   if (F.self) { F.world.querySelector('.fp-bbs').appendChild(F.self.el); F.self._tf = ''; }
   // The world element is NEW but render()'s write-guard cache is not: a portal
@@ -2960,6 +3151,17 @@ function mount(prep, entry) {
   fitViewRadius();
   buildGeometry();
   buildDecor(props || {});
+  /**
+   * ONCE MORE, NOW THAT THE FURNITURE IS IN. The build above is the
+   * ARCHITECTURE — it has to run first, because the fog it settles on is what
+   * every quad gets cut to — but decor adds geometry of its own: the contact
+   * shadows under the billboards (@see groundShadow). Extruded props fold
+   * themselves in when their crops decode, so a chart full of desks was always
+   * going to be rebuilt anyway; a chart of nothing but boulders was not, and
+   * its shadows would have sat in the list unread until the next pov switch.
+   * One extra upload at map open, and none after it.
+   */
+  if (F.shadowQuads && F.shadowQuads.length) buildGeometry();
   for (const sp of spawns) spawnCreature(sp.prey, sp.img, sp.s.x + 0.5, sp.s.y + 0.5);
 
   const title = F.host.querySelector('.fp-title');
@@ -4830,6 +5032,10 @@ if (typeof window !== 'undefined') {
     decor: F.decor.length, solids: F.solids.length,
     solidsDrawn: F.solids.filter((s) => !s.off).length,
     voxProps: (F.propQuads || []).length,
+    // One per thing standing on the floor, and they are the LAST run in the
+    // buffer by construction (@see buildGeometry) — if this is non-zero and
+    // nothing is shading the boards, that ordering is the first thing to check.
+    shadowQuads: (F.shadowQuads || []).length,
     propBlockers: (F.propBlockers || []).length,
     haul: F.haul.gold, seen: F.seen.size, power: F.hooks.power, fatigue: F.hooks.fatigue,
     fight: { swings: F.haul.swings|0, landed: F.haul.landed|0, missed: F.haul.missed|0, foeHits: F.haul.taken|0, foeMisses: F.haul.dodged|0, bouts: F.haul.bouts },

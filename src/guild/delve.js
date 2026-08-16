@@ -28,7 +28,7 @@ import { preyById } from './locales.js';
 import { THEMES, DECALS, ORE_KINDS, oreKindAt, mapForLocale, validateMap, makeLevelModel, CLIMB_CH, DECK_CH, FLOOR_LV, wetCells, waterDepths } from './delve-maps.js';
 import { waterFrames, waterStripUrl, WADE_SPEED, submergeFor, isSwimming } from './water.js';
 import { artSprite, ROOF_KIT, ROOF_GABLE_COL, roofCol } from './art.js';
-import { propVolume, propCell, blockerRadius } from './prop-volume.js';
+import { propVolume, propCell, blockerRadius, PLAYER_H } from './prop-volume.js';
 import { facingOf, facingClass, facingIsIdentity } from './prop-facing.js';
 import { readPad, padReset, touchPrimary, onTouchPrimary, PAD } from '../platform/input.js';
 import { claimPad } from '../platform/ui-pad.js';
@@ -1137,7 +1137,7 @@ function mountScene(prep, entry) {
         const el = addProp(`<img src="${keyTexture()}" style="width:100%;image-rendering:pixelated" alt="">`, x + 0.5, y + 0.9, 18);
         D.keyCells.push({ x, y, el, key: map.id + ':' + x + ',' + y, taken: false });
       }
-      if (ch === 'w') addProp(artSprite('wagon', 'dv-wagon'), x + 0.5, y + 1, 82);
+      if (ch === 'w') shapeShadow(addProp(artSprite('wagon', 'dv-wagon'), x + 0.5, y + 1, 82), { w: 82 }, cardVol(82), 0);
       else if (ch === 't' && map.theme === 'meadow') {
         // The crown stirs — see delve.css dvSway. The negative delay is this
         // tree's own phase, so a stand of them never sways in unison; `windy`
@@ -1146,7 +1146,12 @@ function mountScene(prep, entry) {
         // to avoid — reference-css3d-mobile-budget).
         const cls = windy ? 'dv-tree dv-sway' : 'dv-tree';
         const style = windy ? `animation-delay:${(-(x * 0.7 + y * 1.3) % 5).toFixed(2)}s` : '';
-        addProp(artSprite('treeTall', cls, style), x + 0.5, y + 1, 96);
+        // A trunk stands in real ground and its crown throws real shade. The
+        // shadow does NOT sway with the crown: `dvSway` is a compositor
+        // animation on the ART, and putting a second one on the shadow would
+        // buy a second promoted layer per tree — which is the exact budget
+        // `windy` exists to protect (reference-css3d-mobile-budget).
+        shapeShadow(addProp(artSprite('treeTall', cls, style), x + 0.5, y + 1, 96), { w: 96 }, cardVol(96, 2.5), 0);
       }
       else if (ch === 't') addPropCanvas('stalag', baked.sheets, x + 0.5, y + 0.97);
       else if (ch === 'r') addPropCanvas(theme.grayProps ? 'boulderGray' : 'boulder', baked.sheets, x + 0.5, y + 0.97);
@@ -1166,6 +1171,8 @@ function mountScene(prep, entry) {
     // WHICH WAY IT IS TURNED. One answer for every lens (@see prop-facing.js);
     // this one draws it as a rotateZ about the plane normal (@see applyFacing).
     applyFacing(el, p);
+    // ...and its shadow is turned by the SAME number, so the two agree.
+    shapeShadow(el, p, propVolume(p.art), drawnYaw(p));
     // A hung thing HANGS. The volume table's `mid` is its centre height on the
     // wall — the fact the FP lens has always drawn — and the lift is the same
     // translateZ a ledge rides. Without it the art bottom-anchors on the floor
@@ -1222,6 +1229,17 @@ function mountScene(prep, entry) {
         occ.on = 2;
         for (const el of occ.els) el.classList.add('dv-gone');
       }
+    } else {
+      // AN ANNEX SHADES THE GROUND IT STANDS ON, and it does so at the width of
+      // its ART — never at the width of its prop box, which spans the whole
+      // room for the occluder's sake and would lay a shadow across three tiles
+      // of lane the building does not touch. `artW` is the same capped number
+      // the first-person lens billboards it at, so the two agree.
+      // A ROOMED building is deliberately left alone: it has no standee at all
+      // here (just the nameplate over its door), its walls are real stamped
+      // geometry a shadow would have nothing to sit under, and its ellipse is
+      // already spoken for by the occluder group above.
+      shapeShadow(propEl, { w: artW }, cardVol(artW), 0);
     }
   }
   // Doors to other maps (the wall gap is the doorway; this is just the trigger).
@@ -1746,22 +1764,126 @@ const CARD_D = 0.1;
  * edge-on is held back on the side it was already showing, and never flips to
  * the wrong face on the way.
  *
- * NOTHING ELSE MOVES. The contact shadow does not turn, and neither does
- * collision: `blockerRadius` is a circle off max(w, d) (@see prop-volume.js), so
- * the floor a prop denies you is the same at every angle. The shadow is a
- * picture of that circle, so a turning shadow would be the one that lied.
+ * COLLISION DOES NOT MOVE: `blockerRadius` is a circle off max(w, d) (@see
+ * prop-volume.js), so the floor a prop denies you is the same at every angle.
+ *
+ * THE SHADOW DOES. This file used to argue the opposite — "the shadow is a
+ * picture of that circle, so a turning shadow would be the one that lied" —
+ * and that was a category error: the blocker circle is deliberately
+ * rotation-invariant so that TURNING A DESK CANNOT CHANGE WHERE YOU MAY WALK,
+ * which is a rules fact. A shadow is dressing, and what it pictures is the
+ * OBJECT: a desk turned forty-five degrees casts a shadow turned forty-five
+ * degrees, and in this lens that shadow is the only place the turn is fully
+ * visible at all (the card itself is held back by `lensYaw`). So it turns —
+ * by `drawnYaw`, the very number the art is drawn at, so the two cannot
+ * disagree — and passability is untouched, because nothing below writes to
+ * anything but a `background`.
  *
  * @param {HTMLElement} el  the `.dv-prop` wrapper addProp returned
  * @param {object} p  the chart's prop, carrying `art`, `w` and maybe `facing`
  */
-function applyFacing(el, p) {
+/**
+ * THE ANGLE THIS LENS ACTUALLY DRAWS A PROP AT, 0 when it draws it straight.
+ *
+ * One function because two things turn by it — the art (`applyFacing`) and its
+ * contact shadow (`shapeShadow`) — and a thing pointing one way over a shadow
+ * pointing another is worse than neither turning. It is deliberately NOT
+ * `facingOf`: that is the chart's answer, and this lens has one elevation, so
+ * `lensYaw` is where the authored number meets what a single drawing can
+ * honestly show. The first-person lens asks its own equivalent (`glYaw`), and
+ * both shadows follow their own lens's answer, so each shadow belongs to the
+ * object as that camera draws it.
+ */
+function drawnYaw(p) {
   // `wall` art returns 0 from facingOf (the wall it hangs on already turned it)
   // and `flat` art is radially symmetric, so both land here as identity.
-  if (facingIsIdentity(p)) return null;
+  if (facingIsIdentity(p)) return 0;
   const kind = facingClass(p.art);
-  if (kind !== 'volume' && kind !== 'card') return null;
+  if (kind !== 'volume' && kind !== 'card') return 0;
   const vol = propVolume(p.art);
-  const deg = lensYaw(facingOf(p), (p.w || TILE) / TILE, (vol && vol.d) || CARD_D);
+  return lensYaw(facingOf(p), (p.w || TILE) / TILE, (vol && vol.d) || CARD_D);
+}
+
+/**
+ * GIVE A STANDEE'S SHADOW THE SHAPE OF THE THING STANDING THERE.
+ *
+ * `--shd-w` / `--shd-d` / `--shd-rot` / `--shd-a` are the four numbers
+ * delve.css's `.dv-shadow` reads; every one of them is DERIVED, never
+ * authored, and every one of them comes from a fact that already existed:
+ *
+ *   width  the chart's own `p.w` — the ONE SIZE FACT, px against the 48px
+ *          tile, itself computed from the height ladder (prop-volume.js). A
+ *          shadow as wide as the art is the whole point: the old fixed 12px
+ *          ellipse was the same under a counter and under a candle.
+ *   depth  the volume table's `d`, the same tiles `footprint()` and the
+ *          first-person extruder measure. A card has no depth authored, so it
+ *          gets `CARD_D`, the same hand's breadth applyFacing already uses.
+ *   angle  `drawnYaw` — see above.
+ *   alpha  falls with HEIGHT, because a penumbra grows as the caster's mass
+ *          rises off the floor: a footlocker stamps a dark patch, a lamp post
+ *          three times its height lays down a soft one. Free — it resolves
+ *          once, at build time, into a custom property.
+ *
+ * Written once per prop when the room is built. Nothing here is touched again
+ * for the life of the map: `place()` rewrites transforms every frame on the
+ * WALKERS, and a prop is not a walker, so there is no animation to fight and
+ * no idle-frame style write to add.
+ *
+ * @param {HTMLElement} el the `.dv-prop` wrapper
+ * @param {{w?:number}} p the chart prop (or a decal's crop rect)
+ * @param {{h:number,d?:number}|null} vol its volume, if the table knows it
+ * @param {number} deg the angle this lens draws it at
+ */
+/**
+ * A STAND-IN VOLUME for scenery the volume table has never been told about.
+ *
+ * Trees, wagons, boulders, an annex's facade: grid-char and chart scenery
+ * rather than authored furnishings, so PROP_VOL has no `d` to give and the
+ * only honest source left is the art's own drawn width. 0.55 of it is the
+ * number the first-person lens uses on the same objects (delve-fp.js
+ * SHADOW_CARD_D) — a boulder is nearly as deep as it is wide, a signboard is
+ * not, and this sits between them — so a thing casts ONE shape in both
+ * cameras. A gap in the table said out loud, not a default.
+ * A DISC — depth equals width. A thing with no authored depth is exactly a
+ * thing nobody has decided which way round is, and in the other two lenses it
+ * is drawn as a plane held square to the camera; the only footprint that does
+ * not depend on where you happen to be standing is a circle. (Unity's port
+ * reaches the same answer from the other end: `CollectShadows` gives every
+ * billboard `D = s.W`.)
+ * @param {number} wPx the art's drawn width in plane px
+ * @param {number} [hTiles] its height, when something already knows it
+ */
+const cardVol = (wPx, hTiles) => ({ h: hTiles || PLAYER_H, d: wPx / TILE });
+
+/**
+ * How much wider than its caster a contact shadow lies.
+ *
+ * A penumbra is always bigger than the thing making it — a footprint drawn at
+ * exactly 1.0 reads as a decal cut to the object, which is the tell that says
+ * "sticker" rather than "shadow". 1.35 is the number the Unity port settled on
+ * (DropShadow.Spread) and it is shared here on purpose: the same chart has to
+ * throw the same shape in every camera, and a spread that drifted between them
+ * would be a ONE WORLD break nobody would ever think to look for.
+ */
+const SHADOW_SPREAD = 1.35;
+
+function shapeShadow(el, p, vol, deg) {
+  const sh = el && el.querySelector('.dv-shadow');
+  if (!sh) return;
+  const wPx = (p.w || TILE) * SHADOW_SPREAD;
+  const dPx = ((vol && vol.d) || CARD_D) * TILE * SHADOW_SPREAD;
+  sh.style.setProperty('--shd-w', wPx.toFixed(1) + 'px');
+  sh.style.setProperty('--shd-d', dPx.toFixed(1) + 'px');
+  if (deg) sh.style.setProperty('--shd-rot', deg.toFixed(1) + 'deg');
+  // Heights are multiples of the player (prop-volume.js LADDER); 1x is the
+  // reference, so a thing your own size keeps the shadow the game already had.
+  const h = (vol && vol.h) || PLAYER_H;
+  const a = Math.min(0.5, Math.max(0.2, 0.46 - (h / PLAYER_H - 1) * 0.09));
+  sh.style.setProperty('--shd-a', a.toFixed(3));
+}
+
+function applyFacing(el, p) {
+  const deg = drawnYaw(p);
   if (!deg) return null;
   const up = el.querySelector('.dv-up');
   if (!up) return null;
@@ -1842,6 +1964,16 @@ function addPropCanvas(decalName, sheets, x, y) {
   el.style.setProperty('--dvlift', liftAt(x, y) + 'px');
   D.field.appendChild(el);
   trackOccluder(el, x, y, d.w);
+  /**
+   * A boulder, a stalagmite, a cart. None of these is in PROP_VOL — they are
+   * grid-char scenery rather than authored furnishings — so the volume table
+   * has no depth to give and this is the gap, said out loud: the numbers come
+   * off the CROP instead. Its drawn width and height are already in plane
+   * pixels against the 48px tile, so `/TILE` is a size in tiles with nothing
+   * invented — including the HEIGHT, which most callers of `cardVol` have to
+   * leave to the player's. None of these carries a facing, so none turns.
+   */
+  shapeShadow(el, { w: d.w }, { ...cardVol(d.w), h: d.h / TILE }, 0);
 }
 
 function addOre(x, y, oresImg) {
