@@ -1,0 +1,46 @@
+{
+  "schema": 1,
+  "kind": "delve",
+  "id": "classroom3",
+  "name": "The Classroom · Third Form",
+  "theme": "classroom",
+  "grid": [
+    "#########",
+    "#BBBBBBB#",
+    "#B.....B#",
+    "#B.f...B#",
+    "#B.....B#",
+    "#B.f.f.B#",
+    "#B.....B#",
+    "#B.....B#",
+    "#BBBdBBB#",
+    "#########"
+  ],
+  "entry": [
+    4.5,
+    7.3
+  ],
+  "exitStairs": true,
+  "props": [
+    {
+      "art": "teacherDesk",
+      "x": 3.5,
+      "y": 4
+    },
+    {
+      "art": "classDesk",
+      "x": 3.5,
+      "y": 6
+    },
+    {
+      "art": "classDesk",
+      "x": 5.5,
+      "y": 6
+    },
+    {
+      "art": "abacus",
+      "x": 6.4,
+      "y": 7
+    }
+  ]
+}

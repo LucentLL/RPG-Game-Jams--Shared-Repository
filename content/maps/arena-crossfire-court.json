@@ -1,0 +1,22 @@
+{
+  "schema": 1,
+  "kind": "arena",
+  "id": "arena-crossfire-court",
+  "name": "Crossfire Court",
+  "theme": "meadow",
+  "grid": [
+    ".........",
+    ".^^...r..",
+    "..L......",
+    ".r..^..r.",
+    "...L^L...",
+    ".r..^..r.",
+    "......L..",
+    "..r...^^.",
+    "........."
+  ],
+  "entry": [
+    1.5,
+    7.5
+  ]
+}

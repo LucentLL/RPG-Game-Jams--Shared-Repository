@@ -1,0 +1,65 @@
+{
+  "schema": 1,
+  "kind": "delve",
+  "id": "dormitory",
+  "name": "The Dormitory",
+  "theme": "dormitory",
+  "grid": [
+    "###########",
+    "#BBBBBBBBB#",
+    "#B.......B#",
+    "#B.f.f.f.B#",
+    "#B.......B#",
+    "#B.f.f.f.B#",
+    "#B.......B#",
+    "#B.......B#",
+    "#BBBBdBBBB#",
+    "###########"
+  ],
+  "entry": [
+    5.5,
+    7.3
+  ],
+  "props": [
+    {
+      "art": "bed",
+      "x": 3.5,
+      "y": 4
+    },
+    {
+      "art": "bunkIron",
+      "x": 5.5,
+      "y": 4
+    },
+    {
+      "art": "bed",
+      "x": 7.5,
+      "y": 4
+    },
+    {
+      "art": "bunkPosted",
+      "x": 3.5,
+      "y": 6
+    },
+    {
+      "art": "bed",
+      "x": 5.5,
+      "y": 6
+    },
+    {
+      "art": "bunkIron",
+      "x": 7.5,
+      "y": 6
+    },
+    {
+      "art": "wardrobe",
+      "x": 5.5,
+      "y": 2.02
+    },
+    {
+      "art": "bedCandle",
+      "x": 8.4,
+      "y": 7
+    }
+  ]
+}

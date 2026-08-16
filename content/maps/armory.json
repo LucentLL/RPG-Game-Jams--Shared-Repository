@@ -1,0 +1,50 @@
+{
+  "schema": 1,
+  "kind": "delve",
+  "id": "armory",
+  "name": "The Armory",
+  "theme": "armory",
+  "grid": [
+    "###########",
+    "#BBBBBBBBB#",
+    "#B.......B#",
+    "#B.f...f.B#",
+    "#B.......B#",
+    "#B.bbbbb.B#",
+    "#B.......B#",
+    "#B.......B#",
+    "#BBBdBBBBB#",
+    "###########"
+  ],
+  "entry": [
+    4.5,
+    7.3
+  ],
+  "props": [
+    {
+      "art": "armorKnight",
+      "x": 3.5,
+      "y": 4
+    },
+    {
+      "art": "armorSteel",
+      "x": 7.5,
+      "y": 4
+    },
+    {
+      "art": "gearCubbies",
+      "x": 5.5,
+      "y": 2.02
+    },
+    {
+      "art": "storeBarrel",
+      "x": 2.6,
+      "y": 7
+    },
+    {
+      "art": "footlocker",
+      "x": 8.4,
+      "y": 7
+    }
+  ]
+}

@@ -1,0 +1,41 @@
+{
+  "schema": 1,
+  "kind": "delve",
+  "id": "libraryLoft",
+  "name": "The Reading Room",
+  "theme": "interior",
+  "grid": [
+    "#########",
+    "#BBBBBBB#",
+    "#B.....B#",
+    "#B.f.f.B#",
+    "#B.....B#",
+    "#B.bbb.B#",
+    "#B.....B#",
+    "#B.....B#",
+    "#BBBdBBB#",
+    "#########"
+  ],
+  "entry": [
+    4.5,
+    7.3
+  ],
+  "exitStairs": true,
+  "props": [
+    {
+      "art": "teacherDesk",
+      "x": 3.5,
+      "y": 4
+    },
+    {
+      "art": "globe",
+      "x": 5.5,
+      "y": 4
+    },
+    {
+      "art": "gmPortrait",
+      "x": 4.5,
+      "y": 2.02
+    }
+  ]
+}

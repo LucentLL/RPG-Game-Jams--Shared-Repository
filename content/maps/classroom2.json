@@ -1,0 +1,59 @@
+{
+  "schema": 1,
+  "kind": "delve",
+  "id": "classroom2",
+  "name": "The Classroom · Second Form",
+  "theme": "classroom",
+  "grid": [
+    "#########",
+    "#BBB+BBB#",
+    "#B.....B#",
+    "#B.f...B#",
+    "#B.....B#",
+    "#B.f.f.B#",
+    "#B.....B#",
+    "#B.....B#",
+    "#BBBdBBB#",
+    "#########"
+  ],
+  "entry": [
+    4.5,
+    7.3
+  ],
+  "exitStairs": true,
+  "props": [
+    {
+      "art": "lectern",
+      "x": 3.5,
+      "y": 4
+    },
+    {
+      "art": "classDesk",
+      "x": 3.5,
+      "y": 6
+    },
+    {
+      "art": "classDesk",
+      "x": 5.5,
+      "y": 6
+    },
+    {
+      "art": "globe",
+      "x": 6.4,
+      "y": 2.02
+    }
+  ],
+  "portals": [
+    {
+      "x": 4.5,
+      "y": 1.5,
+      "to": "classroom3",
+      "at": [
+        4.5,
+        7.3
+      ],
+      "enter": true,
+      "stairs": true
+    }
+  ]
+}

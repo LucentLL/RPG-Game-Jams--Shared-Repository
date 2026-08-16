@@ -1,0 +1,69 @@
+{
+  "schema": 1,
+  "kind": "delve",
+  "id": "guildhall",
+  "name": "The Great Hall",
+  "theme": "guildhall",
+  "grid": [
+    "#########",
+    "#BBB+BBB#",
+    "#B.....B#",
+    "#B.f.f.B#",
+    "#B.....B#",
+    "#B..f..B#",
+    "#B.....B#",
+    "#B.....B#",
+    "#BBBdBBB#",
+    "#########"
+  ],
+  "entry": [
+    4.5,
+    7.3
+  ],
+  "props": [
+    {
+      "art": "gmBookshelf",
+      "x": 3.5,
+      "y": 4
+    },
+    {
+      "art": "gmBanner",
+      "x": 5.5,
+      "y": 4
+    },
+    {
+      "art": "gmDesk",
+      "x": 4.5,
+      "y": 6,
+      "use": "estatePlan",
+      "label": "Read the estate plans"
+    },
+    {
+      "art": "gmLedgers",
+      "x": 4.35,
+      "y": 5.8
+    },
+    {
+      "art": "gmPortrait",
+      "x": 2.6,
+      "y": 2.02
+    },
+    {
+      "art": "gmBust",
+      "x": 6.4,
+      "y": 2.02
+    }
+  ],
+  "portals": [
+    {
+      "x": 4.5,
+      "y": 1.5,
+      "to": "guildmaster",
+      "at": [
+        4.5,
+        7.3
+      ],
+      "stairs": true
+    }
+  ]
+}

@@ -1,0 +1,53 @@
+{
+  "schema": 1,
+  "kind": "delve",
+  "id": "guildmaster",
+  "name": "The Guildmaster's Study",
+  "theme": "guildmaster",
+  "grid": [
+    "#########",
+    "#BBBBBBB#",
+    "#B.....B#",
+    "#B..f..B#",
+    "#B.....B#",
+    "#B.f...B#",
+    "#B.....B#",
+    "#B.....B#",
+    "#BBBdBBB#",
+    "#########"
+  ],
+  "entry": [
+    4.5,
+    7.3
+  ],
+  "exitStairs": true,
+  "props": [
+    {
+      "art": "gmDesk",
+      "x": 4.5,
+      "y": 4,
+      "use": "estatePlan",
+      "label": "Read the estate plans"
+    },
+    {
+      "art": "gmLedgers",
+      "x": 4.25,
+      "y": 3.8
+    },
+    {
+      "art": "gmThrone",
+      "x": 3.5,
+      "y": 6
+    },
+    {
+      "art": "gmPortrait",
+      "x": 2.6,
+      "y": 2.02
+    },
+    {
+      "art": "gmBust",
+      "x": 6.4,
+      "y": 2.02
+    }
+  ]
+}

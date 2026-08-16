@@ -1,0 +1,57 @@
+{
+  "schema": 1,
+  "kind": "delve",
+  "id": "classroom",
+  "name": "The Classroom · First Form",
+  "theme": "classroom",
+  "grid": [
+    "#########",
+    "#BBB+BBB#",
+    "#B.....B#",
+    "#B.f...B#",
+    "#B.....B#",
+    "#B.f.f.B#",
+    "#B.....B#",
+    "#B.....B#",
+    "#BBBdBBB#",
+    "#########"
+  ],
+  "entry": [
+    4.5,
+    7.3
+  ],
+  "props": [
+    {
+      "art": "lectern",
+      "x": 3.5,
+      "y": 4
+    },
+    {
+      "art": "classDesk",
+      "x": 3.5,
+      "y": 6
+    },
+    {
+      "art": "classDesk",
+      "x": 5.5,
+      "y": 6
+    },
+    {
+      "art": "lessonBoard",
+      "x": 2.6,
+      "y": 2.02
+    }
+  ],
+  "portals": [
+    {
+      "x": 4.5,
+      "y": 1.5,
+      "to": "classroom2",
+      "at": [
+        4.5,
+        7.3
+      ],
+      "stairs": true
+    }
+  ]
+}

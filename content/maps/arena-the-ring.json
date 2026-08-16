@@ -1,0 +1,22 @@
+{
+  "schema": 1,
+  "kind": "arena",
+  "id": "arena-the-ring",
+  "name": "The Ring",
+  "theme": "meadow",
+  "grid": [
+    ".........",
+    "..rr.rr..",
+    ".r.....r.",
+    ".r..^..r.",
+    "....L....",
+    ".r.....r.",
+    ".r.....r.",
+    "..rr.rr..",
+    "........."
+  ],
+  "entry": [
+    1.5,
+    7.5
+  ]
+}

@@ -19,7 +19,7 @@
  * art.js can't simply be imported here because it pulls in `import.meta.env`,
  * so its one object literal is lifted out and evaluated instead.
  */
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
@@ -42,15 +42,33 @@ function literal(src, startRe, open, close) {
 const artSrc = readFileSync(ROOT + 'art.js', 'utf8');
 const ART = eval('(' + literal(artSrc, /export const ART = /, '{', '}') + ')');
 
-// Every `props: [ ... ]` array in the delve charts, flattened.
-const mapSrc = readFileSync(ROOT + 'delve-maps.js', 'utf8');
+// Every prop placed on every chart, flattened.
+//
+// THESE USED TO BE SCRAPED OUT OF delve-maps.js AS SOURCE TEXT (`props: [ … ]`).
+// The charts moved to content/maps/*.json on 2026-08-15, and the scrape kept
+// working the way a scrape does: it found ZERO props and still printed "size
+// law holds". A check that goes blind and reports success is worse than no
+// check, so it reads the pack directly now — and REFUSES to pass on an empty
+// corpus (see the guard below).
+//
+// The pack carries no `w` at all: it is derived at load from the ladder rung
+// and the art aspect, which is the size law made structural. So for pack props
+// there is no authored width left to disagree with the derivation, and what is
+// audited is that every placed art HAS a rung — an art without one is a prop
+// whose size nobody has decided. campus.js's placeables still author their
+// widths by hand, and those are still compared.
+const MAPS_DIR = new URL('../content/maps/', import.meta.url);
 const props = [];
-for (let k = 0; ;) {
-  const at = mapSrc.indexOf('props: [', k);
-  if (at < 0) break;
-  const lit = literal(mapSrc.slice(at), /props: /, '[', ']');
-  props.push(...eval('(' + lit + ')'));
-  k = at + 8;
+let chartsRead = 0;
+for (const f of readdirSync(MAPS_DIR).sort()) {
+  if (!f.endsWith('.json')) continue;
+  const chart = JSON.parse(readFileSync(new URL(f, MAPS_DIR), 'utf8'));
+  chartsRead++;
+  for (const p of (chart.props || [])) props.push({ ...p, _chart: chart.id });
+}
+if (!chartsRead) {
+  console.error('check-volumes: read 0 charts from content/maps — the corpus is missing, and a size law with nothing to check is not a passing size law.');
+  process.exit(1);
 }
 // Campus placeables carry their width from PROP_KINDS instead.
 const campusSrc = readFileSync(ROOT + 'campus.js', 'utf8');
@@ -100,9 +118,20 @@ for (const [name, ws] of widths) {
 
   // The chart width agrees with the size it was computed from — the exact
   // derivation, all three forms, so no aspect can widen the tolerance.
+  //
+  // A PACK PROP AUTHORS NO WIDTH AT ALL, so `w` is undefined for most of these
+  // now, and the comparison below would be `NaN > tol` — false, silently. That
+  // is the vacuous half of the same failure the scrape had, so the two cases
+  // are split: an AUTHORED width (campus.js) is compared, and a DERIVED one is
+  // required to actually derive. An art whose crop or rung cannot produce a
+  // finite width is a prop nobody has sized, which is the thing being caught.
   const spec = (v.form === 'lie' ? v.d : v.h) * (a.w / a.h) * 48;
-  const hChart = v.form === 'stand' ? (w / 48) * (a.h / a.w) : null;
-  if (Math.abs(w - spec) > W_TOL) {
+  const authored = w != null;
+  const wEff = authored ? w : Math.round(spec);
+  const hChart = v.form === 'stand' ? (wEff / 48) * (a.h / a.w) : null;
+  if (!Number.isFinite(spec) || spec <= 0) {
+    bad.push(`${name}: width does not derive (${v.form} h=${v.h} d=${v.d} against art ${a.w}×${a.h}) — nothing can place this prop`);
+  } else if (authored && Math.abs(w - spec) > W_TOL) {
     bad.push(`${name}: chart w ${w} but the ${v.form} volume derives ${spec.toFixed(1)}px — re-author w = ${Math.round(spec)}`);
   }
 
@@ -110,7 +139,7 @@ for (const [name, ws] of widths) {
   const top = v.mid != null ? v.mid + v.h / 2 : v.h;
   if (top > CEIL) bad.push(`${name}: top at ${top.toFixed(2)} tiles is through the ${CEIL.toFixed(2)} ceiling`);
 
-  rows.push({ name, form: v.form, w, rung: snapped, h: v.h, d: v.d, mid: v.mid, hChart });
+  rows.push({ name, form: v.form, w: wEff, derived: !authored, rung: snapped, h: v.h, d: v.d, mid: v.mid, hChart });
 }
 
 const f = (n, p = 2) => (n == null ? '    - ' : n.toFixed(p).padStart(6));
