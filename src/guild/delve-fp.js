@@ -1218,11 +1218,35 @@ function wantSet(px, py, yaw, R, near, far) {
   // as a texture like any other, is the whole integration: the quadtree still
   // merges lakes into big blocks (adjacent water shares this texture), the
   // block/cell split still works, and the fog is unchanged.
-  const floorTexAt = (x, y, SC) => {
-    if (F.waterTex && F.wet.has(x + ',' + y)) return F.waterTex;
+  //
+  // …and it carries THE GROUND HALF OF THE RETAINED-SCENE KEY with it, for
+  // exactly the reason the wall dressing does (see the key note below):
+  // applyWants only ever re-reads a quad's FOG, so a floor whose dressing
+  // changed must arrive under a DIFFERENT key or the edit silently does not
+  // repaint. `f0,0` was that key on every chart — painted, watered or plain —
+  // which meant re-painting a cell in the drafting table changed the chart and
+  // not the picture. The suffix names whichever channel chose the texture and
+  // is '' where none did, so every undressed key is the string it always was.
+  //
+  // THE CROWN RULE lands here for free (ONE RULES FACT, CLAUDE.md; @see
+  // extractGeometry in delve.js). Everything you can stand on — plain ground,
+  // a LEDGE '^', a terrace '2'..'6' — is emitted as a floor quad and so wears
+  // the ground dressing; the only crowns cut from a surface set's `lid` are
+  // the ones you cannot stand on ('b' and 'B', which the shared model calls
+  // UNGROUND), and those stay the wall dressing's.
+  // The ROOM half of that key comes off the set `surfAt` already resolved, not
+  // a second scan of the region rects: this runs per cell, a few dozen times
+  // over at mount (@see fitViewRadius), and the campus has a rect per building.
+  const setKey = new Map();
+  for (const n in (F.surfByTheme || {})) setKey.set(F.surfByTheme[n], '#' + n);
+  const groundAt = (x, y, SC) => {
+    if (F.waterTex && F.wet.has(x + ',' + y)) return { tex: F.waterTex, key: '~' };
     const t = F.paintThemeAt && F.paintThemeAt(x, y);
-    return (t && F.surfByTheme[t] && F.surfByTheme[t].floor) || SC.floor;
+    const p = t && F.surfByTheme[t];
+    if (p && p.floor) return { tex: p.floor, key: '@' + t };
+    return { tex: SC.floor, key: (SC !== S && setKey.get(SC)) || '' };
   };
+  const floorTexAt = (x, y, SC) => groundAt(x, y, SC).tex;
   /**
    * WALLS — paint's mirror, and the exact opposite half of a surface set. It
    * reaches the faces you could put a hand flat against (the wall itself, a
@@ -1313,6 +1337,12 @@ function wantSet(px, py, yaw, R, near, far) {
       // room's light), and the ceil bake is tuned for the dark overhead.
       // The lid is this block's CROWN — the top-down lens cuts it from the
       // same wall contract (`walls.crown`), so the dressing takes it too.
+      // ONLY UNSTANDABLE crowns reach here, and that is the crown rule holding
+      // (@see groundAt, and extractGeometry in delve.js): WALL and LOW are
+      // exactly the chars the shared model calls UNGROUND, so a top you could
+      // stand on has already left through the floor path above with the ground
+      // dressing on it. Do not answer "standable?" from these tables — the
+      // model owns that question, and a LEDGE is the case that proves it.
       if (LOW[ch]) add('d' + id + wk, (WS && (WS.lid || WS.ceil)) || SC.lid || SC.ceil, T, T, wx, -LOW_H, wz, 'rotateX(90deg)', 'fp-floor', fog);
       // Once any surface climbs to eye-above-the-walls (level 2 up), walls
       // need TOPS or they read as open-topped hollow boxes from a terrace.
@@ -1325,7 +1355,11 @@ function wantSet(px, py, yaw, R, near, far) {
     if (ch === '#') return;
     const lv = heightAt(x, y);
     const lift = -lv * STEP_PX;
-    add('f' + id, floorTexAt(x, y, SC), T, T, wx, lift, wz, 'rotateX(90deg)', 'fp-floor', fog);
+    // The ground quad, and the crown of everything standable: a ledge and a
+    // terrace are floors that happen to be lifted, so the dressing rule and
+    // the key that repaints it are the same one (@see groundAt).
+    const G = groundAt(x, y, SC);
+    add('f' + id + G.key, G.tex, T, T, wx, lift, wz, 'rotateX(90deg)', 'fp-floor', fog);
     // A cell inside a stamped room is INDOORS whatever the weather outside —
     // it gets that room's ceiling even on a map whose light is open sky.
     // THE CEILING RISES WITH THE FLOOR (Doom's sector model, first tooth): a
@@ -1521,7 +1555,11 @@ function wantSet(px, py, yaw, R, near, far) {
   const emitBlock = (bx, by, n) => {
     const SC = surfAt(bx, by);
     const w = n * T, mx = (bx + n / 2) * T, mz = (by + n / 2) * T;
-    add(`f${n}:${bx},${by}`, floorTexAt(bx, by, SC), w, w, mx, 0, mz, 'rotateX(90deg)', 'fp-floor', 0, n, n);
+    // evenGround has already proved every cell in here wears the same ground,
+    // so the block's dressing key is its corner's — and a re-paint of any cell
+    // in it splits the block or changes that key either way.
+    const G = groundAt(bx, by, SC);
+    add(`f${n}:${bx},${by}${G.key}`, G.tex, w, w, mx, 0, mz, 'rotateX(90deg)', 'fp-floor', 0, n, n);
     if (!L.sky || SC !== S) add(`c${n}:${bx},${by}`, SC.ceil, w, w, mx, -WALL_H, mz, 'rotateX(-90deg)', 'fp-ceil', 0, n, n);
   };
 

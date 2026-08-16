@@ -85,9 +85,12 @@ const OUT = flag('--out', join(UNITY, 'Assets', 'Resources', 'Maps', 'pack.json'
 // A drop-detector that cries wolf is worse than none: the next real drop reads
 // as more noise. Re-check this against MapPack.cs whenever the schema grows.
 const CS_MAP_KEYS = new Set(['schema', 'kind', 'id', 'name', 'theme', 'grid', 'entry',
-  'exitStairs', 'props', 'portals', 'spawns', 'regions', 'walls', 'water', 'locks']);
+  'exitStairs', 'props', 'portals', 'spawns', 'regions', 'walls', 'paint', 'water', 'locks']);
 const CS_PROP_KEYS = new Set(['art', 'x', 'y', 'facing', 'use', 'label']);
-const CS_KNOWN_DROPS = new Set(['cls', 'paint']);   // dropped ON PURPOSE, and reported by the loader
+// 'paint' LEFT THIS SET on 2026-08-16: the port carries it now (MapPack.ToChart),
+// because the crown ruling made a standable top read the ground channel and an
+// unread channel meant the grass stayed. Only 'cls' is still a real drop.
+const CS_KNOWN_DROPS = new Set(['cls']);   // dropped ON PURPOSE, and reported by the loader
 
 // ── Read and validate ───────────────────────────────────────────────────────
 if (!existsSync(SRC)) {

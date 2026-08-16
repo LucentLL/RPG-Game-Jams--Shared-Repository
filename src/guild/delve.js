@@ -436,6 +436,38 @@ function cutWallTex(sheets, theme, opts = {}) {
     : texCv(TILE, DEPTH, (cg) => { sheetTile(cg, theme.faceTop.m, 0, 0); sheetTile(cg, theme.faceBot.m, 0, TILE); });
   const [faceSideE, faceSideW] = sidePair(faceS, DEPTH);
 
+  // The GROUND fill of this theme, cut once at world scale. It is drawn from
+  // the theme's OWN fill sheet at the theme's own source size (a 16px parquet
+  // tile blown up to 48, a 48px cliff tile 1:1) — the pit floor, and the crown
+  // of anything you can stand on, are both this.
+  const fillSheet = sheets[theme.sheet || 'cliffs'] || cliffs;
+  const fsrc = theme.src || TILE;
+  const f0 = theme.fill[0];
+  const groundFill = (cg) =>
+    cg.drawImage(fillSheet, f0[0] * fsrc, f0[1] * fsrc, fsrc, fsrc, 0, 0, TILE, TILE);
+  /**
+   * THE GROUND CROWN — the top of a raised thing you can STAND ON.
+   *
+   * Ground fill plus the cliff kit's eight rim strips blitted over its edges
+   * as a one-cell autotile island: that island is what makes a plateau read as
+   * a plateau edge instead of a square floating in the air, so it stays
+   * whatever fill the top now wears.
+   *
+   * Cut for EVERY theme, walls contract or not (it used to live inside the
+   * no-walls branch, where a themed floor could never reach it), because which
+   * crown a cell wears is decided per CELL by the shared model — standable is
+   * ground and ground is paint's; a crown you cannot stand on is the wall's
+   * and keeps `block[kind].top`. @see attachTerrain's topFor.
+   */
+  const groundTop = texCv(TILE, TILE, (cg) => {
+    groundFill(cg);
+    const strip = (t, ox, oy, w2, h2) => cg.drawImage(cliffs, t[0] * TILE + ox, t[1] * TILE + oy, w2, h2, ox, oy, w2, h2);
+    strip(theme.rim.n, 0, 0, TILE, 24); strip(theme.rim.s, 0, 24, TILE, 24);
+    strip(theme.rim.w, 0, 0, 24, TILE); strip(theme.rim.e, 24, 0, 24, TILE);
+    strip(theme.rim.nw, 0, 0, 24, 24); strip(theme.rim.ne, 24, 0, 24, 24);
+    strip(theme.rim.sw, 0, 24, 24, 24); strip(theme.rim.se, 24, 24, 24, 24);
+  });
+
   let block;
   if (theme.walls) {
     const H = opts.wallH || theme.wallH || 96;
@@ -457,14 +489,9 @@ function cutWallTex(sheets, theme, opts = {}) {
       block[n] = { face: tn.toDataURL(), sideE: tE, sideW: tW, top: top.toDataURL(), h: n * BLOCK_H };
     }
   } else {
-    const bTop = texCv(TILE, TILE, (cg) => {
-      sheetTile(cg, theme.fill[0], 0, 0);
-      const strip = (t, ox, oy, w2, h2) => cg.drawImage(cliffs, t[0] * TILE + ox, t[1] * TILE + oy, w2, h2, ox, oy, w2, h2);
-      strip(theme.rim.n, 0, 0, TILE, 24); strip(theme.rim.s, 0, 24, TILE, 24);
-      strip(theme.rim.w, 0, 0, 24, TILE); strip(theme.rim.e, 24, 0, 24, TILE);
-      strip(theme.rim.nw, 0, 0, 24, 24); strip(theme.rim.ne, 24, 0, 24, 24);
-      strip(theme.rim.sw, 0, 24, 24, 24); strip(theme.rim.se, 24, 24, 24, 24);
-    });
+    // Undressed, a block's crown IS the ground crown — that is the picture
+    // this branch has always cut, and the reason a meadow column wears grass.
+    const bTop = groundTop;
     // Terrace faces stack the kit's own courses: the lipped top course first,
     // plain rock beneath it — exactly how the chasm's 2-tall face is built.
     const stack = (h2) => texCv(TILE, h2, (cg) => {
@@ -487,15 +514,12 @@ function cutWallTex(sheets, theme, opts = {}) {
   // The pit floor wears the theme's own ground fill (a step down is still this
   // place); a bridge deck wears planks when the wood sheet rode along, and a
   // tunnel's rock deck wears the terrace top.
-  const fillSheet = sheets[theme.sheet || 'cliffs'] || cliffs;
-  const fsrc = theme.src || TILE;
-  const f0 = theme.fill[0];
-  const pitTop = texCv(TILE, TILE, (cg) =>
-    cg.drawImage(fillSheet, f0[0] * fsrc, f0[1] * fsrc, fsrc, fsrc, 0, 0, TILE, TILE));
+  const pitTop = texCv(TILE, TILE, groundFill);
   const plank = sheets.woodwall ? texCv(TILE, TILE, (cg) =>
     cg.drawImage(sheets.woodwall, 3 * TILE, 0, TILE, TILE, 0, 0, TILE, TILE)) : null;
   return {
     faceS: faceS.toDataURL(), faceSideE, faceSideW, block,
+    groundTop: groundTop.toDataURL(),
     pitTop: pitTop.toDataURL(), plank: plank && plank.toDataURL(),
   };
 }
@@ -513,6 +537,13 @@ function extractGeometry(grid, themeNameAt, extras) {
   // The wall dressing (@see wallThemeAt). Null everywhere on a chart with no
   // `walls` rects, which is what keeps every run merged exactly as before.
   const wallAt = (extras && extras.wallAt) || (() => null);
+  // The GROUND dressing — paint's channel. It reaches nothing vertical; it is
+  // carried here only so a raised thing you can STAND ON knows which ground
+  // its crown is (@see the crown rule on the blocks loop below).
+  const paintAt = (extras && extras.paintAt) || (() => null);
+  // The shared level model, asked ONE question here: is this cell standable?
+  // Absent on a bare estate plane, where nothing is (bakeEstate).
+  const lvModel = extras && extras.model;
   // A face belongs to the FLOOR cell it hangs off, never to the void it faces —
   // that cell is the one a rect can name, so its dressing is what the face wears
   // and a run may only extend while that answer holds.
@@ -554,8 +585,22 @@ function extractGeometry(grid, themeNameAt, extras) {
       // the more specific answer is the later one the user painted. The two
       // travel in SEPARATE fields because they are cut differently (@see
       // tex.byWall) — a room may raise its walls, dressing may not.
+      //
+      // THE CROWN RULE (ONE RULES FACT, CLAUDE.md). A top you can STAND ON is
+      // ground, and ground is `paint`'s; a top you cannot stand on is the
+      // wall's crown and stays `walls`'. The discriminator is the shared level
+      // model — `floorAt(x,y) != null` is exactly "standable" — never the
+      // baked char, because a LEDGE bakes as 'b' (@see bakeChar) and is
+      // walked on, while an authored 'b' is masonry. Terraces '2'..'6' are
+      // standable by the same question and get the same answer.
       if (ch === 'B' || ch === 'b' || '23456'.includes(ch)) {
-        blocks.push({ x, y, kind: ch, theme: themeNameAt ? themeNameAt(x, y) : null, wall: wallAt(x, y) });
+        blocks.push({
+          x, y, kind: ch,
+          theme: themeNameAt ? themeNameAt(x, y) : null,
+          wall: wallAt(x, y),
+          paint: paintAt(x, y),
+          stand: !!lvModel && lvModel.floorAt(x, y) != null,
+        });
       }
     }
   }
@@ -762,9 +807,12 @@ async function bakeMap(map, theme) {
   // piece of geometry carries. The WHOLE cut is kept now, not just `.block`: a
   // `walls` rect can name the cliff face a rim cell wears as well as the sides
   // of a block, and both live in the same cut.
+  // PAINT themes join the same pool: a painted cell's crown (where it is one
+  // you can stand on) is cut from the theme the ground wears, and that is the
+  // undressed cut — the same one a region gets, read for its `groundTop`.
   const tex = cutWallTex(sheets, theme);
   tex.byTheme = {};
-  for (const name of new Set(regions.map((r) => r.theme))) {
+  for (const name of new Set([...regions, ...paints].map((r) => r.theme))) {
     if (THEMES[name]) tex.byTheme[name] = cutWallTex(sheets, THEMES[name]);
   }
   // A SECOND pool for the wall dressing, cut differently on purpose: a region
@@ -782,7 +830,11 @@ async function bakeMap(map, theme) {
     voidColor: sampleVoidColor(sheets.cliffs, theme),
     tex, wet, wframes,
     ...extractGeometry(rgrid, regions.length ? themeNameAt : null,
-      { model, agrid: map.grid, wallAt: wallRects.length ? wallAt : null }),
+      {
+        model, agrid: map.grid,
+        wallAt: wallRects.length ? wallAt : null,
+        paintAt: paints.length ? paintNameAt : null,
+      }),
   };
 }
 
@@ -1456,6 +1508,26 @@ export function attachTerrain(parent, baked, opts = {}) {
    *  changes what the stone is, never how tall it stands (ONE RULES FACT), and
    *  every set on the plane cuts B/b/2..6 at the identical heights. */
   const setFor = (b) => cutFor(b).block;
+  /**
+   * The GROUND cut for a piece of geometry: what the floor there is made of.
+   * Paint first (the Surfaces palette's channel), then the room it stands in,
+   * then the plane's own theme. `walls` is deliberately absent — the wall
+   * dressing reaches vertical surfaces and never the ground.
+   */
+  const groundCutFor = (g) => (g && g.paint && tex.byTheme && tex.byTheme[g.paint])
+    || (g && g.theme && tex.byTheme && tex.byTheme[g.theme]) || tex;
+  /**
+   * THE CROWN RULE, drawn (@see extractGeometry's blocks loop for the ruling).
+   * A crown you can STAND ON is ground: it takes the ground cut's `groundTop`,
+   * so a paint rect over a ledge or a terrace changes the top you walk on and
+   * a `walls` rect does not. A crown you cannot stand on is masonry and keeps
+   * the block set's own top — the wall dressing's crown where the cell carries
+   * one, exactly as it always has.
+   *
+   * `b.stand` is false on every bare estate plane and on every chart with no
+   * level model, so those keep the crown they were always cut.
+   */
+  const topFor = (b, K) => ((b && b.stand && groundCutFor(b).groundTop) || K.top);
   const bBlock = new Map(baked.blocks.map((b) => [b.x + ',' + b.y, b]));
   const hOf = (x, y) => {
     const q = bBlock.get(x + ',' + y);
@@ -1475,7 +1547,7 @@ export function attachTerrain(parent, baked, opts = {}) {
     const zTop = zMode === 'under' ? 2 : base - 6;
     const zFace = zMode === 'under' ? 1 : base - 2;
     const els = [el('dv-block-top', `left:${b.x / cols * 100}%;top:${b.y / rows * 100}%;width:${100 / cols}%;height:${100 / rows}%;` +
-      `background-image:url(${K.top});background-size:100% 100%;transform:translateZ(${h}px);z-index:${zTop};`)];
+      `background-image:url(${topFor(b, K)});background-size:100% 100%;transform:translateZ(${h}px);z-index:${zTop};`)];
     if (hOf(b.x, b.y + 1) < h) { // a block to the south hides this face
       els.push(el('dv-face', `left:${b.x / cols * 100}%;top:${(b.y + 1) / rows * 100}%;width:${100 / cols}%;height:${hT / rows * 100}%;` +
         `background-image:url(${K.face});background-size:100% 100%;` +
