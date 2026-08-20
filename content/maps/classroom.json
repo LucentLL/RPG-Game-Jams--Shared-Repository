@@ -24,8 +24,7 @@
     {
       "art": "lectern",
       "x": 3.5,
-      "y": 4,
-      "facing": 315
+      "y": 4
     },
     {
       "art": "classDesk",

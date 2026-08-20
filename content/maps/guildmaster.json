@@ -26,7 +26,6 @@
       "art": "gmDesk",
       "x": 4.5,
       "y": 4,
-      "facing": 315,
       "use": "estatePlan",
       "label": "Read the estate plans"
     },
