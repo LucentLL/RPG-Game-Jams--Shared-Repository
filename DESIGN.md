@@ -413,8 +413,10 @@ deliver the fantasy; revisit only after the batched renderer, which stays LAST) 
 charge geometry payloads · gear→engine conversion (deferred until durability+repair ship as a
 pair — wiring it now silently nerfs everything) · projectiles/dash/soul-gauge · ward/DOT in the
 arena · mid-battle lens hot-swap (process-wide combat globals) · bespoke minigame engines
-(every contest is a judged prep-check or a combat bout) · festival crowds >4 extra actors
-(compositor ceiling) · cooking/day-granularity/weather/breeding · audio (no assets yet; the
+(every contest is a judged prep-check or a combat bout — **amended 2026-08-22**: a drill may
+also be PERFORMED, with a verb a lens already has; see "Training drills" below; the refusal of
+a separate minigame engine stands) · festival crowds >4 extra actors
+(compositor ceiling — lifted in Unity by the batched atlas; see "The Battlefield") · cooking/day-granularity/weather/breeding · audio (no assets yet; the
 300 unused FX frames in packs 2–6 are the cheaper spectacle lever).
 
 ## Open design decisions
@@ -735,6 +737,142 @@ per-frame per-character canvases; bake at native 48px, not display size; `willRe
 on bake-time scratch canvases; nameplates/HP into the canvas or a batched overlay; every loop
 gates on its screen being active. Characters stay Elements-compositor output — the art
 investment is in **world** art, not redrawing the cast.
+
+## The Battlefield — one against a thousand (owner 2026-08-22)
+
+> Owner directive, with *Dynasty Warriors: Origins* on the screen: *"As an additional mode to
+> test, I want it to be like Dynasty Warriors. We already have the capability to spawn hundreds
+> of characters. They should wear faction colors (different faces, hair, skin, etc) but wear
+> generic gears. Some characters are 'leaders' that have more advanced armor and are more like
+> Action Arena opponents. This can be player 1 vs 1,000 (for example), or the player can also
+> command an army for 1,000 vs 1,000 (not hard numbers, just ideas)."*
+
+**Where it lives, and why only there.** The capability the owner names is the Unity crowd's
+(`Crowd.cs` — 1,472 spectators, one atlas, one draw call). The web arena is hard-wired to
+`p1`/`p2` with a DOM canvas per fighter and cannot carry it; the web stays the spec for the
+*rules* (one resolver, one reach law, one collision fact), not for this lens. A recorded
+divergence, not a port gap.
+
+**Slice 0 — SHIPPED 2026-08-22 (Unity).** Two title doors beside the other exhibitions —
+*The Battlefield · one against a hundred* and *· two armies* — walk the arena's own gear draft
+and land on an **open field** (`ArenaField.OpenField`: turf to the outskirts, a scatter of
+boulders, no stands). Two companies, **Crimson** and **Azure**, are *uniforms*, not tints: one
+tunic stem in one of the sheet's own colourways (`top14_c1` / `top14_c3`, chosen by sampling
+every shipped colourway) worn over faces, hair and skin the generator rolled — the tint wash the
+crowd once wore was the tell that it was wallpaper. **Conscripts** are spawn numbers read by the
+unchanged resolver: scores 6–9, 8–12 HP, a sword, the plain Strike. **Captains** are arena
+opponents: `RollStats`, round-6 refined gear, armour and kit from that gear, the duel's 0.9 s
+cadence, a name. *The musou trick:* a target is engaged by at most four conscripts; the rest hold
+a ring at 2.4 tiles and drift, stepping in as a slot opens; conscripts feint 45% of the time.
+*The rout:* when a company's last captain falls the company breaks and leaves the field. HUD: the
+K.O. count, both companies' census, the captain's bar by name, the rout banner. `[` `]` scale
+the plan, `R` re-deals, F re-deals. A `SpatialGrid` (2-tile cells, rebuilt per frame) makes a
+thousand bodies linear rather than quadratic; `Fighter.Step` gained a listed-neighbour overload
+with the same circle law. Files: `Battlefield.cs`, `SpatialGrid.cs`, `BattlefieldTests.cs`
+(12 pins), the open-field branch in `ArenaWorld`, the smoke player photographs it.
+
+**Roadmap (each step keeps the build green):**
+1. **Perf proof at a thousand** — an `ArenaPerfTests` row at 500 / 1,000 / 2,000; the APK
+   measurement ([[project-unity-pivot]]'s standing rule: WebGL is a look, the APK is the
+   number); the far ring skips breath and skirt quads (LOD); the horizon past the outskirts.
+2. **Command an army** — the *Warcraft-3-light* direction above, finally with a field to stand
+   on: orders to your company (Follow · Hold · Charge · Flank), captains take them, conscripts
+   follow their captain; a rally banner; on touch a held radial. No unit micro.
+3. **The stage grammar** — objectives the reference is made of: camps to take (a banner
+   flips a company's colour), a commander to fell, an escort to bring off the field,
+   reinforcement waves; **morale** drives the rout earlier than "last captain" (captains' kills
+   raise it, the hero's K.O. streak breaks it). Fields authored on the drafting table as a
+   `battlefield` map kind.
+4. **The musou blow** — the held charge (K2) becomes the area strike: one swing, the resolver
+   rolled once per body in the arc; a K.O. streak counter; curriculum techniques
+   (`DISC_TECHNIQUES`) land as the hero's arts.
+5. **Into the guild** — a *Muster* event on the calendar (the decree holds: no free-fight doors
+   in guild mode): the roster marches as the captains of your company, levies hired by the
+   week, casualties through the injury ladder, spoils through the economy; [Simulate] resolves
+   by power × numbers and is never removed.
+6. **Creatures on the field** — beast tribes and wolf packs as the enemy once the
+   creature-in-arena branch exists ([[project-the-wilds]] phase 1).
+
+## The Overworld — a world you ride across (owner 2026-08-22)
+
+> Owner direction, with the second *Origins* screenshot: the 3D world map with guilds and towns
+> on it should be *"something more like this"* — a miniature landscape of real mountains, rivers,
+> forests and roads, castles and towns standing on it as models, and the hero riding across it
+> at diorama scale.
+
+**What we already have.** `WorldGen.Height` is a continuous heightfield that until the globe
+shipped was only ever used to pick a biome letter; `DelveWorld` turns any height chart into one
+static mesh by the one face rule; `DelveWalker`/`EstateWalk` walk such a chart in three lenses;
+the RPG Assets bundles carry world-scale terrain, mountain, tree, town and bridge sheets that
+nothing reads yet (`tf_newworld_terrain_master`, `tf_newworld_treesmountainsB`,
+`overworld_mountains`, `worldmaptowns_extras`, `woodbridge`, `wmountainpath`). The globe and the
+flat oval stay: the globe is the *survey*; this is the *ride*.
+
+**The scale law (to decree before building).** The overworld is a MODEL: a world tile is a
+league, and the hero is a figure standing on the model, the size of a town — exactly the
+screenshot. ONE SIZE FACT still holds *within* the lens (the hero is `PLAYER_H` against the
+overworld's tile); what is declared is that the overworld's tile is not the delve's.
+
+**Roadmap:**
+1. **Relief as ground** — quantise `Height` into a level chart (4×4 tiles per world cell →
+   256×128; sea, shore, lowland, hills, mountains as levels), biome letters choose the turf;
+   derived from `Height` alone (no new chance draws, so the C# stays exact and
+   `dev/dump-world.mjs` pins it).
+2. **Dressing** — peaks, trees, rivers (moisture flow, deterministic) and roads between the
+   seats (least-cost over the levels — new surface, fixture-pinned) from the sheets above.
+3. **Halls and towns as buildings** — the 32 seats as keeps, the 8 towns, the Wilds as
+   cave-mouths; stepping onto one opens the dossier the globe already draws (contacts, venues).
+4. **The rider** — an `EstateWalk` session on the world chart; travel is walking; distance
+   costs weeks on the calendar (the errantry hook, K6).
+5. **Three lenses on the world** — survey (the globe's orbit), ride (over the shoulder), map
+   (top-down); the flat oval remains the founding select.
+6. **Encounters on the road** — a hunt at a Wilds mark; bandits as a small Battlefield
+   (one against twenty) — where this roadmap and the one above meet.
+
+## Training drills — performed, not only simulated (owner 2026-08-22)
+
+> Owner directive: *"Let's also make a roadmap for adding actual training drills for each
+> skill type. Like Monster Rancher, this can range from pushing boulders, hurdling obstacles,
+> blocking or striking projectiles, keeping balance while meditating, etc. These can be
+> simulated or performed by the player as individual characters."*
+
+**The principle that keeps the altitude.** A drill is a VERB OF A LENS YOU ALREADY HAVE — never
+a bespoke minigame engine (the cut list is amended, not repealed). Every drill exists three
+ways: *simulated* (today's `applyTraining`), *watched* (the duty loop on the grounds — the
+member performs it, shipped 2026-07-09), and *performed* (the player takes the member, the way
+"Take control of <name>" already hands them a fight). Performance feeds the SAME result shape:
+`applyTraining(hero, drill, intensity, bias, { equipMult, performance })` ↔
+`TrainingRules.ApplyTraining(..., WeekOpts { EquipMult, Performance })`, a 0.6–1.5 multiplier
+in the slot the stations already use, and the conduct line (exceeded / solid / failed) read off
+the score. Anti-lie: the drill card shows the band a performance can reach.
+
+| Stat | Drill (training.js) | Performed as | The verb, and whose it is |
+|---|---|---|---|
+| POW | Weight Drills | **Push the boulder** — shove a boulder the length of the yard before the bell | *push*: a movable prop body (new rules verb; `prop-volume` collision) |
+| DEF | Shield Wall | **Hold the wall** — a trainer looses arrows and stones; raise the guard on the beat | *guard* + the arena's projectiles (both exist) |
+| SKL | Weapon Forms | **Strike the marks** — dummies rise around the yard; hit them as they rise | *swing* vs a dummy with an AC (exists) |
+| SPD | Sprint Course | **Run the poles** — hurdles on a timed course, a miss costs a beat | *vault*: a timed use of a low prop (new rules verb) |
+| INT | Meditation | **Keep the stone** — sit; hold the drifting centre against gusts with the look | *hold*: the look seam (`createLook` / the pad's right stick) |
+| VIT | Endurance March | **The ruck** — laps of the yard under a pack; pace it or burn out | *walk* + stamina (exist) |
+
+Spar stays a bout (both lenses). Techniques from the curriculum unlock as a drill's "exceeded"
+outcome at discipline thresholds (`DISC_THRESHOLDS`).
+
+**Roadmap:**
+1. **The seam** — `performance` in both builds, fixture-pinned (`dev/dump-training.mjs`
+   extended); the drill card's band; a performed week is the same assignment plus a *perform*
+   verb at the station; [Simulate] stays on every card.
+2. **Stations on the Unity grounds** — port `stations.js` (Unity derives `EquipMult` from the
+   yard tier alone today; the per-drill stations close that divergence); the yard slots become
+   the drill grounds.
+3. **Three verbs on existing systems** — Hold the wall, Strike the marks, The ruck. Zero new
+   engines.
+4. **Two new rules verbs** — *push* and *vault* — in the shared walker (both builds; the
+   boulder push is also a Battlefield mechanic waiting to happen).
+5. **Keep the stone** — the balance hold on the look seam.
+6. **Curriculum and coaching** — Pillar C schedules drills; the player performs one member's
+   week and the rest simulate (the EA Superstar scope); apprentices drill too.
+7. **Errantries** as performed multi-week drills with a return-week boss (K6).
 
 ## Relationship to the current codebase
 

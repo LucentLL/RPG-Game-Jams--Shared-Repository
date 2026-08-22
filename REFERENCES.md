@@ -22,6 +22,7 @@ mood board is how a game becomes six games wearing one title.
 | **Octopath / DQ remakes / Radiant Historia** | 2D sprites standing in a 3D world |
 | **Ragnarok Online (vanilla)** | Craft it, then push it further — at a price |
 | **FF7 + Path of Exile** | Sockets, links, and orbs that grow by being used |
+| **Dynasty Warriors: Origins** | One against a thousand — and the world as a model you ride across |
 
 ---
 
@@ -223,6 +224,36 @@ drop.
 
 ---
 
+## Dynasty Warriors: Origins — one against a thousand, and the world as a model
+
+Two mechanics from one reference, added 2026-08-22 with two screenshots on the screen.
+
+**What it gives us (the field).** The spectacle of one fighter against a thousand, made
+survivable not by weak enemies but by a crowd that *waits its turn*: a handful press, the
+rest hold a ring and step in as a slot opens; captains fight for real; when the last captain
+falls the company breaks. Faction colour as a UNIFORM over generated faces — never a tint.
+The K.O. count as the one number on the glass. Shipped as slice 0 in Unity
+(`Assets/Scripts/Arena/Battlefield.cs`, `SpatialGrid.cs`, the open field in
+`ArenaWorld.cs`; `DESIGN.md` § "The Battlefield"). Every blow still goes through the one
+`UseAttack` path and the one d20 resolver — a mode is a ruleset, and this one only says who is
+on the field and how they behave.
+
+**What it gives us (the road).** The world map as a *place*: a miniature landscape with
+castles and towns standing on it as models and the hero riding across it at the model's
+scale. Designed, not started (`DESIGN.md` § "The Overworld"); the parts are
+`WorldGen.Height`, `DelveWorld`'s one-height-map rule and the unused world-scale sheets in
+RPG Assets.
+
+**What we refuse.**
+- **A second combat engine for the crowd.** Conscripts and captains are spawn numbers and AI
+  states; nothing about a hit is decided on the field. ONE RULES FACT.
+- **Unit micro.** Orders go to *companies* through their captains (the Warcraft-3-light
+  line); the player never selects a conscript.
+- **Free-fight doors in guild mode.** The Battlefield is a TITLE exhibition until it is a
+  calendar event (a Muster) with stakes — the 2026-08-21 decree holds.
+- **The web lens.** The DOM compositor cannot carry a thousand bodies; this is the first
+  feature the Unity build has that the web does not, recorded as a divergence.
+
 ## The seams a reference may never cross
 
 Any new borrowing is checked against these before it is written down. All four have
@@ -233,8 +264,10 @@ already been paid for.
 2. **Anti-lie.** A number shown to the player is the number the resolver uses —
    tournament odds, refine %, drill risk, a rival's ⚡.
 3. **The altitude holds.** Between "one level deeper than an RTS" and "one level
-   higher than Potion Craft." Every contest is a judged prep-check or a combat bout;
-   no bespoke minigame engines.
+   higher than Potion Craft." Every contest is a judged prep-check or a combat bout —
+   or, since 2026-08-22, a DRILL PERFORMED WITH A VERB A LENS ALREADY HAS (push, vault,
+   guard, strike, walk, hold; `DESIGN.md` § "Training drills"). Still no bespoke
+   minigame engines: a drill that needs its own engine is a different game asking in.
 4. **Simulate is never removed.**
 
 ## Open reference debts
@@ -246,6 +279,9 @@ already been paid for.
 | Festivals as a participable week | Monster Rancher | K6 |
 | My Hero / Team control scopes | EA Superstar / Team | Manager ships; scopes are Phases 3–4 |
 | Technique manuals (books that teach combat techniques) | — | Pairs with K6 |
+| Command an army — orders to a company, a Muster on the calendar | Dynasty Warriors: Origins | Slice 0 shipped 2026-08-22 (one against a hundred · two armies, Unity); orders and the calendar event not started |
+| The overworld as a model you ride across | Dynasty Warriors: Origins | Designed 2026-08-22; `WorldGen.Height` + `DelveWorld` are the parts |
+| Performed training drills (boulder, wall, marks, poles, stone, ruck) | Monster Rancher | Designed 2026-08-22; the seam is a `performance` factor beside `equipMult` in both builds |
 
 ## How a new reference joins this file
 
