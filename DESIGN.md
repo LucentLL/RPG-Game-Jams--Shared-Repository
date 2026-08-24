@@ -32,7 +32,9 @@ Two anchors fix how granular the game is. **Every system must sit between them.*
 So for any trade job the player decides **who** works, **what** they make, and **with what
 materials** — then **time + skill** produce the result. Depth comes from *many interacting
 systems* (skill tracks, material quality, item history, spoilage, logistics), **not** from fine
-motor control. Time is measured in **weeks**, not individual actions.
+motor control. Time is measured in **weeks**, not individual actions (**amended
+2026-08-24**: the week now holds three-watch days the player may advance — see "The Three
+Watches"; the ledger still settles weekly).
 
 | Trade | The player DOES | The player does NOT |
 |---|---|---|
@@ -43,6 +45,9 @@ motor control. Time is measured in **weeks**, not individual actions.
 > Combat is the one place the dial can go lower on demand: the player *may* directly play a
 > battle (the action arena) or auto-resolve a squad expedition. Production/trade stays at the
 > management altitude above; combat offers an optional hands-on layer.
+> (**Amended 2026-08-22 and 2026-08-24**: drills may be PERFORMED with a lens's own verb, and
+> the day and walk rungs zoom lower everywhere — see "Training drills" and "The Zoom".
+> Production keeps this altitude: a forge moment has no rung to play, at any zoom.)
 
 This is why the Phase-1 forge is correct: assign a smith + recipe + ore → Advance Week → skill
 drives quality. Keep every future trade system at this altitude.
@@ -257,8 +262,10 @@ the played result returning the **exact same shape** the resolver does — so ev
 **Architecture (four layers over the sim):**
 - **Simulation core** — `hall.js advanceAll()` weekly tick + `resolveQuest`/`resolveTournament`. The
   only two points where combat is decided. Unchanged; runs identically in all modes.
-- **Control-scope layer** *(future `src/guild/control.js`)* — `guild.control = { mode, focusId }` +
-  `playerOwns(battle)` ("player's call or the AI's?") + `autoManage(guild)` (sim-the-rest).
+- **Control-scope layer** *(future `src/guild/control.js`)* — `guild.control = { mode, focusId }`
+  (**amended 2026-08-24**: control is a FOCUS, not a mode — the dial holds on a person and the
+  field spec follows; see "The Zoom") + `playerOwns(battle)` ("player's call or the AI's?") +
+  `autoManage(guild)` (sim-the-rest).
 - **Resolution seam** — inside `advanceAll`, `outcome = playerOwns ? await playBattle(…) : resolve(…)`.
 - **Battle adapter** — `src/guild/battle-bridge.js` (`heroSpec`, `playTournamentMatch`) → the engine's
   `window.playGuildBattle({player,opponent})` facade in `crucible.js` (`guildFighterFromSpec`,
@@ -416,8 +423,11 @@ arena · mid-battle lens hot-swap (process-wide combat globals) · bespoke minig
 (every contest is a judged prep-check or a combat bout — **amended 2026-08-22**: a drill may
 also be PERFORMED, with a verb a lens already has; see "Training drills" below; the refusal of
 a separate minigame engine stands) · festival crowds >4 extra actors
-(compositor ceiling — lifted in Unity by the batched atlas; see "The Battlefield") · cooking/day-granularity/weather/breeding · audio (no assets yet; the
-300 unused FX frames in packs 2–6 are the cheaper spectacle lever).
+(compositor ceiling — lifted in Unity by the batched atlas; see "The Battlefield") ·
+cooking/weather/breeding (day-granularity **amended 2026-08-24**: the day exists now as
+three watches the player may advance — see "The Three Watches" below; the WEEK remains the
+ledger every system resolves at, and weather and feeding minigames stay refused) · audio
+(no assets yet; the 300 unused FX frames in packs 2–6 are the cheaper spectacle lever).
 
 ## Open design decisions
 
@@ -788,8 +798,10 @@ with the same circle law. Files: `Battlefield.cs`, `SpatialGrid.cs`, `Battlefiel
    (`DISC_TECHNIQUES`) land as the hero's arts.
 5. **Into the guild** — a *Muster* event on the calendar (the decree holds: no free-fight doors
    in guild mode): the roster marches as the captains of your company, levies hired by the
-   week, casualties through the injury ladder, spoils through the economy; [Simulate] resolves
-   by power × numbers and is never removed.
+   week (**amended 2026-08-23**: the levies are the academy's own apprentices — see "The
+   Hundred of Every Hall" below; hired levies are repealed), casualties through the injury
+   ladder, spoils through the economy; [Simulate] resolves by power × numbers and is never
+   removed.
 6. **Creatures on the field** — beast tribes and wolf packs as the enemy once the
    creature-in-arena branch exists ([[project-the-wilds]] phase 1).
 
@@ -873,6 +885,321 @@ outcome at discipline thresholds (`DISC_THRESHOLDS`).
 6. **Curriculum and coaching** — Pillar C schedules drills; the player performs one member's
    week and the rest simulate (the EA Superstar scope); apprentices drill too.
 7. **Errantries** as performed multi-week drills with a return-week boss (K6).
+
+## The World Editor — one tool for every place (owner 2026-08-23)
+
+> Owner directive: *"World Editor: The one now is...bad. I've referenced Hexen, Wizordum,
+> Halo. All have editors. All allow editing walls, adding bridges, adding water. This is a
+> well understood feature. A lot of progress is needed here to build future maps and arenas."*
+
+**What the complaint is actually about.** Walls, bridges and water are all authorable
+today — walls are painted chars (`B`/`b`) or laid whole by the X+drag room gesture, bridges
+are the two-surface `n`/`u` cells that keep their trench, water is a first-class overlay in
+both builds (animated in Unity by `DelveWater`). What the three references have that we
+genuinely lack is three other things, and naming them right IS the roadmap: **(1) a world
+that answers** — there is no switch, trigger, lift or scripted event anywhere in the schema;
+`locks:[[x,y]]` on doors is the entire interactive vocabulary, where Wizordum wires relay
+graphs down a corridor and Hexen's whole game is a switch here opening a wall there.
+**(2) breadth** — `PACK_KINDS` is `delve|arena`, so the battlefields, wilds, venues and
+world charts the game now needs cannot be authored at all (the Battlefield roadmap already
+promises a `battlefield` map kind it cannot have). **(3) the editor that moves trails the
+frozen spec** — the web table (2,725 lines, reference-only since 2026-08-23) still out-verbs
+the Unity one: no room or fill gesture, no Surfaces/paint tab, and no `levels` layer in
+`MapPack`, so a chart sculpted past the char vocabulary **walks flat in Unity**
+(`map-pack-validate.js:204`'s standing warning).
+
+**Where it lives, and why only there.** The Unity drafting table (`MapEditorScreen.cs`,
+`MapEditorView3D.cs`, `MapDrafts.cs`) is THE editor now; the web table is its parity floor,
+never the tool that grows. And Unity already holds the one card the references play: it
+edits **inside the game's own renderer** — the real `DelveWorld` to a RenderTexture, rays
+picking cells and faces — which is the thing Wizordum's angled camera approximates and
+Forge simply is. **THE FORMAT IS THE GAME:** everything the editor places is a fact in the
+one pack schema, read by one loader (`MapPack.Parse`, shipped and drawn alike), checked by
+one validator, walked by every lens. An editor feature with no schema fact behind it is
+refused.
+
+**Roadmap (each step keeps the build green):**
+1. **Parity closes** — Unity gains the web's missing verbs: X+drag room, V+drag rectangle
+   fill, the Surfaces/paint tab (its stated omission reason is stale — `MapPack.ToChart`
+   carries paint rects now, and `MapDrafts.Clone` silently drops them, a bug that goes
+   first); the prop palette enumerated from a public `DelveAtlas.VolumeIds` instead of the
+   hand-typed 43 rows; and the **levels layer parses in Unity** so the 2026-08-21 sculpt
+   law finally crosses ([[project-map-editor]]'s recorded gap).
+2. **The chrome pass** — the Wizordum build-order rows still unbuilt: minimap, ghost labels
+   on flags, focus level (active level bright, the rest dimmed, edits clamped), spawn
+   difficulty tiers; and one addition of our own, redo beside the 60-deep undo.
+3. **Height for things** — props gain a level slot: a table on a terrace, a brazier on a
+   bridge deck. The lint that pins furniture to level 0 flips from refusal to
+   surface-must-exist; the collision circle and the rest-on law already hold at any height.
+4. **The wiring** — the world answers: `links` enter the schema as authored edges — switch
+   → door, plate → portcullis, lever → lift, counters and relays after — and any placed
+   thing may be an activator. This is a RULES system every lens must honour, not an editor
+   feature; the delve's bump-doors, keys and locks are its shipped ancestors. Refusal: no
+   scripting language — Hexen's ACS stays on the shelf. A link is a data edge, not code.
+5. **Every kind of place** — `PACK_KINDS` opens: `battlefield` (camps, banners,
+   reinforcement gates — the field the Battlefield's stage grammar is waiting to stand on),
+   `wilds`, venue dressing for arenas (the STADIUM scout), later `world`. Arena charts are
+   editable TODAY — but the one arena-only schema fact, the `foe` corner, has no hand in
+   either editor; it gets one here. The estate stays derived (it opens as an editable copy,
+   never the source — the room layout is its author) and the tactical kind waits its turn:
+   both named rather than quietly dropped. Each kind brings its own lint duties, never its
+   own editor.
+6. **Edit in the lens** — Forge's mechanic, and the prize the Wizordum reference named:
+   while walking a draft (Walk It already round-trips through all three cameras), a build
+   hand places, turns and erases from inside the walk. The plan canvas stays the precision
+   instrument.
+
+## The Hundred of Every Hall — 32 schools, 32 armies (owner 2026-08-23)
+
+> Owner directive: *"Training for a 100 character army. Each guild. 32 guilds in the world.
+> Each guild has their 'speciality' or focus; swords, fire magic, evasion, healing,
+> potions, etc."*
+
+**What stands, and what is missing.** The 32 halls exist as identities and nothing more —
+`SEAT_ROSTER` / `WorldMap.Seats` carry id, name, realm and a keep sprite; no roster, no
+power, no focus. Opposition is individual: the rival pool is drawn and retuned per bracket
+round, and a hall "has" rivals only by the `rivalSeat` hash. The hundred exists in pieces:
+~106 counted dormitory beds and a 100-apprentice class walking at 16.7 ms; a quarters cap
+of 120; the Battlefield's companies of 100 behind the engage ring — but its soldiers are
+anonymous conscripts, and of everything your guild is, only a commissioned apprentice's
+FACE crosses onto the field today.
+
+**Three decrees.**
+- **THE SPECIALTY IS A SEAT FACT.** One focus per hall, stored by seat id (save-safe the
+  way contacts and venues already are), drawn from mechanics that exist — never a display
+  label (the materia rename already taught what a rule keyed on a NAME costs). It expresses
+  everywhere the hall appears: its rivals, its dossier, its army at a muster.
+- **THE ARMY IS THE ACADEMY.** The hundred is not bought at a door. Roster members march as
+  captains carrying their real stats, gear and kit (the member→fighter bridge —
+  `ToFighterStats`, `BattleAc`, kit from `Equipped` — exists and stops at fighter 0
+  today); apprentices march as levies whose band
+  derives from readiness and aptitude — the class the semester plan taught IS the army it
+  fields. Anti-lie: the muster sheet shows the band training bought.
+- **A FOCUS IS TAUGHT, NOT WORN.** The player's hall earns its focus from its school. The
+  substrate is the curriculum — majors, discipline levels, specializations — and it is
+  web-frozen; porting it to Unity is a prerequisite step of this roadmap, not a
+  nice-to-have.
+
+**The specialty menu, priced honestly.**
+
+| Focus | The mechanic it rides today | State |
+|---|---|---|
+| Swords · Axes & Maces · Hammers · Bows · Crossbows | gear types with their own damage/reach/hands + curriculum specializations (Swordsmanship…, ×1.15 affinity) | gear in both builds; curriculum web-frozen, unported |
+| Fire — and each of the seven elements | materia bonuses (Flame Strike / Fire Blast are engine rows) | rows in both builds; the web applies bonuses to every combatant, Unity only to the played arena fighter — a gap step 2 inherits |
+| Healing | the Mend verb (2d6; the AI self-casts under 40%), the Restorative spec, the Church direction | both builds |
+| Potions | the Alchemy trade; the battle bridge's items channel (items in, itemsUsed out) | trade in both; nothing maps brews into the channel yet |
+| Evasion | **nothing** — no evade term exists in either build, and the FP lens's private `BLOCK_EVADE` cannot be it (ONE RULES FACT) | needs its own decree in the shared resolver first |
+
+**Roadmap (each step keeps the build green):**
+1. **The seat learns its trade** — a `focus` on each of the 32, authored in `SEAT_ROSTER` /
+   `WorldMap.Seats` (deterministic, fixture-pinned); the globe dossier and the world map
+   say it; hall standing — the first per-seat state beyond contacts — opens its ledger.
+2. **Rivals wear their school** — the mint and the retune read the rival's hall: archetype
+   lean, gear kinds, materia colours. Power retuning is untouched, so the anti-lie holds —
+   the number on the board is still the number the resolver checks.
+3. **The curriculum comes to Unity** — majors, discipline levels 0–5, techniques and
+   specializations port (Unity's "Discipline" today is a conduct stat, and
+   `Professions.Disciplines` already spends the word on the three trades — the combat
+   majors arrive needing their own name); the player's hall DECLARES its focus from what
+   its school demonstrably teaches. The authored focus on the player's own seat is the
+   school's inheritance — the founding default a declaration supersedes — and the dossier
+   shows the declared one.
+4. **The hundred musters from the ledger** — roster members take captain slots with their
+   stats, gear and names; commissioned apprentices keep their minted Name; levies derive a
+   conscript band from readiness × aptitude; the census is the real academy + roster count,
+   and casualties write back through the injury ladder. The atlas ceiling (28 soldier looks
+   per company) is the honest constraint: levies wear the school's uniform, not a hundred
+   faces. Levy training rides `AcademyTerm` as it stands — captains stay on the per-member
+   MR loop, because that loop is the game.
+5. **The Muster on the calendar** — the Battlefield's step 5, now against a NAMED hall: a
+   `muster` event type (one `Events` row, one stakes row), `venueId` ported, marching costs
+   the week. **The other hundred is minted, not stored:** the named hall's captains are its
+   own circuit rivals (the pool `rivalSeat` already binds to it), mustered in its colours
+   and focus; its levy band and census derive from the hall's standing — deterministic off
+   the seat, fixture-pinned, so power × numbers has a source on BOTH sides. Standing moves
+   with the season's results: the hall you march on next year is not the one you scouted
+   this year. [Simulate] is never removed; played is the Battlefield. Hall W-L-D standings
+   make the 32 a league the season can point at.
+6. **The war of the schools** — focus against focus on the field: the fire hall's captains
+   burn, the healing hall's line outlasts its wounds, the potions hall drinks its own
+   stock — and the evasion hall waits, honestly listed, until the evade decree is written.
+   No unit micro, no free-fight doors, no second combat engine — the standing refusals all
+   hold.
+
+## The Three Watches — a day you can stand inside (owner 2026-08-24)
+
+> Owner directive: *"I think the daily activities should be split into three. Morning,
+> Afternoon, and Night. it works well with Study (mental) one section, practice (physical),
+> and sleep. or double majors can double down. this means advancing days instead of weeks.
+> this structure can be more rewarding if a player chooses to role play as a particular
+> character. for EA reference, the Superstar mode."*
+
+This amends two standing laws, and both now carry the dated note in place: the cut list's
+day-granularity refusal (above) and the Monster Rancher rule that the tick is a week
+(REFERENCES.md). What survives of the old law is its load-bearing half:
+
+**THE WEEK IS THE SUM OF ITS DAYS.** Every system that exists resolves at the week
+boundary and keeps doing so: `WeekResolver.Advance` is the game's one verb, its order
+fixed (hunts → events → the spar PAIRING → the member loop, where the bouts and drills
+actually resolve → the academy → the purse settles once → the Wayhouse recruit board
+re-rolls → `Week++` → the calendar tops up), its randomness one injected stream whose
+DRAW ORDER the tournament fixture counts. The day is the tick the player advances; a day
+ACCUMULATES — watches worked, wear taken — and the boundary resolves the totals.
+Weekly-nonlinear rules stay weekly and run once: the single slack roll, wear (fatigue
+plus twice stress) against the 185 injury threshold, `Age += 1`, injury weeks. The pin that makes the whole
+directive safe: **a week advanced day by day on its defaults produces the identical
+ledger to the week resolved whole** — bit-for-bit, fixture-checked, the draw counter as
+the trap. Zooming in changes outcomes only where the player actually changed a decision
+or performed a verb. That is the EA law applied to time: a day is a camera on the week
+until you touch something.
+
+**The watches.** Morning is STUDY, the mental watch — `study:<discipline>` theory today,
+the curriculum majors when they port, books when the shelf does. Afternoon is PRACTICE,
+the physical watch — the six drills, the spar, the stations. Night is SLEEP — the rest
+verb finally holding its own slot: the recovery numbers (−35 fatigue, −20 stress,
++25 stamina, each recover-trait-scaled, and a flat +5 morale) become the nights' work,
+split so the week-sum law holds against the training fixture. A member's default day
+DERIVES from their weekly assignment — a Weight-Drills week practices weights, studies
+the major, sleeps — so nobody schedules 21 slots; the assignment is the day-plan, and
+"advance the week" simply runs the remaining days on their defaults. EVERY assignment
+derives, not only training: a craft week works its bench in the afternoon and studies its
+theory in the morning (the learn-on-the-job rule finally has a slot to live in); an away
+week — quest, hunt, an errantry — belongs to the road, its days advancing without
+choices. (Vocabulary settled deliberately: these are a DAY's watches; the older "Watch
+tier" of Sim/Watch/Play is the spectate rung and keeps its full name.)
+
+**Double majors double down.** The double major traded the elective away for a second
+discipline, and under the weekly grain that was quiet starvation — one drill fed exactly
+one discipline per week ("slower on both roads" was emergent, never a rule). The watches
+give them what the week could not: BOTH waking watches on the two disciplines, every day.
+The elective member's study watch is their trade instead. Burning the night for a third
+working watch is legal and priced by the wear math that already exists — fatigue plus
+twice stress against the threshold; the injury ladder is the answer to a semester of
+skipped sleep.
+
+**What night needs, honestly.** No sub-week time exists anywhere — the week is the
+smallest unit in either build, and the sun is compile-time constants (light is dressing).
+Night on the grounds is therefore a LIGHTS row — a theme mood, the honest cheap path —
+not a new shader term. Roster members have no beds: the dormitory counts and seats
+apprentices only, though its own header decree already names "100 guild members" —
+`Hero.Bed` and a counted Living Quarters chart are owed: the counted-beds law extended to
+members, the same debt the Hundred's hundred implies. A sleeper LIES as plan art in the
+ground plane — the corpse ruling; no faked pose.
+
+**Roadmap (each step keeps the build green):**
+1. **The clock** — `Guild.Day` (0–6) under `Guild.Week`, saved under a versioned key;
+   *Advance Day* beside *Advance Week*, and Advance Week ≡ seven Advance Days,
+   pinned bit-for-bit against the whole-week resolve. An order-pinning test on
+   `WeekResolver.Advance` lands FIRST — today the order is pinned only indirectly.
+2. **The watch ledger** — each day derives its three watches from the weekly assignment;
+   days accumulate, the boundary resolves; every existing fixture passes unchanged. And
+   the day must SHOW its accumulation, honestly labeled: watches worked, wear taken, the
+   conduct band forming — provisional numbers that settle at the boundary, where results,
+   gold and recaps land as they always did. Seven silent clicks would be the directive
+   refused; the legible day ledger is part of the clock.
+3. **The day card** — the role-play surface: follow one member through their day (the
+   take-control seam is the door), their three watches become three choices, and the
+   grounds show it — the duty loop already stations everyone by assignment; now it
+   stations them by watch. Only the afternoon has a performed verb today (the drills'
+   roadmap); morning and night are menus until study and sleep earn verbs of their own —
+   named, not hidden. And the dial must hold on an APPRENTICE too: rising from the
+   academy is the Superstar fantasy at its purest — their day is the class's lesson,
+   until the day they are pulled out or graduate.
+4. **Doubling down and the night** — double-major watches; sleep splits the rest verb
+   across nights; the skipped night priced by the standing wear math; `Hero.Bed` and the
+   counted quarters.
+5. **The estate after dark** — the third watch made visible: the night LIGHTS row,
+   sleepers abed as plan art, the duty loop's night shift. Dressing only; no rule
+   reads the dark.
+6. **The event takes its day** — an event wears a day of its week on the calendar, and
+   advancing onto that day is where the PLAYED path opens (the armed plan fires there);
+   the default simulate stays at the boundary, identical, with the draw-order pin as the
+   proof. The followed member's week gains the shape the Superstar reference is made of:
+   training days that point at a game day.
+
+## Commanders and Masters — every domain gets a face (owner 2026-08-24)
+
+> Owner directive: *"I'm thinking 'commanders' should be leaders of a domain; forge,
+> apothecary, etc. or maybe they should be leaders of their respective combat
+> proficiency."*
+
+**The answer to the "or maybe" is both — one appointment system, two words.** The seed
+already exists, and only one of it: the web's `guild.trainer`, the Head Trainer — an
+appointed Hall-of-Famer worth +15% to roster training and ×1.3 to apprentice development,
+beside the field already declared for exactly this (`hero.staffRole`, "post-retirement
+posting" — declared and migrated, never yet written; the shipped appointment stores a
+snapshot on `guild.trainer`) and guild.js's own comment declaring the hook: *"staff
+slots generalize later."* Later is now. **MASTERS head domains** — the Forgemaster, the
+master Apothecary, the head of the kitchen, the Librarian: titles minted for the posts.
+What roles.js already gives every domain room is a titled FACE (Blacksmith at the forge,
+Apothecary, Cook, Scholar at the library) for the master post to stand above.
+**COMMANDERS lead combat proficiencies** — the sword-commander, the fire-commander;
+the disciplines and specializations are their taxonomy, which is one more reason the
+curriculum port (the Hundred's step 3) comes first. The vocabulary is settled
+deliberately, because "commander" is already claimed twice: the Battlefield's captains
+and the Academy's commissioned apprentices. Both collisions become convergence — on the
+field, a proficiency's commander IS a captain of the Hundred, and the Academy's
+commission lane becomes the *cadet*-commander serving under them. "Master" already speaks
+craft in this codebase (Mastersmith); it stays on the domain side.
+
+**What an appointment does — three effects, all on seams that exist:**
+- **The multiplier.** The trainer's ×1.15/×1.3 generalized per post; and the craft
+  screens' `Guild.Selected` cursor — today literally "who works the room" — gains a
+  standing answer: the master works the bench when nobody else is chosen.
+- **The teaching.** A study watch in a domain is tutored by its master (the Academy's
+  ×1.3 tutoring precedent, now pointed the other way).
+- **The field.** A proficiency's commander takes a captain slot at the Muster, their
+  proficiency's levies mustered under them.
+
+And a post costs a day: under the Three Watches, an active master's bench default and
+tutoring are watches of THEIR day. An appointment is an assignment with a title, never a
+free aura.
+
+**Roadmap (each step keeps the build green):**
+1. **The post** — `staffRole` generalized and ported (Unity's own comment admits "this
+   fork has no roles system"); appointed from the roster or the Hall of Fame, saved under
+   a versioned key; the Head Trainer becomes the first row of a table instead of a
+   special case.
+2. **Masters of the trades** — forge, apothecary, kitchen: multiplier, bench default,
+   study-watch tutoring.
+3. **Commanders of the proficiencies** — after the curriculum port; they captain the
+   Muster's companies and colour its order of battle.
+4. **The cadet lane folds under** — the Academy's "commission" becomes cadet-commander,
+   ranked beneath the proficiency's commander it apprentices to.
+
+## The Zoom — Manager and Superstar were one game all along (owner 2026-08-24)
+
+> Owner directive: *"I want the player to zoom in as far as they want, but also simulate
+> what they don't find interesting. essentially merging Manager mode and Superstar
+> modes."*
+
+This is not a new law — it is the EA law the project was built on: one simulation always
+running, and control only decides which decisions the player takes over. What the
+directive changes is the shape of the control: the scopes stop being MODES you pick and
+become a DIAL you hold per thing. Superstar is the dial held low on one person; Manager
+is the dial at rest. No save carries a mode; absent any focus, every save already IS
+Manager.
+
+**The rungs, honestly inventoried.** Season (simulate-only by design) → week (the drills
+roadmap's step 6 designs the played week) → **day (the rung that was missing — the Three
+Watches build it)** → event (the web plays or simulates per card through the Tourney
+Board; Unity carries the marked SEAM, the round-tripped `Played` flag, and an
+`AskTournaments` toggle that honestly says nothing reads it yet) → round (fight on /
+simulate the rest, between bracket rounds) → moment (spectate's grab-the-reins at any
+turn boundary — the finest zoom that exists; the Battlefield is already one fighter
+played inside a thousand simulated bodies) → walk (take control of any member on the
+grounds — and, once the Three Watches land, of an apprentice living the class's day).
+The fine rungs are combat's alone: a forge, kitchen or study moment stays a judged check
+at every zoom (the standing minigame refusal) — the dial shows no rung there because
+there is none to play.
+
+**The build.** The control layer was always Phase 2 — `guild.control` with `playerOwns`
+and `autoManage` — and the dial gives it its true shape: `focus`, not `mode`. Follow one
+person and every card they stand on offers play; everything else simulates on the prefs
+that exist (`battlePrefs` grows keys beyond `tournament`). It lands Unity-first (the web
+is frozen), rung by rung as each played path arrives, under the standing honesty rule: a
+button that cannot fight is a lie, so the dial never shows a rung it cannot play.
+[Simulate] is never removed — the dial's resting state is the whole game.
 
 ## Relationship to the current codebase
 

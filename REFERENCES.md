@@ -23,6 +23,7 @@ mood board is how a game becomes six games wearing one title.
 | **Ragnarok Online (vanilla)** | Craft it, then push it further — at a price |
 | **FF7 + Path of Exile** | Sockets, links, and orbs that grow by being used |
 | **Dynasty Warriors: Origins** | One against a thousand — and the world as a model you ride across |
+| **Halo (Forge)** | Editing inside the play session — the editor is a lens on the world, not a second app |
 
 ---
 
@@ -46,7 +47,10 @@ taper **one** champion rather than fielding the roster.
   apprentices you supply and teach, drafted when ready. Prospects come from the
   world, not from a lab. (Cut list, `DESIGN.md`.)
 - **Day granularity, weather, feeding minigames.** The tick is a **week**. Anything
-  that needs a day is a system asking to be a different game.
+  that needs a day is a system asking to be a different game. (**Amended 2026-08-24**:
+  the day exists now — three watches inside the week, with the week still the one ledger
+  every system resolves at; `DESIGN.md` § "The Three Watches". Weather and feeding stay
+  refused.)
 - **Praise as a free buff.** Praise reads *conduct*: praise a hidden slack and they
   file away that nobody checks (Discipline −5). MR's grammar, not a morale button.
 
@@ -60,8 +64,10 @@ takes over.** Superstar = be one hero. Team = play the guild's battles. Manager 
 today's sim. Nothing about the world changes between them; the AI simply stops
 handing you the wheel.
 
-**Where it lives.** `src/guild/battle-bridge.js` (`resolveEncounter` — the one funnel
-for every combat-shaped event) · `guild.battlePrefs` per event type ·
+**Where it lives.** `src/guild/battle-bridge.js` (the one adapter —
+`playTournamentMatch` / `playQuestBout` / `playHuntBout`, each standing beside its
+resolver fallback at its own call site; the long-promised `resolveEncounter` funnel is
+still an extraction, not a fact) · `guild.battlePrefs` per event type ·
 `window.playGuildBattle(config)` in `src/game/crucible.js` — both lenses return the
 identical payload, so payout, reputation, fatigue and recap never learn whether a
 fight was played or simulated.
@@ -75,6 +81,11 @@ fight was played or simulated.
   ruleset; first person is a camera.* The picker offers ⚔ Arena / ♟ Command /
   ▶ Simulate — you can stand inside a tactical fight and step back out mid-match, and
   the board keeps running either way.
+
+**2026-08-24, the owner completes the thought:** the scopes merge into one ZOOM DIAL —
+Superstar is the dial held low on one person, Manager is the dial at rest, and the new
+day-of-three-watches is the rung that was missing between the week and the fight.
+`DESIGN.md` § "The Zoom" and § "The Three Watches"; control becomes `focus`, not `mode`.
 
 ---
 
@@ -95,7 +106,8 @@ doing what Hexen did.
   whole prop-volume model rests on that split. `src/guild/prop-volume.js:97`.
 - **The dead stay where they fell.** Most of why a Hexen corridor reads as a place
   you have *been*. `src/guild/delve-fp.js:3736` (`CORPSE_CAP = 14`).
-- **Keys, switches, and doors that mean something.** Shipped `a9effcf`.
+- **Keys, locks, and doors that mean something.** Shipped `a9effcf`. The switch is still
+  owed — the wiring debt below.
 
 **Its companion, which the owner's list left out but the code has:** the *swing* is
 Hexen's, the *hit* is **Morrowind's** — you aim and time the blow yourself, and
@@ -113,6 +125,9 @@ was invented for the corridor.
   refine, train, slot. A dungeon does not run its own parallel character build.
 - **Projectiles, dash, soul-gauge, ward/DOT in the arena.** Cut deliberately; they
   smuggle area and collision subsystems into a hitscan engine.
+- **ACS, the script layer.** Hexen's doors answer scripts; ours will answer DATA — a link
+  is an authored edge every lens honours, never code (`DESIGN.md` § "The World Editor",
+  step 4).
 
 ---
 
@@ -254,6 +269,33 @@ RPG Assets.
 - **The web lens.** The DOM compositor cannot carry a thousand bodies; this is the first
   feature the Unity build has that the web does not, recorded as a divergence.
 
+---
+
+## Halo (Forge) — the editor lives inside the game
+
+Added 2026-08-23 with the owner's world-editor directive, alongside the two editor
+references already on this shelf (Wizordum gave the grammar, Hexen gives the wiring bar).
+
+**What it gives us.** ONE mechanic: **editing is a mode of being in the world, not a second
+application.** In Forge you fly the level you were just playing, place a thing, and play it
+that instant — the edit/play boundary is a button, not an export. Our seam is already half
+built: Walk It hands a live draft to the real walker and back, and the Unity editor's
+viewport IS the game's renderer (`MapEditorView3D` — `DelveWorld` to a RenderTexture, rays
+picking cells and faces). Forge names the destination: the **build hand inside the walk** —
+place, turn and erase from first person or over-the-shoulder, with the plan canvas kept as
+the precision instrument. `DESIGN.md` § "The World Editor", roadmap step 6.
+
+**What we refuse.**
+- **Physics as content.** Forge's toys are rigid bodies; our world is a chart. Everything
+  placed is a schema fact the validator can read, or it doesn't exist.
+- **Budget as gameplay.** Forge makes the object budget a visible resource to spend; ours
+  stays lint (the >96 bake-cost warning) — advice from the model, never a currency.
+- **The scripting layer.** Modern Forge grew node scripting; same refusal as Hexen's ACS —
+  a link is a data edge both lenses honour, not code.
+- **Co-editing.** One author, one draft, one store.
+
+---
+
 ## The seams a reference may never cross
 
 Any new borrowing is checked against these before it is written down. All four have
@@ -277,11 +319,17 @@ already been paid for.
 | Grid **positioning** in the tactical lens (shove, zone, line) | Radiant Historia | Not started; needs the p1/p2 singleton broken first |
 | Errantries — multi-week absence, focused gains, return-week boss | Monster Rancher | Designed as K6; `hero.awayUntil` not yet built |
 | Festivals as a participable week | Monster Rancher | K6 |
-| My Hero / Team control scopes | EA Superstar / Team | Manager ships; scopes are Phases 3–4 |
+| My Hero / Team control scopes | EA Superstar / Team | Manager ships; reshaped 2026-08-24 into the zoom dial (control as `focus` — row below); Phases 3–4 |
 | Technique manuals (books that teach combat techniques) | — | Pairs with K6 |
 | Command an army — orders to a company, a Muster on the calendar | Dynasty Warriors: Origins | Slice 0 shipped 2026-08-22 (one against a hundred · two armies, Unity); orders and the calendar event not started |
 | The overworld as a model you ride across | Dynasty Warriors: Origins | Designed 2026-08-22; `WorldGen.Height` + `DelveWorld` are the parts |
 | Performed training drills (boulder, wall, marks, poles, stone, ruck) | Monster Rancher | Designed 2026-08-22; the seam is a `performance` factor beside `equipMult` in both builds |
+| The wiring — a switch here opens a door there (`links` every lens honours) | Hexen + Wizordum | Not started; `locks:[[x,y]]` is the whole interactive vocabulary today (`DESIGN.md` § "The World Editor", step 4) |
+| Edit in the lens — the build hand inside a walked draft | Halo (Forge) | Not started; Walk It + the in-renderer viewport (`MapEditorView3D`) are the parts |
+| The hundred of every hall — 32 seat specialties, rivals wearing their school, and the named hall + minted enemy army the Muster row above still lacks | — (owner directive 2026-08-23) | Designed 2026-08-23 as the layer on the DW:Origins Muster debt; seats carry no focus, roster or standing yet, and evasion has no shared mechanic to ride |
+| The three watches — the day inside the week, the week-sum law | Monster Rancher (amended) + EA Superstar | Designed 2026-08-24; no sub-week time exists in either build, and the `WeekResolver.Advance` order-pinning test is owed before the clock |
+| Masters and Commanders — staff posts generalized from the Head Trainer | — (owner directive 2026-08-24) | Designed 2026-08-24; `guild.trainer` is the only appointed head anywhere, web-frozen, and Unity has no roles system by its own admission |
+| The zoom dial — control as `focus`, not `mode` | EA Manager / Superstar | Designed 2026-08-24; `control.js` still unextracted, `battlePrefs` has one key, and Unity's event seam has no played path yet |
 
 ## How a new reference joins this file
 
