@@ -934,14 +934,35 @@ refused.
 > readout and the drawn world are one resolver. Named exclusions, kept for web parity:
 > stairs read the region/base theme (paint does not reach treads) and an 'n' bridge deck
 > prefers plank — both builds agree, and re-deciding that is an owner call, not a port's.
+>
+> **Round two, the same day** — the owner played the deploy ("this editor is nonsense.
+> are you basing it off any other editor in existence? ... at the base-level, it should
+> be like Minecraft Editor Mode. At high-level it should function like Halo Forge, but
+> with land that is editable and textures that can be changed") and four more landed:
+> **(1)** the phone CRASH mid wall-drag was a known Unity 6000.5 WebGL UI Toolkit fault
+> (staging buffer under-sized on large single-frame restyles) — the editor now keeps its
+> hot-path restyles small: border-only arming via a retained chip list, rect-list-only
+> refresh on dressing gestures, debounced+capped search. **(2)** `sides` entered the
+> walls-rect schema (`n,e,s,w,top`, absent = every face): "changing a single wall of a
+> cube changes all sides of it" is dead — the 3D view dresses the face you tap, crowns
+> included, and the strip aims where the brush lands. **(3)** THE LEVELS LAYER PORTED:
+> `LevelModel.Build(grid, levels)` mirrors makeLevelModel with check-levels' fixtures
+> replayed as C# tests, the wire/store/mounts all thread it, deck paint BURIES the
+> authored height and erase REVEALS it (the bridge no longer eats the column), and the
+> sculpt verbs continue past ±6 into the layer and dig under decks. The validator's
+> year-old walks-FLAT warning retired. **(4)** raised standable tops wear the plain
+> fill — "grass growing in the middle of a dirt column" was the groundTop rim island,
+> and the Minecraft reading won; the fork from the frozen web is recorded loudly at
+> both sites (DelveWorld.BuildGround, TileAtlas.LedgeTop).
 
 **Roadmap (each step keeps the build green):**
 1. **Parity closes** — Unity gains the web's missing verbs: X+drag room, V+drag rectangle
    fill ~~, the Surfaces/paint tab~~ (**the Surfaces tab and the `MapDrafts.Clone` paint
    fix SHIPPED 2026-08-29** — see the face-skin directive above); the prop palette
    enumerated from a public `DelveAtlas.VolumeIds` instead of the hand-typed 43 rows; and
-   the **levels layer parses in Unity** so the 2026-08-21 sculpt law finally crosses
-   ([[project-map-editor]]'s recorded gap).
+   ~~the **levels layer parses in Unity**~~ (**SHIPPED 2026-08-29, round two** — the
+   sculpt law crossed, the walks-FLAT warning retired, and the sculpt verbs continue
+   past the chars; only room/fill gestures and the enumerated palette remain of step 1).
 2. **The chrome pass** — the Wizordum build-order rows still unbuilt: minimap, ghost labels
    on flags, focus level (active level bright, the rest dimmed, edits clamped), spawn
    difficulty tiers; and one addition of our own, redo beside the 60-deep undo.
