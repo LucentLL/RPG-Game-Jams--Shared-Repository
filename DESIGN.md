@@ -956,16 +956,20 @@ refused.
 > both sites (DelveWorld.BuildGround, TileAtlas.LedgeTop).
 
 **Roadmap (each step keeps the build green):**
-1. **Parity closes** — Unity gains the web's missing verbs: X+drag room, V+drag rectangle
-   fill ~~, the Surfaces/paint tab~~ (**the Surfaces tab and the `MapDrafts.Clone` paint
-   fix SHIPPED 2026-08-29** — see the face-skin directive above); the prop palette
-   enumerated from a public `DelveAtlas.VolumeIds` instead of the hand-typed 43 rows; and
-   ~~the **levels layer parses in Unity**~~ (**SHIPPED 2026-08-29, round two** — the
-   sculpt law crossed, the walks-FLAT warning retired, and the sculpt verbs continue
-   past the chars; only room/fill gestures and the enumerated palette remain of step 1).
-2. **The chrome pass** — the Wizordum build-order rows still unbuilt: minimap, ghost labels
-   on flags, focus level (active level bright, the rest dimmed, edits clamped), spawn
-   difficulty tiers; and one addition of our own, redo beside the 60-deep undo.
+1. ~~**Parity closes**~~ **CLOSED 2026-08-29, third wave:** the Surfaces tab and the
+   `MapDrafts.Clone` paint fix (first wave), the levels layer (second wave), and now the
+   room and fill drags (latch buttons for touch, held X/V for the desk, the latch
+   outranking the keys; one pre-gesture model per commit, one undo step, live previews
+   in both views) plus `DelveAtlas.VolumeIds` with the palette's Unfiled sweep and drift
+   tests — the curated groups stay curated, but they can no longer hide an addition.
+2. ~~**The chrome pass**~~ **CLOSED 2026-08-29 but for one row:** minimap (one baked
+   texture, camera dot), focus level (cycles the levels the chart stands, decks counted
+   by their span; dims plan + 3D + minimap; clamps every verb, turns included, with
+   structure staying editable), redo beside the 60-deep undo, and ghost labels on flags
+   (verified already shipped with the face-pick wave). **Spawn difficulty tiers stay
+   DEFERRED, with the reason written down:** no difficulty rule exists in either build
+   for the field to feed, and a schema fact no rule reads is a lie waiting (the materia
+   rename's lesson) — the row unfreezes the day a difficulty rule lands.
 3. **Height for things** — props gain a level slot: a table on a terrace, a brazier on a
    bridge deck. The lint that pins furniture to level 0 flips from refusal to
    surface-must-exist; the collision circle and the rest-on law already hold at any height.
