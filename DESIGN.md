@@ -918,13 +918,30 @@ one pack schema, read by one loader (`MapPack.Parse`, shipped and drawn alike), 
 one validator, walked by every lens. An editor feature with no schema fact behind it is
 refused.
 
+> Owner directive, 2026-08-29 (with five Wizordum frames): *"there needs to be a way to
+> apply skins/layers to faces of building blocks. blocks can be generic gray building
+> blocks before skins are applied, or they can be pre-determine as dirt, wood, etc.
+> ex: place dirt blocks across map. then add grass to top layer of some blocks."*
+> **Answered the same day, on the shipped schema** (no new fact — `paint` owns standable
+> tops, `walls` owns verticals and unstandable crowns, per-cell 1×1 rects, later wins):
+> the Surfaces tab landed in Unity (every distinct floor as a chip named by its looks),
+> the Paint hand is face-aware in the 3D view (top tap paints the cell, side tap paints
+> the ground in front — the climb redirect's twin — and PaintStrip aims identically),
+> pre-dressed **Block · material** chips lay a 'B' block and its walls rect in one tap or
+> one stroked run, and the generic block is simply an undressed 'B' wearing the map's own
+> stone. `MapDrafts.Clone`'s paint drop (the bug named below) was fixed FIRST, and
+> `DelveWorld.ThemeAt/WallThemeAt/GroundThemeAt` went public+static so the editor's
+> readout and the drawn world are one resolver. Named exclusions, kept for web parity:
+> stairs read the region/base theme (paint does not reach treads) and an 'n' bridge deck
+> prefers plank — both builds agree, and re-deciding that is an owner call, not a port's.
+
 **Roadmap (each step keeps the build green):**
 1. **Parity closes** — Unity gains the web's missing verbs: X+drag room, V+drag rectangle
-   fill, the Surfaces/paint tab (its stated omission reason is stale — `MapPack.ToChart`
-   carries paint rects now, and `MapDrafts.Clone` silently drops them, a bug that goes
-   first); the prop palette enumerated from a public `DelveAtlas.VolumeIds` instead of the
-   hand-typed 43 rows; and the **levels layer parses in Unity** so the 2026-08-21 sculpt
-   law finally crosses ([[project-map-editor]]'s recorded gap).
+   fill ~~, the Surfaces/paint tab~~ (**the Surfaces tab and the `MapDrafts.Clone` paint
+   fix SHIPPED 2026-08-29** — see the face-skin directive above); the prop palette
+   enumerated from a public `DelveAtlas.VolumeIds` instead of the hand-typed 43 rows; and
+   the **levels layer parses in Unity** so the 2026-08-21 sculpt law finally crosses
+   ([[project-map-editor]]'s recorded gap).
 2. **The chrome pass** — the Wizordum build-order rows still unbuilt: minimap, ghost labels
    on flags, focus level (active level bright, the rest dimmed, edits clamped), spawn
    difficulty tiers; and one addition of our own, redo beside the 60-deep undo.
