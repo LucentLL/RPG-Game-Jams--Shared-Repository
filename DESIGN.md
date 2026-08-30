@@ -978,18 +978,81 @@ refused.
    thing may be an activator. This is a RULES system every lens must honour, not an editor
    feature; the delve's bump-doors, keys and locks are its shipped ancestors. Refusal: no
    scripting language — Hexen's ACS stays on the shelf. A link is a data edge, not code.
-5. **Every kind of place** — `PACK_KINDS` opens: `battlefield` (camps, banners,
-   reinforcement gates — the field the Battlefield's stage grammar is waiting to stand on),
-   `wilds`, venue dressing for arenas (the STADIUM scout), later `world`. Arena charts are
-   editable TODAY — but the one arena-only schema fact, the `foe` corner, has no hand in
-   either editor; it gets one here. The estate stays derived (it opens as an editable copy,
-   never the source — the room layout is its author) and the tactical kind waits its turn:
-   both named rather than quietly dropped. Each kind brings its own lint duties, never its
-   own editor.
+5. **Every kind of place** — **HALF-CLOSED 2026-08-29:** `guild` and `town` are kinds now
+   (`MapPack.Kinds`, read off the loader by the palette instead of retyped there — a
+   literal pair in two files is how the row came to offer exactly Delve and Arena). They
+   are not labels: delve/guild/town are ONE rules model and share the walkable registry,
+   the arena keeps its own, and each of the 32 halls and 8 towns has a chart of its own —
+   grown by `TerrainGen` from a seed that is the seat's own name, the same map forever on
+   any machine, no two alike, and AUTHORED BEATS GROWN so the generator is a starting point
+   an author replaces one hall at a time. All forty are in the drafting table's Open list.
+   This is the layout half of the 2026-08-20 decree ("each guild should have unique biome,
+   layout, level of resources"); the biome half is still `WorldMap.EstateThemeOf` answering
+   meadow four times, and *walking into* another hall from the world map is unwired —
+   Travel still hands you the calendar.
+   **Still open:** `battlefield` (camps, banners, reinforcement gates — the field the
+   Battlefield's stage grammar is waiting to stand on), `wilds`, venue dressing for arenas
+   (the STADIUM scout), later `world`. Arena charts are editable TODAY — but the one
+   arena-only schema fact, the `foe` corner, has no hand in either editor; it gets one here.
+   The estate stays derived (it opens as an editable copy, never the source — the room
+   layout is its author) and the tactical kind waits its turn: both named rather than
+   quietly dropped. Each kind brings its own lint duties, never its own editor.
 6. **Edit in the lens** — Forge's mechanic, and the prize the Wizordum reference named:
    while walking a draft (Walk It already round-trips through all three cameras), a build
    hand places, turns and erases from inside the walk. The plan canvas stays the precision
    instrument.
+
+### Building in the air — the sky deck (owner 2026-08-29) — SHIPPED (Unity)
+
+> *"Being able to place blocks in the air without blocks under them (especially doing this
+> for bridge tiles) absolutely needs to be possible. Land bridges, for example. And this
+> world has magic and materia. The editor needs to let the user specify the height when
+> placing blocks freely in the air. Or at the VERY least allow them to attach to other
+> blocks in the air, then delete blocks under them like Minecraft."*
+
+Not an editor gap — a **rules-model** gap, in three clauses of `LevelModel`. The levels
+layer could only say where a FLOOR sits, so a span's height could not be authored; a deck's
+ground FLOODED from its neighbours, so a bank three cells away poured earth under any
+bridge; and a deck no higher than its ground was called degenerate and, against the void,
+deleted outright — which is exactly and only the shape of a bridge over a chasm. Together
+they meant every walkway in this world stood on something, and the drafting table said so
+out loud: *"that deck stands nowhere · give it a bank to stand against first."*
+
+So the levels token grows, as a **strict superset** — every chart ever written parses to
+what it always did:
+
+| token | meaning |
+|---|---|
+| `.` | the char speaks (unchanged) |
+| `3` | the floor is at 3 (unchanged) |
+| `_` | **no floor here, at any level** — authored void |
+| `:7` | the span is pinned at 7, the floor still derives |
+| `3:7` | floor at 3, span pinned at 7 — an overhang that keeps its own height |
+| `_:7` | **nothing beneath, and a walkable slab at 7** — the land bridge |
+
+`SurfacesAt` answers the high surface where it used to answer EMPTY (which is why the step
+law refused to put a foot on the very thing the author had drawn); `UnderOK` still refuses,
+because a hollow is a fall and not a tunnel. **The world needed no new geometry** —
+`BuildDecks` already lays planks, a lip on every free side and a soffit, and `Stands`
+answering false is what keeps a column from being cut under one.
+
+Three verbs spell it in the drafting table: **Build at** (a level in the toolbar, typed on
+the Tiles tab — a tile lands there as a span and over the void it hangs), **Undermine**
+(the owner's own recipe: build the terrace, walk it up, take the column out from under it)
+and **Underpin** (the inverse, ground back UNDER the span and not at it). Raise and Lower
+on a slab move the slab. All four stroke on a drag and fill a rect, because a land bridge
+is a run.
+
+**The trap, recorded:** the layer has four readers, and one of them REFLOWS on every open
+and resize. A reader that `.`-s a token it does not know is not shrugging, it is DELETING —
+an unlearned `_` flattens every span in the draft on the next open, and the old evaporation
+test ("is there a digit anywhere") would have dropped a layer whose only surviving fact was
+a hollow. Same class: `WithLevelTok(null)` means "no floor PIN", which is what sculpting
+wants and became a *different sentence* from "no token" the day a token grew a hollow.
+
+**Fork, named:** the frozen web parses only `.` and a number, so the new tokens read there
+as unparseable and defer to the char — a chart drawn with them lies flat in the reference
+build rather than wrongly.
 
 ## The Hundred of Every Hall — 32 schools, 32 armies (owner 2026-08-23)
 
