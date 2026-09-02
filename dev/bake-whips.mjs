@@ -77,6 +77,68 @@ const SRC_COLS = 5, SRC_ROWS = 4;
 const CRACK = WORN.swing;                     // [10,11,12,13,14] — the compositor's own slash
 const CARRY_SRC = 0;
 
+/**
+ * THE CARRY CELL IS DRAWN HIGH, AND ONLY THE CARRY CELL.
+ *
+ * Reported 2026-09-02: "whips are behind the character when facing south."
+ * The gallery idles on column 1 — the carry — facing south, which is the worst
+ * case: the grip lands ABOVE THE HEAD and the lash loops off behind, so the
+ * whip reads as something hanging in the air rather than something held.
+ *
+ * MEASURED, NOT EYEBALLED. Ask every sheet the same question — "how far down
+ * the cell is the ink NEAREST the body?", which for a carried weapon is the
+ * part in the hand — and the answer is the same for twenty 48px sheets in all
+ * four facings: y 55-57 of a 112 cell, spread 2px. The whips answer 45 (south),
+ * 49 (west/east) and 55 (north).
+ *
+ * AND THE KIT IS NOT WRONG ABOUT THE SWING. Asked of the crack cells the whip
+ * agrees with the Elements kit to within a pixel — south 63/61/58/55 against
+ * 63/61/59/56 — so the sheets are registered correctly and it is this one
+ * authored pose that hangs high. The crack is therefore placed UNTOUCHED and
+ * only the carry is dropped onto the hand, per facing, by a number this script
+ * measures at bake time rather than one anybody typed.
+ */
+const HAND_REF = ['sword1', 'mace1', 'staff1', 'spear1', 'pickaxe1', 'bow2'];
+
+/** How far down a cell the ink nearest the body sits — the part in the hand. */
+function heldY(img, cell, row, col) {
+  const c = (cell - 1) / 2;
+  let y = -1, best = Infinity;
+  for (let py = 0; py < cell; py++) {
+    for (let px = 0; px < cell; px++) {
+      if (!img.px[((row * cell + py) * img.w + col * cell + px) * 4 + 3]) continue;
+      const d = (px - c) * (px - c) + (py - c) * (py - c);
+      if (d < best) { best = d; y = py; }
+    }
+  }
+  return y;
+}
+
+/**
+ * WHERE THE HAND IS, in a cell of `cell` pixels — the median over the shipped
+ * 48px weapon sheets, which are the registration every other weapon already
+ * keeps. Throws rather than guessing: a missing reference sheet must not
+ * silently become "no shift".
+ */
+function handRow(cell) {
+  const out = [];
+  for (let row = 0; row < SRC_ROWS; row++) {
+    const ys = [];
+    for (const stem of HAND_REF) {
+      const file = path.join(OUT, stem + '.png');
+      if (!fs.existsSync(file)) throw new Error(`bake-whips: ${stem}.png is not in ${OUT} — the hand cannot be measured`);
+      const img = readPng(file);
+      const c = img.w / ELEMENTS_COLS;
+      const y = heldY(img, c, row, 1);
+      if (y >= 0) ys.push(y + (cell - c) / 2);     // into the whip's own cell, centred
+    }
+    if (!ys.length) throw new Error('bake-whips: no reference sheet paints a carried weapon');
+    ys.sort((a, b) => a - b);
+    out.push(ys[ys.length >> 1]);
+  }
+  return out;
+}
+
 /** stem → how many colour variants the kit ships (base + _c2 …). */
 const STEMS = { whip: 2, thornwhip: 2, ballchain: 3, chainblade: 3 };
 
@@ -91,12 +153,46 @@ for (const [stem, variants] of Object.entries(STEMS)) {
     if (src.w !== SRC_COLS * cell || src.h !== SRC_ROWS * cell || cell !== Math.round(cell)) {
       throw new Error(`${name}: ${src.w}×${src.h} is not ${SRC_COLS}×${SRC_ROWS} square cells`);
     }
+    const hand = handRow(cell);
     const out = blankPng(ELEMENTS_COLS * cell, ELEMENTS_ROWS * cell);
+    const drops = [];
     for (let row = 0; row < ELEMENTS_ROWS; row++) {
+      // HOW FAR THE CARRY HAS TO FALL, solved rather than subtracted. The
+      // held end is the ink NEAREST the body, so moving the art moves which
+      // pixel that is — `hand - held` under-shoots by a few pixels and a
+      // second subtraction would under-shoot again. Every legal drop is tried
+      // instead and the one that lands the held end closest to the hand wins,
+      // which is exact in one pass and cannot oscillate.
+      //
+      // Never NEGATIVE: this exists to stop a whip floating, and lifting one
+      // that already sits right would be inventing a pose the artist did not
+      // draw. Never past the cell either — a drop that clipped the lash would
+      // be shortening the weapon, which is the one thing the 112px cell exists
+      // to prevent.
+      let lowest = -1;
+      for (let y = 0; y < cell; y++)
+        for (let x = 0; x < cell; x++)
+          if (src.px[((row * cell + y) * src.w + CARRY_SRC * cell + x) * 4 + 3]) lowest = Math.max(lowest, y);
+      const room = cell - 1 - lowest;
+      let drop = 0, miss = Infinity;
+      for (let d = 0; d <= room; d++) {
+        const probe = blankPng(cell, cell);
+        blitPng(probe, src, CARRY_SRC * cell, row * cell, cell, cell - d, 0, d);
+        const m = Math.abs(heldY(probe, cell, 0, 0) - hand[row]);
+        if (m < miss) { miss = m; drop = d; }
+      }
+      drops.push(drop);
+
       for (let col = 0; col < ELEMENTS_COLS; col++) {
         const i = CRACK.indexOf(col);
-        const srcCol = i < 0 ? CARRY_SRC : i;
-        blitPng(out, src, srcCol * cell, row * cell, cell, cell, col * cell, row * cell);
+        // THE CRACK IS PLACED UNTOUCHED. It already agrees with the Elements
+        // kit's own slash to within a pixel; only the carry hangs high.
+        if (i >= 0) {
+          blitPng(out, src, i * cell, row * cell, cell, cell, col * cell, row * cell);
+        } else {
+          blitPng(out, src, CARRY_SRC * cell, row * cell, cell, cell - drop,
+                  col * cell, row * cell + drop);
+        }
       }
     }
     // The two cells the rules and the viewmodel actually stand on. If either is
@@ -111,7 +207,8 @@ for (const [stem, variants] of Object.entries(STEMS)) {
     }
     fs.writeFileSync(path.join(OUT, name + '.png'), encodePng(out.w, out.h, out.px));
     wrote++;
-    console.log(`  ${name.padEnd(15)} ${src.w}×${src.h} → ${out.w}×${out.h}  (cell ${cell}px)`);
+    console.log(`  ${name.padEnd(15)} ${src.w}×${src.h} → ${out.w}×${out.h}  (cell ${cell}px)`
+                + `  carry dropped S${drops[0]} W${drops[1]} E${drops[2]} N${drops[3]} px onto the hand`);
   }
 }
 console.log(`\nbake-whips: ${wrote} sheets → public/assets/sprites/core/weapon/`);
