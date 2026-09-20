@@ -61,11 +61,11 @@ export const BUILDING_KINDS = {
  *  one exception: no volume entry (it stays a billboard by that file's own
  *  ruling), so its width is still the top-down's authored fact. */
 export const PROP_KINDS = {
-  lampPost:   { name: 'Lamp Post',      art: 'lampPost',   w: 50,  glyph: '', cost: 60 },
-  statue:     { name: 'Statue',         art: 'statue',     w: 30,  glyph: '', cost: 400 },
-  trainDummy: { name: 'Training Dummy', art: 'trainDummy', w: 32,  glyph: '◎', cost: 120 },
-  well:       { name: 'Well',           art: 'well',       w: 38,  glyph: '', cost: 250 },
-  stall:      { name: 'Market Stall',   art: 'stall',      w: 45,  glyph: '', cost: 180 },
+  lampPost:   { name: 'Lamp Post',      art: 'lampPost',   w: 72,  glyph: '', cost: 60 },
+  statue:     { name: 'Statue',         art: 'statue',     w: 43,  glyph: '', cost: 400 },
+  trainDummy: { name: 'Training Dummy', art: 'trainDummy', w: 45,  glyph: '◎', cost: 120 },
+  well:       { name: 'Well',           art: 'well',       w: 54,  glyph: '', cost: 250 },
+  stall:      { name: 'Market Stall',   art: 'stall',      w: 64,  glyph: '', cost: 180 },
   treeTall:   { name: 'Tree',           art: 'treeTall',   w: 96,  glyph: '', cost: 40 },
 };
 

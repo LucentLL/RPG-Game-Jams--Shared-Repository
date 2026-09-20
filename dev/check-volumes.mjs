@@ -74,8 +74,15 @@ if (!chartsRead) {
 const campusSrc = readFileSync(ROOT + 'campus.js', 'utf8');
 for (const m of campusSrc.matchAll(/art: '(\w+)',\s+w: (\d+)/g)) props.push({ art: m[1], w: +m[2] });
 
-const T = 300, K = T / 900, WALL_H = 1260 * K, CEIL = WALL_H / T;   // ceiling, in tiles
-const M = 2.1;   // metres per tile (eye 0.77 tiles ≈ 1.65 m)
+// THE TILE IS FIVE FEET, WIDE AND TALL (owner decree, 2026-09-20 — @see
+// prop-volume.js's SCALE note). The ceiling and the metre column used to be
+// read off the first-person lens's own tuning (WALL_H 1260 of a 900px tile,
+// and "2.1 metres per tile" measured back from it); both are facts about the
+// world rather than about that lens, so both are now the decree divided out.
+// A ten-foot room is two of these tiles, which is why the ceiling is 2.
+const TILE_FT = 5;
+const CEIL = 10 / TILE_FT;                 // a ten-foot room, in tiles
+const M = TILE_FT * 0.3048;                // metres per tile
 
 // Sizing must agree within rounding: w is an integer px against the 48px tile,
 // so ±1 px against the exact derivation is the honest tolerance — for EVERY

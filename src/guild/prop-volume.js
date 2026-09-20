@@ -34,8 +34,19 @@
  * dev/check-volumes.mjs fails the moment the two disagree — authored twice,
  * derived once, drift loud.
  *
- * SCALE. A tile is 300 world px, the eye stands at 0.77 of one and the ceiling
- * is at 1.4, so a tile is very close to 2.1 metres.
+ * SCALE. THE TILE IS FIVE FEET, WIDE AND TALL (owner decree, 2026-09-20:
+ * "Tiles can't be the 'height of a human' when characters can have variance in
+ * height ... Let's say default tile size is 5ft wide and 5ft tall"). A person
+ * is six feet, so PLAYER_H is 1.2 tiles; one level of ledge is a whole tile.
+ *
+ * It was 0.844 tiles, carried over from the first-person lens's own tuning,
+ * and that made the tile 7.1 feet: one level of ledge then stood at 0.478
+ * tiles — 3.3 feet, 57% of a person — which is the waist-high ladder the owner
+ * photographed in the Wilds. NOTHING IN FEET MOVED with the fix. Every height
+ * below is a multiple of PLAYER_H and followed the body; every depth and wall
+ * height was re-based by the ratio of the two tiles (×1.421), so a bed is
+ * still six foot nine and the herbs still hang eight feet up. What moved is
+ * the TILE the world is drawn on, and the rise a ladder serves with it.
  *
  * ── THE LADDER (user decree, 2026-08-06) ──────────────────────────────────
  *
@@ -63,11 +74,13 @@
  */
 
 /**
- * The player's own standing height, in tiles — the same fact delve-fp.js's
- * CREATURE_H writes as rank 3 (760 world px at the 900-tuned scale): "760 is
- * your own height; the eye is at 690". One body, one number, every lens.
+ * The player's own standing height, in tiles — six feet of the five-foot tile
+ * (@see SCALE above for the decree and what it replaced). One body, one
+ * number, every lens, and every prop width in the pack is DERIVED from it
+ * (w = h × aspect × 48), so this module is the size authority for both builds
+ * rather than a fact about this one.
  */
-export const PLAYER_H = 760 / 900;   // ≈ 0.844 tiles ≈ 1.8 m
+export const PLAYER_H = 6 / 5;   // six feet of the five-foot tile
 
 /** The legal multiples of PLAYER_H. Exported for the checker, not for lenses —
  *  a lens never snaps; it draws the authored number. */
@@ -144,27 +157,27 @@ export const LADDER = [0.125, 0.25, 0.5, 0.75, 1, 1.25, 1.5, 2, 3];
  */
 export const PROP_VOL = /** @type {Record<string, Volume>} */ ({
   // ── Desks, benches, counters ──────────────────────────────────────────────
-  teacherDesk:  { form: 'stand', h: 0.50 * PLAYER_H, d: 0.30, fold: 0.45 },
-  gmDesk:       { form: 'stand', h: 0.75 * PLAYER_H, d: 0.38 },   // a raised bench-desk, not a table
-  classDesk:    { form: 'stand', h: 0.50 * PLAYER_H, d: 0.30, fold: 0.55 },
-  lectern:      { form: 'stand', h: 0.75 * PLAYER_H, d: 0.35 },
-  potionCounter:{ form: 'stand', h: 0.50 * PLAYER_H, d: 0.30, fold: 0.30 },
-  abacus:       { form: 'stand', h: 0.25 * PLAYER_H, d: 0.14 },
-  gmLedgers:    { form: 'stand', h: 0.125 * PLAYER_H, d: 0.16 },
-  breadPile:    { form: 'stand', h: 0.125 * PLAYER_H, d: 0.22 },
+  teacherDesk:  { form: 'stand', h: 0.50 * PLAYER_H, d: 0.4263, fold: 0.45 },
+  gmDesk:       { form: 'stand', h: 0.75 * PLAYER_H, d: 0.54 },   // a raised bench-desk, not a table
+  classDesk:    { form: 'stand', h: 0.50 * PLAYER_H, d: 0.4263, fold: 0.55 },
+  lectern:      { form: 'stand', h: 0.75 * PLAYER_H, d: 0.4974 },
+  potionCounter:{ form: 'stand', h: 0.50 * PLAYER_H, d: 0.4263, fold: 0.30 },
+  abacus:       { form: 'stand', h: 0.25 * PLAYER_H, d: 0.1989 },
+  gmLedgers:    { form: 'stand', h: 0.125 * PLAYER_H, d: 0.2274 },
+  breadPile:    { form: 'stand', h: 0.125 * PLAYER_H, d: 0.3126 },
 
   // ── Cabinets and cases: tall solids against a wall ────────────────────────
-  gmBookshelf:  { form: 'stand', h: 1.00 * PLAYER_H, d: 0.28 },
-  jarCabinet:   { form: 'stand', h: 1.00 * PLAYER_H, d: 0.30 },
-  gearCubbies:  { form: 'stand', h: 1.00 * PLAYER_H, d: 0.28 },
-  wardrobe:     { form: 'stand', h: 1.00 * PLAYER_H, d: 0.30 },
-  footlocker:   { form: 'stand', h: 0.25 * PLAYER_H, d: 0.24, fold: 0.28 },
-  gmThrone:     { form: 'stand', h: 0.75 * PLAYER_H, d: 0.30 },
+  gmBookshelf:  { form: 'stand', h: 1.00 * PLAYER_H, d: 0.3979 },
+  jarCabinet:   { form: 'stand', h: 1.00 * PLAYER_H, d: 0.4263 },
+  gearCubbies:  { form: 'stand', h: 1.00 * PLAYER_H, d: 0.3979 },
+  wardrobe:     { form: 'stand', h: 1.00 * PLAYER_H, d: 0.4263 },
+  footlocker:   { form: 'stand', h: 0.25 * PLAYER_H, d: 0.3411, fold: 0.28 },
+  gmThrone:     { form: 'stand', h: 0.75 * PLAYER_H, d: 0.4263 },
 
   // ── Fire and iron ─────────────────────────────────────────────────────────
-  forgeFurnace: { form: 'stand', h: 1.25 * PLAYER_H, d: 0.55 },
-  stoneOven:    { form: 'stand', h: 1.00 * PLAYER_H, d: 0.42 },
-  kitchenStove: { form: 'stand', h: 1.00 * PLAYER_H, d: 0.40, fold: 0.20 },
+  forgeFurnace: { form: 'stand', h: 1.25 * PLAYER_H, d: 0.7816 },
+  stoneOven:    { form: 'stand', h: 1.00 * PLAYER_H, d: 0.5968 },
+  kitchenStove: { form: 'stand', h: 1.00 * PLAYER_H, d: 0.5684, fold: 0.20 },
   // MEASURED off the crop (anvils_3x 264,0,84×48, read at 8x): the working
   // face is the pale slab from the top of the art down to the highlight strip
   // at row ~22 of 48 — 0.45 — and everything under it is the body and stump,
@@ -173,13 +186,13 @@ export const PROP_VOL = /** @type {Record<string, Volume>} */ ({
   // middle read hollow (owner, 2026-08-15). The number is the art's, not the
   // screenshot's — the same 0.45 the teacher's desk takes, and for the same
   // reason: a slab on a base.
-  anvilBare:    { form: 'stand', h: 0.50 * PLAYER_H, d: 0.28, fold: 0.45 },
+  anvilBare:    { form: 'stand', h: 0.50 * PLAYER_H, d: 0.3979, fold: 0.45 },
 
   // ── Beds: drawn in plan, so they lie down ─────────────────────────────────
   // `h` is the mattress-top: a quarter of a person is where you sit down to.
-  bed:          { form: 'lie', h: 0.25 * PLAYER_H, d: 0.95 },
-  bunkIron:     { form: 'lie', h: 0.25 * PLAYER_H, d: 0.95 },
-  bunkPosted:   { form: 'lie', h: 0.25 * PLAYER_H, d: 0.95 },
+  bed:          { form: 'lie', h: 0.25 * PLAYER_H, d: 1.35 },
+  bunkIron:     { form: 'lie', h: 0.25 * PLAYER_H, d: 1.35 },
+  bunkPosted:   { form: 'lie', h: 0.25 * PLAYER_H, d: 1.35 },
 
   // ── Round and irregular uprights ──────────────────────────────────────────
   // `flat: true` opts a prop OUT of the voxel extrusion (playtest 2026-08-06):
@@ -207,7 +220,7 @@ export const PROP_VOL = /** @type {Record<string, Volume>} */ ({
   gmBust:          { form: 'stand', h: 0.75 * PLAYER_H },
   armorKnight:     { form: 'stand', h: 1.00 * PLAYER_H },
   armorSteel:      { form: 'stand', h: 1.00 * PLAYER_H },
-  trainDummy:      { form: 'stand', h: 1.00 * PLAYER_H, d: 0.22 },   // a pell IS a person
+  trainDummy:      { form: 'stand', h: 1.00 * PLAYER_H, d: 0.3126 },   // a pell IS a person
   statue:          { form: 'stand', h: 1.25 * PLAYER_H },
   // Outdoors, where nothing has a ceiling to pierce but you still walk around
   // it. These are PLACEABLES — a handful per estate, bought one at a time — so
@@ -215,7 +228,7 @@ export const PROP_VOL = /** @type {Record<string, Volume>} */ ({
   // stand on.
   well:            { form: 'stand', h: 1.25 * PLAYER_H },
   stall:           { form: 'stand', h: 1.25 * PLAYER_H },
-  lampPost:        { form: 'stand', h: 1.50 * PLAYER_H, d: 0.10 },   // a post is a post, not a crate
+  lampPost:        { form: 'stand', h: 1.50 * PLAYER_H, d: 0.1421 },   // a post is a post, not a crate
   // NOT treeTall, deliberately. The meadow grows trees from its GRID as well as
   // from the placeable list, and the grid ones are legion — the estate's open
   // ground is already the map that runs out of compositor layers first (@see
@@ -228,12 +241,12 @@ export const PROP_VOL = /** @type {Record<string, Volume>} */ ({
 
   // ── Hung on a wall ────────────────────────────────────────────────────────
   // `mid` stays in tiles: it is a position on the wall, not a size.
-  gmPortrait:   { form: 'wall', h: 0.50 * PLAYER_H, mid: 0.95 },
-  lessonBoard:  { form: 'wall', h: 0.50 * PLAYER_H, mid: 0.90 },
-  recipeBanner: { form: 'wall', h: 0.75 * PLAYER_H, mid: 0.95 },
-  gmBanner:     { form: 'wall', h: 1.00 * PLAYER_H, mid: 0.85 },
-  hangingHerbs: { form: 'wall', h: 0.50 * PLAYER_H, mid: 1.18 },   // hangs from the beams
-  tools:        { form: 'wall', h: 0.125 * PLAYER_H, mid: 1.05 },  // the rolling pin on its hooks
+  gmPortrait:   { form: 'wall', h: 0.50 * PLAYER_H, mid: 1.35 },
+  lessonBoard:  { form: 'wall', h: 0.50 * PLAYER_H, mid: 1.2789 },
+  recipeBanner: { form: 'wall', h: 0.75 * PLAYER_H, mid: 1.35 },
+  gmBanner:     { form: 'wall', h: 1.00 * PLAYER_H, mid: 1.2079 },
+  hangingHerbs: { form: 'wall', h: 0.50 * PLAYER_H, mid: 1.6768 },   // hangs from the beams
+  tools:        { form: 'wall', h: 0.125 * PLAYER_H, mid: 1.4921 },  // the rolling pin on its hooks
 });
 
 /** The volume of a named furnishing, or null if it is still just a picture. */
