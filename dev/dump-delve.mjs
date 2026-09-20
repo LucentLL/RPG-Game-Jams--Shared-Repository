@@ -211,7 +211,10 @@ function volRow(art, authoredW, count) {
 function dumpChart(map, { probe = false, generated = false } = {}) {
   const grid = map.grid;
   const rows = grid.length, cols = grid[0].length;
-  const model = makeLevelModel(grid);
+  // The levels layer rides along (no shipped chart carries one yet — the day
+  // one does, the Unity LevelModel must learn parseLevels FIRST or this
+  // fixture will pin answers the port cannot give).
+  const model = makeLevelModel(grid, map.levels);
 
   // The render grid the baker actually sees (delve.js:550).
   const rgrid = grid.map((row, y) => Array.from(row, (ch, x) => bakeChar(ch, x, y, model)).join(''));

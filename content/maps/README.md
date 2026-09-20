@@ -22,6 +22,19 @@ and port reads the same file.
   "name": "Hollowvein Mine",    // OPTIONAL — omitted where the source authors none
   "theme": "mine",              // key into THEMES (delve-maps.js)
   "grid": ["####", "#..#"],     // ASCII rows, all equal length
+  "levels": [". .", ". 8"],     // OPTIONAL — the sculpted height layer: row strings
+                                //   shaped like the grid, one space-separated token
+                                //   per cell ('.' defers to the char, an integer IS
+                                //   that cell's floor level, -64..64). The chars still
+                                //   spell -1..6; the layer spells the rest, and on a
+                                //   'u'/'n' deck cell it pins the ground UNDER the
+                                //   deck. Row strings, never [[x,y,lv]] triples —
+                                //   JsonUtility cannot read nested arrays (the
+                                //   locks/water lesson). See delve-maps.js parseLevels.
+                                //   THE UNITY FORK'S TOKENS (2026-08-29 / 2026-09-08): 'f:d' is a
+                                //   floor f WITH A DECK d over it (a room dug under the stands),
+                                //   '_:d' a deck with nothing beneath, '_' a hollow. This frozen
+                                //   build keeps the floor part and ignores the deck.
   "entry": [4.5, 15.5],         // OPTIONAL. NUMBERS, not integers — see below.
   "exitStairs": false,          // OPTIONAL bool, chart-level
   "water":   [[10, 7]],         // OPTIONAL — see "off-schema keys" below
@@ -30,8 +43,9 @@ and port reads the same file.
   "spawns":  [{ "prey": "ghost", "x": 18, "y": 16 }],
   "regions": [{ "x": 0, "y": 0, "w": 8, "h": 6, "theme": "forge" }],
   "paint":   [{ "x": 0, "y": 0, "w": 8, "h": 6, "theme": "forge" }],
-  "walls":   [{ "x": 3, "y": 7, "w": 5, "h": 1, "theme": "dormitory" }],
-  "locks":   [[21, 11]]
+  "walls":   [{ "x": 3, "y": 7, "w": 5, "h": 1, "theme": "dormitory", "lv": "0-2" }],   // OPTIONAL lv "lo-hi": the band of rungs the rect dresses
+  "locks":   [[21, 11]],
+  "seats":   [[8, 3], [9, 3]]      // OPTIONAL — the crowd: a cell-pair overlay like water; the arena lens seats two spectators a cell, watching the entry
 }
 ```
 
@@ -119,7 +133,7 @@ for, and getting them confused is the one mistake this shape invites:
 | key | surface | what it can change |
 | --- | --- | --- |
 | `paint` | the **GROUND** of the cells in the rect | dressing only |
-| `walls` | the **VERTICAL faces** of the cells in the rect — block sides, wall runs, terrace risers, trench inner faces | dressing only |
+| `walls` | the **VERTICAL faces** of the cells in the rect — block sides, wall runs, terrace risers, trench inner faces; an optional `lv: "lo-hi"` limits the dressing to a BAND of rungs, so one block of a column wears its own skin (2026-09-08) | dressing only |
 | `regions` | a **ROOM** — walls *and* a ceiling (even under open sky) *and* gameplay meaning (`campus.js:362`) | it says a place EXISTS |
 
 `paint` and `walls` are **FILL-ONLY DRESSING AND NEVER A RULE** (CLAUDE.md,

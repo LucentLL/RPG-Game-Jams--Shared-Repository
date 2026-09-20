@@ -1,0 +1,125 @@
+{
+  "schema": 1,
+  "kind": "delve",
+  "id": "dormitoryB2",
+  "name": "The Dormitory",
+  "theme": "dormitory",
+  "grid": [
+    "###########",
+    "#BBBBBBBBB#",
+    "#Bf.f.f.fB#",
+    "#Bf.f.f.fB#",
+    "#Bf.f.f.fB#",
+    "#Bf.f.f.fB#",
+    "#Bf.f.f.fB#",
+    "#B.......B#",
+    "#BBBBdBBBB#",
+    "###########"
+  ],
+  "entry": [
+    5.5,
+    7.3
+  ],
+  "props": [
+    {
+      "art": "bed",
+      "x": 2.5,
+      "y": 3
+    },
+    {
+      "art": "bunkIron",
+      "x": 4.5,
+      "y": 3
+    },
+    {
+      "art": "bunkPosted",
+      "x": 6.5,
+      "y": 3
+    },
+    {
+      "art": "bed",
+      "x": 8.5,
+      "y": 3
+    },
+    {
+      "art": "bunkIron",
+      "x": 2.5,
+      "y": 4
+    },
+    {
+      "art": "bunkPosted",
+      "x": 4.5,
+      "y": 4
+    },
+    {
+      "art": "bed",
+      "x": 6.5,
+      "y": 4
+    },
+    {
+      "art": "bunkIron",
+      "x": 8.5,
+      "y": 4
+    },
+    {
+      "art": "bunkPosted",
+      "x": 2.5,
+      "y": 5
+    },
+    {
+      "art": "bed",
+      "x": 4.5,
+      "y": 5
+    },
+    {
+      "art": "bunkIron",
+      "x": 6.5,
+      "y": 5
+    },
+    {
+      "art": "bunkPosted",
+      "x": 8.5,
+      "y": 5
+    },
+    {
+      "art": "bed",
+      "x": 2.5,
+      "y": 6
+    },
+    {
+      "art": "bunkIron",
+      "x": 4.5,
+      "y": 6
+    },
+    {
+      "art": "bunkPosted",
+      "x": 6.5,
+      "y": 6
+    },
+    {
+      "art": "bed",
+      "x": 8.5,
+      "y": 6
+    },
+    {
+      "art": "bunkIron",
+      "x": 2.5,
+      "y": 7
+    },
+    {
+      "art": "bunkPosted",
+      "x": 4.5,
+      "y": 7
+    },
+    {
+      "art": "bed",
+      "x": 6.5,
+      "y": 7
+    },
+    {
+      "art": "bunkIron",
+      "x": 8.5,
+      "y": 7
+    }
+  ]
+}

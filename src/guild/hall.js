@@ -20,6 +20,7 @@ import { DISCIPLINES, ELECTIVES, ELECTIVE_IDS, DISCIPLINE_IDS, disciplineById, e
 import { RATION_RECIPES, getRation, rationUnlocked, previewYield, cook } from './cooking.js';
 import { orbCost, orbReqTheory, orbUnlocked, previewOrbLevel, craftMateria, slotMateria, itemSockets, orbLabel, craftBlessing, blessingUnlocked, BLESSING_REQ_THEORY, BLESSING_COST } from './enchanting.js';
 import { PLANETS } from '../game/data/progression.js';
+import { isTwoHandedType } from '../game/data/gear.js';
 import { advanceWeek, formatDate, shortDate, yearsAhead, monthName, weekOfMonth } from './calendar.js';
 import { weeklyUpkeep, heroWage, addGold, guildIncome } from './economy.js';
 import { RECIPES, CATEGORY_ORDER, getRecipe, previewQuality, forge, study, recipeUnlocked, rework, previewRework, refine, refineChance, recipeForItem, materialOreCost, MATERIAL_META, MAX_PLUS, REFINE_GUARDS, REFINE_STAMINA } from './smithing.js';
@@ -282,8 +283,14 @@ function closeWielder(item) {
   const w = item.history.wielders[item.history.wielders.length - 1];
   if (w && !w.toWeek) w.toWeek = guild.calendar.week;
 }
-/** Kinds that need both hands, so nothing can share the off-hand with them. */
-const TWO_HANDED = new Set(['bow']);
+/** Kinds that need both hands, so nothing can share the off-hand with them.
+ *  DERIVED from the engine's one two-handed fact (gear.js TWO_HANDED_GEAR_TYPES)
+ *  through the shared kind table — this set used to be a private `['bow']`,
+ *  which had already drifted from the engine's list and could only drift
+ *  further (CLAUDE.md — ONE RULES FACT). */
+const TWO_HANDED = new Set(
+  Object.keys(KIND_TO_ENGINE_TYPE).filter((k) => isTwoHandedType(KIND_TO_ENGINE_TYPE[k]))
+);
 /** Send an equipped item back to the armory, if there is one in that slot. */
 function returnToArmory(h, slot) {
   const id = h.equipped[slot];
@@ -328,7 +335,7 @@ function displacedNote(h, item) {
   if (item.slot === 'offhand') {
     const curId = wornId('weapon');
     const cur = curId ? findItem(guild.inventory, curId) : null;
-    if (cur && TWO_HANDED.has(cur.kind)) return `Also puts down ${itemLabel(cur)} — a bow needs both hands.`;
+    if (cur && TWO_HANDED.has(cur.kind)) return `Also puts down ${itemLabel(cur)} — it needs both hands.`;
   }
   return '';
 }

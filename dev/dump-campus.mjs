@@ -87,10 +87,13 @@ const facades = map.facades.map((f, i) => ({
 }));
 
 // A stamped stair keeps to/at/enter and DROPS the interior's `stairs` flag
-// (campus.js:368). Cells, not centres: every authored portal is on a cell
-// centre, so floor() is lossless — the Unity DelvePortal carries ints.
+// (campus.js:368). THE TRIGGER POINT, not the cell: floor() was called
+// lossless here because every authored portal is on a cell centre — which is
+// exactly why it is NOT lossless. It threw the half away, and the port that
+// trusted this line walked every trigger a half tile north-west. The stamped
+// portal is x1000/y1000 like every other measured coordinate in this file.
 const portals = map.portals.map((p) => ({
-  x: Math.floor(p.x), y: Math.floor(p.y), to: p.to,
+  x1000: K(p.x), y1000: K(p.y), to: p.to,
   atX1000: K(p.at[0]), atY1000: K(p.at[1]),
   enter: !!p.enter, exitStairs: !!p.stairs,
 }));

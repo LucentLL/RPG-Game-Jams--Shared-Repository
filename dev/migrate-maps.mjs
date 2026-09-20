@@ -66,7 +66,7 @@ const { lawfulWidth } = await import(new URL('../src/guild/prop-width.js', impor
 // finding instead of a field that silently fails to make the crossing.
 // Order here is the order written to the file.
 const CHART_KEYS = [
-  'id', 'name', 'theme', 'grid', 'entry', 'exitStairs',
+  'id', 'name', 'theme', 'grid', 'levels', 'entry', 'exitStairs',
   'water', 'props', 'portals', 'spawns', 'regions', 'paint', 'locks',
 ];
 const PROP_KEYS = ['art', 'x', 'y', 'use', 'label', 'cls'];
@@ -224,7 +224,7 @@ if (strays.length) {
  * carefully as its successes.
  */
 function derivedWorld(chart) {
-  const m = makeLevelModel(chart.grid);
+  const m = makeLevelModel(chart.grid, chart.levels);
   const NIL = -32768;                                   // the model's null, as a number
   const L = (v) => (v == null ? NIL : v);
   const cells = [], steps = [];

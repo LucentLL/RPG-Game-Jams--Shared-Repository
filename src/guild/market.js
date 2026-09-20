@@ -11,7 +11,8 @@ import { rollBookStock } from './books.js';
 
 /** Buy price per material unit (sell-back is half). Ores feed the Forge, herbs the
  *  Lab, foodstuffs the Kitchen pantry — each delivered to its room's store. */
-export const MATERIAL_PRICE = { iron_ore: 8, steel_ore: 20, mithril_ore: 55, sunleaf: 6, emberroot: 16, nightcap: 42, grain: 3, salted_meat: 9, game_meat: 7, pelt: 14 };
+export const MATERIAL_PRICE = {
+  timber: 3, iron_ore: 8, steel_ore: 20, mithril_ore: 55, sunleaf: 6, emberroot: 16, nightcap: 42, grain: 3, salted_meat: 9, game_meat: 7, pelt: 14 };
 
 /** Wilds spoils — carried by MATERIAL_PRICE for their SELL value, but never stocked
  *  for purchase (you hunt them, you don't buy them). The Market shows these as a
@@ -21,12 +22,12 @@ export const HUNT_MATERIALS = ['game_meat', 'pelt'];
 // Item value = recoup the ore (floor) + a skill premium for quality above the
 // material's unskilled base — so an unskilled smith barely breaks even and PROFIT
 // comes from Practice. The smith's trade is skill, not free arbitrage.
-const MAT_FLOOR = { leather: 20, iron: 16, steel: 40, mithril: 110 }; // ≈ ore cost of one item
-const MAT_BASE = { leather: 15, iron: 20, steel: 40, mithril: 60 };   // recipe base quality (unskilled)
-const MAT_GAIN = { leather: 1.4, iron: 1.6, steel: 2.0, mithril: 2.4 };// gold per quality-point above base
+const MAT_FLOOR = { wood: 8, leather: 20, iron: 16, steel: 40, mithril: 110 }; // ≈ ore cost of one item
+const MAT_BASE = { wood: 8, leather: 15, iron: 20, steel: 40, mithril: 60 };   // recipe base quality (unskilled)
+const MAT_GAIN = { wood: 1.0, leather: 1.4, iron: 1.6, steel: 2.0, mithril: 2.4 };// gold per quality-point above base
 // A refine level's sale premium per +, by material — the ore, fees and RISK sunk
 // into a +7 blade are real; the market pays for survivorship.
-const MAT_PLUS_GAIN = { leather: 5, iron: 6, steel: 12, mithril: 28 };
+const MAT_PLUS_GAIN = { wood: 3, leather: 5, iron: 6, steel: 12, mithril: 28 };
 
 export function buyPrice(matId) { return MATERIAL_PRICE[matId] || 999; }
 export function sellPriceMat(matId) { return Math.max(1, Math.floor((MATERIAL_PRICE[matId] || 0) * 0.5)); }
@@ -42,7 +43,7 @@ export function itemSellValue(item) {
   return Math.max(1, Math.round(floor + Math.max(0, item.quality - base) * gain + (item.plus || 0) * plusGain));
 }
 
-function defaultStock() { return { iron_ore: 24, steel_ore: 10, mithril_ore: 3, sunleaf: 16, emberroot: 8, nightcap: 3, grain: 30, salted_meat: 12 }; }
+function defaultStock() { return { timber: 40, iron_ore: 24, steel_ore: 10, mithril_ore: 3, sunleaf: 16, emberroot: 8, nightcap: 3, grain: 30, salted_meat: 12 }; }
 
 /** @param {Object} [init] */
 export function createMarket(init = {}) { return { stock: init.stock || defaultStock(), bookStock: init.bookStock || rollBookStock() }; }

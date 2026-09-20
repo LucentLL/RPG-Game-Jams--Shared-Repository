@@ -39,6 +39,12 @@ const MATERIAL_TIER = {
   // `floor` is the Theory the metal itself costs. Leather is NEGATIVE on
   // purpose: hide is the material you learn on, so a fresh smith can already
   // cut a jerkin and a cap while iron is still teaching them to draw a blade.
+  // WOOD IS THE RUNG BELOW HIDE (owner, 2026-09-20: 'Each weapon, armor, and
+  // shield should have a wood version'). Its floor is below leather's for
+  // leather's own reason, one step further down: timber is what you are handed
+  // on the first day. It caps LOW — a wooden sword is a wooden sword however
+  // good the smith — which keeps it a starting rung and not a cheap good blade.
+  wood:    { floor: -16, base: 8, ceil: 30, ore: 'timber', name: 'Wood' },
   leather: { floor: -8, base: 15, ceil: 45, ore: 'pelt', name: 'Leather' },
   iron:    { floor: 0,  base: 20, ceil: 55, ore: 'iron_ore', name: 'Iron' },
   steel:   { floor: 30, base: 40, ceil: 80, ore: 'steel_ore', name: 'Steel' },
@@ -55,23 +61,23 @@ const MATERIAL_TIER = {
  */
 const KINDS = [
   // ── Weapon ───────────────────────────────────────────────────────────────
-  { kind: 'dagger', slot: 'weapon', noun: 'Dagger', skill: 2,  bulk: 1, stamina: 24, mats: ['iron', 'steel', 'mithril'] },
-  { kind: 'sword',  slot: 'weapon', noun: 'Sword',  skill: 0,  bulk: 2, stamina: 30, mats: ['iron', 'steel', 'mithril'] },
-  { kind: 'mace',   slot: 'weapon', noun: 'Mace',   skill: 4,  bulk: 2, stamina: 28, mats: ['iron', 'steel', 'mithril'] },
-  { kind: 'axe',    slot: 'weapon', noun: 'Axe',    skill: 6,  bulk: 2, stamina: 30, mats: ['iron', 'steel', 'mithril'] },
-  { kind: 'hammer', slot: 'weapon', noun: 'Hammer', skill: 8,  bulk: 3, stamina: 34, mats: ['iron', 'steel', 'mithril'] },
-  { kind: 'staff',  slot: 'weapon', noun: 'Staff',  skill: 14, bulk: 2, stamina: 28, mats: ['iron', 'steel', 'mithril'] },
-  { kind: 'bow',    slot: 'weapon', noun: 'Bow',    skill: 16, bulk: 2, stamina: 28, mats: ['leather', 'steel', 'mithril'] },
+  { kind: 'dagger', slot: 'weapon', noun: 'Dagger', skill: 2,  bulk: 1, stamina: 24, mats: ['wood', 'iron', 'steel', 'mithril'] },
+  { kind: 'sword',  slot: 'weapon', noun: 'Sword',  skill: 0,  bulk: 2, stamina: 30, mats: ['wood', 'iron', 'steel', 'mithril'] },
+  { kind: 'mace',   slot: 'weapon', noun: 'Mace',   skill: 4,  bulk: 2, stamina: 28, mats: ['wood', 'iron', 'steel', 'mithril'] },
+  { kind: 'axe',    slot: 'weapon', noun: 'Axe',    skill: 6,  bulk: 2, stamina: 30, mats: ['wood', 'iron', 'steel', 'mithril'] },
+  { kind: 'hammer', slot: 'weapon', noun: 'Hammer', skill: 8,  bulk: 3, stamina: 34, mats: ['wood', 'iron', 'steel', 'mithril'] },
+  { kind: 'staff',  slot: 'weapon', noun: 'Staff',  skill: 14, bulk: 2, stamina: 28, mats: ['wood', 'iron', 'steel', 'mithril'] },
+  { kind: 'bow',    slot: 'weapon', noun: 'Bow',    skill: 16, bulk: 2, stamina: 28, mats: ['wood', 'leather', 'steel', 'mithril'] },
   // A whip is plaited hide long before it is chain — same three metals as the
   // bow, and for the same reason. Skill sits between the hammer and the staff:
   // the plaiting is the hard part, not the metal.
-  { kind: 'whip',   slot: 'weapon', noun: 'Whip',   skill: 11, bulk: 2, stamina: 28, mats: ['leather', 'steel', 'mithril'] },
-  { kind: 'wand',   slot: 'weapon', noun: 'Wand',   skill: 16, bulk: 1, stamina: 24, mats: ['iron', 'steel', 'mithril'] },
+  { kind: 'whip',   slot: 'weapon', noun: 'Whip',   skill: 11, bulk: 2, stamina: 28, mats: ['wood', 'leather', 'steel', 'mithril'] },
+  { kind: 'wand',   slot: 'weapon', noun: 'Wand',   skill: 16, bulk: 1, stamina: 24, mats: ['wood', 'iron', 'steel', 'mithril'] },
   // ── Armor ────────────────────────────────────────────────────────────────
-  { kind: 'greaves', slot: 'lower',  noun: 'Greaves', skill: 3,  bulk: 2, stamina: 26, mats: ['leather', 'iron', 'steel', 'mithril'] },
-  { kind: 'helm',    slot: 'head',   noun: 'Helm',    skill: 5,  bulk: 2, stamina: 26, mats: ['leather', 'iron', 'steel', 'mithril'] },
-  { kind: 'shield',  slot: 'offhand', noun: 'Shield', skill: 10, bulk: 2, stamina: 26, mats: ['iron', 'steel', 'mithril'] },
-  { kind: 'armor',   slot: 'body',   noun: 'Armor',   skill: 12, bulk: 3, stamina: 32, mats: ['leather', 'iron', 'steel', 'mithril'] },
+  { kind: 'greaves', slot: 'lower',  noun: 'Greaves', skill: 3,  bulk: 2, stamina: 26, mats: ['wood', 'leather', 'iron', 'steel', 'mithril'] },
+  { kind: 'helm',    slot: 'head',   noun: 'Helm',    skill: 5,  bulk: 2, stamina: 26, mats: ['wood', 'leather', 'iron', 'steel', 'mithril'] },
+  { kind: 'shield',  slot: 'offhand', noun: 'Shield', skill: 10, bulk: 2, stamina: 26, mats: ['wood', 'iron', 'steel', 'mithril'] },
+  { kind: 'armor',   slot: 'body',   noun: 'Armor',   skill: 12, bulk: 3, stamina: 32, mats: ['wood', 'leather', 'iron', 'steel', 'mithril'] },
 ];
 
 /**
@@ -202,6 +208,7 @@ export const REWORK_STAMINA = 26;
  *  and the gold fee per refine attempt. (What each + is WORTH lives elsewhere:
  *  combat power in inventory.js PLUS_POWER, sale premium in market.js MAT_PLUS_GAIN.) */
 export const MATERIAL_META = {
+  wood:    { ore: 'timber',      safe: 8, fee: 4 },
   leather: { ore: 'pelt',        safe: 7, fee: 8 },
   iron:    { ore: 'iron_ore',    safe: 7, fee: 10 },
   steel:   { ore: 'steel_ore',   safe: 6, fee: 25 },

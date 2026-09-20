@@ -37,7 +37,7 @@ function census(map, px, py, yaw, R, light, fogCull, merged) {
   const at = (x, y) => (x < 0 || y < 0 || x >= cols || y >= rows ? '#' : (g[y][x] || '#'));
   // The SHARED level model — the census no longer keeps its own copy of the
   // height vocabulary, which is exactly how it had started to drift.
-  const model = map._model || (map._model = makeLevelModel(map.grid));
+  const model = map._model || (map._model = makeLevelModel(map.grid, map.levels));
   const heightAt = (x, y) => { const f = model.floorAt(x, y); return f == null ? 0 : f; };
   const onClimb = (x, y) => at(x, y) === 'L' || at(x, y) === 'v';
   let maxLv = 0;

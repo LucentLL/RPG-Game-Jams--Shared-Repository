@@ -473,7 +473,7 @@ export function wornLayerDesc(item) {
  *  first-person viewmodel cannot come to different conclusions about a mace. */
 export const KIND_TO_ENGINE_TYPE = {
   sword: 'Sword', dagger: 'Dagger', axe: 'Axe', bow: 'Bow', hammer: 'Hammer',
-  mace: 'Club', wand: 'Wand', staff: 'Wand', shield: 'Buckler', whip: 'Whip',
+  mace: 'Club', wand: 'Wand', staff: 'Staff', shield: 'Buckler', whip: 'Whip',
 };
 
 /** Material → the engine `tier` that picks the same colour variant the icon
@@ -501,6 +501,12 @@ export const WORN = {
   // PICK sheet paints at all — pickaxe1 row 3 col 1 is empty, so with rest:1
   // the delver's pick viewmodel was invisible.
   rest: 14,
+  // The BARE hand rests on the walk-cycle stand cell instead — the same cell
+  // ELEMENTS_ANIMS.idle plays, arms at the sides. Col 14's blade-up reasons
+  // above are weapon reasons: an empty fist resting on the follow-through
+  // read as a permanent raised guard the standee never strikes (user report,
+  // 2026-08-21). Held things keep rest:14; only the empty hand stands down.
+  stand: 1,
   swing: [10, 11, 12, 13, 14],
   frameMs: 70,          // ELEMENTS_ANIMS.slash speed
   // Shields paint nothing in the slash columns and stand edge-on (5px) in the

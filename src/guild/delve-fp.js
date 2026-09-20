@@ -22,15 +22,16 @@
  * Deliberately unhandled: `regions` (the campus's per-room themes). The estate is
  * a place you look at from above; the delve is a place you are inside.
  */
-import { ART_BASE } from '../config/assets.js';
-import { THEMES, LIGHTS, DECALS, ORE_KINDS, oreKindAt, mapForLocale, validateMap, makeLevelModel, DECK_CH, wetCells, waterDepths } from './delve-maps.js';
+import { ART_BASE, TILES_BASE } from '../config/assets.js';
+import { ladderArt } from '../game/arena-terrain.js';
+import { THEMES, LIGHTS, DECALS, ORE_KINDS, oreKindAt, mapForLocale, validateMap, makeLevelModel, CLIMB_CH, DECK_CH, wetCells, waterDepths } from './delve-maps.js';
 import { preyById } from './locales.js';
 import { loadImg, SHEET_URLS, doorTexture, keyTexture, wallThemeAt } from './delve.js';
 import { ART, artSprite, artCropCss, artTexRect, SWAY, KIND_TO_ENGINE_TYPE } from './art.js';
 import { gearReach } from '../game/data/gear.js';
 import { createFpHands, armsOf } from '../game/fp-hands.js';
 import { waterFrames, WADE_SPEED, submergeFor, isSwimming } from './water.js';
-import { propVolume, propCell, footprint, blockerRadius, REST_SLOP, PLAYER_H } from './prop-volume.js';
+import { propVolume, propCell, footprint, blockerRadius, bodyRadius, clearOfBodies, REST_SLOP, PLAYER_H } from './prop-volume.js';
 import { facingOf, facingClass, facingIsIdentity } from './prop-facing.js';
 import { icon } from './icons.js';
 import { createLook, readPad, padReset, touchPrimary, onTouchPrimary, PAD } from '../platform/input.js';
@@ -735,8 +736,10 @@ function mountSky() {
   el.style.backgroundRepeat = 'no-repeat';
 }
 
-/** The rungs, drawn rather than cropped: no sheet in the kit has a head-on
- *  ladder, and a ladder head-on is four rectangles. */
+/** The rungs, drawn — but only as the FALLBACK now: the kit DOES have a
+ *  head-on ladder (the caveladders sheet's standalone cutout, the one the
+ *  arena already crops), and prep() swaps this for that crop before any
+ *  scene builds. This survives for the chart whose sheet 404s. */
 let _ladderTex = null;
 function ladderTexture() {
   if (_ladderTex) return _ladderTex;
@@ -751,6 +754,7 @@ function ladderTexture() {
   g.fillRect(10, 0, 6, 320); g.fillRect(96, 0, 6, 320);
   return (_ladderTex = cv.toDataURL());
 }
+
 
 // ---------------------------------------------------------------------------
 // The chart
@@ -805,6 +809,20 @@ const BODY = 0.28;
  * ledge still needs a ladder to go UP and none to drop off, because a ledge is
  * a thing you climb to reach, not a pen you must climb to leave.
  */
+/** Every body that blocks `self` — CHARACTERS OCCUPY SPACE (user decree,
+ *  2026-08-21). `self` null is the walker asking (creatures block them);
+ *  a creature asking gets the other creatures AND the walker. A dead thing
+ *  blocks nothing. Radii are the engage-ring width term (bodyRadius), so a
+ *  contact-fight always fires before the wall does. */
+const fpBodies = (self) => {
+  const out = [];
+  for (const c of (F.creatures || [])) {
+    if (c !== self && c.hp > 0) out.push({ x: c.x, y: c.y, lv: c.lv, r: bodyRadius(c.wTiles) });
+  }
+  if (self) out.push({ x: F.px, y: F.py, lv: F.lv, r: BODY });
+  return out;
+};
+
 /** The surface the last successful canStandAt picked — consumed by slide(),
  *  which commits the mover to it. */
 let _pick = null;
@@ -831,6 +849,10 @@ function canStandAt(x, y, fx, fy, lv) {
     const dx = x - b.x, dy = y - b.y, rr = b.r + BODY;
     if (dx * dx + dy * dy < rr * rr) return false;
   }
+  // Other characters are as solid as the props are (user decree, 2026-08-21):
+  // circle against every living creature, the same >=2-level exemption, and an
+  // origin already inside an overlap may walk out — never further in.
+  if (!clearOfBodies(x, y, lv, BODY, fpBodies(null), fx, fy)) return false;
   // THE STEP LAW — the shared model's answer, verbatim in every lens (ONE
   // RULES FACT): down is always legal, up is one rung across a climb cell,
   // and a two-surface cell hands you whichever floor your level earns.
@@ -2934,6 +2956,9 @@ function spawnCreature(prey, img, x, y) {
   cv.style.width = '100%'; cv.style.height = '100%';
   const c = {
     prey, img, el, cv, fw, fh, box, x, y, home: { x, y },
+    // Drawn width in TILES — the same fact the top-down's engage ring reads
+    // (its c.fw/TILE); what bodyRadius turns into blocking space.
+    wTiles: (h * aspect) / T,
     // Committed surface — spawns stand on the ground of their cell.
     lv: (F.model ? (F.model.surfacesAt(Math.floor(x), Math.floor(y))[0] || 0) : 0),
     mode: 'idle', t: 1 + Math.random() * 2, tx: x, ty: y,
@@ -3024,6 +3049,16 @@ async function prep(mapId) {
   validateMap(map);
   const theme = THEMES[map.theme];
   const surf = await cutSurfaces(theme, { plank: map.grid.some((r) => r.includes('n')) });
+  // The kit's own ladder over the painted rungs — the caveladders crop the
+  // arena already stamps (arena-terrain ladderArt; art law: owned tilesets
+  // first). prep is the await point for every other sheet, so it is this
+  // one's too; the drawn fallback stays if the sheet 404s. Gated on the
+  // VOCABULARY (every non-stair climb), never on 'L'/'v' literals.
+  const rungCh = Object.keys(CLIMB_CH).filter((c) => CLIMB_CH[c] !== 'stairs');
+  if (map.grid.some((r) => rungCh.some((c) => r.includes(c)))) {
+    try { surf.ladder = (await ladderArt(TILES_BASE)).toDataURL(); }
+    catch (e) { /* the painted rungs stay */ }
+  }
   // REGIONS — rooms stamped into this plane with textures of their own (the
   // campus). One surface set per distinct theme, picked per cell at build time,
   // so a kitchen's wall ring is scrubbed stone and the meadow around it grass.
@@ -3040,7 +3075,10 @@ async function prep(mapId) {
     ...(map.walls || []).map((r) => r.theme),
   ])].filter((n) => THEMES[n]);
   const sets = await Promise.all(names.map((n) => cutSurfaces(THEMES[n], { ores: false })));
-  names.forEach((n, i) => { surfByTheme[n] = sets[i]; });
+  // ONE ladder for the whole chart: the rung quad reads the PER-CELL set, so
+  // a region set left on the painted fallback would dress a ladder inside a
+  // room differently from the identical ladder outside it.
+  names.forEach((n, i) => { surfByTheme[n] = sets[i]; sets[i].ladder = surf.ladder; });
   const props = await decorSheets(map);
   const spawns = [];
   for (const s of (map.spawns || [])) {
@@ -3117,8 +3155,9 @@ function mount(prep, entry) {
   // way through it, in the middle of the passage you opened.
   F.grid = map.grid.map((row, y) => row.replace(/o/g, (m, x) => (F.mined.has(map.id + ':' + x + ',' + y) ? '.' : m)));
   // The height law (ONE RULES FACT). Built from the AUTHORED grid — a mined
-  // seam opens at the level the model already knew ('o' is ground to it).
-  F.model = makeLevelModel(map.grid);
+  // seam opens at the level the model already knew ('o' is ground to it) —
+  // and the chart's levels layer, so a sculpted height stands here too.
+  F.model = makeLevelModel(map.grid, map.levels);
   // Water finds its own level: each body brims at the highest ground it
   // touches, so depth is a per-BODY flood and not a per-cell guess.
   F.depths = waterDepths(F.model, F.wet);
@@ -3950,6 +3989,9 @@ function moveCreatures(dt) {
       if (pk == null) return false;
       const dk = F.model.deckAt(gx, gy);
       if (rank >= 4 && dk != null && pk < dk) return false;
+      // Other bodies block a creature too — tested BEFORE the level commit,
+      // or a refused step would still change the creature's committed floor.
+      if (!clearOfBodies(X, Y, pk, bodyRadius(c.wTiles), fpBodies(c), c.x, c.y)) return false;
       c.lv = pk;
       return true;
     };

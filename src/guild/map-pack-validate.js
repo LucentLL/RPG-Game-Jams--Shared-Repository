@@ -76,12 +76,33 @@ export const PACK_KINDS = ['delve', 'arena'];
  * The closed key sets. Every one of these is the pinned schema verbatim; an
  * addition here is a schema change and belongs in the schema doc first.
  */
-export const MAP_KEYS = ['schema', 'kind', 'id', 'name', 'theme', 'grid', 'entry',
-  'foe', 'water', 'exitStairs', 'props', 'portals', 'spawns', 'regions', 'paint', 'walls', 'locks'];
+export const MAP_KEYS = ['schema', 'kind', 'id', 'name', 'theme', 'grid', 'levels', 'entry',
+  'foe', 'water', 'seats', 'exitStairs', 'props', 'portals', 'spawns', 'regions', 'paint', 'walls', 'locks'];
 export const PROP_KEYS = ['art', 'x', 'y', 'facing', 'use', 'label', 'cls'];
 export const PORTAL_KEYS = ['x', 'y', 'to', 'at', 'enter', 'stairs'];
 export const SPAWN_KEYS = ['prey', 'x', 'y'];
-export const RECT_KEYS = ['x', 'y', 'w', 'h', 'theme'];
+// `lv` (2026-09-08): a walls rect may name a BAND of rungs, "lo-hi", so one
+// block of a column can wear its own stone (Unity MapPack.cs DelveWallRect.Lo/Hi).
+export const RECT_KEYS = ['x', 'y', 'w', 'h', 'theme', 'sides', 'lv'];
+/** The face vocabulary a `walls` rect's `sides` may name — dress ONLY these
+ *  faces of the covered cells; `top` is the crown, `bot` the SOFFIT, absent =
+ *  every face of the cell (owner decree 2026-08-29: "changing a single wall of
+ *  a cube changes all sides of it" was the bug). Walls-channel ONLY: ground
+ *  has one face, and a room is a room.
+ *
+ *  `bot` is the CEILING SEEN FROM UNDERNEATH (owner, same day: skins "also
+ *  need to be usable on sides of blocks (and bottoms, presumably painting a
+ *  ceiling from underneath the tile)"). It exists where a surface has air
+ *  beneath it, which in this vocabulary is a DECK — 'n' a bridge, 'u' a tunnel
+ *  roof — and dresses nothing on an ordinary cell, which stands on the ground
+ *  it is cut from. THIS FILE IS PIPELINE, NOT GAME CODE (the web build is
+ *  frozen, memory feedback-web-build-frozen): the token is carried here so a
+ *  chart authored in the Unity drafting table still validates on its way into
+ *  content/maps. The Unity renderer that draws the soffit is
+ *  DelveWorld.BuildDecks; the frozen web build draws none and will simply
+ *  ignore the token, which is what an unknown-but-legal dressing token has
+ *  always done there. */
+export const SIDE_TOKENS = ['n', 'e', 's', 'w', 'top', 'bot'];
 /** The arrays the schema says are omitted when empty. */
 export const ARRAY_KEYS = ['props', 'portals', 'spawns', 'regions', 'paint', 'walls', 'locks'];
 /** The three rect channels, in the one order everything prints them: ground,
@@ -185,6 +206,63 @@ export function checkPackMap(raw, stem, ctx = {}) {
   }
   const inside = (x, y) => W > 0 && x >= 0 && y >= 0 && Math.floor(x) < W && Math.floor(y) < H;
 
+  // ── levels: the sculpted height layer ────────────────────────────────────
+  // Row STRINGS shaped like the grid, one space-separated token per cell: '.'
+  // defers to the cell's char, an integer IS its floor level (delve-maps.js
+  // parseLevels). Strings and not [[x,y,lv]] triples because the Unity port's
+  // JsonUtility cannot read nested arrays (the locks/water lesson) but carries
+  // string[] for free, like the grid itself. LV_MIN/LV_MAX are delve-maps',
+  // transcribed because importing delve-maps from here IS the cycle this
+  // module was built to break (delve-maps → map-pack → this file); the charts
+  // exercise the transcription the same way they exercise GRID_CHARS.
+  const LV_MIN = -64, LV_MAX = 64;
+  // The chars whose token the RENDERERS honor (delve.js bakeChar routes
+  // exactly these through the model) — a token on any other GROUND char
+  // changes the walk but not the picture: a body standing three steps up
+  // over flat-drawn floor. Warn, don't refuse: the model itself is honest.
+  const LAYERED_CHARS = '.,^23456unLvSDK';
+  if ('levels' in raw) {
+    // The walks-FLAT-in-Unity warning stood here for a year and retired
+    // 2026-08-29: MapPack.cs carries the field and LevelModel.Build(grid,
+    // levels) mirrors makeLevelModel, pinned by LevelsLayerTests against
+    // check-levels' own fixtures.
+    if (!Array.isArray(raw.levels) || !raw.levels.every((r) => typeof r === 'string')) {
+      bad('levels is present but not an array of row strings');
+    } else if (raw.levels.length !== H) {
+      bad(`levels has ${raw.levels.length} rows, the grid has ${H} — the layer is shaped like the grid`);
+    } else {
+      raw.levels.forEach((row, y) => {
+        const toks = row.trim().split(/\s+/).filter(Boolean);
+        if (toks.length !== W) { bad(`levels row ${y} holds ${toks.length} tokens, the grid is ${W} wide`); return; }
+        toks.forEach((t, x) => {
+          if (t === '.') return;
+          // THE UNITY FORK'S TOKENS (2026-08-29, the sky deck; 2026-09-08, the
+          // Stadium's locker rooms dug under the stands): 'f' pins the floor,
+          // 'f:d' a floor WITH A DECK d over it, '_:d' a deck with nothing
+          // beneath, '_' a hollow. LevelModel.TryParseTok (Unity) is the
+          // reader; this frozen build's parseLevels keeps the floor part and
+          // ignores the deck, which is what a build with no deck tokens should
+          // do with them. A bare deck pins no floor, so the floor checks below
+          // do not apply to it.
+          const m = /^(-?\d+|_)?(?::(-?\d+))?$/.exec(t);
+          if (!m || (m[1] == null && m[2] == null)) { bad(`levels ${x},${y} is '${t}' — a token is '.', an integer, or floor:deck ('0:3', '_:3')`); return; }
+          if (m[2] != null) {
+            const d = Number(m[2]);
+            if (d < LV_MIN || d > LV_MAX) bad(`levels ${x},${y} deck is ${d}, outside the sculptable ${LV_MIN}..${LV_MAX}`);
+            if (m[1] != null && m[1] !== '_' && d <= Number(m[1])) bad(`levels ${x},${y} is '${t}' — a deck hangs ABOVE its floor`);
+          }
+          if (m[1] == null || m[1] === '_') return;
+          const v = Number(m[1]);
+          const ch = raw.grid && raw.grid[y] ? raw.grid[y][x] : null;
+          if (v < LV_MIN || v > LV_MAX) bad(`levels ${x},${y} is ${v}, outside the sculptable ${LV_MIN}..${LV_MAX}`);
+          else if (ch != null && !LAYERED_CHARS.includes(ch)) {
+            warn(`levels ${x},${y} sits on '${ch}' — the renderers do not honor a level there (the walk would, which is worse: a body standing on air)`);
+          }
+        });
+      });
+    }
+  }
+
   // ── entry ────────────────────────────────────────────────────────────────
   // The schema comment says "integers"; every shipped chart authors halves
   // (hollowvein's [4.5, 15.5] is a tile CENTRE). Finite is the honest test —
@@ -216,6 +294,21 @@ export function checkPackMap(raw, stem, ctx = {}) {
     else raw.water.forEach((c, i) => {
       if (!pair(c) || !c.every(isInt)) bad(`water[${i}] ${JSON.stringify(c)} is not two integer cell coords`);
       else if (!inside(c[0], c[1])) bad(`water[${i}] ${c} is off the ${W}×${H} grid`);
+    });
+  }
+
+  // ── seats: where a crowd sits, deliberately NOT a grid char (2026-09-08) ─
+  // The arena's stands are TERRACES an author sculpts like any other, and a
+  // seat is a fact painted over them the way water is painted over a bed:
+  // the stone stays whatever the tier's char says, and "a spectator watches
+  // from here" is the overlay. Owner directive: "Flag the 'stadium stands'
+  // with crowd positions." Same shape as water — [x,y] pairs — so the Unity
+  // loader lifts it the same way (MapPack.CellPairs).
+  if ('seats' in raw) {
+    if (!Array.isArray(raw.seats)) bad('seats is present but not an array');
+    else raw.seats.forEach((c, i) => {
+      if (!pair(c) || !c.every(isInt)) bad(`seats[${i}] ${JSON.stringify(c)} is not two integer cell coords`);
+      else if (!inside(c[0], c[1])) bad(`seats[${i}] ${c} is off the ${W}×${H} grid`);
     });
   }
 
@@ -333,6 +426,16 @@ export function checkPackMap(raw, stem, ctx = {}) {
       else if (!(r.w > 0 && r.h > 0)) bad(`${at} is ${r.w}×${r.h} — a rect covers something`);
       if (!isStr(r.theme)) bad(`${at} names no theme`);
       else if (!THEMES[r.theme]) bad(`${at} names unknown theme '${r.theme}'`);
+      if ('sides' in r) {
+        // `sides` is the walls channel's vocabulary alone, and malformed
+        // tokens are SHAPE (refused here); whether the named face exists on
+        // any covered cell is dressing-advice, which is lintWallsRects' lane.
+        if (key !== 'walls') bad(`${at} authors 'sides' — that is the walls channel's key (ground has one face)`);
+        else if (!isStr(r.sides) || !r.sides.length) bad(`${at} has an empty 'sides' — omit the key to dress every face`);
+        else for (const t of r.sides.split(',')) {
+          if (!SIDE_TOKENS.includes(t.trim())) bad(`${at} names side '${t.trim()}' — the face vocabulary is ${SIDE_TOKENS.join(',')}`);
+        }
+      }
     }
   }
 
@@ -415,7 +518,7 @@ export function lintWallsRects(map, model = {}) {
   const out = [];
   if (!rects.length || !Array.isArray(map.grid) || !map.grid.length) return out;
   const W = map.grid[0].length, H = map.grid.length;
-  const m = typeof model.makeLevelModel === 'function' ? model.makeLevelModel(map.grid) : null;
+  const m = typeof model.makeLevelModel === 'function' ? model.makeLevelModel(map.grid, map.levels) : null;
 
   /**
    * Does this cell OWN a vertical face for `walls` to dress?
@@ -497,7 +600,7 @@ export function lintDelveMap(map, model) {
   const W = grid[0].length, H = grid.length;
   const at = (x, y) => (grid[Math.floor(y)] || '')[Math.floor(x)];
   const inside = (x, y) => x >= 0 && x < W && y >= 0 && y < H;
-  const m = makeLevelModel(grid);
+  const m = makeLevelModel(grid, map.levels);
 
   if (map.entry) {
     const e = at(map.entry[0], map.entry[1]);
@@ -592,7 +695,7 @@ export function lintDelveMap(map, model) {
     if (!Array.isArray(p.at)) continue;
     const dest = p.to === map.id ? map : (resolve ? resolve(p.to) : null);
     if (!dest || !Array.isArray(dest.grid)) continue;
-    const dm = p.to === map.id ? m : makeLevelModel(dest.grid);
+    const dm = p.to === map.id ? m : makeLevelModel(dest.grid, dest.levels);
     if (dm.deckAt(Math.floor(p.at[0]), Math.floor(p.at[1])) != null) {
       out.push(`portal to '${p.to}' arrives at ${p.at} on the GROUND under the deck`);
     }

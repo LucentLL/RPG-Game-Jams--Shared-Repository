@@ -16,7 +16,7 @@
  * Drafts persist in localStorage ('crucible.editorMaps') and export as JSON;
  * promoting one to a shipped chart is pasting that JSON into delve-maps.js.
  */
-import { DELVE_MAPS, THEMES, validateMap, makeLevelModel, CLIMB_CH, DECK_CH, wetCells } from './delve-maps.js';
+import { DELVE_MAPS, THEMES, validateMap, makeLevelModel, CLIMB_CH, DECK_CH, FLOOR_LV, LV_MIN, LV_MAX, wetCells } from './delve-maps.js';
 import { invalidateBake } from './delve.js';
 import { ART, artSprite, artTexRect } from './art.js';
 import { waterFrames, waterFrameAt, WATER_TINT } from './water.js';
@@ -46,16 +46,65 @@ function freeId(wish) {
 
 const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
 
+/** The keys a draft may carry — everything the table can author or draw.
+ *  A CLOSED set, enforced below: a legacy store entry once carried the
+ *  campus's own `facades` + `regions` bundle — invisible on the plan (the
+ *  table draws none of it) and fully rendered by every walk, which is how a
+ *  blank draft walked into "the default guild map appeared over it"
+ *  (playtest 2026-08-21). What the table cannot show, it must not ship. */
+const DRAFT_KEYS = ['id', 'name', 'theme', 'grid', 'levels', 'entry', 'spawns', 'props',
+  'portals', 'paint', 'locks', 'water', 'exitStairs'];
+
+/** The chars whose layer token the RENDERERS honor (delve.js bakeChar asks
+ *  the model for exactly these) — a token on anything else changes the walk
+ *  but not the picture: the walking-on-air class. Drafts clear such tokens on
+ *  load; the pack validator warns hand-authors about them. */
+const LAYERED_CHARS = '.,^23456unLvSDK';
+
+/**
+ * The levels layer reshaped to the grid: rows padded/truncated to the width,
+ * tokens sanitized ('.'-ed when not an integer or on a char the renderers
+ * cannot honor, clamped into LV_MIN..LV_MAX so a draft that walks is a draft
+ * the pack gate will take), and the whole key dropped when no number
+ * survives. ONE implementation — normalize and resize both reflow through
+ * it, because the two copies this replaced had already drifted (review).
+ */
+function reflowLevels(m) {
+  if (!Array.isArray(m.levels)) { delete m.levels; return; }
+  const W = m.grid[0].length;
+  m.levels = m.grid.map((row, y) => {
+    const toks = String(m.levels[y] ?? '').trim().split(/\s+/).filter(Boolean)
+      .map((t, x) => {
+        if (!/^-?\d+$/.test(t) || !LAYERED_CHARS.includes(row[x])) return '.';
+        return String(Math.max(LV_MIN, Math.min(LV_MAX, Number(t))));
+      });
+    while (toks.length < W) toks.push('.');
+    toks.length = W;
+    return toks.join(' ');
+  });
+  if (!m.levels.some((r) => /\d/.test(r))) delete m.levels;
+}
+
 /** Every map the editor touches gets the FULL shape — shipped charts omit
  *  arrays they don't use (hollowvein has no props), and imports omit anything. */
 function normalize(m) {
+  // The closed set first: whatever a legacy save, a hand-edited import or an
+  // older build smuggled in, the draft keeps only what the table can see.
+  // (No shipped pack chart carries `regions`/`facades` — content/maps grep —
+  // so nothing legitimate is lost; the campus derives its own fresh.)
+  for (const k of Object.keys(m)) {
+    if (!DRAFT_KEYS.includes(k)) {
+      console.warn(`draft '${m.id}': dropping '${k}' — not a key the drafting table authors`);
+      delete m[k];
+    }
+  }
   m.id = freeId(m.id);   // freeId suffixes a shipped id ('classroom' → 'classroom-draft')
   m.name = String(m.name || m.id);
   m.theme = THEMES[m.theme] ? m.theme : 'meadow';
   if (!Array.isArray(m.grid) || !m.grid.length) m.grid = blank(36, 24).grid;
   m.grid = m.grid.map(String);
   if (!Array.isArray(m.entry) || m.entry.length !== 2) m.entry = [2.5, 2.5];
-  for (const k of ['props', 'spawns', 'portals', 'paint', 'regions', 'locks', 'water']) if (!Array.isArray(m[k])) m[k] = [];
+  for (const k of ['props', 'spawns', 'portals', 'paint', 'locks', 'water']) if (!Array.isArray(m[k])) m[k] = [];
   // A wet cell is an [x, y] pair on the grid or it is nothing — and it is only
   // ever there once, so an import (or a drag that outran its own guard) can
   // never leave the same cell stacked and un-dryable.
@@ -72,6 +121,9 @@ function normalize(m) {
   // A paint rect is four finite numbers or it is nothing — a NaN rect would
   // draw nowhere on the plan and still ride along in the export.
   m.paint = m.paint.filter((r) => r && [r.x, r.y, r.w, r.h].every(Number.isFinite) && r.w > 0 && r.h > 0);
+  // The LEVELS LAYER: reshaped to the grid so an import whose layer is ragged
+  // (or a resize's leftover) can never desync — see reflowLevels.
+  reflowLevels(m);
   // A lock is a [x, y] pair on the grid or it is nothing.
   m.locks = m.locks.filter((l) => Array.isArray(l) && Number.isFinite(l[0]) && Number.isFinite(l[1]));
   return m;
@@ -95,15 +147,18 @@ const TILES = [
   // be indistinguishable from the new Steps char.
   { ch: 's', name: 'Entry stairs (exit)', color: '#6b5d4a', glyph: '▼' },
   { ch: 'w', name: 'Wagon exit', color: '#6b5d4a', glyph: 'W' },
-  { ch: '^', name: 'Ledge (one step up)', color: '#9aa66d', glyph: '▲' },
-  // The height vocabulary (delve-maps.js) — the canvas's level shading carries
-  // most of the reading; the terraces need no glyph at all.
-  { ch: '2', name: 'Terrace (two steps)', color: '#a8b478', glyph: '' },
-  { ch: '3', name: 'Terrace (three steps)', color: '#b6c184', glyph: '' },
-  { ch: '4', name: 'Terrace (four steps)', color: '#c2cc90', glyph: '' },
-  { ch: '5', name: 'Terrace (five steps)', color: '#cdd69c', glyph: '' },
-  { ch: '6', name: 'Terrace (six steps)', color: '#d8e0a8', glyph: '' },
-  { ch: ',', name: 'Sunken floor (one down)', color: '#55663f', glyph: '' },
+  // The height vocabulary (delve-maps.js) — still legal chars (shipped charts
+  // and the eyedropper speak them), but HIDDEN from the chip list: seven named
+  // heights beside a Raise verb was two ways to say one thing, and the sculpt
+  // now says it at any height (playtest 2026-08-21). The canvas's level
+  // shading and numbers carry the reading.
+  { ch: '^', name: 'Ledge (one step up)', color: '#9aa66d', glyph: '▲', hide: 1 },
+  { ch: '2', name: 'Terrace (two steps)', color: '#a8b478', glyph: '', hide: 1 },
+  { ch: '3', name: 'Terrace (three steps)', color: '#b6c184', glyph: '', hide: 1 },
+  { ch: '4', name: 'Terrace (four steps)', color: '#c2cc90', glyph: '', hide: 1 },
+  { ch: '5', name: 'Terrace (five steps)', color: '#cdd69c', glyph: '', hide: 1 },
+  { ch: '6', name: 'Terrace (six steps)', color: '#d8e0a8', glyph: '', hide: 1 },
+  { ch: ',', name: 'Sunken floor (one down)', color: '#55663f', glyph: '', hide: 1 },
   { ch: 'S', name: 'Steps (climb at a walk)', color: '#8a7a52', glyph: '≡' },
   { ch: 'u', name: 'Tunnel (under-deck)', color: '#6e6250', glyph: '∩' },
   { ch: 'n', name: 'Bridge (planked deck)', color: '#8a6a42', glyph: '≃' },
@@ -589,6 +644,7 @@ function paletteCatalogue() {
   out.push({ tab: 'tiles', name: 'Water (wade across)', badge: 'Overlay', swatch: WATER_TINT, glyph: '≈',
     sel: { kind: 'water' }, key: 'water', terms: 'liquid lake creek river sea flood' });
   for (const t of TILES) {
+    if (t.hide) continue;   // the height chars — the sculpt verbs speak for them now
     out.push({ tab: 'tiles', name: t.name, badge: `Tile '${t.ch}'`, swatch: t.color, glyph: t.glyph,
       sel: { kind: 'tile', id: t.ch }, key: 'tile' + t.ch });
   }
@@ -717,14 +773,18 @@ function renderSide() {
     pal.innerHTML = `<div class="med-hint">Click a tile, then paint. <b>Right-click</b> picks up whatever is
         under the cursor, <b>Shift+click</b> erases, <b>X+drag</b> draws a room and <b>V+drag</b> fills a
         rectangle. Keys 1-5 change tab, Q/E turn the 3D view, G toggles it, F fits.</div>`
-      // The vertical VERBS, ahead of the tiles: sculpt the ground a step at a
-      // time (pit , → floor . → ledge ^ → terraces 2 → 3) instead of hunting
-      // the height chars — the answer to "how do I add vertically."
+      // The vertical VERBS, ahead of the tiles — THE way to add vertically.
+      // The named height chips (ledge, terraces two..six, sunken) are gone
+      // from this list: seven names beside a Raise verb was two vocabularies
+      // for one fact, and the verbs now sculpt past both old ends (LV_MIN..
+      // LV_MAX steps — a stadium tier, a mine gallery, a mountain).
       + group('Sculpt the ground')
-      + `<button class="med-chip ${E.sel.kind === 'vert' && E.sel.dir === 1 ? 'on' : ''}" data-vert="1">
+      + `<button class="med-chip ${E.sel.kind === 'vert' && E.sel.dir === 1 ? 'on' : ''}" data-vert="1"
+          title="Lift ground one step per click or drag; V+drag lifts a whole rectangle. Works on any height, and on the ground under a bridge.">
           <span class="med-swatch" style="background:#3c4457">▲</span>Raise ground
           <span class="med-ch">+1</span></button>
-        <button class="med-chip ${E.sel.kind === 'vert' && E.sel.dir === -1 ? 'on' : ''}" data-vert="-1">
+        <button class="med-chip ${E.sel.kind === 'vert' && E.sel.dir === -1 ? 'on' : ''}" data-vert="-1"
+          title="Sink ground one step per click or drag; V+drag sinks a whole rectangle — a trench, a quarry, a shaft under a bridge.">
           <span class="med-swatch" style="background:#3c4457">▼</span>Lower ground
           <span class="med-ch">−1</span></button>`
       // WATER IS NOT A TILE, and it sits here anyway — because painting is how
@@ -738,7 +798,9 @@ function renderSide() {
           <span class="med-swatch" style="background:${WATER_TINT}">≈</span>Water (wade across)
           <span class="med-ch">drag</span></button>`
       + group('Tiles')
-      + TILES.map((t) => `
+      // Hidden height chips stay hidden — EXCEPT the one the eyedropper just
+      // armed, or a picked-up terrace would show a palette with nothing 'on'.
+      + TILES.filter((t) => !t.hide || (E.sel.kind === 'tile' && E.sel.id === t.ch)).map((t) => `
         <button class="med-chip ${E.sel.kind === 'tile' && E.sel.id === t.ch ? 'on' : ''}" data-tile="${t.ch}">
           <span class="med-swatch" style="background:${t.color}">${t.glyph}</span>${t.name}
           <span class="med-ch">'${t.ch}'</span>
@@ -882,6 +944,9 @@ function onMapAction(act, pal) {
       const row = E.map.grid[y] || '';
       return (row + '#'.repeat(Math.max(0, w - row.length))).slice(0, w);
     });
+    // The layer resizes WITH the grid, or a sculpted height would drift onto
+    // a different cell the moment a column was added.
+    reflowLevels(E.map);
     fitView(true); renderSide();
   } else if (act === 'new') {
     snap(); E.map = blank(36, 24); fitView(true); renderSide();
@@ -925,8 +990,8 @@ function restsOn(ax, ay, art) {
  * draw() runs on every hover move and the flood is cheap but not free.
  */
 function levelModel() {
-  const key = E.map.grid.join('\n');
-  if (E._modelKey !== key) { E._modelKey = key; E._model = makeLevelModel(E.map.grid); }
+  const key = E.map.grid.join('\n') + ' ' + (E.map.levels ? E.map.levels.join('\n') : '');
+  if (E._modelKey !== key) { E._modelKey = key; E._model = makeLevelModel(E.map.grid, E.map.levels); }
   return E._model;
 }
 
@@ -1066,7 +1131,7 @@ function lint() {
   for (const p of m.portals || []) {
     const dest = p.to === m.id ? m : DELVE_MAPS[p.to];
     if (!dest || !Array.isArray(dest.grid) || !Array.isArray(p.at)) continue;
-    const dm = p.to === m.id ? model : makeLevelModel(dest.grid);
+    const dm = p.to === m.id ? model : makeLevelModel(dest.grid, dest.levels);
     if (dm.deckAt(Math.floor(p.at[0]), Math.floor(p.at[1])) != null) out.push(`${p.at[0]},${p.at[1]} arrives on the GROUND under the deck`);
   }
 
@@ -1433,8 +1498,8 @@ function onBarClick(e) {
     E.sel = { kind: 'vert', dir: act === 'raise' ? 1 : -1 };
     E.tab = 'tiles'; renderSide();
     toast(act === 'raise'
-      ? 'Raise armed — click ground to lift it, a step at a time, up to six.'
-      : 'Lower armed — click ground to sink it, down to the pit.');
+      ? 'Raise armed — click or drag ground to lift it a step at a time; V+drag lifts a whole rectangle.'
+      : 'Lower armed — click or drag ground to sink it a step at a time; V+drag sinks a whole rectangle.');
   }
   else if (act === 'zoomIn') zoomTo(E.zoom * 1.25);
   else if (act === 'zoomOut') zoomTo(E.zoom / 1.25);
@@ -1576,6 +1641,103 @@ const setCell = (x, y, ch) => {
   E.map.grid[y] = row.slice(0, x) + ch + row.slice(x + 1);
 };
 
+// ---------------------------------------------------------------------------
+// The LEVELS LAYER (delve-maps.js parseLevels) — the sculpt's memory for what
+// the chars cannot spell: heights past 6, depths past -1, and the ground kept
+// under a deck. Row strings, one token per cell, '.' = defer to the char.
+// ---------------------------------------------------------------------------
+
+/** One cell's authored layer level, or null (the char speaks). */
+function levelTokAt(x, y) {
+  const row = E.map.levels && E.map.levels[y];
+  if (row == null) return null;
+  const t = String(row).trim().split(/\s+/)[x];
+  const v = t == null || t === '.' ? NaN : Number(t);
+  return Number.isFinite(v) ? Math.trunc(v) : null;
+}
+/** Write (or clear, v = null) one cell's layer token. The layer materializes
+ *  on the first number and evaporates with the last, so a draft that never
+ *  sculpted past the chars ships without the key at all. */
+function setLevelTok(x, y, v) {
+  if (v == null && !Array.isArray(E.map.levels)) return;
+  const W = E.map.grid[0].length, H = E.map.grid.length;
+  if (!Array.isArray(E.map.levels)) E.map.levels = [];
+  while (E.map.levels.length < H) E.map.levels.push(Array(W).fill('.').join(' '));
+  const toks = String(E.map.levels[y] || '').trim().split(/\s+/).filter(Boolean);
+  while (toks.length < W) toks.push('.');
+  toks.length = W;
+  toks[x] = v == null ? '.' : String(Math.max(LV_MIN, Math.min(LV_MAX, Math.trunc(v))));
+  E.map.levels[y] = toks.join(' ');
+  if (v == null && !E.map.levels.some((r) => /\d/.test(r))) delete E.map.levels;
+}
+
+/**
+ * Paint one ground char with the layer kept honest. A deck char BURIES the
+ * cell's AUTHORED level into the layer first — painting 'n' used to erase the
+ * trench it bridged, because the one-char-per-cell grid kept only the 'n'.
+ * Authored ONLY (a height char's level; a sculpted token simply stays): the
+ * derived grade must stay the flood's to derive, or every bridge painted on
+ * flat ground pinned a 0 under itself and refused the trench dug up to it
+ * later (review, 2026-08-21). Erasing a deck back to '.' REVEALS the buried
+ * token — the trench is a trench again; every other char clears it, because
+ * the paint states the cell's whole truth.
+ */
+function paintChar(x, y, ch) {
+  const was = (E.map.grid[y] || '')[x];
+  if (DECK_CH[ch] && !DECK_CH[was]) {
+    if (FLOOR_LV[was] != null && levelTokAt(x, y) == null) setLevelTok(x, y, FLOOR_LV[was]);
+  } else if (!DECK_CH[ch] && !(DECK_CH[was] && ch === '.')) {
+    setLevelTok(x, y, null);
+  }
+  setCell(x, y, ch);
+}
+
+/** What the sculpt verbs may shape: open ground of any height, and the ground
+ *  under a deck — DERIVED from the exported vocabulary (FLOOR_LV + DECK_CH),
+ *  never transcribed, so a height char added to delve-maps sculpts here the
+ *  same day. Walls, doors, climbs, exits and furnishings refuse rather than
+ *  being silently overwritten — the verbs shape terrain, tiles place things. */
+const SCULPTABLE = { '.': 1, ...Object.fromEntries(Object.keys(FLOOR_LV).map((c) => [c, 1])), ...DECK_CH };
+/** The chars that can still spell a level, by level (FLOOR_LV inverted) — the
+ *  sculpt prefers them: a draft that never leaves -1..6 is a chart any reader
+ *  of the old grid vocabulary, the Unity port included, walks unchanged. */
+const CHAR_OF_LV = { 0: '.', ...Object.fromEntries(Object.entries(FLOOR_LV).map(([c, lv]) => [lv, c])) };
+
+/**
+ * One step of sculpt at one cell: the MODEL's current floor, ±1, clamped to
+ * LV_MIN..LV_MAX. Within the char vocabulary the char is written (and the
+ * layer token cleared); past it the cell goes '.' and the layer speaks. On a
+ * deck cell the verb shapes the ground UNDER the deck — the layer pins it, so
+ * a trench can be dug back beneath a bridge that buried one.
+ * @returns {boolean} did anything change
+ */
+function sculptCell(x, y, dir, loud, model) {
+  const ch = (E.map.grid[y] || '')[x];
+  if (!SCULPTABLE[ch]) {
+    if (loud) toast('Raise and lower sculpt open ground — floors, terraces, pits, and the ground under a deck.');
+    return false;
+  }
+  // `model` is a rect-fill's pre-gesture snapshot: each write invalidates the
+  // cache, and asking fresh per cell made an 864-cell fill rebuild the whole
+  // flood 864 times. Chars and tokens read the same off the snapshot; only a
+  // derived deck ground could differ, and a uniform ±1 over a rect reading
+  // the PRE-rect world is the more honest gesture anyway.
+  const lv = (model || levelModel()).floorAt(x, y);
+  if (lv == null) return false;
+  const nv = Math.max(LV_MIN, Math.min(LV_MAX, lv + dir));
+  if (nv === lv) return false;
+  if (DECK_CH[ch]) {
+    setLevelTok(x, y, nv);
+  } else if (CHAR_OF_LV[nv] != null) {
+    setCell(x, y, CHAR_OF_LV[nv]);
+    setLevelTok(x, y, null);
+  } else {
+    setCell(x, y, '.');
+    setLevelTok(x, y, nv);
+  }
+  return true;
+}
+
 function cellAt(ev) {
   const cv = document.querySelector('.med-canvas');
   const r = cv.getBoundingClientRect();
@@ -1694,6 +1856,7 @@ function beginEdit(c, shift) {
   snap();
   E.painting = true;
   E.dragRight = false;
+  E.strokeCells = new Set([c.x + ',' + c.y]);
   apply(c, false);
   draw();
 }
@@ -1727,8 +1890,16 @@ function onMove(ev) {
     beginEdit(p.c, p.shift);
   }
   // Tiles and water both DRAG — they are the two brushes. Erasing drags too:
-  // drying a creek one click at a time is nobody's idea.
+  // drying a creek one click at a time is nobody's idea. The sculpt verbs
+  // drag as well, but only ONCE per cell per stroke (a brush is idempotent;
+  // a ±1 step is not, and a wiggle inside one cell must not dig a shaft).
   if (E.painting && (E.sel.kind === 'tile' || E.sel.kind === 'water')) { apply(c, E.dragRight); draw(); }
+  else if (E.painting && E.sel.kind === 'vert' && changed) {
+    E.strokeCells = E.strokeCells || new Set();
+    const k = c.x + ',' + c.y;
+    if (!E.strokeCells.has(k)) { E.strokeCells.add(k); apply(c, E.dragRight); }
+    draw();
+  }
   else if (changed) draw();
 }
 function onUp(ev) {
@@ -1750,17 +1921,25 @@ function onUp(ev) {
     E.paintStart = null;
     draw();
   }
-  // The armed rectangle commits here, as ONE undo step for the whole gesture.
+  // The armed rectangle commits here, as ONE undo step for the whole gesture
+  // — and a gesture that changed nothing (every cell refused the sculpt, the
+  // rect was already what it painted) rolls its snapshot back like a stroke.
   if (E.rectStart) {
     const r = dragRect(E.rectStart);
     if (r) {
       snap();
-      if (!fillRect(r, E.rectMode)) E.undo.pop();
+      if (!fillRect(r, E.rectMode)
+        || JSON.stringify(E.undo[E.undo.length - 1]) === JSON.stringify(E.map)) E.undo.pop();
     }
     E.rectStart = null; E.rectMode = null;
     draw();
   }
-  E.painting = false; E.pan = null; E.dragRight = false;
+  // A stroke that changed nothing rolls its own snapshot back — ONE place,
+  // instead of each tool popping mid-stroke (a pop during a drag ate a level
+  // of real history every time the stroke re-entered a cell it had done).
+  if (E.painting && E.undo.length
+    && JSON.stringify(E.undo[E.undo.length - 1]) === JSON.stringify(E.map)) E.undo.pop();
+  E.painting = false; E.pan = null; E.dragRight = false; E.strokeCells = null;
 }
 
 /** The live Surfaces drag as a grid rect — normalized and clamped, min 1×1
@@ -1823,24 +2002,29 @@ function fillRect(r, mode) {
     toast('A room is drawn with a WALL — arm B, b or an ore vein, then X+drag.');
     return false;
   }
+  // ONE model snapshot for the whole gesture (@see sculptCell's model param).
+  const model = E.sel.kind === 'vert' ? levelModel() : null;
   for (let y = r.y; y < r.y + r.h; y++) {
     for (let x = r.x; x < r.x + r.w; x++) {
-      if (mode === 'fill') { paintOne(x, y); continue; }
+      if (mode === 'fill') { paintOne(x, y, model); continue; }
       const edge = x === r.x || y === r.y || x === r.x + r.w - 1 || y === r.y + r.h - 1;
-      setCell(x, y, edge ? wallCh : '.');
+      paintChar(x, y, edge ? wallCh : '.');
     }
   }
   return true;
 }
-/** One cell of a filled rect, routed by what is armed (water is not a tile). */
-function paintOne(x, y) {
+/** One cell of a filled rect, routed by what is armed (water is not a tile;
+ *  the sculpt verbs raise or lower the whole rectangle one step — how a
+ *  stadium tier or a quarry floor is cut in one gesture). */
+function paintOne(x, y, model) {
   if (E.sel.kind === 'water') {
     E.map.water = E.map.water || [];
     if ((E.map.grid[y] || '')[x] === '#') return;
     if (!E.map.water.some(([wx, wy]) => wx === x && wy === y)) E.map.water.push([x, y]);
     return;
   }
-  if (E.sel.kind === 'tile') setCell(x, y, E.sel.id);
+  if (E.sel.kind === 'vert') { sculptCell(x, y, E.sel.dir, false, model); return; }
+  if (E.sel.kind === 'tile') paintChar(x, y, E.sel.id);
 }
 
 /**
@@ -1856,18 +2040,16 @@ function apply(c, erase) {
   if (y < 0 || y >= E.map.grid.length || x < 0 || x >= E.map.grid[0].length) return;
   if (erase) {
     if (E.sel.kind === 'water') {
-      const before = (E.map.water || []).length;
       E.map.water = (E.map.water || []).filter(([wx, wy]) => wx !== x || wy !== y);
-      if (E.map.water.length === before) E.undo.pop();
       return;
     }
-    setCell(x, y, '.');
+    paintChar(x, y, '.');
     return;
   }
 
   if (E.sel.kind === 'tile') {
     const was = (E.map.grid[y] || '')[x];
-    setCell(x, y, E.sel.id);
+    paintChar(x, y, E.sel.id);
     // A lock belongs to its door: painting anything else over a locked 'D'
     // takes the latch with the wood (a lock on plain floor is a lint ghost).
     if (was === 'D' && E.sel.id !== 'D' && Array.isArray(E.map.locks)) {
@@ -1902,26 +2084,17 @@ function apply(c, erase) {
     // tools use for their eraser.
     E.map.water = E.map.water || [];
     const i = E.map.water.findIndex(([wx, wy]) => wx === x && wy === y);
-    if (i >= 0) { E.undo.pop(); return; }        // already wet — nothing changed
+    if (i >= 0) return;                          // already wet — nothing changed
     if ((E.map.grid[y] || '')[x] === '#') {
       toast('The void has no bed to hold water — cut floor there first.');
-      E.undo.pop(); return;
+      return;
     }
     E.map.water.push([x, y]);
     return;
   }
 
   if (E.sel.kind === 'vert') {
-    // Sculpting: one step along the ground ladder per click. Anything that
-    // is not GROUND (walls, doors, climbs, decks) refuses rather than being
-    // silently overwritten — the verbs shape terrain, tiles place things.
-    const seq = [',', '.', '^', '2', '3', '4', '5', '6'];
-    const ch = (E.map.grid[y] || '')[x];
-    const i = seq.indexOf(ch);
-    if (i < 0) { toast('Raise and lower sculpt open ground — floors, ledges, terraces, pits.'); E.undo.pop(); return; }
-    const ni = Math.max(0, Math.min(seq.length - 1, i + E.sel.dir));
-    if (ni === i) { E.undo.pop(); return; }
-    setCell(x, y, seq[ni]);
+    sculptCell(x, y, E.sel.dir, true);
     return;
   }
 
@@ -1968,7 +2141,7 @@ function apply(c, erase) {
       E.map.water = E.map.water.filter(([wx, wy]) => wx !== x || wy !== y);
       return;
     }
-    setCell(x, y, '.');
+    paintChar(x, y, '.');
     return;
   }
 
@@ -2002,11 +2175,14 @@ function apply(c, erase) {
     const resting = restsOn(ax, ay, art);
     const cx = Math.floor(ax), cyRow = Number.isInteger(ay) ? ay - 1 : Math.floor(ay);
     const under = (E.map.grid[cyRow] || '')[cx];
-    if (!resting && under !== '.' && under !== 'f') {
-      // '^23,Sun' spells the seven level chars: honest ground to WALK, but
-      // the prop chart has no height slot yet — a desk on a bridge would
-      // draw at level 0 in every lens and lie in all of them.
-      toast('^23,Sun'.includes(under)
+    // The height question is the MODEL's — a sculpted cell wears '.' with its
+    // level in the layer, so the char alone can no longer clear a placement.
+    const offGrade = !resting && levelModel().floorAt(cx, cyRow) !== 0;
+    if (!resting && (offGrade || (under !== '.' && under !== 'f'))) {
+      // Honest ground to WALK, but the prop chart has no height slot yet — a
+      // desk on a bridge would draw at level 0 in every lens and lie in all
+      // of them.
+      toast(offGrade || '^23,Sun'.includes(under)
         ? 'Furniture keeps to ground level for now — terraces and decks cannot take a piece yet.'
         : 'Furniture needs a floor cell — or a bigger piece to rest on.');
       return;
@@ -2150,7 +2326,9 @@ function drawIso(g, s, m, model, themeFloor, wtile, wet) {
       const base = lv == null ? 0 : lv;
       let fill = paintAt(x, y) || (ch === '.' || ch === 'f' || lv != null ? themeFloor : (t ? t.color : '#a03a72'));
       // Height keeps the plan's reading: brighter per step up, darker sunken.
-      if (lv != null && lv !== 0) fill = shade(paintAt(x, y) || themeFloor, 1 + 0.14 * lv);
+      // tanh, not linear — a linear 0.14/step blew past white at level 7 and
+      // read every tall tower as one flat glare (and every deep shaft black).
+      if (lv != null && lv !== 0) fill = shade(paintAt(x, y) || themeFloor, 1 + 0.55 * Math.tanh(lv * 0.22));
       // Water outranks paint and the level wash alike — it is not a floor tile
       // and not a height, it is what is lying on top of one.
       const isWet = wet.has(x + ',' + y);
@@ -2198,8 +2376,30 @@ function drawIso(g, s, m, model, themeFloor, wtile, wet) {
         faceSW(u, v, dk, dk - 0.3, shade(dfill, 0.62));
         faceSE(u, v, dk, dk - 0.3, shade(dfill, 0.5));
       }
-      // Climbs keep their glyph, planted on the ground they derive.
-      if (t && t.glyph && !WALL_LV[ch]) {
+      // Ladders and vines draw as the THING — rails and rungs rising the one
+      // level they serve, against the face they serve it at — never a letter
+      // floating mid-cell (the drafting-table review's "ladders just stand
+      // alone in free space").
+      if (CLIMB_CH[ch] && CLIMB_CH[ch] !== 'stairs') {
+        const dir = model.servedDir(x, y);
+        const dv2 = dir ? vdir(dir[0], dir[1]) : [0, -1];
+        const eu = u + 0.5 + dv2[0] * 0.48, ev = v + 0.5 + dv2[1] * 0.48;
+        const tang = [dv2[1], -dv2[0]];                  // along the served edge
+        const rail = (k) => [eu + tang[0] * k, ev + tang[1] * k];
+        g.strokeStyle = ch === 'v' ? '#5d8f3c' : '#8a6033';
+        g.lineWidth = Math.max(1, s * 0.06);
+        for (const k of [-0.16, 0.16]) {
+          const [ru, rv] = rail(k);
+          const [ax2, ay2] = P(ru, rv, base), [bx2, by2] = P(ru, rv, base + 1.15);
+          g.beginPath(); g.moveTo(ax2, ay2); g.lineTo(bx2, by2); g.stroke();
+        }
+        for (let i = 1; i <= 4; i++) {
+          const [au, av] = rail(-0.16), [bu, bv] = rail(0.16);
+          const [ax2, ay2] = P(au, av, base + i * 0.27), [bx2, by2] = P(bu, bv, base + i * 0.27);
+          g.beginPath(); g.moveTo(ax2, ay2); g.lineTo(bx2, by2); g.stroke();
+        }
+      } else if (t && t.glyph && !WALL_LV[ch]) {
+        // Everything else keeps its glyph, planted on the ground it derives.
         const [gx2, gy2] = P(u + 0.5, v + 0.5, base);
         g.fillStyle = 'rgba(255,255,255,.8)';
         g.font = `${Math.round(s * 0.42)}px serif`;
@@ -2356,11 +2556,14 @@ function draw() {
         else { g.fillStyle = WATER_TINT; g.fillRect(x * s, y * s, s, s); }
       }
       // Level shading from the MODEL, not the chars: a terrace lightens per
-      // step, a pit darkens, and a climb shades at the ground it DERIVED —
-      // so the plan reads height exactly the way the lenses will walk it.
+      // step, a pit darkens PER STEP (a shaft at -8 must not read like the
+      // creek at -1), and a climb shades at the ground it DERIVED — so the
+      // plan reads height exactly the way the lenses will walk it.
       const lv = model.floorAt(x, y);
       if (lv != null && lv !== 0) {
-        g.fillStyle = lv > 0 ? `rgba(255,255,255,${Math.min(0.4, 0.12 * lv)})` : 'rgba(0,0,0,.35)';
+        g.fillStyle = lv > 0
+          ? `rgba(255,255,255,${Math.min(0.5, 0.055 * lv).toFixed(3)})`
+          : `rgba(0,0,0,${Math.min(0.6, 0.2 + 0.055 * (-lv - 1)).toFixed(3)})`;
         g.fillRect(x * s, y * s, s, s);
       }
       // A deck cell is TWO surfaces: the ground shading above stays honest,
@@ -2375,6 +2578,13 @@ function draw() {
         g.font = `${Math.round(s * 0.5)}px serif`;
         g.textAlign = 'center'; g.textBaseline = 'middle';
         g.fillText(t.glyph, x * s + s / 2, y * s + s / 2);
+      } else if (lv != null && (lv > 1 || lv < -1) && s >= 14) {
+        // Past one step the shading alone stops counting — the NUMBER is what
+        // the retired terrace chips used to say, now said per cell.
+        g.fillStyle = lv > 0 ? 'rgba(40,48,30,.8)' : 'rgba(255,255,255,.55)';
+        g.font = `${Math.round(s * 0.42)}px system-ui, sans-serif`;
+        g.textAlign = 'center'; g.textBaseline = 'middle';
+        g.fillText(String(lv), x * s + s / 2, y * s + s / 2);
       }
     }
   }

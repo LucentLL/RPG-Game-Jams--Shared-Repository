@@ -28,8 +28,10 @@ import { preyById } from './locales.js';
 import { THEMES, DECALS, ORE_KINDS, oreKindAt, mapForLocale, validateMap, makeLevelModel, CLIMB_CH, DECK_CH, FLOOR_LV, wetCells, waterDepths } from './delve-maps.js';
 import { waterFrames, waterStripUrl, WADE_SPEED, submergeFor, isSwimming } from './water.js';
 import { artSprite, ROOF_KIT, ROOF_GABLE_COL, roofCol } from './art.js';
-import { propVolume, propCell, blockerRadius, PLAYER_H } from './prop-volume.js';
+import { propVolume, propCell, blockerRadius, bodyRadius, clearOfBodies, PLAYER_H } from './prop-volume.js';
+import { hash2 } from '../game/engine/rng.js';
 import { facingOf, facingClass, facingIsIdentity } from './prop-facing.js';
+import { ladderArt } from '../game/arena-terrain.js';
 import { readPad, padReset, touchPrimary, onTouchPrimary, PAD } from '../platform/input.js';
 import { claimPad } from '../platform/ui-pad.js';
 import { openFieldSheet } from '../platform/field-sheet.js';
@@ -159,12 +161,18 @@ const CLIMB = { L: 'ladder', v: 'vine' };
  */
 const bakeChar = (ch, x, y, model) => {
   if (ch === LEDGE) return 'b';
-  if (FLOOR_LV[ch] != null) return ch;   // terraces 2-6 and the sunken ','
-  // A door or a key cell paints as the ground beneath it: the door itself is
-  // live geometry (it has to be able to OPEN), the key a standee.
-  if (CLIMB_CH[ch] || DECK_CH[ch] || ch === 'D' || ch === 'K') {
-    const f = model ? model.floorAt(x, y) : 0;
-    return (f != null && f < 0) ? ',' : '.';
+  // Every GROUND char asks the model, because the LEVELS LAYER (delve-maps.js
+  // parseLevels) can put any cell below grade — a '.' sculpted to -3 must bake
+  // as the sunken ',' or the painter would lay grade floor over the shaft. A
+  // door or a key cell paints as the ground beneath it likewise: the door
+  // itself is live geometry (it has to be able to OPEN), the key a standee.
+  if (FLOOR_LV[ch] != null || CLIMB_CH[ch] || DECK_CH[ch] || ch === 'D' || ch === 'K' || ch === '.') {
+    const f = model ? model.floorAt(x, y) : (FLOOR_LV[ch] ?? 0);
+    if (f != null && f < 0) return ',';
+    // An authored terrace char keeps its spelling (the extractor reads levels
+    // off the model either way); a layer-raised '.' stays '.' — its block
+    // geometry comes from the model, its grade paint hides beneath the block.
+    return (FLOOR_LV[ch] != null && ch !== ',') ? ch : '.';
   }
   return ch;
 };
@@ -197,11 +205,9 @@ const WATER_CELL_CAP = 400;
  *  CSS keyframe and honours the query itself (delve.css). */
 const reducedMotion = () => !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
 // Well-mixed 2D hash — naive xor-of-primes checkerboards on % 2 variant picks.
-const hash2 = (x, y) => {
-  let h = (x * 374761393 + y * 668265263) | 0;
-  h = ((h ^ (h >>> 13)) * 1274126177) | 0;
-  return (h ^ (h >>> 16)) >>> 0;
-};
+// It moved to the pure RNG module the day the world generator needed the same
+// lattice (world-gen.js): two authorings of one hash would drift, and this one
+// is mirrored in C# as TileAtlas.Hash2. @see game/engine/rng.js.
 
 /** Where each sheet key lives. THEMES and DECALS name sheets by these keys. */
 export const SHEET_URLS = {
@@ -478,12 +484,13 @@ function cutWallTex(sheets, theme, opts = {}) {
     const [tallE, tallW] = sidePair(tall, H);
     const [lowE, lowW] = sidePair(low, BLOCK_H);
     // Terraces in a walled theme tile the same wall cut to their own height —
-    // six rungs now: a keep is six steps of masonry, not three.
+    // one cut per DISTINCT height the chart actually stands (opts.blockLevels,
+    // from the model): a keep is however many steps of masonry it was built.
     block = {
       B: { face: tall.toDataURL(), sideE: tallE, sideW: tallW, top: top.toDataURL(), h: H },
       b: { face: low.toDataURL(), sideE: lowE, sideW: lowW, top: top.toDataURL(), h: BLOCK_H },
     };
-    for (let n = 2; n <= 6; n++) {
+    for (const n of (opts.blockLevels || [2, 3, 4, 5, 6])) {
       const tn = cut(theme.walls.tall, TILE, n * BLOCK_H);
       const [tE, tW] = sidePair(tn, n * BLOCK_H);
       block[n] = { face: tn.toDataURL(), sideE: tE, sideW: tW, top: top.toDataURL(), h: n * BLOCK_H };
@@ -509,7 +516,7 @@ function cutWallTex(sheets, theme, opts = {}) {
     const low = kind(BLOCK_H);
     const H = opts.wallH || BLOCK_H;
     block = { B: H === BLOCK_H ? low : kind(H), b: low };
-    for (let n = 2; n <= 6; n++) block[n] = kind(n * BLOCK_H);
+    for (const n of (opts.blockLevels || [2, 3, 4, 5, 6])) block[n] = kind(n * BLOCK_H);
   }
   // The pit floor wears the theme's own ground fill (a step down is still this
   // place); a bridge deck wears planks when the wood sheet rode along, and a
@@ -593,13 +600,32 @@ function extractGeometry(grid, themeNameAt, extras) {
       // baked char, because a LEDGE bakes as 'b' (@see bakeChar) and is
       // walked on, while an authored 'b' is masonry. Terraces '2'..'6' are
       // standable by the same question and get the same answer.
-      if (ch === 'B' || ch === 'b' || '23456'.includes(ch)) {
+      if (ch === 'B' || ch === 'b') {
         blocks.push({
           x, y, kind: ch,
           theme: themeNameAt ? themeNameAt(x, y) : null,
           wall: wallAt(x, y),
           paint: paintAt(x, y),
           stand: !!lvModel && lvModel.floorAt(x, y) != null,
+        });
+      } else if (lvModel ? ('.23456'.includes(ch) && (lvModel.floorAt(x, y) || 0) >= 1) : '23456'.includes(ch)) {
+        // Raised GROUND — asked of the MODEL, not the chars, so the '2'..'6'
+        // terraces and any layer-sculpted height (delve-maps.js parseLevels)
+        // are one answer: a column of face courses with a standable crown,
+        // however tall. ('.'-spelled cells only: an 'o' vein or an 'r'
+        // boulder on raised ground is a standee with its own art, not a
+        // column of rock.) Level 1 wears the 'b' block it always has (the
+        // ledge look); a deck cell's raised under-ground rises the same way,
+        // with the planks drawn above it. A MODEL-LESS plane (bakeEstate —
+        // the ranch, the arena) keeps the char reading: a terrace char there
+        // must still stand its column or its collision walks into thin air.
+        const lvUp = lvModel ? lvModel.floorAt(x, y) : +ch;
+        blocks.push({
+          x, y, kind: lvUp === 1 ? 'b' : lvUp,
+          theme: themeNameAt ? themeNameAt(x, y) : null,
+          wall: wallAt(x, y),
+          paint: paintAt(x, y),
+          stand: !!lvModel,
         });
       }
     }
@@ -621,11 +647,17 @@ function extractGeometry(grid, themeNameAt, extras) {
         // whose ground runs below grade keeps its creek bed — the planks are
         // drawn separately, above it.
         if (lv != null && lv < 0) {
+          // Each inner face carries its TOP level (or false: no face). Before
+          // the levels layer every pit was -1 and every face hung from grade;
+          // two adjacent trenches of unequal depth exist now, and the deeper
+          // one's shared face must start at the shallower FLOOR — a face from
+          // grade would stand phantom masonry across the open air between.
           const walls = ORTH.map(([dx, dy]) => {
             const nch = aat(x + dx, y + dy);
             if (nch === '#') return false;              // the void owns its own faces
             const nf = model.floorAt(x + dx, y + dy);
-            return nf == null ? true : nf > lv;         // masonry, or just higher ground
+            if (nf == null) return 0;                   // masonry stands from grade
+            return nf > lv ? Math.min(0, nf) : false;   // the neighbour's floor, capped at grade
           });
           // A standee sunk below the plane projects its feet DOWN-SCREEN over
           // the ground south of the pit (the baked canvas is the bottom of
@@ -666,7 +698,7 @@ async function bakeMap(map, theme) {
   const sheets = await loadSheets(map, theme);
   // The one height fact every lens shares — levels, climbs, decks (ONE RULES
   // FACT). Computed here so the bake, the geometry and the walk all read it.
-  const model = makeLevelModel(map.grid);
+  const model = makeLevelModel(map.grid, map.levels);
   // Two grids from here on. The AUTHORED one answers every gameplay question —
   // what blocks, what is a step up, what you can climb. The RENDER one is what
   // the baker and the geometry extractor see, with the height vocabulary
@@ -810,10 +842,22 @@ async function bakeMap(map, theme) {
   // PAINT themes join the same pool: a painted cell's crown (where it is one
   // you can stand on) is cut from the theme the ground wears, and that is the
   // undressed cut — the same one a region gets, read for its `groundTop`.
-  const tex = cutWallTex(sheets, theme);
+  // Which block heights this chart actually stands (the model's, so the
+  // LEVELS LAYER counts) — every texture set on the plane cuts exactly these,
+  // and a ten-step tower gets a ten-course face instead of falling back to
+  // the room-height 'B' cut.
+  const blockLevels = new Set([2, 3, 4, 5, 6]);
+  for (let y = 0; y < rows; y++) {
+    for (let x = 0; x < cols; x++) {
+      const f = model.floorAt(x, y);
+      if (f != null && f >= 2) blockLevels.add(f);
+    }
+  }
+  const cutOpts = { blockLevels: [...blockLevels] };
+  const tex = cutWallTex(sheets, theme, cutOpts);
   tex.byTheme = {};
   for (const name of new Set([...regions, ...paints].map((r) => r.theme))) {
-    if (THEMES[name]) tex.byTheme[name] = cutWallTex(sheets, THEMES[name]);
+    if (THEMES[name]) tex.byTheme[name] = cutWallTex(sheets, THEMES[name], cutOpts);
   }
   // A SECOND pool for the wall dressing, cut differently on purpose: a region
   // is a room and may stand its own walls at its own height (the campus's
@@ -822,7 +866,7 @@ async function bakeMap(map, theme) {
   tex.byWall = {};
   for (const name of new Set(wallRects.map((r) => r.theme))) {
     if (THEMES[name]) {
-      tex.byWall[name] = cutWallTex(sheets, THEMES[name], { wallH: tex.block.B.h, dressing: true });
+      tex.byWall[name] = cutWallTex(sheets, THEMES[name], { ...cutOpts, wallH: tex.block.B.h, dressing: true });
     }
   }
   return {
@@ -1142,8 +1186,11 @@ function mountScene(prep, entry) {
       continue;
     }
     if (b.h <= TILE) continue;
-    const kind = (map.grid[b.y] || '')[b.x];
-    const topLv = '23456'.includes(kind) ? +kind : 99;
+    // WALKABLE tops carry their level so the x-ray never fires for the walker
+    // standing ON them — asked of the MODEL (a layer-sculpted tower is a '.'
+    // in the chart), masonry ('B' walls) stands nobody and reads 99.
+    const f = D.model.floorAt(b.x, b.y);
+    const topLv = f != null ? f : 99;
     D.occluders.push({ els: b.els, x0: b.x, x1: b.x + 1, y: b.y + 1, rows: rowsHidden(b.h), on: 0, topLv });
   }
 
@@ -1182,8 +1229,8 @@ function mountScene(prep, entry) {
     for (let x = 0; x < D.cols; x++) {
       const ch = map.grid[y][x];
       if (ch === 's' || ch === 'w' || ch === 'd') D.exit = { x: x + 0.5, y: y + 0.5, lv: (baked.model.surfacesAt(x, y)[0] || 0) };
-      // The thing you climb, standing against the face of the ledge it serves.
-      if (CLIMB[ch]) addProp(`<span class="dv-${CLIMB[ch]}"></span>`, x + 0.5, y + 1, 30);
+      // The thing you climb, bolted flat on the face of the ledge it serves.
+      if (CLIMB[ch]) addClimbDressing(ch, x, y);
       // A key still waiting to be taken (a taken one stays taken — the ledger).
       if (ch === 'K' && !D.keysTaken.has(map.id + ':' + x + ',' + y)) {
         const el = addProp(`<img src="${keyTexture()}" style="width:100%;image-rendering:pixelated" alt="">`, x + 0.5, y + 0.9, 18);
@@ -1305,7 +1352,9 @@ function mountScene(prep, entry) {
   for (const sp of spawns) spawnCreature(sp.prey, sp.img, sp.s.x + 0.5, sp.s.y + 0.5);
 
   // The room's own people — whoever the caller says works here, going about
-  // their business. They wander, they don't fight, and they don't block.
+  // their business. They wander, they don't fight — and they DO block, like
+  // every other character (occupying space is the decree, 2026-08-21; they
+  // used to be walk-through by an earlier choice).
   D.companions = [];
   // WHERE SOMEONE STANDS IS THE MODEL'S ANSWER, not a dice roll. A lens may say
   // `at` for a person — the guild derives it from that member's week, so the
@@ -1576,7 +1625,6 @@ export function attachTerrain(parent, baked, opts = {}) {
   // The south inner wall faces away from the camera and is never drawn.
   for (const p of (baked.pits || [])) {
     const drop = p.lv * BLOCK_H;                       // negative px
-    const hT = -p.lv * BLOCK_H / TILE;                 // wall drop in tile units
     const base = 10 + (p.y + 1) * TILE;
     const zTop = zMode === 'under' ? 1 : base - 8;
     const zFace = zMode === 'under' ? 1 : base - 4;
@@ -1585,21 +1633,28 @@ export function attachTerrain(parent, baked, opts = {}) {
     const K = cutFor(p).block.b;
     el('dv-block-top', cell(p.x, p.y, 1, 1) +
       `background-image:url(${tex.pitTop});background-size:100% 100%;transform:translateZ(${drop}px);z-index:${zTop};`);
+    // Each face spans its OWN top (the walls entry — grade, or a shallower
+    // neighbour's floor) down to this pit's floor, and TILES the single rock
+    // course per step of that drop — a shaft at -6 is six courses of masonry,
+    // not one course stretched to blur. `!== false`: grade is top level 0.
     const [wN, , wW, wE] = p.walls;
-    if (wN) {
-      el('dv-face', cell(p.x, p.y, 1, hT) +
-        `background-image:url(${K.face});background-size:100% 100%;` +
-        `transform-origin:50% 0;transform:rotateX(-90deg);z-index:${zFace};`);
+    const spanT = (topLv) => (topLv - p.lv) * BLOCK_H / TILE;   // face drop in tile units
+    const lift = (topLv) => (topLv ? `translateZ(${topLv * BLOCK_H}px) ` : '');
+    const courseFor = (topLv) => (100 / Math.max(1, topLv - p.lv)).toFixed(3);
+    if (wN !== false) {
+      el('dv-face', cell(p.x, p.y, 1, spanT(wN)) +
+        `background-image:url(${K.face});background-size:100% ${courseFor(wN)}%;` +
+        `transform-origin:50% 0;transform:${lift(wN)}rotateX(-90deg);z-index:${zFace};`);
     }
-    if (wW) {
-      el('dv-face', cell(p.x, p.y, hT, 1) +
-        `background-image:url(${K.sideE});background-size:100% 100%;` +
-        `transform-origin:0 50%;transform:rotateY(90deg);z-index:${zFace};`);
+    if (wW !== false) {
+      el('dv-face', cell(p.x, p.y, spanT(wW), 1) +
+        `background-image:url(${K.sideE});background-size:${courseFor(wW)}% 100%;` +
+        `transform-origin:0 50%;transform:${lift(wW)}rotateY(90deg);z-index:${zFace};`);
     }
-    if (wE) {
-      el('dv-face', cell(p.x + 1 - hT, p.y, hT, 1) +
-        `background-image:url(${K.sideW});background-size:100% 100%;` +
-        `transform-origin:100% 50%;transform:rotateY(-90deg);z-index:${zFace};`);
+    if (wE !== false) {
+      el('dv-face', cell(p.x + 1 - spanT(wE), p.y, spanT(wE), 1) +
+        `background-image:url(${K.sideW});background-size:${courseFor(wE)}% 100%;` +
+        `transform-origin:100% 50%;transform:${lift(wE)}rotateY(-90deg);z-index:${zFace};`);
     }
     // The south lip: the neighbour row's own baked ground, re-drawn as a quad
     // that sorts over a body sunk in the pit and under a body standing on it.
@@ -2006,6 +2061,79 @@ function addProp(html, x, y, w, room) {
   return el;
 }
 
+/** The kit ladder cut three ways — upright for the N/S faces and pre-rotated
+ *  for E/W exactly as sidePair rotates the block faces, so the rungs run
+ *  ACROSS the ladder whichever wall it bolts to. Cached; null while loading
+ *  (the CSS rungs are the paint until then, and stay if the sheet 404s). */
+let _ladderCuts = null;
+function ladderCuts() {
+  if (_ladderCuts) return _ladderCuts;
+  _ladderCuts = ladderArt(TILES_BASE).then((art) => {
+    const cv = (w, h, fn) => {
+      const c = document.createElement('canvas');
+      c.width = w; c.height = h;
+      const g = c.getContext('2d');
+      g.imageSmoothingEnabled = false;
+      fn(g);
+      return c;
+    };
+    const e = cv(art.height, art.width, (g) => { g.translate(0, art.width); g.rotate(-Math.PI / 2); g.drawImage(art, 0, 0); });
+    const w2 = cv(art.height, art.width, (g) => { g.translate(art.height, 0); g.scale(-1, 1); g.drawImage(e, 0, 0); });
+    return { s: art.toDataURL(), e: e.toDataURL(), w: w2.toDataURL() };
+  }).catch(() => { _ladderCuts = null; return null; });
+  return _ladderCuts;
+}
+
+/**
+ * The climb's dressing. A LADDER with a served face gets a REAL quad bolted
+ * flat on that face — the kit's own caveladders wood (arena-terrain ladderArt;
+ * art law: owned tilesets first), one rung of height because one rung is all
+ * the law lets any climb serve, rails a hand proud of the lip. A vine (or a
+ * ladder nothing serves) stays a standee, leaned toward the face like the
+ * arena's and footed ON ITS OWN FLOOR — liftAt's climb answer is CLIMB_LIFT,
+ * meant for a BODY mid-rungs, and hovering the dressing half a block up was
+ * the arena FP's "ladders only go halfway" bug, reshipped here.
+ */
+function addClimbDressing(ch, x, y) {
+  const m = D.model;
+  const lv = m.floorAt(x, y) || 0;
+  const dir = m.servedDir(x, y);       // ONE RULES FACT: the model names the face
+  if (ch !== 'L' || !dir) {
+    const lean = dir ? [dir[0] * 0.4, dir[1] * 0.4] : [0, 0];
+    const el = addProp(`<span class="dv-${CLIMB[ch]}"></span>`, x + 0.5 + lean[0], y + 1 + lean[1], 30);
+    el.style.setProperty('--dvlift', lv * BLOCK_H + 'px');
+    return;
+  }
+  const cols = D.cols, rows = D.rows;
+  const LH = BLOCK_H + 12, LW = 30;                 // px: one rung + proud rails
+  const top = lv * BLOCK_H + LH;
+  const hT = LH / TILE, wT = LW / TILE;
+  // One template, four bearings: N/S faces are wT wide at the served row edge
+  // (rotateX); E/W faces put the drop in their WIDTH like every side face
+  // (rotateY), pre-rotated art to match (@see ladderCuts).
+  const isNS = dir[1] !== 0;
+  const left = isNS ? x + (1 - wT) / 2 : (dir[0] === -1 ? x : x + 1 - hT);
+  const topEdge = isNS ? (dir[1] === -1 ? y : y + 1) : y + (1 - wT) / 2;
+  const [w, h] = isNS ? [wT, hT] : [hT, wT];
+  const [origin, rot, key] = isNS
+    ? ['50% 0', 'rotateX(-90deg)', 's']
+    : (dir[0] === -1 ? ['0 50%', 'rotateY(90deg)', 'e'] : ['100% 50%', 'rotateY(-90deg)', 'w']);
+  const face = document.createElement('div');
+  face.className = 'dv-face dv-ladder-face';
+  face.style.cssText =
+    `left:${left / cols * 100}%;top:${topEdge / rows * 100}%;` +
+    `width:${w / cols * 100}%;height:${h / rows * 100}%;` +
+    `transform-origin:${origin};transform:translateZ(${top}px) ${rot};` +
+    `z-index:${10 + (y + 1) * TILE - 3};`;
+  D.field.appendChild(face);
+  ladderCuts().then((cuts) => {
+    if (cuts && face.isConnected) {
+      face.style.backgroundImage = `url(${cuts[key]})`;
+      face.style.backgroundSize = '100% 100%';
+    }
+  });
+}
+
 /** Ground a decal cutout the same way sprites are grounded — a 48px cell crop
  *  usually has empty rows under the object. Measured once per decal. */
 function groundDecal(name, cv, h) {
@@ -2307,16 +2435,31 @@ const stepSurface = (lv, fx, fy, x, y) =>
     ? (D.model.surfacesAt(Math.floor(x), Math.floor(y))[0] ?? null)
     : D.model.pickSurface(lv, Math.floor(fx), Math.floor(fy), Math.floor(x), Math.floor(y));
 
+/** Every body that blocks `self` right now — CHARACTERS OCCUPY SPACE (user
+ *  decree, 2026-08-21). Humanoids block at BODY_R; a creature at the width term
+ *  its engage ring already uses (bodyRadius), so contact-fights fire first. */
+const bodiesFor = (self) => {
+  const out = [];
+  const push = (e, r) => { if (e && e !== self) out.push({ x: e.x, y: e.y, lv: e.lv, r }); };
+  push(D.player, BODY_R);
+  for (const c of D.creatures) push(c, bodyRadius(c.fw / TILE));
+  for (const c of D.companions) push(c, BODY_R);
+  return out;
+};
+
 /** The surface the last successful canStand picked — consumed by tryMove. */
 let _pick = null;
-function canStand(x, y, fx, fy, lv, noUnder) {
+function canStand(x, y, fx, fy, lv, noUnder, self) {
   _pick = null;
   if (!(passAt(x - BODY_R, y - BODY_R) && passAt(x + BODY_R, y - BODY_R) &&
     passAt(x - BODY_R, y + BODY_R) && passAt(x + BODY_R, y + BODY_R) &&
     // The extra standoff from a wall to the NORTH — see WALL_BACK. Props are
     // exempt (they use `solids`), so you can still tuck in behind an anvil.
     !tallAt(x - BODY_R, y - BODY_R - WALL_BACK) && !tallAt(x + BODY_R, y - BODY_R - WALL_BACK) &&
-    clearOfSolids(x, y, lv))) return false;
+    clearOfSolids(x, y, lv) &&
+    // Other characters are as solid as the props are — and a spawn probe
+    // (no self, no origin) refuses occupied ground by the same test.
+    clearOfBodies(x, y, lv, BODY_R, bodiesFor(self), fx, fy))) return false;
   const pick = stepSurface(lv, fx, fy, x, y);
   if (pick == null) return false;
   // A body too big for the passage refuses the under-surface of a deck —
@@ -2336,8 +2479,8 @@ function canStand(x, y, fx, fy, lv, noUnder) {
  *  A successful axis commits the body to the surface the law picked. */
 function tryMove(e, dx, dy, noUnder) {
   let moved = false;
-  if (dx && canStand(e.x + dx, e.y, e.x, e.y, e.lv, noUnder)) { e.x += dx; e.lv = _pick; moved = true; }
-  if (dy && canStand(e.x, e.y + dy, e.x, e.y, e.lv, noUnder)) { e.y += dy; e.lv = _pick; moved = true; }
+  if (dx && canStand(e.x + dx, e.y, e.x, e.y, e.lv, noUnder, e)) { e.x += dx; e.lv = _pick; moved = true; }
+  if (dy && canStand(e.x, e.y + dy, e.x, e.y, e.lv, noUnder, e)) { e.y += dy; e.lv = _pick; moved = true; }
   return moved;
 }
 
@@ -2418,7 +2561,7 @@ function moveCreatures(dt) {
         // leaves the pit accumulating wildlife.
         for (let i = 0; i < 6; i++) {
           const nx = c.home.x + (Math.random() * 6 - 3), ny = c.home.y + (Math.random() * 6 - 3);
-          if (canStand(nx, ny) && _pick >= (c.lv || 0)) { c.tx = nx; c.ty = ny; c.mode = 'walk'; break; }
+          if (canStand(nx, ny, null, null, null, false, c) && _pick >= (c.lv || 0)) { c.tx = nx; c.ty = ny; c.mode = 'walk'; break; }
         }
         if (c.mode !== 'walk') c.t = 1.5;
       }
@@ -2448,7 +2591,7 @@ function moveCompanions(dt) {
       if (c.t <= 0) {
         for (let i = 0; i < 8; i++) {
           const nx = c.home.x + (Math.random() * 5 - 2.5), ny = c.home.y + (Math.random() * 5 - 2.5);
-          if (canStand(nx, ny)) { c.tx = nx; c.ty = ny; c.mode = 'walk'; break; }
+          if (canStand(nx, ny, null, null, null, false, c)) { c.tx = nx; c.ty = ny; c.mode = 'walk'; break; }
         }
         if (c.mode !== 'walk') c.t = 1.5;
       }
@@ -2688,7 +2831,7 @@ async function workAt(useId, opts = {}) {
   // Step in to the station and square up to it — and COMMIT the surface the
   // step-in lands on, like every other position write (the teleport crossed a
   // cell line with a stale lv and the standee rendered on the wrong floor).
-  if (canStand(u.x, u.y + 0.58)) { p.x = u.x; p.y = u.y + 0.58; p.lv = _pick; }
+  if (canStand(u.x, u.y + 0.58, null, null, null, false, p)) { p.x = u.x; p.y = u.y + 0.58; p.lv = _pick; }
 
   const result = await swingLoop({
     tool: opts.tool, tx: u.x, ty: u.y, beats: opts.beats || 3, anim: opts.anim,

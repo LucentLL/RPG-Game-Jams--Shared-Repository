@@ -7,8 +7,8 @@
   "grid": [
     "###########",
     "#BBBBBBBBB#",
-    "#B.......B#",
-    "#B.f.f.f.B#",
+    "#B,.....^B#",
+    "#BSf.f.fSB#",
     "#B.......B#",
     "#B.f.f.f.B#",
     "#B.......B#",
@@ -60,6 +60,30 @@
       "art": "bedCandle",
       "x": 8.4,
       "y": 7
+    }
+  ],
+  "portals": [
+    {
+      "x": 2.5,
+      "y": 2.5,
+      "to": "dormitoryB1",
+      "at": [
+        5.5,
+        7.3
+      ],
+      "enter": true,
+      "stairs": true
+    },
+    {
+      "x": 8.5,
+      "y": 2.5,
+      "to": "dormitory2",
+      "at": [
+        5.5,
+        7.3
+      ],
+      "enter": true,
+      "stairs": true
     }
   ]
 }

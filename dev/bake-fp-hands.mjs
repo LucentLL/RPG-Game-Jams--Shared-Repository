@@ -121,8 +121,12 @@ function armMask(body, weapon) {
 }
 
 const SW = [WORN.rest].concat(WORN.swing);
+// The bare fist rests on the stand cell, not the follow-through — same list
+// fp-hands.js mounts for an empty hand (seeded off the sword sheet, never drawn).
+const BARE = [WORN.stand].concat(WORN.swing);
 // Every viewmodel sheet the kit carries, against a spread of body tops.
 const WEAPONS = [
+  ['bare-fist', 'core/weapon/sword1.png', BARE],
   ['sword', 'core/weapon/sword1.png', SW],
   ['dagger', 'ce2/weapon/daggerR.png', SW],
   ['axe', 'ce1/weapon/axe1.png', SW],

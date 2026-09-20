@@ -22,6 +22,12 @@ export const MATERIALS = {
   // and sold for gold at the Market. Neither is buyable — you hunt them.
   game_meat: { id: 'game_meat', name: 'Game Meat', kind: 'food', tier: 2, col: '#a85a4a' },
   pelt: { id: 'pelt', name: 'Pelt', kind: 'hide', tier: 1, col: '#b8895a' },
+  // TIMBER — the stock every trainee cuts their teeth on (owner, 2026-09-20:
+  // 'Each weapon, armor, and shield should have a wood version'). It is the rung
+  // BELOW hide in the Forge's ladder: a wooden sword, a lath shield, a practice
+  // cap. Its own kind rather than an ore, because it is not dug; it shelves at
+  // the Forge with the ores and the Market sells it by the beam.
+  timber: { id: 'timber', name: 'Timber', kind: 'timber', tier: 1, col: '#a9763f' },
   // Refining reagents — CRAFTED by the other trades, never bought (RO's protective ores).
   // Tempering Oil (Alchemist): a failed refine only drops the piece −1 instead of breaking.
   // Smith's Blessing (Enchanter): a failed refine keeps its level. Shelved at the Forge.
@@ -30,7 +36,7 @@ export const MATERIALS = {
 };
 
 /** Which room a material kind is stored in (its working inventory). */
-export const ROOM_OF_KIND = { ore: 'forge', herb: 'laboratory', food: 'kitchen', hide: 'armory', reagent: 'forge' };
+export const ROOM_OF_KIND = { ore: 'forge', herb: 'laboratory', food: 'kitchen', hide: 'armory', reagent: 'forge', timber: 'forge' };
 /** The material ids shelved in a given room's store. */
 export function roomMaterialIds(roomId) {
   return Object.keys(MATERIALS).filter((k) => ROOM_OF_KIND[MATERIALS[k].kind] === roomId);

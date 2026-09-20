@@ -87,12 +87,47 @@ const ok = (name, got, want) => {
   ok('grade vein derives 0', m.floorAt(2, 2), 0);
 }
 
+// ── 1b. The LEVELS LAYER — sculpted heights past the char vocabulary ────────
+
+{ // A layer value IS the level; a '.' token defers to the char.
+  const m = makeLevelModel(['#####', '#.2.#', '#####'], ['. . . . .', '. 8 . -3 .', '. . . . .']);
+  ok('layer overrides the char', m.floorAt(1, 1), 8);
+  ok('a dot token defers to the char', m.floorAt(2, 1), 2);
+  ok('layer digs below the char floor', m.floorAt(3, 1), -3);
+  ok('no leap onto an eight-step tower', m.pickSurface(0, 2, 1, 1, 1), null);
+  ok('dropping into the shaft is free', m.pickSurface(2, 2, 1, 3, 1), -3);
+}
+{ // The step law climbs a layered tower one rung at a time, past six.
+  const m = makeLevelModel(['#########', '#..S.S..#', '#########'],
+    ['. . . . . . . . .', '. 6 6 . 7 . 8 8 .', '. . . . . . . . .']);
+  ok('stair derives the six-step landing', m.floorAt(3, 1), 6);
+  ok('chain climbs 6→7', m.pickSurface(6, 3, 1, 4, 1), 7);
+  ok('chain climbs 7→8', m.pickSurface(7, 5, 1, 6, 1), 8);
+  ok('strolling onto the seventh step is refused', m.pickSurface(6, 2, 1, 4, 1), null);
+  ok('no leap 6→8', m.pickSurface(6, 3, 1, 6, 1), null);
+}
+{ // A bridge over a layered trench KEEPS the trench: the deck cell's authored
+  // level pins the ground beneath (painting 'n' used to erase the height char).
+  const m = makeLevelModel(['#######', '#..n..#', '#######'], ['. . . . . . .', '. . . -2 . . .', '. . . . . . .']);
+  ok('bridge ground pinned at -2', m.floorAt(3, 1), -2);
+  ok('bridge deck still at grade', m.deckAt(3, 1), 0);
+  ok('under AND over (two steps is headroom)', m.surfacesAt(3, 1), [-2, 0]);
+}
+{ // A layer value on UNGROUND is ignored — a wall has no level to author.
+  const m = makeLevelModel(['#####', '#.B.#', '#####'], ['. . . . .', '. . 9 . .', '. . . . .']);
+  ok('a wall stands nobody, layered or not', m.floorAt(2, 1), null);
+}
+{ // The layer clamps: past the sculptable range a value pins at the rim.
+  const m = makeLevelModel(['###', '#.#', '###'], ['. . .', '. 999 .', '. . .']);
+  ok('a runaway level pins at LV_MAX', m.floorAt(1, 1), 64);
+}
+
 // ── 2. The shipped charts must resolve ──────────────────────────────────────
 
 const ORTH = [[0, -1], [0, 1], [-1, 0], [1, 0]];
 for (const [id, map] of Object.entries(DELVE_MAPS)) {
   if (!map || !map.grid) continue;
-  const m = makeLevelModel(map.grid);
+  const m = makeLevelModel(map.grid, map.levels);
   const at = (x, y) => (map.grid[y] || '')[x];
   for (let y = 0; y < m.rows; y++) {
     for (let x = 0; x < m.cols; x++) {

@@ -72,6 +72,11 @@ import { packOfKind } from './map-pack.js';
  *      editor lint both refuse it; span a trench or open ground instead).
  *
  * Interiors may also carry:
+ *   levels  row strings shaped like the grid, one space-separated token per
+ *           cell: '.' defers to the cell's char, an integer IS its floor level
+ *           (see parseLevels). The chars spell -1..6; the layer spells the
+ *           rest — a keep past six steps, a shaft below one, and the ground
+ *           kept under a bridge. Absent on every chart that predates it.
  *   name    the room's title, shown in the HUD (and on arrival)
  *   water   [[x, y], …] the cells under water — see wetCells(). Composes with
  *           whatever the grid says that cell already is: put it in a ',' bed
@@ -248,11 +253,53 @@ export const MIN_CLEAR = 2;
  *  (passability owns the block; the model owns only the height). */
 const UNGROUND = { '#': 1, B: 1, b: 1, F: 1 };
 
+/** The sculptable range, in steps. Wide enough for a mountain and a mine under
+ *  it; bounded so a typo'd level can't put the camera a kilometre underground. */
+export const LV_MIN = -64, LV_MAX = 64;
+
+/**
+ * THE LEVELS LAYER — authored heights past the char vocabulary.
+ *
+ * `map.levels` is optional: row strings shaped exactly like the grid, each a
+ * space-separated token per cell — '.' defers to the cell's char, an integer
+ * IS that cell's floor level. Row strings (not [[x,y,lv]] triples) because the
+ * Unity port's JsonUtility cannot read nested arrays (the locks/water lesson,
+ * MapPack.cs CellPairs) but carries string[] for free, like the grid itself.
+ *
+ * The chars stay a complete language for what they can spell (-1..6) — every
+ * shipped chart and old draft is a chart with no layer. The layer exists for
+ * what they cannot: a tower past six steps, a shaft below one, and the ground
+ * UNDER a deck ('u'/'n' replaced their cell's height char at paint time, so a
+ * bridge ERASED the trench it spanned — an authored level on a deck cell is
+ * that buried fact, kept).
+ * @returns {(number|null)[][]} per-cell authored level, null = defer to char
+ */
+export function parseLevels(levels, rows, cols) {
+  const out = [];
+  for (let y = 0; y < rows; y++) {
+    const src = levels && levels[y];
+    // filter(Boolean): splitting a blank row yields [''] and Number('') is 0,
+    // which is finite — an empty string must never pin cell (0,y) to grade.
+    const toks = src == null ? null
+      : Array.isArray(src) ? src : String(src).trim().split(/\s+/).filter(Boolean);
+    const row = new Array(cols).fill(null);
+    if (toks) {
+      for (let x = 0; x < cols && x < toks.length; x++) {
+        const v = toks[x] === '.' ? NaN : Number(toks[x]);
+        if (Number.isFinite(v)) row[x] = Math.max(LV_MIN, Math.min(LV_MAX, Math.trunc(v)));
+      }
+    }
+    out.push(row);
+  }
+  return out;
+}
+
 /**
  * The height law of one grid, computed once and asked by every lens.
  *
  * Levels are per-CELL facts derived entirely from the chart:
- * - a plain floor char stands at FLOOR_LV[ch] || 0;
+ * - a plain floor char stands at FLOOR_LV[ch] || 0 — unless the levels layer
+ *   names a number for the cell, which then IS the level (see parseLevels);
  * - a climb cell stands at the LOWEST adjacent ground (it is the way up from
  *   there — the Sparring Ring's ladders read level 0 exactly as they always
  *   have), resolved by flood so chained stairs land on the landing below them;
@@ -260,6 +307,8 @@ const UNGROUND = { '#': 1, B: 1, b: 1, F: 1 };
  *   neighbouring ground (the passage continues it), deck = the highest (the
  *   crossing continues it), both resolved by flood so a long span holds its
  *   height mid-air. The under-passage exists only with MIN_CLEAR of headroom.
+ *   An authored level on a climb or deck cell pins its GROUND instead of
+ *   deriving it — the trench under a bridge, the authored base of a shaft.
  *
  * THE STEP LAW (pickSurface) is the shipped ledge law, generalized and
  * tightened to one rung: dropping any distance is always legal; climbing is
@@ -267,24 +316,29 @@ const UNGROUND = { '#': 1, B: 1, b: 1, F: 1 };
  * ground is therefore terraced by construction — exactly the grammar the
  * ledge shipped with, now tall enough to build a keep out of.
  */
-export function makeLevelModel(grid) {
+export function makeLevelModel(grid, levels) {
   const rows = grid.length, cols = grid[0].length;
   const at = (x, y) => (x < 0 || y < 0 || x >= cols || y >= rows) ? '#' : grid[y][x];
   const grounded = (x, y) => !UNGROUND[at(x, y)];
   const ORTH = [[0, -1], [0, 1], [-1, 0], [1, 0]];
+  const lay = parseLevels(levels, rows, cols);
 
   // Pass 1 — plain floors wear their authored level; climbs, decks and the
   // OPENABLE cells wait. A vein is rock continuous with the ground it stands
   // in — a flat 0 let a vein authored in a terrace flank open (when mined)
   // into a pit no lint could see — and a door or a key is the same story:
-  // each derives like a climb, the lowest ground it touches.
+  // each derives like a climb, the lowest ground it touches. A LAYER value on
+  // any of them pins the ground instead: it does not wait, and the flood may
+  // not move it.
   const DERIVED = { o: 1, D: 1, K: 1 };
   const floor = [], deck = [];
   for (let y = 0; y < rows; y++) {
     floor.push(new Array(cols).fill(null)); deck.push(new Array(cols).fill(null));
     for (let x = 0; x < cols; x++) {
       const ch = at(x, y);
-      if (!grounded(x, y) || CLIMB_CH[ch] || DECK_CH[ch] || DERIVED[ch]) continue;
+      if (!grounded(x, y)) { lay[y][x] = null; continue; }
+      if (lay[y][x] != null) { floor[y][x] = lay[y][x]; continue; }
+      if (CLIMB_CH[ch] || DECK_CH[ch] || DERIVED[ch]) continue;
       floor[y][x] = FLOOR_LV[ch] || 0;
     }
   }
@@ -317,7 +371,7 @@ export function makeLevelModel(grid) {
           }
         }
         if (lo == null) continue;
-        if (floor[y][x] !== lo) { floor[y][x] = lo; moved = true; }
+        if (lay[y][x] == null && floor[y][x] !== lo) { floor[y][x] = lo; moved = true; }
         if (isDeck && deck[y][x] !== hi) { deck[y][x] = hi; moved = true; }
       }
     }
@@ -354,6 +408,15 @@ export function makeLevelModel(grid) {
     return underOK(x, y) ? [f, d] : [d];
   };
   const climbAt = (x, y) => !!CLIMB_CH[at(x, y)];
+  /** The orthogonal step a climb (or stair) SERVES — the neighbour standing
+   *  exactly one level up, which is the face its dressing bolts to and the
+   *  direction its treads rise. Answered HERE (ONE RULES FACT): five lenses
+   *  each re-derived this scan before it had a name. Null when nothing one
+   *  level up adjoins. */
+  const servedDir = (x, y) => {
+    const lv = floorAt(x, y) ?? 0;
+    return ORTH.find(([dx, dy]) => surfacesAt(x + dx, y + dy).includes(lv + 1)) || null;
+  };
   /** Stairs are climbs that walk at full speed and draw as steps — every
    *  OTHER climb behaviour (slow rungs, ladder dressing, climb pose) must
    *  keep testing L/v, which is why this is its own question. */
@@ -374,7 +437,7 @@ export function makeLevelModel(grid) {
     for (const c of s) if (c <= fromLv + up && (best == null || c > best)) best = c;
     return best;
   };
-  return { cols, rows, floorAt, deckAt, underOK, surfacesAt, climbAt, stairAt, pickSurface };
+  return { cols, rows, floorAt, deckAt, underOK, surfacesAt, climbAt, stairAt, servedDir, pickSurface };
 }
 
 /**

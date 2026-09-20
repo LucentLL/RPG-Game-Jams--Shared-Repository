@@ -84,8 +84,17 @@ const OUT = flag('--out', join(UNITY, 'Assets', 'Resources', 'Maps', 'pack.json'
 // carries both (JProp at MapPack.cs:96 has `facing`; JMap at :179 has `walls`).
 // A drop-detector that cries wolf is worse than none: the next real drop reads
 // as more noise. Re-check this against MapPack.cs whenever the schema grows.
-const CS_MAP_KEYS = new Set(['schema', 'kind', 'id', 'name', 'theme', 'grid', 'entry',
-  'exitStairs', 'props', 'portals', 'spawns', 'regions', 'walls', 'paint', 'water', 'locks']);
+// 'levels' JOINED 2026-08-29: MapPack.cs JMap carries the row strings and
+// LevelModel.Build(grid, levels) mirrors makeLevelModel — the walks-FLAT
+// warning this list once justified is retired. ('sides' rides INSIDE walls
+// rects, which this chart-key audit does not walk; JRect gained the field the
+// same day, in the same change, which is the only reason that blind spot is
+// tolerable.)
+const CS_MAP_KEYS = new Set(['schema', 'kind', 'id', 'name', 'theme', 'grid', 'levels', 'entry',
+  'exitStairs', 'props', 'portals', 'spawns', 'regions', 'walls', 'paint', 'water', 'locks',
+  // 'seats' (2026-09-08): the crowd's cells, a pair list lifted by hand like water and
+  // locks (MapPack.CellPairs) — the arena lens seats two spectators on each.
+  'seats']);
 const CS_PROP_KEYS = new Set(['art', 'x', 'y', 'facing', 'use', 'label']);
 // 'paint' LEFT THIS SET on 2026-08-16: the port carries it now (MapPack.ToChart),
 // because the crown ruling made a standable top read the ground channel and an
