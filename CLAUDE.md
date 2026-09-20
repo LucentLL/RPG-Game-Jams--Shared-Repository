@@ -46,6 +46,49 @@ a preview of another. Therefore:
 - **ONE WORLD.** The lenses are cameras on one world, not copies of it. State
   carried between views (position, facing, spoils, worked seams) crosses 1:1.
 
+## Every mode is the same game (user decree, 2026-09-20)
+
+*"All modes maps should be created with the same Map Editor. All modes should
+have the same functionality for navigation, interaction, and combat. It is very
+inefficient that changes made are not universal. Per mode features can be added
+on top of a mode like Guild Management or Party control, but the underlying
+fundamentals should be universal."*
+
+The lens law above says one world seen through many cameras. This is the same
+law one level up: ONE GAME played under many RULE SETS. Therefore:
+
+- **ONE EDITOR.** Every place any mode plays on is a chart the Map Editor made
+  and can open again — a `kind` of chart, never a literal grid in code and never
+  a private generator's private vocabulary. A generator may GROW a place, but
+  what it grows is a chart (`TerrainGen` already does this for halls and towns).
+  The Battlefield's generated plain is the last world that is not an area; it is
+  owed a kind, and nothing new may join it.
+- **ONE SUBSTRATE.** Navigation (the step law, collision, levels, climbs, water,
+  doors), interaction (offers, uses, keys, portals, exits) and combat (bodies,
+  attacks, the wind-up, stamina, the guard, skills, damage, targeting, the AI)
+  are each implemented ONCE, and every mode plays on that one implementation. A
+  fix or a feature to a fundamental lands in the shared layer and is therefore
+  in every mode the day it ships. A mode with a private copy of a fundamental —
+  "the Wilds' fight", "the arena's walk" — is a bug by definition, however
+  faithfully it was ported. (`DelveFight` beside `ArenaCombat` is the standing
+  example: the Wilds had no wind-up because its fight was a second fight.)
+- **MODES ARE LAYERS.** What a mode may own is what is genuinely its own: guild
+  management, party control, a bout's bell and its lists, an army's orders, a
+  hunt's spoils. A layer switches mechanics ON over the substrate; it never
+  re-implements one. If a mode needs a fundamental to behave differently, the
+  difference is a parameter of the shared thing, stated there.
+- **QUICKPLAY IS THE CORE MODE'S OWN CODE.** *"Arena is a Quickplay version of
+  the same mode from the core mode tournaments. Battlefield modes are quick play
+  versions of eventual Guild vs Guild battles."* One entry each: quickplay
+  supplies a roster and a venue and calls the SAME bout the calendar's
+  tournament calls, the SAME battle a guild-vs-guild war will call. Nothing is
+  built for a quickplay mode that the core mode cannot use, and nothing the core
+  mode needs may live behind a quickplay-only door.
+- **THE TEST, before writing any fundamental:** *which modes does this reach?*
+  If the answer is not "all of them", it is in the wrong file. The staged plan
+  for getting there from a build that grew four engines is
+  `Guild Rancher/docs/ONE-SUBSTRATE.md`.
+
 ## Art law (earned three times over — see memory `project-delve-2p5d`)
 
 - The designated sheet cells ARE the poses: never fake a pose, a fall, or
