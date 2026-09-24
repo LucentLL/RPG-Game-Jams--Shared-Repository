@@ -25,6 +25,7 @@
  * a fighter lifted onto a ledge lands exactly on the drawn surface.
  */
 import { bakeEstate, attachTerrain, BLOCK_H } from '../guild/delve.js';
+import { clearOfBodies } from '../guild/prop-volume.js';
 
 /** One elevation step, in plane pixels. Re-exported so the renderer can lift a
  *  standee by exactly the height of the surface it is standing on. */
@@ -240,7 +241,7 @@ const BODY = 0.3; // half-width of a fighter's feet box, in tiles
  * the arena edge, and the surface must be all one level — you step UP or DOWN a
  * level only through a climb cell.
  */
-export function canStandAt(T, x, y, fromX, fromY) {
+export function canStandAt(T, x, y, fromX, fromY, others) {
   if (!T) return x >= 0.5 && x <= 8.5 && y >= 0.5 && y <= 8.5;
   if (x < BODY || y < BODY || x > T.cols - BODY || y > T.rows - BODY) return false;
   const corners = [[-BODY, -BODY], [BODY, -BODY], [-BODY, BODY], [BODY, BODY]];
@@ -265,17 +266,33 @@ export function canStandAt(T, x, y, fromX, fromY) {
     const hFrom = heightAt(T, fromX, fromY), hTo = heightAt(T, x, y);
     if (hTo > hFrom && !onClimb(T, fromX, fromY) && !onClimb(T, x, y)) return false;
   }
+  // The OTHER fighter occupies space (user decree, 2026-08-21) — circle vs
+  // circle at the terrain's own heights, and a fighter already overlapped may
+  // walk out but never further in. Same helper the delve lenses call.
+  if (others && others.length
+    && !clearOfBodies(x, y, heightAt(T, x, y), BODY, others, fromX, fromY)) return false;
   return true;
+}
+
+/** The living fighters other than `self`, as blocking bodies for canStandAt.
+ *  A downed fighter blocks nothing — you can step over the fallen. */
+export function fighterBodies(T, fighters, self) {
+  const out = [];
+  for (const f of (fighters || [])) {
+    if (!f || f === self || f.hp <= 0) continue;
+    out.push({ x: f.ax, y: f.ay, lv: heightAt(T, f.ax, f.ay), r: BODY });
+  }
+  return out;
 }
 
 /**
  * Axis-separated step so a fighter slides along a rock instead of sticking to
  * it. Mutates {ax, ay}. Returns whether anything moved.
  */
-export function slideMove(T, f, dx, dy) {
+export function slideMove(T, f, dx, dy, others) {
   let moved = false;
-  if (dx && canStandAt(T, f.ax + dx, f.ay, f.ax, f.ay)) { f.ax += dx; moved = true; }
-  if (dy && canStandAt(T, f.ax, f.ay + dy, f.ax, f.ay)) { f.ay += dy; moved = true; }
+  if (dx && canStandAt(T, f.ax + dx, f.ay, f.ax, f.ay, others)) { f.ax += dx; moved = true; }
+  if (dy && canStandAt(T, f.ax, f.ay + dy, f.ax, f.ay, others)) { f.ay += dy; moved = true; }
   return moved;
 }
 

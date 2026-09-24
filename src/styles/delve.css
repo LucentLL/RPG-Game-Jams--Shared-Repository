@@ -79,9 +79,19 @@
 }
 
 /* --- Climb links: the way between levels ------------------------------- */
-/* Drawn upright against the face of the ledge they serve, so they read as
-   something you go up rather than something lying on the floor. Same grammar as
-   the action arena's .at-ladder / .at-vine — one rung language for both grounds. */
+/* The LADDER is a real quad bolted flat on the face it serves (delve.js
+   addClimbDressing), wearing the caveladders kit crop once it loads; this
+   class carries the painted rungs as its fallback. NO filter here — a filter
+   on a 3D quad is the exact mobile failure the CSS3D budget forbids. */
+.dv-ladder-face {
+  background-image:
+    repeating-linear-gradient(180deg, #8a6033 0 4px, transparent 4px 12px),
+    linear-gradient(90deg, #6b4a26 0 5px, transparent 5px calc(100% - 5px), #6b4a26 calc(100% - 5px) 100%);
+  background-size: 100% 100%;
+}
+/* The vine (and a ladder nothing serves) stays a standee, leaned toward the
+   face it hangs into and footed on its own floor. Same rung language as the
+   action arena's .at-ladder / .at-vine. */
 .dv-ladder, .dv-vine { display: block; margin: 0 auto; }
 .dv-ladder {
   width: 26px; height: 58px;

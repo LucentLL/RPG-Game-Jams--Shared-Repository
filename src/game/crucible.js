@@ -19,6 +19,7 @@ import {
   ARENA_FIELDS as _ARENA_FIELDS, pickField as pickArenaField, readField as readArenaField,
   mountArenaTerrain, heightAt as arenaHeightAt, onClimb as arenaOnClimb, liftAt as arenaLiftAt,
   canStandAt as arenaCanStand, slideMove as arenaSlide, hasLineOfSight as arenaLOS,
+  fighterBodies as arenaFighterBodies,
   stepToward as arenaStepToward, CLIMB_SPEED, HIGH_GROUND_RANGE, HIGH_GROUND_TOHIT,
 } from './arena-terrain.js';
 import { facingToRow, facingAngle, faceBothFighters, angleDiff, getZone, getAdjacentTilesByZone, isRearTile, isFrontTile } from './engine/facing.js';
@@ -2243,7 +2244,18 @@ function shiftBuilderCosmetic(slot, delta){
   var idx = cycle.findIndex(function(g){ return _cosmeticMatches(g, current); });
   if (idx < 0) idx = 0;
   idx = (idx + delta + cycle.length) % cycle.length;
-  builderState.cosmeticGear[slot] = cycle[idx] ? Object.assign({}, cycle[idx]) : null;
+  var picked = cycle[idx] ? Object.assign({}, cycle[idx]) : null;
+  builderState.cosmeticGear[slot] = picked;
+  // Cosmetics obey the equip rule the draft enforces: a two-hander fills both
+  // hands, and nothing sits behind one. The builder preview must not show a
+  // loadout the game refuses (a staff in each hand was the literal report).
+  if (slot === 'LHand' || slot === 'RHand'){
+    var other = (slot === 'LHand') ? 'RHand' : 'LHand';
+    var held = builderState.cosmeticGear[other];
+    if ((picked && isTwoHandedType(picked.type)) || (picked && held && isTwoHandedType(held.type))){
+      builderState.cosmeticGear[other] = null;
+    }
+  }
   renderBuilderControls();
   renderBuilderPreview();
 }
@@ -3008,10 +3020,13 @@ function _equipDroppedGear(gear, slotPos){
 function equipDraftGear(gear){
   if(gear.pos==='Hand'){
     // Two-handed weapon: fills both hands (dominant hand holds it), no main/off prompt.
+    // Any OPEN prompt dies here too — leaving it live let the next tap answer a
+    // question about a hand the two-hander had already filled.
     if(isTwoHandedType(gear.type)){
       var d2=run.dominantHand||'R';
       run.equipped.LHand=null; run.equipped.RHand=null;
       run.equipped[(d2==='L')?'LHand':'RHand']=gear;
+      delete run._pendingEquip;
       renderDraft();
       return;
     }
@@ -3036,10 +3051,13 @@ function equipDraftGear(gear){
 }
 
 // Player has picked a slot from the prompt: equip into that slot and clear the
-// pending state.
+// pending state. THROUGH equippedAfter, not a raw write — the prompt could go
+// stale (open it for a sword, equip a bow, then answer it) and a raw write
+// seated a one-hander beside a two-hander the rule had just forbidden.
 function equipDraftGearTo(slot){
   if(!run._pendingEquip) return;
-  run.equipped[slot]=run._pendingEquip.gear;
+  var next = equippedAfter(run.equipped, run._pendingEquip.gear, slot);
+  EQUIP_SLOTS.forEach(function(s){ run.equipped[s]=next[s]; });
   delete run._pendingEquip;
   renderDraft();
 }
@@ -3091,16 +3109,34 @@ var _charge = null;                // { name, start } while the player HOLDS an 
 var _guildItems = null;            // [{batchId,name,glyph,potency,qty}] withdrawn consumables (guild battles only)
 var _guildItemsUsed = null;        // { batchId: count } drunk this battle — reported in the resolve payload
 
+/**
+ * THE ROUND-7 DRAW — who waits at the top of the Athanor this run.
+ *
+ * It used to be `pick(champs)` alone: with one saved champion (the common case
+ * — your own first winner) the climactic fight was the SAME face every run,
+ * forever, and a champion whose kit out-healed you was a wall ten attempts
+ * could not crack (user report, 2026-08-21). The pool now always carries a
+ * freshly generated round-7 foe alongside the pantheon, and whoever stood
+ * there LAST time sits the draw out — a one-champion pantheon alternates at
+ * worst, and every run rolls real entropy. Champions still appear; the
+ * fan-service survives, the rut does not.
+ */
+function rollFinalOpponent(round){
+  var last = null;
+  try { last = localStorage.getItem('crucible_last_final_foe'); } catch(e){}
+  var pool = loadPantheon()
+    .filter(function(c){ return (c.name || 'Champion') !== last; })
+    .map(championToOpponent);
+  pool.push(generateOpponent(round));
+  var opp = pick(pool);
+  try { localStorage.setItem('crucible_last_final_foe', opp.name || ''); } catch(e){}
+  return opp;
+}
+
 function startActionArena(){
   // Build fighters the same way the VS / battle does, then layer on
   // action-specific state (continuous tile coords, cooldown timers).
-  var opp;
-  if (run.round === TOTAL_ROUNDS){
-    var champs = loadPantheon();
-    opp = champs.length ? championToOpponent(pick(champs)) : generateOpponent(run.round);
-  } else {
-    opp = generateOpponent(run.round);
-  }
+  var opp = (run.round === TOTAL_ROUNDS) ? rollFinalOpponent(run.round) : generateOpponent(run.round);
   run.currentOpponent = opp;
   p1 = buildPlayerFighter();
   p2 = buildOpponentFighter(opp);
@@ -3233,7 +3269,7 @@ if (typeof window !== 'undefined'){
   // Walk the player a step in tile space, ignoring the input layer.
   window.__arenaNudge = function(dx, dy){
     if (!p1) return null;
-    if (_arenaT) arenaSlide(_arenaT, p1, dx, dy); else { p1.ax += dx; p1.ay += dy; }
+    if (_arenaT) arenaSlide(_arenaT, p1, dx, dy, arenaBodies(p1)); else { p1.ax += dx; p1.ay += dy; }
     p1._climbing = arenaOnClimb(_arenaT, p1.ax, p1.ay);
     return window.__arenaDebug();
   };
@@ -3251,24 +3287,34 @@ if (typeof window !== 'undefined'){
   };
 }
 
+/** The bodies that block `self` in this bout — the other fighter, alive.
+ *  CHARACTERS OCCUPY SPACE (user decree, 2026-08-21). */
+function arenaBodies(self){
+  return arenaFighterBodies(_arenaT, [p1, p2], self);
+}
+
 /** Nudge a fighter to the nearest spot they can legally stand, spiralling out
- *  from where they were put. Keeps a fixed spawn corner honest on any field. */
+ *  from where they were put. Keeps a fixed spawn corner honest on any field —
+ *  and a spot inside the other fighter is not legal ground either. */
 function placeOnOpenGround(f){
-  if (!_arenaT || arenaCanStand(_arenaT, f.ax, f.ay)) return;
+  if (!_arenaT || arenaCanStand(_arenaT, f.ax, f.ay, null, null, arenaBodies(f))) return;
   for (var r = 0.5; r <= 6; r += 0.5){
     for (var a = 0; a < 16; a++){
       var th = a / 16 * Math.PI * 2;
       var nx = f.ax + Math.cos(th) * r, ny = f.ay + Math.sin(th) * r;
-      if (arenaCanStand(_arenaT, nx, ny)){ f.ax = nx; f.ay = ny; return; }
+      if (arenaCanStand(_arenaT, nx, ny, null, null, arenaBodies(f))){ f.ax = nx; f.ay = ny; return; }
     }
   }
 }
 
-/** The longest reach in this fighter's kit — how far the AI wants to stand off. */
+/** The longest reach in this fighter's kit — how far the AI wants to stand off.
+ *  Attack lists hold NAMES (cf. buildActionAttackBar's ATTACKS[name]); indexing
+ *  `.range` on the string always gave 1, so every archer closed to melee. */
 function aiBestReach(f){
   var best = 1;
   for (var i = 0; i < (f.attacks||[]).length; i++){
-    var r = f.attacks[i] && f.attacks[i].range;
+    var a = f.attacks[i], atk = (typeof a === 'string') ? ATTACKS[a] : a;
+    var r = atk && atk.range;
     if (r > best) best = r;
   }
   return best;
@@ -3278,9 +3324,20 @@ function aiBestReach(f){
  * Would this attack actually land right now? Mirrors the gate in
  * tryActionAttack so the AI stops burning cooldowns on shots the terrain has
  * already refused (out of range · wrong level for a blade · rock in the way).
+ * Accepts a name or the attack row — the AI filter passes names, and judging
+ * the STRING made every special a range-1 melee here (`.range` of a string is
+ * undefined), so the answers were about attacks nobody was asking about.
  */
 function actionAttackViable(attacker, defender, atk){
-  if (!atk || atk.special) return !!atk; // heals/teleports have their own rules
+  if (typeof atk === 'string') atk = ATTACKS[atk];
+  if (!atk) return false;
+  // THE TACTICAL LENS'S HEAL RULE, ported (ONE RULES FACT — pickAIAttack's own
+  // 40% threshold): a heal is an option only when genuinely hurt, never a
+  // rotation filler at full health. Ungated, a foe with Mend restored ~7 HP on
+  // every draw of it and out-healed a round-1 player's whole DPS forever
+  // (user report, 2026-08-21 — ten attempts, zero wins).
+  if (atk.special === 'heal') return attacker.hp < attacker.maxHp * 0.4;
+  if (atk.special) return true; // teleports have their own rules
   var d = Math.hypot(defender.ax - attacker.ax, defender.ay - attacker.ay);
   var hA = fighterHeight(attacker), hD = fighterHeight(defender);
   var reach = (atk.range || 1) + (isMissile(atk) ? Math.max(0, hA - hD) * HIGH_GROUND_RANGE : 0);
@@ -3905,7 +3962,7 @@ function actionTick(dt){
     dx /= L; dy /= L;
     // Terrain-aware step: slides along rocks, and only changes level over a
     // climb cell. Falls back to the old bounds clamp on a flat plane.
-    if (_arenaT) arenaSlide(_arenaT, p1, dx * sp1 * dt, dy * sp1 * dt);
+    if (_arenaT) arenaSlide(_arenaT, p1, dx * sp1 * dt, dy * sp1 * dt, arenaBodies(p1));
     else {
       p1.ax = Math.max(0.5, Math.min(ACTION_GS - 0.5, p1.ax + dx * sp1 * dt));
       p1.ay = Math.max(0.5, Math.min(ACTION_GS - 0.5, p1.ay + dy * sp1 * dt));
@@ -3930,11 +3987,11 @@ function actionTick(dt){
     var ux = oa/od, uy = ob/od;
     // On real terrain a beeline walks into rock and stalls there forever, so
     // steer by a breadth-first step whenever the direct line is blocked.
-    if (_arenaT && !arenaCanStand(_arenaT, p2.ax + ux * sp2 * dt, p2.ay + uy * sp2 * dt, p2.ax, p2.ay)){
+    if (_arenaT && !arenaCanStand(_arenaT, p2.ax + ux * sp2 * dt, p2.ay + uy * sp2 * dt, p2.ax, p2.ay, arenaBodies(p2))){
       var st = arenaStepToward(_arenaT, p2.ax, p2.ay, p1.ax, p1.ay);
       if (st){ var sl = Math.hypot(st.dx, st.dy) || 1; ux = st.dx/sl; uy = st.dy/sl; }
     }
-    if (_arenaT) arenaSlide(_arenaT, p2, ux * sp2 * dt, uy * sp2 * dt);
+    if (_arenaT) arenaSlide(_arenaT, p2, ux * sp2 * dt, uy * sp2 * dt, arenaBodies(p2));
     else {
       p2.ax = Math.max(0.5, Math.min(ACTION_GS - 0.5, p2.ax + ux * sp2 * dt));
       p2.ay = Math.max(0.5, Math.min(ACTION_GS - 0.5, p2.ay + uy * sp2 * dt));
@@ -4001,7 +4058,7 @@ function tryActionAttack(attacker, defender, atkName, opts){
       for (var s = 1; s <= 12; s++){
         var t = s / 12;
         var cx = attacker.ax + (tx - attacker.ax) * t, cy = attacker.ay + (ty - attacker.ay) * t;
-        if (!arenaCanStand(_arenaT, cx, cy, okX, okY)) break;
+        if (!arenaCanStand(_arenaT, cx, cy, okX, okY, arenaBodies(attacker))) break;
         okX = cx; okY = cy;
       }
       tx = okX; ty = okY;
@@ -4011,8 +4068,17 @@ function tryActionAttack(attacker, defender, atkName, opts){
     return;
   }
   if (atk.special === 'heal'){
+    // A heal at full health is a refused cast, not a free animation.
+    if (attacker.hp >= attacker.maxHp){
+      if (attacker === p1) actionLog('☽ '+atk.name+' — already whole', 'miss');
+      return;
+    }
     setFighterAnim(attacker, 'parry');
-    attacker._atkCD = 0.8;
+    // Mend pays real tempo, mirroring the tactical economy where a heal
+    // consumes the whole turn: ~a turn's worth of cooldown against the
+    // 0.7-0.95s of a swing, for BOTH sides. Free-tempo healing was the other
+    // half of the unbeatable-healer report.
+    attacker._atkCD = 2.5;
     var healed = rollDice(atk.healDice || '2d6');
     attacker.hp = Math.min(attacker.maxHp, attacker.hp + healed);
     actionLog('☽ '+(attacker===p1?'You':'Opp')+' '+atk.name+' heal '+healed, 'hit');
@@ -4854,14 +4920,17 @@ function generateOpponentGear(round){
   var bodyTypes=GEAR_TYPES.filter(function(g){return g.pos==='Body'});
   var headTypes=GEAR_TYPES.filter(function(g){return g.pos==='Head'});
   var lowerTypes=GEAR_TYPES.filter(function(g){return g.pos==='Lower'});
-  // AI always: weapon in RHand, shield in LHand (default stance)
+  // AI always: weapon in RHand, shield in LHand (default stance) — unless the
+  // weapon is two-handed, in which case the off-hand stays empty: the AI obeys
+  // the same equip rule the draft enforces on the player.
   var rhand=generateGearPieceOfType(pick(weaponTypes),round);
   var body=generateGearPieceOfType(pick(bodyTypes),round);
-  var lhand=generateGearPieceOfType(pick(shieldTypes),round);
+  var lhand=isTwoHandedType(rhand.type)?null:generateGearPieceOfType(pick(shieldTypes),round);
   var head=generateGearPieceOfType(pick(headTypes),round);
   var lower=generateGearPieceOfType(pick(lowerTypes),round);
   // Scale opponent refinement with round
   [lhand,body,rhand,head,lower].forEach(function(g){
+    if(!g)return;
     if(round>=3)g.refinement=randInt(0,Math.min(round-1,5));
     if(round>=6)g.refinement=randInt(2,Math.min(round,8));
   });
@@ -4979,19 +5048,9 @@ function buildAttacksFromMateria(equipped){
 
 // ═══ VS SCREEN ═══
 function startVS(){
-  // Build fighters
-  var opp;
-  // Check for Pantheon champion at round 7
-  if(run.round===TOTAL_ROUNDS){
-    var champs=loadPantheon();
-    if(champs.length>0){
-      opp=championToOpponent(pick(champs));
-    } else {
-      opp=generateOpponent(run.round);
-    }
-  } else {
-    opp=generateOpponent(run.round);
-  }
+  // Build fighters. Round 7 draws through rollFinalOpponent — the same pool,
+  // no-repeat, plus-a-fresh-foe rule the action arena uses.
+  var opp = (run.round===TOTAL_ROUNDS) ? rollFinalOpponent(run.round) : generateOpponent(run.round);
   run.currentOpponent=opp;
   p1=buildPlayerFighter();
   p2=buildOpponentFighter(opp);
@@ -5751,12 +5810,19 @@ function getMateriaBonus(fighter,atkData){
         if((m1.idx===c.a&&m2.idx===c.b)||(m1.idx===c.b&&m2.idx===c.a)){
           if(!found&&(m1.slot==='w'||m1.slot==='a')){
             found=true;
-            if(c.name==='Lunar Flux'){b.acBonus+=3;b.toHit+=1}
-            if(c.name==='Healing Arts'){b.lifesteal=true;b.lifestealDice='1d6'}
-            if(c.name==='Solar Grace'){b.lifesteal=true;b.bonusDmg+=2}
-            if(c.name==='Solar Forge'){b.bonusDmg+=3;b.critRange=Math.min(b.critRange,19)}
-            if(c.name==='War Expansion'){b.critRange=Math.min(b.critRange,18);b.extraRange+=1}
-            if(c.name==='Crushing Weight'){b.extraRange+=2;b.dotBonus+=2}
+            // WHICH PAIR IT IS, ASKED BY PAIR. These branches compared c.name
+            // against six literals, so the elemental rename (2026-08-22) would
+            // have switched every compound bonus silently OFF — nothing throws,
+            // nothing logs, and the only symptom is that gear stops being worth
+            // what it says. A compound IS its two indices; the name is what we
+            // call it. Keyed on the former, renaming the latter is never a rules
+            // change. (The Unity port had the identical bug and the identical fix.)
+            if(c.a===0&&c.b===1){b.acBonus+=3;b.toHit+=1}
+            if(c.a===1&&c.b===2){b.lifesteal=true;b.lifestealDice='1d6'}
+            if(c.a===2&&c.b===3){b.lifesteal=true;b.bonusDmg+=2}
+            if(c.a===3&&c.b===4){b.bonusDmg+=3;b.critRange=Math.min(b.critRange,19)}
+            if(c.a===4&&c.b===5){b.critRange=Math.min(b.critRange,18);b.extraRange+=1}
+            if(c.a===5&&c.b===6){b.extraRange+=2;b.dotBonus+=2}
           }
         }
       });
@@ -8037,7 +8103,13 @@ function showMatDetail(planetIdx,level,xp){
   COMPOUNDS.forEach(function(c){
     if(c.a===planetIdx||c.b===planetIdx){
       var otherIdx=c.a===planetIdx?c.b:c.a;
-      compText+='<div style="margin-top:3px"><span style="color:'+c.col+'">'+c.name+'</span> — link with '+PLANETS[otherIdx].sym+' '+PLANETS[otherIdx].name+': '+c.desc+'</div>';
+      // "PAIRS WITH", NOT "LINK WITH" (user decree, 2026-08-22: "materia can be
+      // slotted but not linked"). A compound fires when both elements are in the
+      // same slot letter — getMateriaBonus never looks at which socket is next
+      // to which, and its own comment says so. "Link" is Final Fantasy VII's word
+      // for adjacency, and using it promised a rule this build does not have.
+      // The alchemical symbol goes with it; the element's name is the whole name.
+      compText+='<div style="margin-top:3px"><span style="color:'+c.col+'">'+c.name+'</span> — pairs with '+PLANETS[otherIdx].name+': '+c.desc+'</div>';
     }
   });
   // Slot behavior + granted attacks

@@ -40,9 +40,16 @@
  * on purpose, so the three lenses cannot drift apart visually.
  */
 import { loadImg } from '../guild/delve.js';
-import { WORN, wornWeapon, wornShield, wornPick, wornArms } from '../guild/art.js';
+import { WORN, wornWeapon, wornShield, wornPick, wornArms, KIND_TO_ENGINE_TYPE } from '../guild/art.js';
 import { ELEMENTS_SKIN_SOURCE, ELEMENTS_SKIN_TONES } from './data/sprite-tables.js';
 import { weaponCellOf } from './data/config.js';
+import { isTwoHandedType } from './data/gear.js';
+
+/** A kind needs both hands when the engine type it stands for does — the view
+ *  asks the model's one fact (gear.js TWO_HANDED_GEAR_TYPES) instead of keeping
+ *  its own list. It used to test `kind === 'bow'`, which was already wrong for
+ *  every two-hander that is not a bow. */
+const kindTwoHanded = (k) => !!(k && isTwoHandedType(KIND_TO_ENGINE_TYPE[k] || ''));
 
 /**
  * How a held thing sits in the frame.
@@ -725,7 +732,8 @@ export function createFpHands(layer, spec) {
 
   H.ready = (async () => {
     const w = spec && spec.weapon, o = spec && spec.offhand, s = spec && spec.shield;
-    H.bow = !!(w && w.kind === 'bow');
+    H.bow = !!(w && w.kind === 'bow');          // which FRAMES it plays (bowDraw)
+    H.twoHanded = !!(w && kindTwoHanded(w.kind)); // whether the other hand stays empty
     const SW = [WORN.rest].concat(WORN.swing);
     H.weapon = await put(w && wornWeapon(w.kind, w.material), H.bow ? WORN.bowDraw : SW, 'fp-hand-weapon', w && w.name);
     // NOTHING EQUIPPED IS A LOADOUT (playtest decision, 2026-08-08: "they just
@@ -737,12 +745,17 @@ export function createFpHands(layer, spec) {
     // key off; `H.weapon` is the fist, because to everything downstream — the
     // swing, the stow arbitration, the fit — an empty hand is simply the hand
     // you lead with.
+    // The bare fist RESTS on the stand cell (WORN.stand — the cell the standee's
+    // own idle/walk plays, hand at the hip), not on WORN.rest: col 14 is the
+    // slash follow-through, and an empty hand parked there read as a raised
+    // guard the character in every other lens never held. A punch still plays
+    // the slash block and settles back to the stand.
     if (!H.dead && !w) {
       H.bare = true;
-      H.weapon = await put(wornWeapon('sword', 'iron'), SW, 'fp-hand-weapon fp-bare', 'Bare hands', true);
+      H.weapon = await put(wornWeapon('sword', 'iron'), [WORN.stand].concat(WORN.swing), 'fp-hand-weapon fp-bare', 'Bare hands', true);
     }
-    // A bow is two-handed: nothing goes in the other hand behind it.
-    if (!H.dead && !H.bow) {
+    // A two-hander fills both hands: nothing goes in the other hand behind it.
+    if (!H.dead && !H.twoHanded) {
       if (s) H.shield = await put(wornShield(s.material), WORN.shieldBrace, 'fp-hand-shield', s.name);
       else if (o) H.offhand = await put(wornWeapon(o.kind, o.material), SW, 'fp-hand-offhand', o.name);
     }

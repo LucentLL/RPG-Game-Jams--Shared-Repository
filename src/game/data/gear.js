@@ -154,8 +154,13 @@ function fighterReach(equipped){
 
 // Two-handed weapons occupy BOTH hands: equipping one clears the off-hand, and no
 // shield or second weapon can sit alongside it. Bows and crossbows are drawn with
-// two hands (and loose a projectile in combat).
-var TWO_HANDED_GEAR_TYPES = ['Bow','Crossbow'];
+// two hands (and loose a projectile in combat); axes, hammers, staves and rods
+// are the heavy/long-haft weapons (user decree, 2026-08-21 — dual-wielding a
+// two-hander can someday be an unlocked skill, but it is not a default). Wands
+// and whips stay one-handed; sword/dagger/club keep the 2026-08-05 dual-wield
+// loadout. This list is the ONE authority — every lens and the guild derive
+// from it (hall.js TWO_HANDED, fp-hands.js H.twoHanded).
+var TWO_HANDED_GEAR_TYPES = ['Bow','Crossbow','Axe','Hammer','Staff','Rod'];
 function isTwoHandedType(type){ return TWO_HANDED_GEAR_TYPES.indexOf(type) >= 0; }
 
 /**
