@@ -2,10 +2,27 @@
   "version": "0.0.1",
   "configurations": [
     {
-      "name": "dev",
+      "name": "web-dev",
       "runtimeExecutable": "npm",
-      "runtimeArgs": ["run", "dev"],
-      "port": 8080
+      "runtimeArgs": [
+        "run",
+        "dev",
+        "--",
+        "--port",
+        "5199",
+        "--strictPort"
+      ],
+      "port": 5199
+    },
+    {
+      "name": "unity-webgl",
+      "runtimeExecutable": "node",
+      "runtimeArgs": [
+        "C:/Users/mcgee/Guild Rancher/dev/serve-webgl.mjs",
+        "C:/Users/mcgee/Guild Rancher/Builds/WebGL",
+        "8787"
+      ],
+      "port": 8787
     }
   ]
 }
