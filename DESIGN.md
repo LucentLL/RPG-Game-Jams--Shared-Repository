@@ -1002,6 +1002,280 @@ refused.
    hand places, turns and erases from inside the walk. The plan canvas stays the precision
    instrument.
 
+> **Round six, 2026-09-08 — the block is a voxel.** The owner, on the deploy: *"I can't place a
+> block on top of a block. I can't select the face of a block to change the wall texture. I can't
+> access Map Editor from the main menu ... it feels like the center point of rotation is on the
+> other side of the map. I can't 'look around' like Minecraft Creative Mode ... place a bridge
+> without using Undermine ... delete individual blocks."* Every one was a real mechanism: the
+> `Block ·` chips painted 'B' and re-dressed every face (a crown tap re-skinned instead of stacking);
+> the Walls hand skinned one face but nothing SHOWED the face; `Orbit` turned about a focus `Dist`
+> ahead of the eye; `Build at: N` did lay spans over untouched ground but the block hand ignored it.
+> Landed, on the shipped schema: **the Block hand lands against the face you tap** — a top stacks
+> (the 'B' cube on level ground; one rung above, the sculpt verbs' unit), a side builds out at the
+> face's own height (`Grow` a step, `f:L` across a gap with the ground beneath untouched, `_:L` over
+> the void — the bridge without Undermine), under a deck the ground beneath rises; the eraser in the
+> 3D view takes off THE BLOCK YOU ARE LOOKING AT (a span out, a block gone, ground loses a rung — a
+> lawn tap digs, a side tap pops the column); the hover highlight sits ON the face (top / side /
+> ceiling) and the readout names it; `OrbitAbout(pivot)` turns the rig about the point under the
+> finger on the survey rig and about the EYE while flying (`Orbit` is `OrbitAbout(Focus)` to the bit);
+> a title-screen door; and placed props carry a `use` (stall → Market, anvil → Forge, cauldron →
+> Apothecary) so a room drawn beside the arena can sell and mend. The decision is one pure function
+> (`MapEditorScreen.PlanBlock`), pinned without a mesh. Not done: a middle voxel cannot come out of a
+> column (a heightfield has no middle), and a 'B' still stands from the plane — above grade a block
+> is a terrace, said so in the notice.
+
+> **Round six, second pass (the same day, off the deploy).** *"I was able to stack blocks.
+> Nice. I could change the top surface. Nice. When I try to change the side surface, it
+> selects the entire column. Not nice. When I try to stack another block after changing the
+> top surface, I can't."* Two mechanisms: the block hand's UNIT was one rung (a third of the
+> cube the owner had just placed — reads as nothing), and a cell's face was ONE face top to
+> bottom with no way to say "this block of it". Now `BlockRungs = ceil(WallH/Step) = 3` is
+> the unit — stack a block, dig a block, build out at the height of the block you tapped
+> (the pick's own hit point, `BlockTopAt`) — and the walls rect carries a BAND of rungs
+> (`lv:"3-6"`) that `WallThemeAt` answers per rung and `FaceDownBands` draws as separate runs.
+> And the **locker-room doors** landed on the arena's apron: barred until the verdict, then an
+> offer at the field's edge that walks a draft named `lockers-west` / `lockers-east` (the walk
+> resolves drafts now) or opens the Market / Forge until one is drawn. Rooms drawn INSIDE the
+> bowl are still roadmap step 5 — the lists are a different world from the chart.
+
+> **Round seven — the arena is an AREA (owner, 2026-09-08, the same day).** *"All
+> maps used in game should be on maps created inside the editor. That's the
+> purpose of it. We use it to design maps and locations, then the game takes
+> place in those areas. Recreate the arena if necessary inside the editor. Flag
+> the 'stadium stands' with crowd positions. You can even add stairs for moving
+> up and down the arena and a fence to keep the arena separate from the crowd
+> like an NFL or Soccer stadium."* — and, mid-turn: *"Why are there separate
+> 'worlds'. Guild Estate, Delve, Arena, Battlefield. These should all be areas.
+> Different mechanics can be enabled or disabled depending on area."*
+>
+> **The decree, restated as law:** a place is a chart the editor made, and a
+> lens is a set of mechanics switched on over it. The estate and the delve were
+> already that. The duel was not — `ArenaField.All` was seven C# literals and
+> `ArenaWorld.Build` grew a bowl of tiers around them, drawn by its own renderer
+> with its own tile vocabulary, which is exactly why a locker room drawn at the
+> drafting table could never appear beside the lists.
+>
+> **What shipped (Unity):**
+> - **`seats`** — a fourth cell-pair overlay beside `water`/`locks` (validator,
+>   `MapPack.CellPairs`, `MapDrafts` export/clone, an editor Flags chip *Seat
+>   (crowd)* that toggles like water and refuses a cell with no surface, a `c`
+>   mark on the plan). A seat is a fact about the MAP; the arena lens seats two
+>   spectators on every flagged cell, watching the entry.
+> - **`ArenaField.FromChart(chart, model)`** — the fight's rules read off a
+>   chart: a level per cell off `LevelModel.SurfacesAt` (the DELVE's rungs,
+>   `Rise = DelveScale.Step`, so a fighter stands on the ladder the world was
+>   drawn with), climbs off the climb chars, cover off `Tall`, water, footing.
+>   Plus what the arena ADDS as read facts: the **lists** (the entry's own floor
+>   flooded outward and stopped by fence, wall, gate, stair, seat or drop — foes
+>   are dealt only there), the **doors** (`D` cells, barred for the bout, opened
+>   by the verdict), the seats, and the **uses** (props with a `use`).
+> - **`ArenaWorld.FromChart`** — the duel's world is now a `DelveWorld` (the one
+>   renderer every walked place has) wearing the shape the fight's camera and
+>   rules read (`Field`, `Seats`, `Floor`, `WorldOf`, `SightTopAt`, `Sunlit`).
+>   The generated bowl stays for the Battlefield's plains until they have a kind
+>   of their own (roadmap step 5). The apron-door hack of round six's second
+>   pass is gone — a locker room is CELLS beside the lists now.
+> - **`ArenaVenues`** — F in the lists cycles the pack's `arena` charts (the
+>   Stadium first, then the seven ported fields by id) and every draft saved as
+>   kind `arena`. A draft is a venue the moment it is saved.
+> - **`arena-stadium`** (`dev/gen-arena-stadium.mjs`, 44×32): three tiers of
+>   stands flagged as 708 seats, stairs up every side, a walkway, a fence with
+>   two gates, and two locker rooms behind doors — a stall (`use: market`) and a
+>   bed in the west, an anvil (`use: anvil`), a bed and an armour stand in the
+>   east. The doors are barred from the first bell and open at the verdict; a
+>   counter's offer (E / south face / a HUD button) leaves the lists for that
+>   room's screen through the same door an estate walk opens
+>   (`EstateWalk.ScreenForUse` → `OpenCampusDoor`).
+>
+> **Invariants earned:**
+> - *One rise.* A chart-backed field's `Rise` is the delve's `Step`; the bowl's
+>   `LevelRise` is the Battlefield's. `WorldOf` takes the field's rise — a
+>   fighter drawn on `LevelRise` over a chart drawn on `Step` floats.
+> - *The lists are a read fact, not a spawn rule in the bootstrap.* `SpawnOK`
+>   answers off the flood; `Populate` only asks.
+> - *The door law is the arena's, the door art is the delve's.* Barring is
+>   `Read.SetDoorsPassable(false)` + a fresh world (every `D` is drawn shut);
+>   opening is `SetDoorsPassable(true)` + `DelveWorld.OpenDoor` — one call,
+>   `ArenaWorld.SetDoorsShut`, for both.
+> - *A venue with no `seats` has no crowd.* The seven ported fields carry none
+>   yet; the crowd is an authoring job at the drafting table now, not a ring the
+>   generator grows.
+>
+> - *The door opens on the Stadium.* F cycles the venues while you stand in
+>   the lists; walking in from the hall or the season is always the opening
+>   venue (`ArenaVenues.Opening`). PlayMode tests share ONE bootstrap, and a
+>   test that pressed F seven times used to hand the next test a bare field.
+>
+> **Still open on this decree:** the Battlefield (a generated plain, its own
+> renderer path through `ArenaWorld.Build`) is the last "world" that is not an
+> area; roadmap step 5 gives it a kind. Guild/town charts do not yet carry the
+> arena's door law when walked (a delve door is a delve door — the lens decides
+> what a `D` means, which is the decree's own "mechanics enabled per area").
+
+> **Round eight — the deep bowl, the rooms under it, and the breath between
+> swings (owner, 2026-09-08, off the round-seven deploy).** *"You should not
+> be able to equip a weapon AND dual wield daggers at the same time. Every
+> arena match is over in <5 seconds. I very rarely do more than 50% health
+> even though I spam attack. is there any stamina or regulation of skill/attack
+> time duration? I was expecting the Arena locker rooms to be inside/under the
+> stadium stands like a real stadium. And each locker room should have access
+> to all required stations to upgrade their gear, slot it, craft/refine
+> materia, and buy from an NPC standing at market table. I also miss the deep
+> bowl with the crowd towering into the sky. This arena is very flat."*
+>
+> **What shipped (Unity):**
+> - **A pair fills both hands.** The kit's "Twin Daggers" sheet draws a
+>   figure holding one in each hand, so the one piece IS the dual wield:
+>   `WeaponArt.Shape.Paired` on that shape, and ONE rule, `Gear.FillsBothHands`
+>   (a two-handed TYPE or a paired SHAPE, the shape being the DRAWN one), asked
+>   by the draft, AutoSlot, EquippedAfter, CanEquip, the costume walk, the
+>   first-person rig, the gallery and the creator. A single dagger still dual
+>   wields. `Gear.IsTwoHanded(type)` is only ever half the answer now.
+> - **Stamina.** The honest answer to the question was: one regulator, the
+>   per-throw cooldown (0.7s a swing, 0.95s a shot), and it regulates a swing,
+>   not a fight — with the tactical lens's hit points (20 + 2·CON, ~44) and
+>   every blow in range landing, a 0.9s foe cadence at ~10 a hit is five
+>   seconds. The second regulator is a POOL (`ArenaCombat.MaxStamina` 100,
+>   `StaminaRegen` 12/s; `Attacks.StaminaCost` — a swing 25, a shot 30, the
+>   shape factor, +10 a wind-up tier; a blink 20, a mend 30, the rites free):
+>   every throw spends from it in the one place the cooldown is paid
+>   (`PayFor`), an unaffordable throw is refused before it costs anything
+>   ("winded", on the HUD under the health bar), and the AI's usable list
+>   drops what it cannot afford — so both sides fight in bursts of four and
+>   breathe between them. HP and damage untouched: a clock, not a scale.
+>   Stored as FATIGUE spent (a Fighter is a struct made with no constructor).
+> - **The Stadium, second cut** (`dev/gen-arena-stadium.mjs`, 38×32): SEVEN
+>   tiers, one cell deep and one BLOCK (three rungs) high each — levels 21 down
+>   to 3, the bowl — 718 seats; the lists 18×12 behind a fence with two gates;
+>   and the locker rooms DUG UNDER THE STANDS: a wall of `B` in the lowest tier
+>   (its crowns are the tier) with a door roofed by it (`0:3`), and three cells
+>   of room under tiers 6, 5 and 4 written as `floor:deck` tokens (`0:6`,
+>   `0:9`, `0:12` — the stands' undersides as the ceiling). Every station in
+>   each: a stall with its MERCHANT (a body seated behind the counter by the
+>   crowd machinery, facing the room), an anvil (Forge: forge, refine, slot), a
+>   cauldron (the Apothecary's materia bench), a bed, an armour stand. No
+>   stairs: a fighter's step is one rung and a tier is three, so the stands
+>   are the crowd's, as a real stadium's are.
+> - **A roofed cell is fought at its floor.** `ArenaField.FromChart` reads a
+>   cell with a floor AND a deck at the FLOOR (the body lives on the ground;
+>   the deck is the crowd's) and keeps the top in `Read.Tops`; seats sit on the
+>   top (`TopLevelAt`), the chase camera measures the floor under a roof
+>   (`ArenaWorld.SightTopAt`), and the lists flood stops at the room's door.
+> - **The validator learned the fork's tokens** (`map-pack-validate.js`):
+>   `f`, `f:d`, `_:d`, `_` — Unity's `LevelModel.TryParseTok` grammar since the
+>   sky deck; the frozen web's `parseLevels` keeps the floor part and ignores
+>   the deck, which is the right thing for a build with no deck tokens to do.
+>
+> **Invariants earned:**
+> - *What you see is what your hands hold.* The pairing rule reads the DRAWN
+>   shape (`FpViewmodel.ShapeOf`), never a type table alone.
+> - *One price, one place.* Every path that pays a cooldown pays through
+>   `PayFor`; a refused throw still pays nothing. A gate that is not there is a
+>   fight with no rhythm.
+> - *The deck is the crowd's; the floor is the fight's.* A two-surface cell has
+>   two owners, and every reader of a chart-backed arena must say which one it
+>   is asking for.
+
+> **Round nine — a peer in the other corner, the tunnel, and a fighter who
+> gets up (owner, 2026-09-08, off the round-eight deploy, with two photographs
+> of a players' tunnel).** *"I'm still getting decimated every round. I
+> haven't been able to visit the locker rooms yet to know if they work. Mobile
+> UI debug options are still all over the screen. the character sheet is hard
+> to read due to being transparent. you really seem to not understand how
+> stadium tunnels work for athletes to go in and out of locker room."*
+>
+> **What was actually wrong with the duel:** `RollStats` deals a foe 8 + the
+> best two of 3d6 (10..20, fifteen and a half on average) — the standalone
+> arena's roll for BOTH corners — while a member arrives at
+> `Guild.ToFighterStats` (8 + twelve hundredths of a 0..100 MR score): nine to
+> twelve for a recruit. Every opponent was four points up on every score (two
+> more a blow, ten more hit points, a harder hide) and swung every 0.9s — the
+> web's GUILD-BATTLE tightening carried into every bout — against a thumb on a
+> wheel. The stamina pool of round eight paced both sides but could not close
+> that gap.
+>
+> **What shipped (Unity):**
+> - **A peer opponent.** `ArenaCombat.OpponentStats`: in a member's bout the
+>   foe's block is the member's own, jittered a point either way and climbing
+>   a point per rung of the run — round one a peer, round six a champion. The
+>   battlefield, the tactical board and the smoke player keep `RollStats`.
+> - **The web's plain cadence.** `Attacks.AiCadence` 0.9 → 1.6 (crucible.js:
+>   `_guildBattle ? 0.9 : 1.6`).
+> - **A beaten fighter gets up.** Two seconds after the verdict the loser
+>   stands on one hit point, the winner stands down (the AI idles once the
+>   outcome is recorded), the card keeps saying DOWN and adds "the tunnel is
+>   open — walk to your locker room". `_lost` is kept apart from `Alive` for
+>   exactly this.
+> - **The fight log** — the web's actionLog, six fading lines under the bars:
+>   every blow with its damage, every refusal with its reason (out of reach /
+>   not on your level / no line of sight / nobody in reach / winded). A bout
+>   can be read now, which is how the next report gets answered with numbers.
+> - **The touch toggles fold away** behind one "..." button below the Title
+>   and lens buttons; a fight opens with none showing. **The field sheet is a
+>   solid slate** with a hairline, not the skin's tint.
+> - **The tunnel** (`dev/gen-arena-stadium.mjs`, 36×30). The photographs are
+>   the spec: the mouth is a door IN THE FENCE at the edge of the lists; the
+>   seats continue right over it (the tier-7 cell above the mouth is a deck
+>   cell with a seat); a one-cell corridor runs straight back under tiers 7
+>   and 6 (ceilings 3 and 6 — a doorway, then head room), walled by the tiers
+>   themselves; and the locker room is three cells deep and six wide under
+>   tiers 5, 4 and 3 (ceilings 9, 12, 15). The grade walkway ring and the
+>   north/south crowd gates are gone — the stands start right behind the
+>   fence, as a stadium's do. Both rooms hold the stall with its merchant, the
+>   anvil, the cauldron, a bed and an armour stand.
+>
+> **Invariants earned:**
+> - *The other corner is rolled on the member's ladder.* A duel's difficulty
+>   is the round, never the generator's dice.
+> - *Lost is not dead.* The verdict is a fact of the bout; being on the floor
+>   is a fact of the body. A beaten fighter walks.
+> - *Everything is under the crowd.* A tunnel mouth is in the pitch-side wall
+>   with seats over it; nothing about a locker room is beside the lists.
+
+> **Round ten — Arena and Battlefield are a mode of their own (owner,
+> 2026-09-08, off the round-nine deploy).** *"when I join Arena it makes me one
+> of the characters from guild mode. when I try to access The Market or any
+> other service in Arena 'locker room' it takes me to guild mode menu. when I
+> back out of the menu to start the next round, I'm stuck in guild mode. Arena
+> and Battlefield are supposed to be separate modes that simplify the guild
+> manager experience into a mode where you can buy all items, craft things
+> yourself"*
+>
+> **What shipped (Unity):**
+> - **`ArenaProfile`** — the two lenses play a PROFILE: a separate save under
+>   its own key (`crucible.arena.v1`) holding ONE member, the character you
+>   made in the creator (their look) or a rolled challenger, with a purse of
+>   2500, a starter kit (iron sword and shield, leather helm, armour and
+>   greaves — real armory items) and an armory of their own. `Enter` saves the
+>   guild to its key (if one was ever saved), points `GuildSave.ActiveKey` at
+>   the arena key, loads or founds the profile and raises the flags; `Leave`
+>   saves the profile and puts the guild back. Every unnamed `GuildSave.Save()`
+>   a room makes in between goes to the profile — that is what `ActiveKey` is
+>   for — so nothing in this mode can overwrite the guild.
+> - **The rooms open OVER the stadium** (`OpenRoomOverArena`): the Market, the
+>   Forge, the Apothecary and the Armory (the armour stand's use) go up as hall
+>   documents with the stadium as their backdrop — the draft's own arrangement
+>   — and Back or Escape resumes the bout where it stood, the fighter re-dressed
+>   in whatever was bought, forged or put on, and healed (a locker room is where
+>   you rest). No draft on the way in: you dress at the Armory.
+> - **The mode's rules, not new screens:** `Market.Unlimited` (the shelf never
+>   runs out), a purse per bout won (`ArenaProfile.Purse`: 100 + 50 a round),
+>   the profile's own W/L ledger.
+> - **The member fights in what they wear.** Found under the balance report and
+>   fixed here: fighter 0's loadout was never assigned (`Populate` deals every
+>   foe its gear; `ApplyHero` set the AC, the kit and the attunement off the
+>   loadout but never the loadout itself), so `WeaponDamage(null)` and
+>   `ArmorPoints(null)` priced the member's weapon and armour at NOTHING in
+>   every bout since the port. `p.Equipped = EffectiveLoadout(hero)`.
+>
+> **Invariants earned:**
+> - *One switch, two sides.* A mode that borrows the guild's statics must
+>   own the save key while it does, and restore both on the way out.
+> - *A room over a fight hands you back to the fight.* `_roomOverArena` is the
+>   whole difference between a locker room and a guild errand.
+> - *What is dealt to a foe is dealt to the member.* Any per-fighter fact set
+>   in `Populate` for `i > 0` needs its `i == 0` twin in `ApplyHero`.
+
 ### Building in the air — the sky deck (owner 2026-08-29) — SHIPPED (Unity)
 
 > *"Being able to place blocks in the air without blocks under them (especially doing this
