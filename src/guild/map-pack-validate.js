@@ -68,16 +68,27 @@ import { lawfulWidth } from './prop-width.js';
 /** The pinned pack version. A file that does not say `1` is not this format. */
 export const PACK_SCHEMA = 1;
 
-/** The kinds the pack knows. world/estate/tactical are LATER kinds — a file
- *  that claims one is a file written against a schema that does not exist. */
-export const PACK_KINDS = ['delve', 'arena'];
+/** The kinds the pack knows — the Unity loader's five (MapPack.Kinds): a
+ *  delve, a guild's hall, a town, an arena field, and (S5.10, 2026-09-26) a
+ *  battlefield, a battle's ground with its musters and keeps. world/estate/
+ *  tactical are still not kinds — a file that claims one is a file written
+ *  against a schema that does not exist. THIS FILE IS PIPELINE, NOT GAME
+ *  CODE: the frozen web build walks none of the three it never knew. */
+export const PACK_KINDS = ['delve', 'guild', 'town', 'arena', 'battlefield'];
+
+/** What taking a keep can mean — a battlefield's `objective` (MapPack.Objectives). */
+export const OBJECTIVES = ['flag', 'keepstone', 'hold'];
 
 /**
  * The closed key sets. Every one of these is the pinned schema verbatim; an
  * addition here is a schema change and belongs in the schema doc first.
  */
-export const MAP_KEYS = ['schema', 'kind', 'id', 'name', 'theme', 'grid', 'levels', 'entry',
-  'foe', 'water', 'seats', 'exitStairs', 'props', 'portals', 'spawns', 'regions', 'paint', 'walls', 'locks'];
+// 'rockSizes' (2026-09-26): the boulders' sizes as the map says them (Unity
+// DelveChart.RockSizes, D26b). The battle's words (S5.10): 'muster0'/'muster1'
+// cell pairs, 'hearts' [{x,y}], 'objective', 'open' (Unity MapPack.Battle).
+export const MAP_KEYS = ['schema', 'kind', 'id', 'name', 'theme', 'grid', 'levels', 'rockSizes', 'entry',
+  'foe', 'water', 'seats', 'exitStairs', 'props', 'portals', 'spawns', 'regions', 'paint', 'walls', 'locks',
+  'muster0', 'muster1', 'hearts', 'objective', 'open'];
 export const PROP_KEYS = ['art', 'x', 'y', 'facing', 'use', 'label', 'cls'];
 export const PORTAL_KEYS = ['x', 'y', 'to', 'at', 'enter', 'stairs'];
 export const SPAWN_KEYS = ['prey', 'x', 'y'];
@@ -104,7 +115,7 @@ export const RECT_KEYS = ['x', 'y', 'w', 'h', 'theme', 'sides', 'lv'];
  *  always done there. */
 export const SIDE_TOKENS = ['n', 'e', 's', 'w', 'top', 'bot'];
 /** The arrays the schema says are omitted when empty. */
-export const ARRAY_KEYS = ['props', 'portals', 'spawns', 'regions', 'paint', 'walls', 'locks'];
+export const ARRAY_KEYS = ['props', 'portals', 'spawns', 'regions', 'paint', 'walls', 'locks', 'muster0', 'muster1', 'hearts'];
 /** The three rect channels, in the one order everything prints them: ground,
  *  vertical, room. @see THE THREE RECT CHANNELS below. */
 export const RECT_KEYS_BY_CHANNEL = ['paint', 'walls', 'regions'];
@@ -311,6 +322,43 @@ export function checkPackMap(raw, stem, ctx = {}) {
       else if (!inside(c[0], c[1])) bad(`seats[${i}] ${c} is off the ${W}×${H} grid`);
     });
   }
+
+  // ── rockSizes: the boulders' sizes, as the map says them (2026-09-26) ────
+  // Row strings shaped like the grid, one char per cell: '1'..'4' is a rung of
+  // the height ladder, anything else lets the game choose (Unity
+  // DelveMaps.BoulderSizeAt). A row count off the grid is a note there, and a
+  // note here.
+  if ('rockSizes' in raw) {
+    if (!Array.isArray(raw.rockSizes) || !raw.rockSizes.every((r) => typeof r === 'string')) bad('rockSizes is present but not an array of row strings');
+    else if (raw.rockSizes.length !== H) warn(`rockSizes has ${raw.rockSizes.length} rows, the grid has ${H} — rows past it are ignored, missing rows leave their boulders to the game`);
+  }
+
+  // ── A battle's words (S5.10): musters, hearts, objective, open ───────────
+  // Legal on every kind, because a hall may one day be besieged; only the
+  // battle lens reads them. The musters are cell PAIRS like water (the Unity
+  // loader lifts them, MapPack.CellPairs); the hearts are {x,y} objects.
+  for (const k of ['muster0', 'muster1']) {
+    if (!(k in raw)) continue;
+    if (!Array.isArray(raw[k])) { bad(`${k} is present but not an array`); continue; }
+    raw[k].forEach((c, i) => {
+      if (!pair(c) || !c.every(isInt)) bad(`${k}[${i}] ${JSON.stringify(c)} is not two integer cell coords`);
+      else if (!inside(c[0], c[1])) bad(`${k}[${i}] ${c} is off the ${W}×${H} grid`);
+    });
+  }
+  const hearts = Array.isArray(raw.hearts) ? raw.hearts : [];
+  if ('hearts' in raw) {
+    if (!Array.isArray(raw.hearts)) bad('hearts is present but not an array');
+    else raw.hearts.forEach((h, i) => {
+      if (!plain(h) || !isInt(h.x) || !isInt(h.y) || Object.keys(h).some((k) => k !== 'x' && k !== 'y'))
+        bad(`hearts[${i}] ${JSON.stringify(h)} is not an {x, y} cell`);
+      else if (!inside(h.x, h.y)) bad(`hearts[${i}] ${h.x},${h.y} is off the ${W}×${H} grid`);
+    });
+  }
+  if ('objective' in raw && !OBJECTIVES.includes(raw.objective))
+    bad(`objective ${JSON.stringify(raw.objective)} is not one of ${OBJECTIVES.join(' / ')}`);
+  if ('objective' in raw && !hearts.length) bad('an objective with no heart to take — say the hearts or drop it');
+  if (hearts.length && !('objective' in raw)) bad(`${hearts.length} heart(s) and no objective — say what taking a keep means`);
+  if ('open' in raw && typeof raw.open !== 'boolean') bad('open is present but not a boolean');
 
   // ── The overlay arrays ───────────────────────────────────────────────────
   for (const k of ARRAY_KEYS) {

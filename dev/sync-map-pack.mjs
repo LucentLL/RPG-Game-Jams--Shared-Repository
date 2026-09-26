@@ -94,7 +94,12 @@ const CS_MAP_KEYS = new Set(['schema', 'kind', 'id', 'name', 'theme', 'grid', 'l
   'exitStairs', 'props', 'portals', 'spawns', 'regions', 'walls', 'paint', 'water', 'locks',
   // 'seats' (2026-09-08): the crowd's cells, a pair list lifted by hand like water and
   // locks (MapPack.CellPairs) — the arena lens seats two spectators on each.
-  'seats']);
+  'seats',
+  // 'rockSizes' (2026-09-26): row strings, JMap.rockSizes (DelveChart.RockSizes, D26b).
+  'rockSizes',
+  // The battle's words (S5.10): the musters are pair lists lifted like seats; the
+  // hearts are objects (JMap.hearts, JCell); the objective and open are plain fields.
+  'muster0', 'muster1', 'hearts', 'objective', 'open']);
 const CS_PROP_KEYS = new Set(['art', 'x', 'y', 'facing', 'use', 'label']);
 // 'paint' LEFT THIS SET on 2026-08-16: the port carries it now (MapPack.ToChart),
 // because the crown ruling made a standable top read the ground channel and an

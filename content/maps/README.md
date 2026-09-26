@@ -16,8 +16,9 @@ and port reads the same file.
 ```jsonc
 {
   "schema": 1,
-  "kind": "delve",              // "delve" | "arena".
-                                //   world/estate/tactical are LATER kinds — do not invent them.
+  "kind": "delve",              // "delve" | "guild" | "town" | "arena" | "battlefield" —
+                                //   the Unity loader's five (MapPack.Kinds; battlefield since
+                                //   S5.10). world/estate/tactical are not kinds — do not invent them.
   "id": "hollowvein",           // matches the filename stem; [a-z0-9-]+
   "name": "Hollowvein Mine",    // OPTIONAL — omitted where the source authors none
   "theme": "mine",              // key into THEMES (delve-maps.js)
@@ -45,9 +46,23 @@ and port reads the same file.
   "paint":   [{ "x": 0, "y": 0, "w": 8, "h": 6, "theme": "forge" }],
   "walls":   [{ "x": 3, "y": 7, "w": 5, "h": 1, "theme": "dormitory", "lv": "0-2" }],   // OPTIONAL lv "lo-hi": the band of rungs the rect dresses
   "locks":   [[21, 11]],
-  "seats":   [[8, 3], [9, 3]]      // OPTIONAL — the crowd: a cell-pair overlay like water; the arena lens seats two spectators a cell, watching the entry
+  "seats":   [[8, 3], [9, 3]],     // OPTIONAL — the crowd: a cell-pair overlay like water; the arena lens seats two spectators a cell, watching the entry
+  "rockSizes": ["....", "..3."],   // OPTIONAL — the boulders' sizes: row strings shaped like the grid, '1'..'4' a rung (0.25x..1x a person), anything else the game's choice
+  "muster0": [[4, 20], [5, 20]],   // OPTIONAL (a battle, S5.10) — where team 0 forms up: cell pairs, lifted like water
+  "muster1": [[4, 2], [5, 2]],     //   …and team 1. Team-indexed: a guild-vs-guild war has no "hero side"
+  "hearts":  [{ "x": 5, "y": 3 }], // OPTIONAL — a keep's heart; a keep is the team muster that contains one
+  "objective": "flag",           // "flag" | "keepstone" | "hold" — said iff a heart is
+  "open": true                   // OPTIONAL bool — the land runs on past the rim
 }
 ```
+
+**A battle's words are derived from, never stored beside:** keeps, gates,
+courtyards, facings and camps all come from the musters and hearts in the
+Unity build's battle reader. The validator checks only their shape — cells on
+the grid, an objective one of the three and said exactly where a heart is.
+`dev/fixtures/battlefield/` holds one field that passes and three that each
+fail on one of those (`node dev/check-maps.mjs dev/fixtures/battlefield/good`
+and `…/bad`).
 
 **Arrays are omitted when empty, and every optional key may be absent.** A
 loader must tolerate all of it: `hollowvein` has no `props` key at all, and
