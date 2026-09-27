@@ -95,5 +95,13 @@ law one level up: ONE GAME played under many RULE SETS. Therefore:
   volume with synthetic transforms. "Near enough to see, you can always tell."
 - Animated art stays a sprite (a carving cannot stir); still art may be
   extruded to real volume from its own pixels (`voxel-sprite.js`).
+  THE FIRST-PERSON HANDS (owner, 2026-09-27: *"bring back character hands in
+  first person like Minecraft. With Voxel Depth to give it some thickness"*): a
+  held piece and the member's own cut arm take DEPTH from their own pixels ONE
+  DESIGNATED CELL AT A TIME — each cell its own slab facing the eye, swapped on
+  the sheet's own clock, never one carving warped or tweened between poses. A
+  piece's side wears its edge pixel; an arm's side wears the limb and ends in
+  its outline (Guild Rancher `HandSlab.cs`). Animated world props
+  (`PropVolume.Flat`) stay sprites.
 - Owned tilesets first (`RPG Assets/`, `public/assets/`): draw new art only
   when no kit carries the thing, and say so in a comment.
