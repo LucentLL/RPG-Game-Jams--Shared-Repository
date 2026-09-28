@@ -36,6 +36,10 @@ a preview of another. Therefore:
   keeps its feet when the tile is re-measured, and nothing may shrink a thing
   for being broad (a tree is three people tall, two tiles across, and blocks
   only its bole).
+  ONE EXCEPTION BY DECREE: a LYING BODY is half the lowest rung, 0.0625x
+  (owner, 2026-09-27: *"Body/corpse thickness needs to be reduced by half"*;
+  Guild Rancher `ArenaRenderer.DownedRung`), and bodies do not pile — each
+  lies on the ground where it fell (*"Corpses should not stack"*).
 - **ONE COLLISION FACT.** A thing blocks the space its art occupies — in every
   lens, no more, no less. "Bigger than the art" collision is a bug by
   definition; so is walking through something you can see.
