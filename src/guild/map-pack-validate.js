@@ -129,8 +129,14 @@ export const RECT_KEYS_BY_CHANNEL = ['paint', 'walls', 'regions'];
  * characters actually used across all 15 shipped charts is a strict subset of
  * this string, so the transcription is checked by the charts themselves; see
  * integrationNotes for the export that would remove the copy.
+ *
+ * RAMPS (owner, 2026-09-27: "we need to add sloped tiles. Like ramps"): A, >, V
+ * and < are ramps rising north, east, south and west — Unity's drafting table
+ * lays them (Guild Rancher DelveMaps.IsRampCh). The frozen web game has no
+ * ramp: it reads them as floor at level 0 and draws a ramp chart flat. That is
+ * a named fork; the validator only has to let the pack carry them.
  */
-export const GRID_CHARS = '.#Bbfd+sw^23456,SunLvDKort=m';
+export const GRID_CHARS = '.#Bbfd+sw^23456,SunLvDKort=mA>V<';
 
 /** An id the pack will accept: the filename stem, and nothing that could ever
  *  land on Object.prototype. map-editor.js's freeId() RENAMES these (a draft
