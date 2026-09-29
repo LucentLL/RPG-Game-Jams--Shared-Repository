@@ -86,7 +86,9 @@ export const OBJECTIVES = ['flag', 'keepstone', 'hold'];
 // 'rockSizes' (2026-09-26): the boulders' sizes as the map says them (Unity
 // DelveChart.RockSizes, D26b). The battle's words (S5.10): 'muster0'/'muster1'
 // cell pairs, 'hearts' [{x,y}], 'objective', 'open' (Unity MapPack.Battle).
-export const MAP_KEYS = ['schema', 'kind', 'id', 'name', 'theme', 'grid', 'levels', 'rockSizes', 'entry',
+// 'waterLevels' (2026-09-28): the water's set surface, quarter tiles under
+// its brim (Unity DelveChart.WaterLevels).
+export const MAP_KEYS = ['schema', 'kind', 'id', 'name', 'theme', 'grid', 'levels', 'rockSizes', 'waterLevels', 'entry',
   'foe', 'water', 'seats', 'exitStairs', 'props', 'portals', 'spawns', 'regions', 'paint', 'walls', 'locks',
   'muster0', 'muster1', 'hearts', 'objective', 'open'];
 export const PROP_KEYS = ['art', 'x', 'y', 'facing', 'use', 'label', 'cls'];
@@ -337,6 +339,19 @@ export function checkPackMap(raw, stem, ctx = {}) {
   if ('rockSizes' in raw) {
     if (!Array.isArray(raw.rockSizes) || !raw.rockSizes.every((r) => typeof r === 'string')) bad('rockSizes is present but not an array of row strings');
     else if (raw.rockSizes.length !== H) warn(`rockSizes has ${raw.rockSizes.length} rows, the grid has ${H} — rows past it are ignored, missing rows leave their boulders to the game`);
+  }
+
+  // ── waterLevels: the water's set surface (2026-09-28) ────────────────────
+  // "So water height can be specified rather than just filling an exact tile
+  // height" (owner). Row strings shaped like the grid, one char per cell:
+  // '1'..'9' then 'a'..'z' is how many QUARTER TILES under its brim the body
+  // of water this cell is in stands; '.' or anything else is the brim (Unity
+  // DelveMaps.WaterDropAt, the one reader). The frozen web game fills every
+  // body to its brim and ignores the layer — a named fork, like the ramps. A
+  // row count off the grid is a note there (MapPack.cs), and a note here.
+  if ('waterLevels' in raw) {
+    if (!Array.isArray(raw.waterLevels) || !raw.waterLevels.every((r) => typeof r === 'string')) bad('waterLevels is present but not an array of row strings');
+    else if (raw.waterLevels.length !== H) warn(`waterLevels has ${raw.waterLevels.length} rows, the grid has ${H} — rows past it are ignored, missing rows leave their water at its brim`);
   }
 
   // ── A battle's words (S5.10): musters, hearts, objective, open ───────────

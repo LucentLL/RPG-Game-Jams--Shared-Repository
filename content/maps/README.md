@@ -48,6 +48,7 @@ and port reads the same file.
   "locks":   [[21, 11]],
   "seats":   [[8, 3], [9, 3]],     // OPTIONAL — the crowd: a cell-pair overlay like water; the arena lens seats two spectators a cell, watching the entry
   "rockSizes": ["....", "..3."],   // OPTIONAL — the boulders' sizes: row strings shaped like the grid, '1'..'4' a rung (0.25x..1x a person), anything else the game's choice
+  "waterLevels": ["....", ".2.."], // OPTIONAL — the water's set surface: row strings shaped like the grid, '1'..'9' then 'a'..'z' quarter tiles under the brim for that cell's body, anything else the brim (Unity only; the web fills to the brim)
   "muster0": [[4, 20], [5, 20]],   // OPTIONAL (a battle, S5.10) — where team 0 forms up: cell pairs, lifted like water
   "muster1": [[4, 2], [5, 2]],     //   …and team 1. Team-indexed: a guild-vs-guild war has no "hero side"
   "hearts":  [{ "x": 5, "y": 3 }], // OPTIONAL — a keep's heart; a keep is the team muster that contains one
