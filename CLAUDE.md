@@ -112,7 +112,12 @@ law one level up: ONE GAME played under many RULE SETS. Therefore:
   breathing, in the air, on the rungs — takes the lying body's thickness
   (0.0625x, times its stature) from its OWN pixels, the hands' rule: walls
   walked from that cell's ink outline, swapped with the cell, never a carving
-  (Guild Rancher `SpriteSlab.cs`). The kit paints the climb as the back alone,
+  (Guild Rancher `SpriteSlab.cs`). The thickness runs LEVEL, as a body's does,
+  so it shows in EVERY lens: the map view's standee leans back to face the lens
+  and keeps its full height, and its slab still runs away from the lens across
+  the ground (owner, 2026-10-02: *"Top-Down didn't receive the voxel depth for
+  characters like Over The Shoulder did"*; Guild Rancher
+  `ArenaRenderer.BodyBack`). The kit paints the climb as the back alone,
   so a CLIMBER does not turn to the lens: it hangs in the plane of the rungs as
   a corpse lies in the plane of the floor, and climbs empty-handed as a sleeper
   lies (*"the weapon floats by the character when it should be hidden (like
