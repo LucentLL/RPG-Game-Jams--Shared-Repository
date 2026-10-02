@@ -122,5 +122,18 @@ law one level up: ONE GAME played under many RULE SETS. Therefore:
   a corpse lies in the plane of the floor, and climbs empty-handed as a sleeper
   lies (*"the weapon floats by the character when it should be hidden (like
   when sleeping in bed)"*).
+- A HELD STANCE WALKS ON THE WALK'S LEGS (owner, 2026-10-02: *"Blocking and
+  holding charge on weapon should keep the weapon/shield in the correct
+  block/charge ready position, use feet placement from walking section to
+  walk"*). The one sanctioned join of two designated cells: a raised shield or
+  a cocked charge keeps its own cell's held half — weapon and shield whole, the
+  atlas's MOVING ink — over the walk cycle's LEGS, the line the kit's layers and
+  the breath already part on. The legs are the walk's PLANTED LAYERS BAKED
+  ALONE (a fighter's three extra cells): the walk cell's own shins lie under its
+  hem and its hanging blade, so its planted ink is only the boots (*"I don't see
+  legs when charging and walking sideways"*; Guild Rancher `Fighter.LegsColumn`,
+  `CharacterAtlas.LegsCols`, `ArenaRenderer.WriteFigure`). Behind a raised shield
+  the walk is half a walk (*"walk (slowly) while blocking"*;
+  `BodyLaw.Gait.GuardPace`).
 - Owned tilesets first (`RPG Assets/`, `public/assets/`): draw new art only
   when no kit carries the thing, and say so in a comment.
