@@ -107,5 +107,15 @@ law one level up: ONE GAME played under many RULE SETS. Therefore:
   piece's side wears its edge pixel; an arm's side wears the limb and ends in
   its outline (Guild Rancher `HandSlab.cs`). Animated world props
   (`PropVolume.Flat`) stay sprites.
+- EVERY BODY SPRITE IS A SLAB (owner, 2026-10-02: *"Thickness should be added
+  to this (and all character sprites in game)"*). Each body cell — standing,
+  breathing, in the air, on the rungs — takes the lying body's thickness
+  (0.0625x, times its stature) from its OWN pixels, the hands' rule: walls
+  walked from that cell's ink outline, swapped with the cell, never a carving
+  (Guild Rancher `SpriteSlab.cs`). The kit paints the climb as the back alone,
+  so a CLIMBER does not turn to the lens: it hangs in the plane of the rungs as
+  a corpse lies in the plane of the floor, and climbs empty-handed as a sleeper
+  lies (*"the weapon floats by the character when it should be hidden (like
+  when sleeping in bed)"*).
 - Owned tilesets first (`RPG Assets/`, `public/assets/`): draw new art only
   when no kit carries the thing, and say so in a comment.
