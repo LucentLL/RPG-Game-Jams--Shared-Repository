@@ -36,10 +36,16 @@ a preview of another. Therefore:
   keeps its feet when the tile is re-measured, and nothing may shrink a thing
   for being broad (a tree is three people tall, two tiles across, and blocks
   only its bole).
-  ONE EXCEPTION BY DECREE: a LYING BODY is half the lowest rung, 0.0625x
+  TWO EXCEPTIONS BY DECREE: a LYING BODY is half the lowest rung, 0.0625x
   (owner, 2026-09-27: *"Body/corpse thickness needs to be reduced by half"*;
   Guild Rancher `ArenaRenderer.DownedRung`), and bodies do not pile — each
-  lies on the ground where it fell (*"Corpses should not stack"*).
+  lies on the ground where it fell (*"Corpses should not stack"*). And a GOD
+  — a guild's patron — is as big as its artist drew it, off the top of the
+  ladder (owner, 2026-10-03, shown the Sea Leviathan at the top rung beside
+  its sheet's own scale: *"Size B is more interesting. Some Gods/Patrons will
+  be even larger than these"*): its sheet's INK in pixels against the 48-px
+  tile, the ONE SIZE FACT's own measure, so a bigger creature is a bigger god
+  with no number to set (Guild Rancher `PatronPresence.HeightOf`).
 - **ONE COLLISION FACT.** A thing blocks the space its art occupies — in every
   lens, no more, no less. "Bigger than the art" collision is a bug by
   definition; so is walking through something you can see.
