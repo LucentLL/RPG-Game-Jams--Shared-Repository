@@ -118,7 +118,9 @@ law one level up: ONE GAME played under many RULE SETS. Therefore:
   breathing, in the air, on the rungs — takes the lying body's thickness
   (0.0625x, times its stature) from its OWN pixels, the hands' rule: walls
   walked from that cell's ink outline, swapped with the cell, never a carving
-  (Guild Rancher `SpriteSlab.cs`). The thickness runs LEVEL, as a body's does,
+  (Guild Rancher `SpriteSlab.cs`) — a creature's and a god's too, on the one
+  creature path (owner, 2026-10-03, of the gods: *"They should also have voxel
+  depth thickness"*; `DelveFaunaRenderer`). The thickness runs LEVEL, as a body's does,
   so it shows in EVERY lens: the map view's standee leans back to face the lens
   and keeps its full height, and its slab still runs away from the lens across
   the ground (owner, 2026-10-02: *"Top-Down didn't receive the voxel depth for
