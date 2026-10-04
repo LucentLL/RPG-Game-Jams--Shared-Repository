@@ -46,6 +46,12 @@ a preview of another. Therefore:
   be even larger than these"*): its sheet's INK in pixels against the 48-px
   tile, the ONE SIZE FACT's own measure, so a bigger creature is a bigger god
   with no number to set (Guild Rancher `PatronPresence.HeightOf`).
+  AND A GOD IS ANIMATED (owner, 2026-10-04: *"as a general rule, if they don't
+  have animations, they are not Gods. They can be used as mobs in
+  Delve/Quests"*): a creature the artist shipped without animations of its own
+  — a still, or a 4-direction walk sheet alone — is a MOB, never a patron. A
+  god plays its own animations on its rig (Guild Rancher `GuildPatrons`,
+  `BoneRig`).
 - **ONE COLLISION FACT.** A thing blocks the space its art occupies — in every
   lens, no more, no less. "Bigger than the art" collision is a bug by
   definition; so is walking through something you can see.
